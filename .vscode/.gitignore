@@ -1,0 +1,18 @@
+# Generated Rojo files
+sourcemap.json
+build.rbxl
+build.rbxlx
+
+# Package folders
+Packages/
+ServerPackages/
+DevPackages/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Operating-system files
+.DS_Store
+Thumbs.db
