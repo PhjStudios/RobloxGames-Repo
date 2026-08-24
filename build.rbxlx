@@ -34,7 +34,82 @@ return Example
         <Properties>
           <string name="Name">Main</string>
           <token name="RunContext">0</token>
-          <string name="Source"><![CDATA[print("Rojo live synchronization works")
+          <string name="Source"><![CDATA[local TweenService = game:GetService("TweenService")
+
+local BRICK_COUNT = 5
+local BRICK_SIZE = Vector3.new(4, 2, 4)
+local BRICK_SPACING = 6
+local BRICK_START_Y = 3
+local JUMP_HEIGHT = 6
+local JUMP_INTERVAL_SECONDS = 5
+local JUMP_HALF_DURATION_SECONDS = 0.4
+
+local brickFolder = Instance.new("Folder")
+brickFolder.Name = "JumpingBricks"
+brickFolder.Parent = workspace
+
+local bricks = {}
+
+for index = 1, BRICK_COUNT do
+	local brick = Instance.new("Part")
+	brick.Name = `Brick{index}`
+	brick.Anchored = true
+	brick.CanCollide = true
+	brick.Color = Color3.fromRGB(196, 40, 28)
+	brick.Material = Enum.Material.Brick
+	brick.Size = BRICK_SIZE
+
+	local offsetFromCenter = index - (BRICK_COUNT + 1) / 2
+	brick.Position = Vector3.new(offsetFromCenter * BRICK_SPACING, BRICK_START_Y, 0)
+	brick.Parent = brickFolder
+
+	table.insert(bricks, brick)
+end
+
+local jumpTweenInfo = TweenInfo.new(JUMP_HALF_DURATION_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local fallTweenInfo = TweenInfo.new(JUMP_HALF_DURATION_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+
+local function playTweens(tweens: { Tween })
+	for _, tween in tweens do
+		tween:Play()
+	end
+
+	task.wait(JUMP_HALF_DURATION_SECONDS)
+end
+
+local function jumpBricks()
+	local fallTweens = {}
+	local jumpTweens = {}
+
+	for _, brick in bricks do
+		local startingPosition = brick.Position
+		table.insert(
+			jumpTweens,
+			TweenService:Create(brick, jumpTweenInfo, {
+				Position = startingPosition + Vector3.new(0, JUMP_HEIGHT, 0),
+			})
+		)
+		table.insert(
+			fallTweens,
+			TweenService:Create(brick, fallTweenInfo, {
+				Position = startingPosition,
+			})
+		)
+	end
+
+	playTweens(jumpTweens)
+	playTweens(fallTweens)
+end
+
+task.wait(JUMP_INTERVAL_SECONDS)
+
+while true do
+	local jumpStartedAt = os.clock()
+	jumpBricks()
+
+	local elapsed = os.clock() - jumpStartedAt
+	task.wait(math.max(0, JUMP_INTERVAL_SECONDS - elapsed))
+end
 ]]></string>
         </Properties>
       </Item>
