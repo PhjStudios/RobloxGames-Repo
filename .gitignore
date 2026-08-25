@@ -1,12 +1,17 @@
 # Generated Rojo files
-sourcemap.json
-build.rbxl
-build.rbxlx
+/sourcemap*.json
+/*.rbxl
+/*.rbxlx
+/build/
+
+# Local diagnostics
+*.log
+/logs/
 
 # Package folders
-Packages/
-ServerPackages/
-DevPackages/
+/Packages/
+/ServerPackages/
+/DevPackages/
 
 # Secrets
 .env

@@ -10,6 +10,9 @@
     "ReplicatedStorage": {
       "$className": "ReplicatedStorage",
       "$ignoreUnknownInstances": true,
+      "$attributes": {
+        "ATDPlaceRole": "Development"
+      },
 
       "Shared": {
         "$path": "src/shared"

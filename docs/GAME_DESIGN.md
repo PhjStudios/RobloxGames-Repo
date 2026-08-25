@@ -16,7 +16,7 @@ production-data changes, or monetization.
 - Recorded: 2026-08-25
 - Packet: 00.2
 - Status: Accepted for core development
-- Next roadmap packet: 00.3, Place and ownership inventory
+- Next roadmap packet: 02.4, Studio multi-place manual gate
 
 ## Product identity and game loop
 
@@ -51,8 +51,9 @@ individual matches isolated and reproducible.
   tower-defense simulation.
 
 **Implementation effect:** Common, lobby-only, and match-only source must remain
-separated. The exact Match PlaceId and ownership information are intentionally
-left to Packet 00.3.
+separated. Ownership and place requirements are recorded in
+`docs/PLACE_INVENTORY.md`; the exact Match PlaceId remains pending approved
+Studio creation.
 
 ## Players, squads, and matchmaking
 
@@ -480,8 +481,8 @@ Deferred items must not be implemented opportunistically during a core packet.
 
 The following do not block Packet 00.2:
 
-- Match PlaceId, experience owner/group, supported test place, and test DataStore
-  strategy: Packet 00.3.
+- The Match PlaceId and test-place identifiers will be recorded when the Studio
+  setup described by the completed Packet 00.3 inventory is approved and done.
 - Tool versions and test framework: Phases 01 and 05.
 - First map theme and art direction: Phase 29.
 - First tower roster names/stats: Phase 30.

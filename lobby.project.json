@@ -1,0 +1,65 @@
+{
+  "name": "Ant Tower Defense - Lobby",
+  "tree": {
+    "$className": "DataModel",
+    "$ignoreUnknownInstances": true,
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$ignoreUnknownInstances": true,
+      "$attributes": {
+        "ATDPlaceRole": "Lobby"
+      },
+
+      "Shared": {
+        "$path": "src/shared",
+        "$ignoreUnknownInstances": true
+      }
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "$ignoreUnknownInstances": true,
+
+      "Server": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true,
+
+        "common": {
+          "$path": "src/server/common",
+          "$ignoreUnknownInstances": true
+        },
+
+        "lobby": {
+          "$path": "src/server/lobby",
+          "$ignoreUnknownInstances": true
+        }
+      }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$ignoreUnknownInstances": true,
+
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$ignoreUnknownInstances": true,
+
+        "Client": {
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true,
+
+          "common": {
+            "$path": "src/client/common",
+            "$ignoreUnknownInstances": true
+          },
+
+          "lobby": {
+            "$path": "src/client/lobby",
+            "$ignoreUnknownInstances": true
+          }
+        }
+      }
+    }
+  }
+}

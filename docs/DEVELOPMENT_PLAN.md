@@ -24,12 +24,13 @@ only change through an explicit architecture decision recorded here.
 ## Current status
 
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
-- Gameplay state: minimal Rojo scaffold with temporary example code.
-- Current implementation phase: Phase 00; Packet 00.3 awaits one ownership
-  confirmation.
-- Completed packets: 00.1 on 2026-08-24 and 00.2 on 2026-08-25.
-- Active packet: 00.3; all locally discoverable fields are recorded in
-  `docs/PLACE_INVENTORY.md`.
+- Gameplay state: minimal Rojo scaffold with harmless Studio-only client and
+  server bootstraps; temporary example behavior has been removed.
+- Current implementation phase: Phase 02.
+- Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
+  02.2, and 02.3 on 2026-08-25.
+- Next packet: 02.4, Studio multi-place manual gate. It has not begun and
+  requires a real Match place decision.
 - Publishing state: no publishing is authorized by this document.
 
 ## Approved product foundation
@@ -309,9 +310,8 @@ decisions that materially alter architecture.
 
 ### Packet 00.3 — Place and ownership inventory
 
-**Status:** Awaiting user confirmation — 2026-08-25. Evidence:
-`docs/PLACE_INVENTORY.md`. The exact Roblox owner group name/ID is the only
-undiscovered required field.
+**Status:** Complete — 2026-08-25. Evidence: `docs/PLACE_INVENTORY.md`. The user
+confirmed the Roblox owner as PHJGAMES, Group ID `35420107`.
 
 - Record lobby PlaceId, future match PlaceId, experience owner/group, supported
   platforms, and test-universe strategy.
@@ -319,13 +319,16 @@ undiscovered required field.
 - Identify which assets and places must be manually created in Studio.
 - Record which place is safe for DataStore API testing.
 
-**Exit gate:** The user approves the roadmap and architecture-affecting decisions.
+**Exit gate:** Passed — 2026-08-25. The user approved the roadmap and
+architecture-affecting decisions, and the place/ownership inventory is recorded.
 
 ## Phase 01 — Toolchain baseline and scaffold cleanup
 
 **Objective:** Establish a trustworthy baseline before adding systems.
 
 ### Packet 01.1 — Toolchain verification
+
+**Status:** Complete — 2026-08-25. Evidence: `docs/TOOLCHAIN.md`.
 
 - Run `rokit install` if needed.
 - Record actual Rojo, StyLua, and Selene versions.
@@ -334,6 +337,8 @@ undiscovered required field.
 
 ### Packet 01.2 — Formatting and lint policy
 
+**Status:** Complete — 2026-08-25. Evidence: `docs/CODE_STYLE.md`.
+
 - Add or refine StyLua configuration if the defaults are insufficient.
 - Review Selene configuration and enable only rules appropriate for Roblox Luau.
 - Document generated/build outputs that must remain untracked.
@@ -341,13 +346,17 @@ undiscovered required field.
 
 ### Packet 01.3 — Remove temporary example behavior
 
+**Status:** Complete — 2026-08-25. Evidence:
+`docs/BOOTSTRAP_SMOKE_TEST.md`.
+
 - Replace jumping-brick and print-only demonstrations with minimal bootstraps.
 - Remove `Example.luau` only after nothing references it.
 - Make both client and server boot visibly but harmlessly in development.
 - Build and run a Studio smoke test.
 
-**Exit gate:** Clean boot, format, lint, and build succeed with no temporary
-gameplay behavior.
+**Exit gate:** Passed — 2026-08-25. Client and server booted cleanly in a local
+Studio Play test; format, lint, and build succeeded; no temporary gameplay
+behavior remained.
 
 ## Phase 02 — Multi-place Rojo structure
 
@@ -355,6 +364,8 @@ gameplay behavior.
 large enough to make the split risky.
 
 ### Packet 02.1 — Source-directory split
+
+**Status:** Complete — 2026-08-25. Evidence: `docs/SOURCE_LAYOUT.md`.
 
 - Introduce `server/common`, `server/lobby`, `server/match` and matching client
   directories.
@@ -364,6 +375,8 @@ large enough to make the split risky.
 
 ### Packet 02.2 — Rojo project definitions
 
+**Status:** Complete — 2026-08-25. Evidence: `docs/ROJO_PROJECTS.md`.
+
 - Keep `default.project.json` as the convenient documented development default.
 - Add lobby and match project files.
 - Map common plus place-specific code into predictable DataModel folders.
@@ -371,6 +384,8 @@ large enough to make the split risky.
 - Build each project independently.
 
 ### Packet 02.3 — Place identity configuration
+
+**Status:** Complete — 2026-08-25. Evidence: `docs/PLACE_ROLES.md`.
 
 - Add a single shared place-role configuration.
 - Detect incorrect project/place pairing and fail clearly in development.

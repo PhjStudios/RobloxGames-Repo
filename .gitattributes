@@ -1,0 +1,7 @@
+# Keep repository text deterministic across Windows and non-Windows tools.
+* text=auto eol=lf
+
+# Binary Roblox place/model files must never be line-normalized if an explicit
+# future policy allows one to be versioned.
+*.rbxl binary
+*.rbxm binary

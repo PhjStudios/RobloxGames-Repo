@@ -1,0 +1,65 @@
+{
+  "name": "Ant Tower Defense - Match",
+  "tree": {
+    "$className": "DataModel",
+    "$ignoreUnknownInstances": true,
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$ignoreUnknownInstances": true,
+      "$attributes": {
+        "ATDPlaceRole": "Match"
+      },
+
+      "Shared": {
+        "$path": "src/shared",
+        "$ignoreUnknownInstances": true
+      }
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "$ignoreUnknownInstances": true,
+
+      "Server": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true,
+
+        "common": {
+          "$path": "src/server/common",
+          "$ignoreUnknownInstances": true
+        },
+
+        "match": {
+          "$path": "src/server/match",
+          "$ignoreUnknownInstances": true
+        }
+      }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$ignoreUnknownInstances": true,
+
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$ignoreUnknownInstances": true,
+
+        "Client": {
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true,
+
+          "common": {
+            "$path": "src/client/common",
+            "$ignoreUnknownInstances": true
+          },
+
+          "match": {
+            "$path": "src/client/match",
+            "$ignoreUnknownInstances": true
+          }
+        }
+      }
+    }
+  }
+}

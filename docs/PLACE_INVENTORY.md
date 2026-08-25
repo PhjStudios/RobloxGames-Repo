@@ -14,8 +14,8 @@ keys, cookies, or secrets.
 
 - Recorded: 2026-08-25
 - Packet: 00.3
-- Status: Awaiting one user confirmation
-- Missing required fact: exact Roblox owner group name and group ID
+- Status: Complete
+- Ownership confirmation: PHJGAMES, Roblox Group ID `35420107`
 - Gameplay code changed: no
 - Roblox Studio content changed: no
 - Roblox publishing authorized: no
@@ -48,6 +48,8 @@ ownership details.
 
 - PlaceId: `100561454756026`
 - Evidence: `default.project.json` under `servePlaceIds`
+- Role-isolated Rojo project: `lobby.project.json`; it declares the `Lobby` role
+  while the shared Packet 02.3 configuration owns the runtime PlaceId
 - Public API verification: the PlaceId resolves to universe `10757629094`
 - Intended role: Lobby/start place
 - Confirmed as the universe root/start place: no; private dashboard verification
@@ -62,12 +64,15 @@ name is `Ant Tower Defense`.
 - Evidence: Roblox public place-to-universe endpoint
 - Public visibility: restricted/content-restricted
 - Public creator type: Group
-- Public creator name/ID: withheld as placeholder values
+- Public creator name/ID: withheld as placeholder values; confirmed separately by
+  the user below
 
 ### Match PlaceId
 
 - Current configured Match PlaceId: none
-- Matching Rojo project file: none
+- Matching Rojo project file: `match.project.json`; it declares the `Match` role
+  while `src/shared/config/PlaceRoles.luau` retains a safe unset sentinel until
+  a real Match place exists
 - Required status: must be created or identified before the Phase 02 Studio
   multi-place gate
 
@@ -84,18 +89,21 @@ The Match place must:
 - Preserve unmapped Studio instances when connected through Rojo.
 
 No placeholder Match PlaceId should be invented. Until a real ID is known,
-configuration must fail clearly in development features that require teleporting
-rather than silently sending players somewhere else.
+the common bootstraps reject the Match role with `PLACE_ID_UNCONFIGURED` rather
+than silently starting or sending players somewhere else.
 
 ## Ownership inventory
 
 ### Roblox experience ownership
 
 - Verified owner type: Group
-- Exact Roblox group name: awaiting user confirmation
-- Exact Roblox group ID: awaiting user confirmation
-- Confidence: Roblox's restricted public response identifies the creator type as
-  Group but replaces its ID/name with placeholder values
+- Exact Roblox group name: `PHJGAMES`
+- Exact Roblox group ID: `35420107`
+- Group page supplied by the user:
+  `https://www.roblox.com/share/g/35420107`
+- Confidence: user-confirmed name and ID, consistent with Roblox's public creator
+  type of Group; the restricted public experience response still replaces its
+  creator ID/name with placeholder values
 
 ### GitHub repository ownership
 
@@ -321,7 +329,8 @@ Sync must never be used on Rojo-managed folders.
 - Create Test Lobby and Test Match places.
 - Record their universe and PlaceIds without credentials.
 - Connect the appropriate Rojo project to each place after Phase 02 creates the
-  project files.
+  project files and centralized role validation. This is Packet 02.4's manual
+  gate.
 
 ### Needed before Phase 07's graybox map gate
 
@@ -344,6 +353,8 @@ Sync must never be used on Rojo-managed folders.
 - Production root/start-place status cannot be verified without authenticated
   Creator Dashboard access.
 - Production Match place does not appear in repository configuration.
+- The Match role exists but its PlaceId is intentionally unset until Packet
+  02.4 creates or identifies that place.
 - Separate test universe and places do not appear in repository configuration.
 - Current enabled platform settings are not visible locally.
 - Current Studio API-access setting is not treated as verified because restricted
@@ -355,11 +366,10 @@ work.
 
 ## Packet 00.3 completion requirement
 
-All locally discoverable facts and recommended strategies have been recorded.
-Packet 00.3 can be marked complete after the user confirms:
+Complete on 2026-08-25. All locally discoverable facts and recommended
+strategies are recorded, and the user confirmed the exact Roblox owner as
+PHJGAMES, Group ID `35420107`.
 
-1. Exact Roblox owner group name.
-2. Exact Roblox owner group ID.
-
-If the group ID is unknown, the user may instead confirm the group name and later
-provide the ID from Creator Dashboard before the Phase 02 Studio gate.
+The still-uncreated Match place and separate test environment are recorded
+requirements, not invented identifiers. Their real IDs must be added here when
+the approved Studio setup work occurs before the Phase 02 multi-place gate.

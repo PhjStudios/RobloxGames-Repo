@@ -13,6 +13,12 @@ order.
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
 - [Roblox place and test-environment inventory](docs/PLACE_INVENTORY.md)
+- [Verified toolchain baseline](docs/TOOLCHAIN.md)
+- [Formatting, linting, and generated-output policy](docs/CODE_STYLE.md)
+- [Bootstrap cleanup and Studio smoke-test evidence](docs/BOOTSTRAP_SMOKE_TEST.md)
+- [Source layers and runnable-entrypoint rules](docs/SOURCE_LAYOUT.md)
+- [Combined, lobby, and match Rojo projects](docs/ROJO_PROJECTS.md)
+- [Typed place-role configuration and validation](docs/PLACE_ROLES.md)
 - [Project instructions](AGENTS.md)
 
 ## Source of truth
@@ -62,11 +68,19 @@ experience, with separate Rojo project files and shared source modules.
 ## Development commands
 
 - Install tools: `rokit install`
-- Start Studio synchronization: `rojo serve`
+- Start combined Studio synchronization: `rojo serve`
+- Start lobby-only synchronization: `rojo serve lobby.project.json`
+- Start match-only synchronization: `rojo serve match.project.json`
 - Format code: `stylua src`
 - Check formatting: `stylua --check src`
 - Lint code: `selene src`
-- Build the project: `rojo build -o build.rbxlx`
+- Build the combined project: `rojo build default.project.json -o build.rbxlx`
+- Build the lobby project: `rojo build lobby.project.json -o lobby.rbxlx`
+- Build the match project: `rojo build match.project.json -o match.rbxlx`
 
 Every implementation packet must format and lint changed Luau code, build its
 applicable Rojo project, and describe any required Roblox Studio testing.
+
+The default project intentionally contains all source layers for combined
+development inspection. Use the lobby or match project for role-isolated Studio
+testing once place-specific runnable code exists.

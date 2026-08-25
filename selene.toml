@@ -1,1 +1,3 @@
+# Resolve Roblox globals, classes, datatypes, and APIs without weakening Selene's
+# default correctness rules.
 std = "roblox"
