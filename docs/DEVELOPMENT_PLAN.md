@@ -23,9 +23,13 @@ only change through an explicit architecture decision recorded here.
 
 ## Current status
 
-- Roadmap state: initial detailed draft.
+- Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
 - Gameplay state: minimal Rojo scaffold with temporary example code.
-- Current implementation phase: Phase 00, review and roadmap approval.
+- Current implementation phase: Phase 00; Packet 00.3 awaits one ownership
+  confirmation.
+- Completed packets: 00.1 on 2026-08-24 and 00.2 on 2026-08-25.
+- Active packet: 00.3; all locally discoverable fields are recorded in
+  `docs/PLACE_INVENTORY.md`.
 - Publishing state: no publishing is authorized by this document.
 
 ## Approved product foundation
@@ -285,12 +289,16 @@ decisions that materially alter architecture.
 
 ### Packet 00.1 — Roadmap repository documentation
 
+**Status:** Complete — 2026-08-24. Evidence: `README.md` and this roadmap.
+
 - Replace the placeholder README identity with Ant Tower Defense.
 - Add this roadmap and planned code structure.
 - Confirm that no gameplay code is changed.
 - Verify Markdown links and Git diff.
 
 ### Packet 00.2 — Product decision register
+
+**Status:** Complete — 2026-08-25. Evidence: `docs/GAME_DESIGN.md`.
 
 - Confirm or change the recommended defaults listed above.
 - Decide provisional names for persistent Gold and Battle Cash.
@@ -300,6 +308,10 @@ decisions that materially alter architecture.
 - Record decisions in `docs/GAME_DESIGN.md` without implementing them.
 
 ### Packet 00.3 — Place and ownership inventory
+
+**Status:** Awaiting user confirmation — 2026-08-25. Evidence:
+`docs/PLACE_INVENTORY.md`. The exact Roblox owner group name/ID is the only
+undiscovered required field.
 
 - Record lobby PlaceId, future match PlaceId, experience owner/group, supported
   platforms, and test-universe strategy.

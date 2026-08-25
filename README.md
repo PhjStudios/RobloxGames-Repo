@@ -11,6 +11,8 @@ verifiable work packets. Gameplay implementation should follow that roadmap in
 order.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
+- [Game design decisions](docs/GAME_DESIGN.md)
+- [Roblox place and test-environment inventory](docs/PLACE_INVENTORY.md)
 - [Project instructions](AGENTS.md)
 
 ## Source of truth
