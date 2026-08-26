@@ -283,8 +283,7 @@ This is historical Studio solo evidence. Phase 05 changed no production source,
 so it did not rerun these cycles. Phase 06 has since added the server-owned
 network tree, limiter, dispatcher, and connection cleanup beneath one
 `NetworkRegistry` service. These pre-network cycles therefore do not prove the
-current networking shutdown path; the required unsaved Phase 06 regression is
-pending. See `docs/TEST_MATRIX.md`.
+current networking shutdown path. See `docs/TEST_MATRIX.md` for current status.
 
 The final synchronized code completed three consecutive Play-Stop cycles in each
 isolated Studio place, for six cycles total.
@@ -302,6 +301,18 @@ ready record but registered no shutdown hook. Each Stop returned promptly to
 Edit mode; neither Studio session hung.
 
 No place was saved or published to perform these tests.
+
+Packet 06.5 subsequently passed the current unsaved regression against the
+network-enabled bootstrap. Three new plain Lobby and three new plain Match
+Play/Stop cycles each reported one server `NetworkRegistry` service, zero client
+services, and clean terminal shutdown. A final runtime-only two-client Match
+harness separately proved real `PlayerRemoving`, continued request handling for
+the remaining peer, server and remaining-client `caseCount=10` terminals,
+test-fixture cleanup `Cleaned`, and preservation of the empty production
+`ATDNetwork/v1` tree. Its bounded Output audits reported `forbiddenMatches=0`
+and `errorCount=0`. This does not claim that the departing client invoked the
+server's `BindToClose` path. Complete evidence is in
+`docs/NETWORK_SECURITY_STUDIO_REGRESSION.md`.
 
 ## Manual regression procedure
 
@@ -353,3 +364,6 @@ Phase 04 added pure shared configuration contracts. Packet 04.5 now gates the
 valid startup path before shutdown registration, while preserving the one-hook
 shutdown behavior recorded here. Current bootstrap evidence is in
 `docs/CONFIGURATION_VALIDATION.md`.
+
+Packet 06.5 is complete with headless security and unsaved Studio networking
+evidence. The fresh Phase 06/Gate A exit audit remains open.

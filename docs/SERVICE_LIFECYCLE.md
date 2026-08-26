@@ -203,9 +203,12 @@ dedicated general `ServiceLifecycle` suite; the network-runtime suite instead
 exercises the frozen network service definition and its
 initialize/start/shutdown state adapter. Packet 06.4 extends that composition to
 the limiter, dispatcher, two `PlayerRemoving` owners, and fixed listener
-bindings. The evidence in this section remains historical Studio validation;
-reusable general lifecycle coverage is deferred until a dedicated regression
-packet. See `docs/TEST_MATRIX.md`.
+bindings. Packet 06.5 adds nine integrated adversarial cases that exercise the
+same registry, limiter, dispatcher, protocol, client tracker, Player-removal,
+and whole-network cleanup boundaries. The current canonical run passes all 200
+cases across 16 suites. The evidence in this section remains historical Studio
+validation; reusable general lifecycle coverage is deferred until a dedicated
+regression packet. See `docs/TEST_MATRIX.md`.
 
 Packet 03.3 reran 12 focused lifecycle cases through the migrated logger-based
 constructor. Dependency order, registration/state rejection, and all three
@@ -242,8 +245,8 @@ projects and tested without editing, saving, or publishing them.
 
 This table records the then-current pre-network lifecycle. Phase 06 has since
 added one foundation-only `NetworkRegistry` server service while the client
-remains at zero services. The table is not current Phase 06 Studio evidence; the
-required unsaved networking regression remains pending.
+remains at zero services. The table is historical and is not the current Phase
+06 Studio evidence.
 
 | Place | Role/PlaceId | Server result | Client result | Opposite-role executable source |
 | --- | --- | --- | --- | ---: |
@@ -256,6 +259,16 @@ Edit DataModel still contains preserved empty `match` folders from earlier
 combined synchronization; each has zero descendants and zero scripts/modules.
 They are not match source and were not deleted because unknown Studio instances
 remain preserved by policy.
+
+Packet 06.5 subsequently passed the current unsaved networking regression.
+Three plain Lobby and three plain Match Play/Stop cycles each reported one
+server `NetworkRegistry` service and zero client services. The final runtime-only
+Match Server & Clients harness used exactly two clients and passed real
+`PlayerRemoving`, continued request handling for the remaining peer, server and
+remaining-client `caseCount=10` terminals, test-fixture cleanup `Cleaned`, and
+preservation of the empty production `ATDNetwork/v1` tree. Its bounded Output
+audits reported `forbiddenMatches=0` and `errorCount=0`. The complete evidence is
+in `docs/NETWORK_SECURITY_STUDIO_REGRESSION.md`.
 
 ## Manual regression procedure
 
@@ -272,9 +285,9 @@ remain preserved by policy.
 Phase 03 is complete. Packet 03.4 evidence is in
 `docs/GRACEFUL_SHUTDOWN.md`. Phase 04 added pure content contracts, and Packet
 04.5 placed their centralized gate before runner construction without changing
-this lifecycle behavior. Packets 06.1–06.4 add only the common server network
-service and its nested limiter/dispatcher ownership described in
-`docs/NETWORK_PROTOCOL.md`. Packet 06.5 and the fresh Phase 06/Gate A exit audit
-remain open.
+this lifecycle behavior. Packets 06.1–06.5 add only the common server network
+service, its nested limiter/dispatcher ownership, and test-only security
+evidence described in `docs/NETWORK_PROTOCOL.md`. Packet 06.5 is complete; the
+fresh Phase 06/Gate A exit audit remains open.
 Configuration evidence remains in
 `docs/CONFIGURATION_VALIDATION.md`.

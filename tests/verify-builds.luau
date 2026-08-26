@@ -328,6 +328,7 @@ local function hasTestLeak(dataModel: DataModel): boolean
 			local source = (descendant :: LuaSourceContainer).Source
 			if
 				string.find(source, "ATD_TEST", 1, true) ~= nil
+				or string.find(source, "ATD_PHASE06_STUDIO", 1, true) ~= nil
 				or string.find(source, "PRIVATE_MODULE_LOAD_VALUE", 1, true) ~= nil
 			then
 				return true
@@ -471,7 +472,11 @@ local function verifyProduction(dataModel: DataModel, definition: BuildDefinitio
 end
 
 local function verifyTest(dataModel: DataModel, definition: BuildDefinition): boolean
-	local _, scripts, localScripts = countClasses(dataModel)
+	local modules, scripts, localScripts = countClasses(dataModel)
+	if modules ~= 65 then
+		emit("FAIL", definition.name, `TEST_MODULE_COUNT_{modules}`)
+		return false
+	end
 	if scripts ~= 0 or localScripts ~= 0 then
 		emit("FAIL", definition.name, "RUNNABLE_SCRIPT_PRESENT")
 		return false
@@ -579,8 +584,18 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			end
 		end
 	end
+	local networkingModules = 6
+	local testOwnedModules = modules - sharedModules - networkingModules
+	if testOwnedModules ~= 26 then
+		emit("FAIL", definition.name, `TEST_OWNED_MODULE_COUNT_{testOwnedModules}`)
+		return false
+	end
 
-	emit("PASS", definition.name, `SHARED_MODULES_{sharedModules}_NETWORKING_MODULES_6_RUNNABLE_SCRIPTS_0`)
+	emit(
+		"PASS",
+		definition.name,
+		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
+	)
 	return true
 end
 

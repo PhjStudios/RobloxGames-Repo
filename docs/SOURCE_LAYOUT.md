@@ -17,7 +17,7 @@ place-isolated mappings recorded in `docs/ROJO_PROJECTS.md`.
 - Studio-authored content changed: no
 - Place saved or published: no
 
-## Current source tree
+## Current Phase 06-relevant source tree excerpt
 
 ```text
 src/
@@ -92,14 +92,23 @@ tests/
   negative/
   specs/
     ClientRequestTracker.spec.luau
+    NetworkSecurity.spec.luau
     PayloadValidation.spec.luau
     RemoteRegistry.spec.luau
     RemoteRuntime.spec.luau
     RequestProtocol.spec.luau
     ServerRateLimiter.spec.luau
     ServerRequestDispatcher.spec.luau
+  studio/
+    Phase06NetworkClient.client.luau
+    Phase06NetworkServer.server.luau
   support/
 ```
+
+This excerpt shows every production source and the Phase 06 test areas relevant
+to the network boundary. It intentionally omits unrelated test fixtures,
+negative controls, older specs, support modules, and runner entrypoints; it is
+not a complete tracked-file inventory.
 
 The remaining `.gitkeep` files preserve the four empty place-specific
 architecture directories until packet-approved source replaces them. They are
@@ -157,6 +166,14 @@ protected handler outcomes, and origin-only response routing. The client tracker
 builds only registered fixed request envelopes and bounds pending and terminal
 correlation state. The client bootstrap does not import it, and no runnable
 entrypoint, gameplay contract, or production endpoint was added.
+
+Packet 06.5 adds one test-only integrated adversarial spec and two tracked
+manual Studio harness sources under `tests/studio/`. No Rojo project maps the
+manual harness directory. Its final independent review also hardens the existing
+production `ServerRequestDispatcher` to close yielding authorizers/handlers and
+forbid handler-supplied validation metadata. The production file inventory,
+runnable entrypoints, empty lasting registry, and empty lasting rate-policy list
+are unchanged.
 
 ## Bootstrap move manifest
 
@@ -327,7 +344,7 @@ headless seam is gated by the exact Test-project structure.
 The ignored smoke-build artifact was inspected and removed. It can be recreated
 with the build command above.
 
-### Current Packet 06.4 source layout
+### Current Packet 06.5 source layout
 
 The four-project structural contract now expects 40 ModuleScripts, one Script,
 and one LocalScript in every production build. That is 42 exact production Lua
@@ -340,12 +357,16 @@ The Test build's production source subset contains all 33 shared modules and
 exactly six common networking modules copied under test-only `ServerStorage`
 paths. It maps four server modules (`ProductionRateLimits`,
 `ServerRemoteRegistry`, `ServerRateLimiter`, and `ServerRequestDispatcher`) and
-two client modules (`ClientRemoteLookup` and `ClientRequestTracker`). Test-owned
-specs, fixtures, support, and negative controls remain separate, and the build
-has zero runnable scripts. Lobby contains no Match source, Match contains no
-Lobby source, and lasting production remote definitions and rate policies
-remain empty. Packet 06.4 implementation is present; Packet 06.5 and the fresh
-Phase 06 exit audit remain open.
+two client modules (`ClientRemoteLookup` and `ClientRequestTracker`). The full
+Test build now contains 65 ModuleScripts: those 33 shared modules, six mapped
+networking modules, and 26 test-owned modules. It has zero runnable scripts.
+Lobby contains no Match source, Match contains no Lobby source, and lasting
+production remote definitions and rate policies remain empty. Production
+remains at 40 ModuleScripts, one Script, and one LocalScript. The existing
+dispatcher now enforces synchronous non-yielding feature callbacks and reserves
+validation metadata to its own strict payload failure path. Packet 06.5 is
+complete; the fresh Phase 06/Gate A exit audit and CI evidence remain open, and
+Phase 07 has not begun.
 
 ## Roblox Studio verification
 
@@ -379,6 +400,21 @@ The Play session was stopped and Studio returned to Edit mode. No Studio-authore
 content, DataStore, external service, save operation, or publish operation was
 used.
 
+### Packet 06.5 unsaved networking regression
+
+The later Packet 06.5 engine regression used Studio `0.735.0.7351131` from
+installation directory `version-dcbeee682ce74ee0`. With
+`lobby.project.json` connected only to Lobby and
+`match.project.json` connected only to Match, one project at a time, three
+unsaved Lobby cycles and three unsaved Match cycles passed. The final authorized
+two-client networking regression also passed. Both places were left in Edit
+mode, and neither was saved or published.
+
+The reusable source for that manual check is
+`tests/studio/Phase06NetworkServer.server.luau` and
+`tests/studio/Phase06NetworkClient.client.luau`. These tracked files are mapped
+by no Rojo project and do not change either production bootstrap count.
+
 ## Manual regression procedure
 
 1. Run `rojo serve` from the repository root and connect the development place.
@@ -409,7 +445,9 @@ place-specific layer. Production code must never import a test module. Fixtures
 and intentional negative controls stay under test-only
 directories; lasting authored catalogs under `src/shared/config` and lasting
 remote definitions under `src/shared/network/ProductionRemotes.luau` remain
-empty or policy-only.
+empty or policy-only. Packet 06.5 adds the integrated adversarial spec to the
+Test-only spec root; its two `tests/studio` manual harness sources remain mapped
+nowhere.
 
 `test.project.json` creates no runnable Script or LocalScript. Conversely,
 Default, Lobby, and Match map no test directory.
@@ -419,5 +457,6 @@ generated DataModels, including an exact positive path/class/source map for all
 test-mapped networking modules.
 
 This headless boundary and every environment-specific follow-up are indexed in
-`docs/TEST_MATRIX.md`; passing it does not substitute for a deferred Studio,
-multi-client, published-client, or device gate.
+`docs/TEST_MATRIX.md`; passing it does not substitute for published-client,
+device, or any future packet-required Studio gate. Packet 06.5's specific
+unsaved Studio and two-client regression is recorded above.

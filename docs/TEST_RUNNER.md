@@ -2,7 +2,7 @@
 
 ## Decision record
 
-- Status: Phase 05 and Packets 06.1–06.4 complete; Packet 06.5 is next
+- Status: Phase 05 and Packets 06.1–06.5 complete; fresh Phase 06/Gate A exit audit is next
 - Research date: 2026-08-26
 - Selected runtime: Lune 0.10.5
 - Rokit tool identifier: `lune-org/lune@0.10.5`
@@ -490,5 +490,43 @@ changing the canonical command or its exit-code contract:
   and exact generated-output cleanup. The lasting production registry and
   rate-policy list remain empty.
 
-Packet 06.4 is complete. Packet 06.5 is next and has not begun; Phase 06 and
-Gate A remain open, and no gameplay or Phase 07 source has begun.
+Packet 06.4 is complete. Its counts above are historical Packet 06.4 evidence.
+
+## Packet 06.5 completion verification
+
+Packet 06.5 extends the same deterministic discovery and restricted loader
+without changing the canonical command or its exit-code contract:
+
+- Sixteen suites and all 200 cases pass in canonical path and declaration
+  order. `NetworkSecurity.spec.luau` contributes nine integrated adversarial
+  cases while the focused registry, validation, limiter, protocol, dispatcher,
+  lookup, and tracker suites remain in normal discovery.
+- `ServerRequestDispatcher.spec.luau` now contributes 21 focused cases. The two
+  review-driven additions prove that feature callbacks cannot yield and retain
+  suspended work, and that only dispatcher-owned payload validation may attach
+  public validation-path metadata.
+- The integrated cases compose the real foundation modules through test-only
+  adapters and cover fixed endpoint use, malformed envelopes and hostile
+  payloads, forged authority fields, duplicate/stale correlation, independent
+  Player/endpoint bursts, bounded privacy-safe aggregates, contained handler
+  failures, and removal/shutdown ownership. They add no gameplay definition.
+- `lune run tests/verify-builds.luau` passes with the unchanged 40
+  ModuleScripts, one Script, and one LocalScript in Default, Lobby, and Match.
+  Test contains 33 shared ModuleScripts, exactly six mapped common networking
+  modules, 26 test-owned ModuleScripts, and zero runnable scripts, for 65
+  ModuleScripts total.
+- `tests/studio/Phase06NetworkServer.server.luau` and
+  `tests/studio/Phase06NetworkClient.client.luau` are tracked manual harness
+  sources. They are mapped by no Rojo project and therefore are absent from
+  Default, Lobby, Match, and Test builds.
+- On the observed Roblox Studio installation directory
+  `version-dcbeee682ce74ee0`, three unsaved Lobby cycles and three unsaved Match
+  cycles passed, followed by the final two-client networking regression. Both
+  places were left in Edit mode; neither place was saved or published.
+- The production file/build inventory remains unchanged from Packet 06.4. The
+  existing dispatcher alone gained non-yielding callback and validation-metadata
+  hardening; lasting remote definitions and policies remain empty, and Phase 07
+  has not begun.
+
+Packet 06.5 is complete with this packet-level evidence. Phase 06 and Gate A
+remain open pending the fresh exit audit and its genuine CI evidence.

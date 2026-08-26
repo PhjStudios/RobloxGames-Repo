@@ -82,6 +82,33 @@ reproduction checklist, not the historical source-only spellings.
 | `lune run tests/run.luau` | Pass | Packet 05.2 discovered eight suites and 76 ordered cases. Three consecutive runs returned exit 0 with byte-identical output. |
 | `lune run tests/verify-builds.luau` | Pass | Packet 05.2 rebuilt Default, Lobby, Match, and Test, matched all 32 production Lua containers to their exact path, class, and authoritative source, and removed its exact ignored outputs. |
 
+### Packet 06.5 current verification
+
+The table above preserves the packet-specific historical evidence named in each
+row. With the same pinned tools, Packet 06.5 produced the following current
+evidence on Windows x64:
+
+- `lune run tests/run.luau` passed all 200 tests in 16 deterministic suites.
+  The new `NetworkSecurity.spec.luau` suite contributes nine integrated
+  adversarial cases.
+- `lune run tests/verify-builds.luau` passed with the unchanged 40
+  ModuleScripts, one Script, and one LocalScript in each production build. Test
+  contains 65 ModuleScripts—33 shared, six mapped common networking, and 26
+  test-owned—and zero runnable scripts.
+- The two tracked manual sources under `tests/studio/` are mapped by no Rojo
+  project and are absent from all four generated DataModels.
+- Roblox Studio `0.735.0.7351131` was observed from installation directory
+  `version-dcbeee682ce74ee0`. Three unsaved Lobby cycles, three unsaved Match
+  cycles, and the final two-client networking regression passed. Both places
+  were left in Edit mode without saving or publishing.
+- No tool version, manifest pin, production file/build inventory, lasting
+  gameplay catalog, remote definition, or rate policy changed for Packet 06.5.
+  The existing dispatcher alone gained review-driven non-yielding callback and
+  validation-metadata hardening. Phase 07 has not begun.
+
+This is Packet 06.5 evidence, not the Phase 06/Gate A exit record. The fresh
+exit audit and genuine CI evidence remain open.
+
 The occupied default Rojo port is expected while a sync session is already
 running. When this occurs, inspect the listener before starting another server;
 do not kill a user's active Rojo or Studio process merely to make a second

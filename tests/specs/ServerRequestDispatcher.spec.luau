@@ -833,6 +833,143 @@ return TestHarness.suite("server request dispatcher", {
 		end
 	),
 
+	TestHarness.case("forbids handler-supplied public validation metadata", function(assertions)
+		local result = RequestProtocol.createPublicError(
+			"INVALID_PAYLOAD",
+			{
+				path = "payload.value",
+			} :: any
+		)
+		assertions.isTrue(result.ok)
+		if not result.ok then
+			return
+		end
+		local failure = captureError(assertions, function()
+			ServerRequestDispatcher.reject(result.value)
+		end)
+		assertions.contains(failure, "[code=PUBLIC_ERROR_METADATA_NOT_ALLOWED]")
+	end),
+
+	TestHarness.case("closes yielding authorizers and handlers without retaining work", function(assertions)
+		local requestAuthorizationThread: thread? = nil
+		local eventHandlerThread: thread? = nil
+		local requestAuthorizationAfterYield = 0
+		local eventHandlerAfterYield = 0
+		local requestHandlerCount = 0
+		local requestAuthorizationContract = ServerRequestDispatcher.createRequestContract(
+			REGISTRY,
+			"Match",
+			RESPONSE_REQUEST,
+			PAYLOAD_SCHEMA,
+			RESPONSE_SCHEMA,
+			function(_context): boolean
+				requestAuthorizationThread = coroutine.running()
+				coroutine.yield(PRIVATE_SENTINEL)
+				requestAuthorizationAfterYield += 1
+				return true
+			end,
+			function(_context, _payload)
+				requestHandlerCount += 1
+				return ServerRequestDispatcher.success({ accepted = true })
+			end
+		)
+		local yieldingEventHandlerContract = ServerRequestDispatcher.createEventContract(
+			REGISTRY,
+			"Match",
+			CLIENT_EVENT,
+			PAYLOAD_SCHEMA,
+			function(_context): boolean
+				return true
+			end,
+			function(_context, _payload)
+				eventHandlerThread = coroutine.running()
+				coroutine.yield(PRIVATE_SENTINEL)
+				eventHandlerAfterYield += 1
+				return ServerRequestDispatcher.success(nil)
+			end
+		)
+
+		withRuntime(nil, function(state, player)
+			startDispatcher(state, { requestAuthorizationContract, yieldingEventHandlerContract })
+			local remote = Instance.new("RemoteEvent") :: RemoteEvent
+			state.dispatcher:dispatch(requestAuthorizationContract, remote, player, requestWire("YieldAut1", 1))
+			assertions.equal(responseCode(state.sent[1].envelope), "NOT_AUTHORIZED")
+			assertions.equal(requestHandlerCount, 0)
+			assertions.equal(requestAuthorizationAfterYield, 0)
+			assertions.isNotNil(requestAuthorizationThread)
+			assertions.equal(coroutine.status(requestAuthorizationThread :: thread), "dead")
+			assertions.equal(state.dispatcher:getStats().pendingRequestCount, 0)
+			assertions.equal(state.dispatcher:getStats().completedRequestCount, 1)
+			assertAggregateReport(assertions, state.reports[1], "NOT_AUTHORIZED", player, "YieldAut1")
+
+			state.observationNow = ServerRequestDispatcher.REPORT_INTERVAL_SECONDS
+			state.dispatcher:dispatch(yieldingEventHandlerContract, nil, player, eventWire(2))
+			assertions.equal(eventHandlerAfterYield, 0)
+			assertions.isNotNil(eventHandlerThread)
+			assertions.equal(coroutine.status(eventHandlerThread :: thread), "dead")
+			assertions.equal(#state.reports, 2)
+			assertions.equal(state.reports[2].code, "HANDLER_FAILED")
+			assertions.equal(state.reports[2].endpoint, CLIENT_EVENT.name)
+			assertions.equal(state.reports[2].protocolRejectionCount, 1)
+			assertGraphDoesNotRetain(assertions, state.reports[2], PRIVATE_SENTINEL)
+			remote:Destroy()
+		end)
+
+		local requestHandlerThread: thread? = nil
+		local eventAuthorizationThread: thread? = nil
+		local requestHandlerAfterYield = 0
+		local eventAuthorizationAfterYield = 0
+		local eventHandlerCount = 0
+		local yieldingRequestHandlerContract = responseRequestContract(function(_context, _payload)
+			requestHandlerThread = coroutine.running()
+			coroutine.yield(PRIVATE_SENTINEL)
+			requestHandlerAfterYield += 1
+			return ServerRequestDispatcher.success({ accepted = true })
+		end)
+		local eventAuthorizationContract = ServerRequestDispatcher.createEventContract(
+			REGISTRY,
+			"Match",
+			CLIENT_EVENT,
+			PAYLOAD_SCHEMA,
+			function(_context): boolean
+				eventAuthorizationThread = coroutine.running()
+				coroutine.yield(PRIVATE_SENTINEL)
+				eventAuthorizationAfterYield += 1
+				return true
+			end,
+			function(_context, _payload)
+				eventHandlerCount += 1
+				return ServerRequestDispatcher.success(nil)
+			end
+		)
+
+		withRuntime(nil, function(state, player)
+			startDispatcher(state, { yieldingRequestHandlerContract, eventAuthorizationContract })
+			local remote = Instance.new("RemoteEvent") :: RemoteEvent
+			state.dispatcher:dispatch(yieldingRequestHandlerContract, remote, player, requestWire("YieldHnd1", 1))
+			assertions.equal(responseCode(state.sent[1].envelope), "INTERNAL_ERROR")
+			assertions.equal(requestHandlerAfterYield, 0)
+			assertions.isNotNil(requestHandlerThread)
+			assertions.equal(coroutine.status(requestHandlerThread :: thread), "dead")
+			assertions.equal(state.dispatcher:getStats().pendingRequestCount, 0)
+			assertions.equal(state.dispatcher:getStats().completedRequestCount, 1)
+			assertAggregateReport(assertions, state.reports[1], "HANDLER_FAILED", player, "YieldHnd1")
+
+			state.observationNow = ServerRequestDispatcher.REPORT_INTERVAL_SECONDS
+			state.dispatcher:dispatch(eventAuthorizationContract, nil, player, eventWire(2))
+			assertions.equal(eventHandlerCount, 0)
+			assertions.equal(eventAuthorizationAfterYield, 0)
+			assertions.isNotNil(eventAuthorizationThread)
+			assertions.equal(coroutine.status(eventAuthorizationThread :: thread), "dead")
+			assertions.equal(#state.reports, 2)
+			assertions.equal(state.reports[2].code, "NOT_AUTHORIZED")
+			assertions.equal(state.reports[2].endpoint, CLIENT_EVENT.name)
+			assertions.equal(state.reports[2].protocolRejectionCount, 1)
+			assertGraphDoesNotRetain(assertions, state.reports[2], PRIVATE_SENTINEL)
+			remote:Destroy()
+		end)
+	end),
+
 	TestHarness.case(
 		"handles Events and no-response Requests without allocating or sending response state",
 		function(assertions)

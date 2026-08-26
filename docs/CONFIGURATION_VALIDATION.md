@@ -205,7 +205,10 @@ Both common bootstraps now use the same sequence:
 5. create the resolved context and logger;
 6. call `ConfigurationValidator.validateLoaded()`;
 7. fail through structured `Log.error` when invalid; and only on success
-8. create, initialize, and start the zero-service lifecycle runner;
+8. create the lifecycle runner; the client starts it empty, while the server
+   constructs the fixed network owner from the empty production registry and
+   empty rate-policy list, registers one `NetworkRegistry` service, and then
+   initializes and starts it;
 9. create cleanup ownership;
 10. register the server close hook; and
 11. emit the existing ready record.
@@ -283,6 +286,17 @@ the same ordering and terminal states with zero ATD warning or error, and both
 places ended in Edit mode. The audit also reran 376 combined assertions in each
 place and recorded its complete evidence in `docs/PHASE_04_EXIT_AUDIT.md`.
 
+Packet 06.5 subsequently passed a fresh unsaved networking regression against
+the network-enabled bootstrap. Three plain Lobby and three plain Match
+Play/Stop cycles each reported server `serviceCount=1`, client
+`serviceCount=0`, successful configuration before ready, clean shutdown, and
+final Edit mode. The final runtime-only two-client Match harness passed real
+`PlayerRemoving`, a remaining-peer request, server and remaining-client
+`caseCount=10` terminals, fixture cleanup `Cleaned`, preservation of the empty
+production `ATDNetwork/v1` tree, and bounded Output audits with
+`forbiddenMatches=0` and `errorCount=0`. See
+`docs/NETWORK_SECURITY_STUDIO_REGRESSION.md`.
+
 ## Formatting, lint, and build verification
 
 | Check | Result |
@@ -319,13 +333,15 @@ callbacks.
 
 1. Run `stylua src tests`, then `stylua --check --verify src tests`,
    `selene validate-config`, and `selene src tests`.
-2. Run `lune run tests/run.luau`. Confirm all 76 ordered cases pass, including
+2. Run `lune run tests/run.luau`. Confirm all 200 ordered cases across 16 suites
+   pass, including
    lasting-empty and policy-only configuration, representative graphs, invalid
    references/boundaries, exact code/path/order, privacy, malformed roots, and
    source-load containment.
-3. Run `lune run tests/verify-builds.luau`. Confirm all four builds, 30
-   ModuleScripts plus one Script and one LocalScript in each production build,
-   role isolation, exact source identity, and no test code in production.
+3. Run `lune run tests/verify-builds.luau`. Confirm all four builds; 40
+   ModuleScripts plus one Script and one LocalScript in each production build;
+   65 ModuleScripts and zero runnable scripts in Test; role isolation; exact
+   source identity; and no test code in production.
 4. If production bootstrap or engine-integration behavior changed, connect
    `lobby.project.json` only to Lobby and `match.project.json` only to Match.
 5. In each affected place, complete three consecutive Play/Stop cycles. Confirm
@@ -338,6 +354,6 @@ callbacks.
 7. Leave both sessions in Edit mode. Remove only exact temporary harnesses and
    builds. Do not save or publish merely to test.
 
-Phase 05 automated evidence is in `docs/TEST_RUNNER.md` and CI evidence is in
-`docs/CONTINUOUS_INTEGRATION.md`. `docs/TEST_MATRIX.md` distinguishes this
-headless coverage from historical Studio evidence and deferred runtime gates.
+Automated evidence is in `docs/TEST_RUNNER.md` and CI evidence is in
+`docs/CONTINUOUS_INTEGRATION.md`. `docs/TEST_MATRIX.md` distinguishes headless
+coverage from historical, current, and deferred environment-specific gates.

@@ -42,6 +42,9 @@ also map exactly six common networking modules beneath
 `ServerRemoteRegistry`, `ServerRateLimiter`, `ServerRequestDispatcher`,
 `ClientRemoteLookup`, and `ClientRequestTracker`. Test still maps no bootstrap,
 shutdown module, place-specific layer, or runnable Script/LocalScript.
+The tracked `tests/studio/Phase06NetworkServer.server.luau` and
+`tests/studio/Phase06NetworkClient.client.luau` manual harness sources are
+mapped by none of the four projects.
 
 The role projects intentionally omit `servePlaceIds`, raw PlaceIds, universe
 IDs, and conditional role selection. Their only identity declaration is the
@@ -169,8 +172,11 @@ Additional assertions passed:
   `ProductionRateLimits`, `ServerRemoteRegistry`, `ServerRateLimiter`,
   `ServerRequestDispatcher`, `ClientRemoteLookup`, and `ClientRequestTracker`
   under test-only `ServerStorage` paths. Its test-owned
-  spec/fixture/support/negative-control ModuleScripts remain separate, and it has
-  no runnable Script or LocalScript.
+  spec/fixture/support/negative-control set now contains 26 ModuleScripts. The
+  complete Test build therefore contains 65 ModuleScripts and no runnable Script
+  or LocalScript.
+- The two tracked `tests/studio` manual harness sources occur in no generated
+  DataModel; they are absent even from the Test build.
 - All builds contain `ReplicatedStorage.Shared`.
 - `.gitkeep` files produce no Roblox instances.
 - Both structured common bootstrap records are present in every production
@@ -209,12 +215,21 @@ The structural verifier is the current headless production-shipping gate. Its
 status and the separate Studio/published test boundaries are indexed in
 `docs/TEST_MATRIX.md`.
 
-Packet 06.4 adds only the shared request protocol, the server dispatcher, the
+Packet 06.4 added only the shared request protocol, the server dispatcher, the
 client tracker, their focused specs, and narrow Test mappings reflected above.
-The Test-only networking copies remain source-identical and do not alter
-production mappings or make the test project suitable for serving. The lasting
-production registry and frozen policy list remain empty. Packet 06.5 and the
-fresh Phase 06/Gate A exit audit remain open.
+Packet 06.5 adds one Test-only integrated adversarial spec and two unmapped
+manual Studio harness sources. The Test-only networking copies remain
+source-identical and do not alter production mappings or make the test project
+suitable for serving. Default, Lobby, and Match remain unchanged at 40
+ModuleScripts, one Script, and one LocalScript; the lasting production registry
+and frozen policy list remain empty.
+
+For Packet 06.5, `lobby.project.json` was connected only to Lobby and
+`match.project.json` only to Match, one at a time. Three unsaved cycles passed in
+each role, followed by the final two-client networking regression. Both places
+were left in Edit mode without saving or publishing. Packet 06.5 is complete;
+the fresh Phase 06/Gate A exit audit and CI evidence remain open, and Phase 07
+has not begun.
 
 ## Scope boundary and next gate
 

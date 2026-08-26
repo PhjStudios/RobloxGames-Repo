@@ -359,9 +359,11 @@ later added a repository-owned runner. It still has no dedicated full `Log` or
 loggers and proves private endpoint and connector sentinels are absent from
 network failures. The limiter and dispatcher suites additionally exercise both
 aggregate cadence/count bounds, reporter failure isolation, and absence of
-private identity, request, payload, handler-error, and clock sentinels. The
-Studio evidence here and the deferred reusable coverage boundary are indexed in
-`docs/TEST_MATRIX.md`.
+private identity, request, payload, handler-error, and clock sentinels. Packet
+06.5 adds nine integrated adversarial cases over the real network boundary; the
+current canonical run passes all 200 cases across 16 suites. The historical
+Studio evidence here, the current networking regression, and the deferred full
+logging-suite boundary are indexed in `docs/TEST_MATRIX.md`.
 
 ## Toolchain and build verification
 
@@ -398,9 +400,8 @@ isolated Rojo project and tested in Play without saving or publishing.
 
 This table records the then-current pre-network ready records. Phase 06 has
 since added one foundation-only `NetworkRegistry` server service while the
-client remains at zero services. The required current unsaved networking
-regression is pending, so the historical zero-service values are not current
-Phase 06 evidence.
+client remains at zero services. The historical zero-service values are not
+current Phase 06 evidence.
 
 | Place | Resolved role and PlaceId | Server ready result | Client ready result | Opposite-role executable source |
 | --- | --- | --- | --- | ---: |
@@ -413,6 +414,17 @@ fields. Neither session produced an application warning or error. Both sessions
 were stopped and both Studio windows returned to Edit mode. No Studio-authored
 instance was changed, no external service was enabled, and neither place was
 saved or published.
+
+Packet 06.5 subsequently passed the current unsaved networking regression.
+Three plain Lobby and three plain Match Play/Stop cycles produced the expected
+server `serviceCount=1` and client `serviceCount=0` records without an ATD error.
+The final runtime-only two-client Match harness passed real `PlayerRemoving`, a
+remaining-peer request, server and remaining-client `caseCount=10` terminals,
+fixture cleanup `Cleaned`, and preservation of the empty production
+`ATDNetwork/v1` tree. The bounded Output audits reported exactly
+`forbiddenMatches=0` and `errorCount=0`; no client value, identity, request ID,
+payload, caught error, or traceback was accepted into the evidence. See
+`docs/NETWORK_SECURITY_STUDIO_REGRESSION.md`.
 
 ## Manual regression procedure
 
@@ -451,8 +463,8 @@ Phase 04 packet to extend the public vocabulary, narrowly adding the
 report, privacy, bootstrap, and Studio evidence is recorded in
 `docs/CONFIGURATION_VALIDATION.md`.
 
-Packets 06.1–06.4 make the narrow `network` vocabulary and aggregate-field
+Packets 06.1–06.5 make and test the narrow `network` vocabulary and aggregate-field
 extensions recorded above. The lasting production registry and rate-policy list
-remain empty, and no gameplay endpoint was created. Packet 06.5 and the fresh
-Phase 06/Gate A exit audit remain open. The architecture and privacy boundary
-are recorded in `docs/NETWORK_PROTOCOL.md`.
+remain empty, and no gameplay endpoint was created. Packet 06.5 is complete;
+the fresh Phase 06/Gate A exit audit remains open. The architecture and privacy
+boundary are recorded in `docs/NETWORK_PROTOCOL.md`.

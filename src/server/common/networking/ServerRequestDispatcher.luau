@@ -172,6 +172,19 @@ local function isFiniteNumber(value: number): boolean
 	return value == value and value ~= math.huge and value ~= -math.huge
 end
 
+local function callNonYielding(callback: (...any) -> any, ...: any): (boolean, any)
+	local callbackThread = coroutine.create(callback)
+	local resumed, value = coroutine.resume(callbackThread, ...)
+	if not resumed then
+		return false, nil
+	end
+	if coroutine.status(callbackThread) ~= "dead" then
+		coroutine.close(callbackThread)
+		return false, nil
+	end
+	return true, value
+end
+
 local function isRuntimeRole(value: unknown): boolean
 	return value == "Development" or value == "Lobby" or value == "Match"
 end
@@ -208,6 +221,9 @@ end
 function ServerRequestDispatcher.reject(errorValue: unknown): HandlerOutcome
 	if not RequestProtocol.isPublicError(errorValue) then
 		staticError("INVALID_PUBLIC_ERROR")
+	end
+	if (errorValue :: RequestProtocol.PublicError).metadata ~= nil then
+		staticError("PUBLIC_ERROR_METADATA_NOT_ALLOWED")
 	end
 	return makeOutcome({
 		kind = "Rejected",
@@ -1001,7 +1017,7 @@ local function dispatchRequest(
 	end
 
 	local context = makeContext(player, contractData.definition, data.role)
-	local authorizationSucceeded, authorized = pcall(contractData.authorizer, context)
+	local authorizationSucceeded, authorized = callNonYielding(contractData.authorizer, context)
 	if not dispatcherCanHandle(data) or not ledger.active or not isActivePlayer(data, player) then
 		return
 	end
@@ -1040,7 +1056,7 @@ local function dispatchRequest(
 		return
 	end
 
-	local handlerSucceeded, outcomeValue = pcall(contractData.handler, context, canonicalPayload)
+	local handlerSucceeded, outcomeValue = callNonYielding(contractData.handler, context, canonicalPayload)
 	if not dispatcherCanHandle(data) or not ledger.active or not isActivePlayer(data, player) then
 		return
 	end
@@ -1171,7 +1187,7 @@ local function dispatchEvent(
 
 	local player = origin :: Player
 	local context = makeContext(player, contractData.definition, data.role)
-	local authorizationSucceeded, authorized = pcall(contractData.authorizer, context)
+	local authorizationSucceeded, authorized = callNonYielding(contractData.authorizer, context)
 	if not dispatcherCanHandle(data) or not isActivePlayer(data, player) then
 		return
 	end
@@ -1193,7 +1209,7 @@ local function dispatchEvent(
 		return
 	end
 
-	local handlerSucceeded, outcomeValue = pcall(contractData.handler, context, canonicalPayload)
+	local handlerSucceeded, outcomeValue = callNonYielding(contractData.handler, context, canonicalPayload)
 	if not dispatcherCanHandle(data) or not isActivePlayer(data, player) then
 		return
 	end

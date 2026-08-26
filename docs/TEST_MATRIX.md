@@ -7,8 +7,9 @@ Ant Tower Defense. Packet 05.4 created it on 2026-08-26. It separates checks
 that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
-Phase 05 and its fresh combined exit audit are complete. Phase 06 is active;
-Packets 06.1–06.4 are complete, and Packet 06.5 is next but has not begun.
+Phase 05 and its fresh combined exit audit are complete. Packets 06.1–06.5 are
+complete; Phase 06 remains active while the fresh Gate A/Phase 06 exit audit and
+its genuine CI evidence are open. Phase 07 has not begun.
 
 The current repository has a fixed remote-registry/network-ownership foundation,
 strict shared payload validators, a server-authoritative token-bucket limiter,
@@ -30,6 +31,8 @@ never presented as passing evidence.
 - `Historical evidence only` means the named packet recorded a passing temporary
   harness, but its exact executable harness was not committed and cannot be
   rerun as a current repository test.
+- `Pending` means a required check is available but its exact current external
+  evidence has not run or has not yet been recorded.
 - `Deferred` means the planned system or test implementation does not exist yet.
 - `Unavailable` means an external environment, device, publication, or service
   prerequisite is also missing.
@@ -48,6 +51,9 @@ linked historical document for the original Studio evidence.
 - Default, Lobby, and Match never map `tests/` or a test-only dependency.
   `lune run tests/verify-builds.luau` enforces exact source identity, role
   isolation, runnable-entrypoint counts, and test exclusion.
+- The two tracked `tests/studio` harness sources are mapped by no Rojo project.
+  They are injected only into runtime-only local Server & Clients DataModels by
+  the reviewed unsaved procedure and are discarded when the session ends.
 - Production universe `10757629094` is not a routine persistence-test target.
   Keep Studio API access disabled there. The complete environment policy is in
   [Place and test-environment inventory](PLACE_INVENTORY.md).
@@ -73,10 +79,11 @@ linked historical document for the original Studio evidence.
 - **Required players or devices:** zero players; one Windows x64 development or
   CI host.
 - **Authorization requirement:** none for local non-publishing execution.
-- **External service or publication requirement:** none.
+- **External service or publication requirement:** none for the local check;
+  H-06 separately records the required current GitHub Actions exit evidence.
 - **Destructive-data risk:** none; the runner uses only deterministic fixtures
   and an exact ignored build path that it removes.
-- **Expected evidence:** 15 suites and 189 tests pass in stable path and
+- **Expected evidence:** 16 suites and 200 tests pass in stable path and
   declaration order; zero discovery, module-load, malformed-root/discovery, and
   runner-crash controls return their documented nonzero exit classes; output
   contains stable suite, case, assertion, code, and path context without private
@@ -84,7 +91,7 @@ linked historical document for the original Studio evidence.
 - **Cleanup procedure:** confirm the runner removed its exact temporary test
   place and that `git status --short --ignored` shows no new residue.
 - **Phase or prerequisite:** available now; Packet 05.1 established the runner,
-  Packet 05.2 established the initial contract suite, and Packets 06.1–06.4
+  Packet 05.2 established the initial contract suite, and Packets 06.1–06.5
   added the current networking suites.
 
 ### H-02 — Cleanup contract
@@ -93,7 +100,7 @@ linked historical document for the original Studio evidence.
   idempotence, nesting/cycles, post-clean guards, cached failures, and sibling
   failure isolation.
 - **Test category:** automated headless unit test.
-- **Current status:** `Passed` as part of the 189-test suite on 2026-08-26.
+- **Current status:** `Passed` as part of the 200-test suite on 2026-08-26.
 - **Environment:** isolated Rojo test DataModel under Lune.
 - **Command or procedure:** run `lune run tests/run.luau`; inspect the ordered
   `cleanup contract` suite in the result.
@@ -115,7 +122,7 @@ linked historical document for the original Studio evidence.
   cross-family rejection, immutable Result envelopes, validation issue paths,
   related paths, codes, causes, path formatting, and freezing.
 - **Test category:** automated headless unit test.
-- **Current status:** `Passed` as part of the 189-test suite on 2026-08-26.
+- **Current status:** `Passed` as part of the 200-test suite on 2026-08-26.
 - **Environment:** isolated Rojo test DataModel under Lune.
 - **Command or procedure:** run `lune run tests/run.luau`; inspect the ordered ID,
   Result, and Validation suites.
@@ -138,7 +145,7 @@ linked historical document for the original Studio evidence.
   lasting empty/policy configuration.
 - **Test category:** automated headless unit/integration test with test-only
   deterministic fixtures.
-- **Current status:** `Passed` as part of the 189-test suite on 2026-08-26.
+- **Current status:** `Passed` as part of the 200-test suite on 2026-08-26.
 - **Environment:** isolated Rojo test DataModel under Lune; fixtures under
   `tests/fixtures` only.
 - **Command or procedure:** run `lune run tests/run.luau`; inspect schema and
@@ -167,26 +174,30 @@ linked historical document for the original Studio evidence.
   Lua source map, production runnable-entrypoint counts, place-role isolation,
   and absence of tests/test-only dependencies from production.
 - **Test category:** automated headless build and structural integration test.
-- **Current status:** `Passed` on 2026-08-26.
-- **Environment:** local Windows x64 and GitHub Actions Windows runner using
-  pinned Rojo and Lune.
+- **Current status:** `Passed` locally on 2026-08-26; current Phase 06 GitHub
+  Actions evidence is `Pending`. Phase 05 retains its own historical clean run.
+- **Environment:** current local Windows x64; the exact current Phase 06 state
+  must also pass the GitHub Actions Windows runner using pinned Rojo and Lune.
 - **Command or procedure:** run `lune run tests/verify-builds.luau`.
 - **Required players or devices:** zero.
 - **Authorization requirement:** none.
-- **External service or publication requirement:** none.
+- **External service or publication requirement:** GitHub Actions is required
+  for the current exit evidence; no Roblox service or publication is required.
 - **Destructive-data risk:** none; generated builds are ignored and exact-path
   temporary outputs are removed.
 - **Expected evidence:** Default, Lobby, and Match each contain exactly 40
   ModuleScripts, one Script, and one LocalScript; Test contains 33 shared
-  ModuleScripts, exactly six test-mapped common networking modules, 25
-  test-owned ModuleScripts, and no runnable script, for 64 ModuleScripts total;
+  ModuleScripts, exactly six test-mapped common networking modules, 26
+  test-owned ModuleScripts, and no runnable script, for 65 ModuleScripts total;
   Lobby contains no Match
   source, Match contains no Lobby source, and production contains no test source
-  or marker.
+  or marker. The two manual `tests/studio` harness sources are mapped nowhere
+  and occur in none of the four builds.
 - **Cleanup procedure:** the verifier removes its exact four outputs; confirm no
   generated place remains.
 - **Phase or prerequisite:** available now; mapping details are in
-  [Rojo Project Definitions](ROJO_PROJECTS.md).
+  [Rojo Project Definitions](ROJO_PROJECTS.md). The Phase 06/Gate A exit audit
+  must record the pending current Actions pass.
 
 ### H-06 — Formatting, linting, and genuine CI enforcement
 
@@ -194,10 +205,11 @@ linked historical document for the original Studio evidence.
   generated-output residue, least-privilege workflow, and unambiguous negative
   controls.
 - **Test category:** automated local quality gate and GitHub Actions CI.
-- **Current status:** `Passed` locally and in genuine GitHub Actions runs on
-  2026-08-26. Formatting, Selene-lint, broken-expectation, and broken-definition
-  controls each failed their intended step before ordinary restoration commits;
-  final clean runs passed and retained no artifacts.
+- **Current status:** `Passed` locally on 2026-08-26; current Phase 06 GitHub
+  Actions evidence is `Pending`. Phase 05's formatting, Selene-lint,
+  broken-expectation, broken-definition, restoration, and final clean runs
+  remain valid historical evidence for the workflow contract; those intentional
+  failing commits are not recreated for Phase 06.
 - **Environment:** local Windows x64 or GitHub-hosted `windows-2025`; tools and
   action pins are repository-controlled.
 - **Command or procedure:** locally run, in order, `stylua --check --verify src
@@ -211,15 +223,17 @@ linked historical document for the original Studio evidence.
   genuine CI evidence; no Roblox service or publication.
 - **Destructive-data risk:** none. Required checks do not deploy, publish,
   release, upload artifacts, or use secrets.
-- **Expected evidence:** every clean step exits zero; each deliberate local/CI
-  control exits nonzero at its intended gate; workflow permissions are only
-  `contents: read`; no artifact is retained.
+- **Expected evidence:** every current clean step exits zero; the existing
+  Phase 05 deliberate controls remain linked to their intended failing gates;
+  workflow permissions are only `contents: read`; no artifact is retained.
 - **Cleanup procedure:** restore a local temporary control before exiting. If a
   control was pushed for genuine CI evidence, follow it with an ordinary
   restoring commit; never rewrite history. Remove exact generated outputs and
   leave no broken working-tree state.
-- **Phase or prerequisite:** available now; exact commits, runs, jobs, and
-  security policy are in [Continuous integration](CONTINUOUS_INTEGRATION.md).
+- **Phase or prerequisite:** local checks are available now. The current Phase
+  06 combined state still needs its genuine clean run; exact historical commits,
+  runs, jobs, and security policy are in
+  [Continuous integration](CONTINUOUS_INTEGRATION.md).
 
 ### H-07 — Lifecycle, logging, and shutdown headless regression
 
@@ -256,14 +270,15 @@ linked historical document for the original Studio evidence.
   server-authoritative token buckets.
 - **Test category:** automated headless protocol/security unit and integration
   test with deterministic test-only remote definitions and payloads.
-- **Current status:** `Passed` for the Packet 06.1–06.3 subset on Windows x64
-  on 2026-08-26; the complete Phase 06 adversarial record remains M-06.
+- **Current status:** `Passed` for the current Packet 06.5 headless boundary on
+  Windows x64 on 2026-08-26. M-06 records the completed initial Phase 06
+  adversarial and Studio evidence.
 - **Environment:** isolated Rojo Test DataModel under Lune; production runtime
   modules are copied to exact test-only `ServerStorage` paths, while shared
   validators use the normal `ReplicatedStorage.Shared` mapping.
 - **Command or procedure:** run `lune run tests/run.luau`; inspect
   `RemoteRegistry.spec`, `RemoteRuntime.spec`, `PayloadValidation.spec`, and
-  `ServerRateLimiter.spec`.
+  `ServerRateLimiter.spec`, plus the integrated `NetworkSecurity.spec` suite.
 - **Required players or devices:** zero.
 - **Authorization requirement:** none for local non-publishing execution.
 - **External service or publication requirement:** none.
@@ -274,14 +289,20 @@ linked historical document for the original Studio evidence.
   limits, one shared speculative-union work budget, exact deterministic paths, finite
   numbers/vectors/CFrames, cycles, repeated aliases, hostile metatables/keys,
   every typed ID family, explicit server-only Instance class/ancestry policy,
-  detached frozen outputs, and privacy-safe failures. Limiter evidence includes
+  detached frozen table containers with approved Instance identity retained,
+  and privacy-safe failures. Limiter evidence includes
   exact policy coverage and bounds, burst/refill math, independent Player/endpoint
   state, clock anomaly recovery, removal/shutdown cleanup, aggregate warning
   cadence, reporter failure isolation, and payload/identity-free diagnostics.
+  Nine integrated adversarial cases additionally compose the fixed registry,
+  lookup, validators, limiter, dispatcher, protocol, and tracker across hostile
+  payload, forged-authority, spam, replay, failure, privacy, and cleanup paths.
 - **Cleanup procedure:** destroy test-owned Instances and rely on the runner's
   exact generated-place cleanup; confirm no new residue.
-- **Phase or prerequisite:** Packets 06.1–06.3 complete. Packet 06.5 must
-  complete M-06 before a feature remote can ship.
+- **Phase or prerequisite:** Packets 06.1–06.5 and the initial M-06 record are
+  complete. Every future feature remote must still satisfy the
+  [remote-security checklist](REMOTE_SECURITY_CHECKLIST.md) before it can ship;
+  the fresh Phase 06/Gate A exit audit remains open.
 
 ### H-09 — Request correlation, dispatch, and public errors
 
@@ -291,33 +312,40 @@ linked historical document for the original Studio evidence.
   routing.
 - **Test category:** automated headless protocol/security unit and integration
   test with deterministic test-only contracts and mutation sentinels.
-- **Current status:** `Passed` for Packet 06.4 on Windows x64 on 2026-08-26; the
-  complete Phase 06 adversarial and Studio record remains M-06.
+- **Current status:** `Passed` for the current Packet 06.5 headless boundary on
+  Windows x64 on 2026-08-26. M-06 records the completed initial Phase 06
+  adversarial and Studio evidence.
 - **Environment:** isolated Rojo Test DataModel under Lune; the exact production
   protocol, client tracker, dispatcher, registry, limiter, and validator modules
   are exercised with fixed test-only registry definitions.
 - **Command or procedure:** run `lune run tests/run.luau`; inspect
   `RequestProtocol.spec`, `ClientRequestTracker.spec`,
-  `ServerRequestDispatcher.spec`, and `RemoteRuntime.spec`.
+  `ServerRequestDispatcher.spec`, `RemoteRuntime.spec`, and the integrated
+  `NetworkSecurity.spec` suite.
 - **Required players or devices:** zero.
 - **Authorization requirement:** none for local non-publishing execution.
 - **External service or publication requirement:** none.
 - **Destructive-data risk:** none; Players, remotes, payloads, senders, clocks,
   reporters, and mutation sentinels are test-owned.
-- **Expected evidence:** all 13 protocol, 12 client-tracker, 19 dispatcher, and
+- **Expected evidence:** all 13 protocol, 12 client-tracker, 21 dispatcher, and
   12 integrated runtime cases pass. The set covers malformed and oversized IDs,
   exact envelope keys, hostile tables, fixed endpoint/schema matching,
   Pending/Success/Rejected states, the 32-Pending and 128-terminal bounds,
   duplicate/stale/cross-endpoint behavior, rate-before-authorization ordering,
-  protected handlers and response validation, origin-only sending,
+  protected handlers and response validation, non-yielding callback enforcement,
+  rejection of handler-supplied validation metadata, origin-only sending,
   Player-removal and shutdown re-entry, public-error privacy, aggregate log
   bounds, and zero handler mutation after authorization-time removal or cleanup.
+  The nine integrated adversarial cases add fixed client lookup/tracking,
+  forged-authority rejection, cross-endpoint replay, independent peer/endpoint
+  bursts, contained Request/Event handler failure, privacy-safe aggregation, and
+  removal/shutdown mutation sentinels.
 - **Cleanup procedure:** destroy test-owned Players and remotes, clear owned
   correlation/ledger state, and confirm the runner removed its exact generated
   place.
-- **Phase or prerequisite:** Packet 06.4 complete. Packet 06.5 must complete
-  M-06 and the unsaved Studio networking regression before a feature remote can
-  ship.
+- **Phase or prerequisite:** Packets 06.1–06.5 and the initial M-06 record are
+  complete. Every future feature remote still requires its approved boundary
+  checklist; the fresh Phase 06/Gate A exit audit remains open.
 
 ## Local Studio solo tests
 
@@ -384,15 +412,15 @@ linked historical document for the original Studio evidence.
   service with zero gameplay services, zero client services, Cleanup ownership,
   logging, and bounded server shutdown.
 - **Test category:** local Studio solo regression.
-- **Current status:** `Available; last passed after Packet 04.5`. The Phase 03
-  three-cycle Play-Stop evidence remains historical for its then-current
-  zero-service build; it was not rerun after Phase 06 added the network service.
-  The current Phase 06 unsaved networking regression remains pending.
+- **Current status:** `Passed` on 2026-08-26 for the current Phase 06 build; all
+  three Lobby Play/Stop cycles passed with server service count 1, client service
+  count 0, a production root with zero endpoints, and clean shutdown.
 - **Environment:** Roblox Studio Lobby place `100561454756026` with only
   `lobby.project.json` connected.
-- **Command or procedure:** follow the Lobby half of
-  [Graceful shutdown manual regression](GRACEFUL_SHUTDOWN.md#manual-regression-procedure)
-  and the current configuration expectations in
+- **Command or procedure:** follow the Lobby half of the
+  [Phase 06 plain-place lifecycle procedure][phase-06-plain-lifecycle].
+  The general shutdown and configuration references remain
+  [Graceful shutdown](GRACEFUL_SHUTDOWN.md#manual-regression-procedure) and
   [Configuration validation](CONFIGURATION_VALIDATION.md).
 - **Required players or devices:** one local desktop player and the Studio server.
 - **Authorization requirement:** none for Edit/Play without save or publish.
@@ -405,7 +433,8 @@ linked historical document for the original Studio evidence.
   the full regression.
 - **Cleanup procedure:** stop Play, return to Edit mode, do not save/publish, and
   stop the Lobby Rojo server before connecting another project.
-- **Phase or prerequisite:** available now.
+- **Phase or prerequisite:** current Packet 06.5 evidence passed 3/3; rerun after
+  a relevant bootstrap, lifecycle, network-owner, or project-mapping change.
 
 ### S-03 — Isolated Match bootstrap and shutdown regression
 
@@ -414,15 +443,16 @@ linked historical document for the original Studio evidence.
   service with zero gameplay services, zero client services, Cleanup ownership,
   logging, and bounded server shutdown.
 - **Test category:** local Studio solo regression.
-- **Current status:** `Available; last passed after Packet 04.5`. The Phase 03
-  three-cycle Play-Stop evidence remains historical for its then-current
-  zero-service build; it was not rerun after Phase 06 added the network service.
-  The current Phase 06 unsaved networking regression remains pending.
+- **Current status:** `Passed` on 2026-08-26 for the current Phase 06 build; all
+  three Match Play/Stop cycles passed with server service count 1, client service
+  count 0, a production root with zero endpoints, and clean shutdown.
 - **Environment:** Roblox Studio Match place `136401514513678` with only
   `match.project.json` connected.
-- **Command or procedure:** follow the Match half of
-  [Graceful shutdown manual regression](GRACEFUL_SHUTDOWN.md#manual-regression-procedure)
-  and [Configuration validation](CONFIGURATION_VALIDATION.md).
+- **Command or procedure:** follow the Match half of the
+  [Phase 06 plain-place lifecycle procedure][phase-06-plain-lifecycle].
+  The general shutdown and configuration references remain
+  [Graceful shutdown](GRACEFUL_SHUTDOWN.md#manual-regression-procedure) and
+  [Configuration validation](CONFIGURATION_VALIDATION.md).
 - **Required players or devices:** one local desktop player and the Studio server.
 - **Authorization requirement:** none for Edit/Play without save or publish.
 - **External service or publication requirement:** none.
@@ -434,7 +464,8 @@ linked historical document for the original Studio evidence.
   the full regression.
 - **Cleanup procedure:** stop Play, return to Edit mode, do not save/publish, and
   stop the Match Rojo server when finished.
-- **Phase or prerequisite:** available now.
+- **Phase or prerequisite:** current Packet 06.5 evidence passed 3/3; rerun after
+  a relevant bootstrap, lifecycle, network-owner, or project-mapping change.
 
 ### S-04 — Phase 03 focused module harnesses
 
@@ -656,38 +687,48 @@ linked historical document for the original Studio evidence.
   containment.
 - **Test category:** automated protocol tests plus Studio multi-client security
   regression.
-- **Current status:** `Deferred` for the complete record. Packets 06.1–06.4's
-  headless fixed-registry, ownership, role-isolation, conflict, cleanup, bounded
-  lookup/correlation, strict payload, Instance-policy, rate-policy, token-bucket,
-  envelope, authorization, replay, fixed dispatch, public-error, aggregate-
-  logging, and privacy subset passes; the consolidated Packet 06.5 attack set
-  and Studio multi-client coverage remain deferred.
-- **Environment:** current isolated Lune DataModel for the Packets 06.1–06.4
-  subset; future Studio Server & Clients with an adversarial client harness.
-- **Command or procedure:** run `lune run tests/run.luau` for the current subset.
-  Packet 06.5 must define and run the complete stable attack set before any
-  feature remote is accepted.
-- **Required players or devices:** zero for pure validators; at least two Studio
-  clients for cross-player authorization and throttling isolation.
+- **Current status:** `Passed` for the initial Phase 06 record on 2026-08-26.
+  Nine integrated headless adversarial cases passed together with the
+  [exact unsaved two-client Studio evidence][phase-06-two-client-evidence].
+- **Environment:** isolated Lune Test DataModel for deterministic protocol logic;
+  correctly paired Match Studio `Server & Clients` with exactly two clients for
+  engine transport, origin, routing, datatype, and disconnect behavior. The two
+  tracked `tests/studio` harness sources are mapped nowhere and are injected only
+  into runtime DataModels that are discarded at session end.
+- **Command or procedure:** run `lune run tests/run.luau` and inspect the
+  nine-case `NetworkSecurity.spec` suite, then follow the exact
+  [runtime-only two-client procedure][phase-06-two-client-procedure].
+- **Required players or devices:** zero for the headless attack set; exactly two
+  Studio clients and one local server for the engine regression.
 - **Authorization requirement:** none for local contained tests; do not attack a
   public or production server.
 - **External service or publication requirement:** none for the initial gate.
 - **Destructive-data risk:** none locally if all authoritative state is fixture or
   match-local; never log raw private payloads.
-- **Expected evidence:** the current subset proves malformed, oversized, deeply
+- **Expected evidence:** the completed initial record proves malformed, oversized, deeply
   nested, cyclic, hostile-metatable, non-finite, and unexpected-Instance payloads
   fail closed with stable privacy-safe paths. It also proves deterministic
   bursts/refills, independent Player/endpoint buckets, invalid-clock recovery,
   bounded cleanup, fixed-envelope/correlation behavior, protected dispatch and
   safe public translation, origin-only responses, and interval-limited
-  privacy-safe abuse aggregates. The completed record must consolidate
+  privacy-safe abuse aggregates. The nine integrated cases consolidate
   cross-player authorization, forged identity/ownership, arbitrary-path and
   wrong-direction attempts, zero-partial-mutation behavior, disconnect cleanup,
-  and lifecycle re-entry while valid peers remain usable.
-- **Cleanup procedure:** stop adversarial clients, destroy test-owned remotes, and
-  retain no raw payload logs.
-- **Phase or prerequisite:** Packets 06.1–06.4 subsets complete; Packet 06.5
-  completes the initial record, expanded by Phase 38.
+  lifecycle re-entry, and remaining-peer isolation. The linked Studio pass
+  records real `PlayerRemoving`, exact departing-player limiter/ledger cleanup,
+  continued remaining-peer service, zero forbidden log-history matches and zero
+  error records, exact fixture cleanup, and preservation of the empty production
+  root.
+- **Cleanup procedure:** the headless runner destroys test-owned state and its
+  exact generated place. The Studio fixture owns and destroys its exact root;
+  ending the session discards all runtime-only harness scripts. Both places
+  return to Edit mode without save or publication.
+- **Phase or prerequisite:** Packets 06.1–06.5 complete the initial foundation
+  record; the fresh Phase 06/Gate A exit audit remains open. This pass does not
+  cover or approve gameplay remotes, published-client behavior, adverse-network
+  simulation, reconnect/teleport behavior, devices, persistence, or external
+  services. Those rows remain deferred or unavailable, and later Phase 38
+  expands M-06 only after its affected systems exist.
 
 ## Published-client and private-version tests
 
@@ -1136,3 +1177,7 @@ Run the applicable Studio, multi-client, published-client, device, or destructiv
 row only when its prerequisites exist and its authorization line is satisfied.
 Do not replace a deferred environment-specific test with a headless test and call
 the environment gate passed.
+
+[phase-06-plain-lifecycle]: NETWORK_SECURITY_STUDIO_REGRESSION.md#plain-lobby-and-match-lifecycle-checks
+[phase-06-two-client-evidence]: NETWORK_SECURITY_STUDIO_REGRESSION.md#final-two-client-run
+[phase-06-two-client-procedure]: NETWORK_SECURITY_STUDIO_REGRESSION.md#runtime-only-two-client-injection

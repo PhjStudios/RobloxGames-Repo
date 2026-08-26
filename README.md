@@ -8,14 +8,14 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phases 04 and 05 are complete, Phase 06 is active, and Packets 06.1–06.4
-are complete. The isolated runner executes 189 deterministic cases across 15
-suites, and the least-privilege GitHub workflow has genuine formatting,
-Selene-lint, broken-expectation,
-broken-definition, restoration, and final combined-state clean-run evidence.
-Packet 06.5 is next but has not begun. The lasting production endpoint registry
-and production rate-policy list remain empty; no gameplay remote or Phase 07
-system has been added.
+order. Phases 04 and 05 are complete, Phase 06 is active, and Packets 06.1–06.5
+are complete. The isolated runner executes 200 deterministic cases across 16
+suites, the four project structures pass, and the unsaved Lobby, Match, and
+two-client Studio regressions pass. Phase 05 retains genuine least-privilege
+GitHub workflow evidence; the fresh Phase 06/Gate A audit and its current clean
+workflow evidence are the active checkpoint. The lasting production endpoint
+registry and production rate-policy list remain empty; no gameplay remote or
+Phase 07 system has been added.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -42,6 +42,8 @@ system has been added.
 - [Current automated, Studio, device, published, and destructive test matrix](docs/TEST_MATRIX.md)
 - [Phase 05 combined exit-gate audit](docs/PHASE_05_EXIT_AUDIT.md)
 - [Network protocol and remote-security architecture](docs/NETWORK_PROTOCOL.md)
+- [Future remote security checklist](docs/REMOTE_SECURITY_CHECKLIST.md)
+- [Unsaved Phase 06 Studio networking regression](docs/NETWORK_SECURITY_STUDIO_REGRESSION.md)
 - [Project instructions](AGENTS.md)
 
 ## Source of truth
@@ -77,6 +79,7 @@ separate shared, lobby-only, match-only, server, and client responsibilities:
       fixtures/
       negative/
       specs/
+      studio/
       support/
     docs/
 
@@ -118,6 +121,8 @@ applicable Rojo project, and describe any required Roblox Studio testing.
 `test.project.json` is build-only and has no place binding. Test specs,
 fixtures, support modules, negative controls, and Lune never appear in Default,
 Lobby, or Match builds; the structural verifier enforces this boundary.
+`tests/studio` contains manual, runtime-only regression harness source and is
+not mapped into any of the four projects.
 
 The default project intentionally contains all source layers for combined
 development inspection. Use the lobby or match project for role-isolated Studio

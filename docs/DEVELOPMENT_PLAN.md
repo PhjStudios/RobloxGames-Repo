@@ -30,13 +30,15 @@ only change through an explicit architecture decision recorded here.
   Phase 04's separate exit-gate audit also passed on 2026-08-26.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
-  Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, 06.3, and
-  06.4 completed on 2026-08-26.
-- Current checkpoint: Packet 06.4 is complete; Packet 06.5 is next but not
-  begun. The current deterministic suite passes 189 cases across 15 suites, all
-  four structural builds pass, and the lasting production registry and
-  production rate-policy list remain empty. No gameplay remote or Phase 07
-  system has begun. Phase 06 and Gate A remain open.
+  Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, 06.3, 06.4,
+  and 06.5 completed on 2026-08-26.
+- Current checkpoint: Packets 06.1–06.5 are complete; the fresh Phase 06/Gate A
+  exit audit is next. The current deterministic suite passes 200 cases across
+  16 suites, all four structural builds pass, and the unsaved three-cycle Lobby,
+  three-cycle Match, and two-client networking regressions pass. The lasting
+  production registry and production rate-policy list remain empty. No gameplay
+  remote or Phase 07 system has begun. Phase 06 and Gate A remain open until the
+  exit audit and current clean workflow evidence pass.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -663,8 +665,8 @@ definitions, authenticated schemas, one rate policy, one context-only
 authorizer, and one protected handler before the network lifecycle can
 initialize. The complete 189-case, 15-suite run and all four structural builds
 pass after lifecycle/re-entry hardening, with no unresolved P0, P1, or P2 review
-finding. Production definitions and policies remain empty. Packet 06.5 is next
-and has not begun; Phase 06 and Gate A remain open.
+finding. Production definitions and policies remain empty. Packet 06.5 has
+since completed; Phase 06 and Gate A remain open pending the fresh exit audit.
 
 - Give mutating requests client-generated request IDs within strict limits.
 - Return safe public error codes rather than raw server errors.
@@ -673,13 +675,31 @@ and has not begun; Phase 06 and Gate A remain open.
 
 ### Packet 06.5 — Security tests
 
+**Status:** Complete — 2026-08-26. One integrated nine-case adversarial suite
+composes the production registry owner, strict validators, token buckets,
+dispatcher, protocol, client lookup, and tracker through test-only fixtures.
+It covers hostile envelopes and payloads, forged authority fields, replay and
+spam isolation, fixed topology, safe handler failure, privacy-safe bounded
+aggregation, zero partial mutation, player removal, and lifecycle cleanup. The
+complete run passes 200 cases across 16 suites. A runtime-only, unsaved Match
+Server & Clients regression with exactly two clients passed real
+`RemoteEvent` delivery, engine-supplied origin, origin-only routing, live
+datatypes, explicit Instance policy, `StudioTestService:LeaveTest()`, real
+`PlayerRemoving`, remaining-peer service, log privacy, and exact fixture
+cleanup. Three plain Lobby and three plain Match cycles also passed. The
+mandatory future-remote checklist is recorded in
+`docs/REMOTE_SECURITY_CHECKLIST.md`; no production endpoint or gameplay source
+was added. The fresh Phase 06/Gate A exit audit remains open.
+
 - Test malformed payloads, spam, unauthorized context, stale IDs, and unexpected
   instances.
 - Confirm rejected requests do not partially mutate state.
 - Document the checklist future remotes must satisfy.
 
-**Gate A exit:** Phases 00–06 are complete; both places build, definitions validate,
-tests run, and all future remotes have an approved boundary.
+**Gate A exit:** Pending fresh audit. It passes only when Phases 00–06 are
+complete, both places build, definitions validate, tests run, every future
+remote has one approved boundary, and the completed implementation/audit state
+has genuine clean workflow evidence.
 
 # Milestone B — Graybox Match Vertical Slice
 

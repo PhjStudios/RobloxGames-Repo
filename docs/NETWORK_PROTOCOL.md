@@ -9,6 +9,7 @@
 - Packet 06.2 status: complete — 2026-08-26
 - Packet 06.3 status: complete — 2026-08-26
 - Packet 06.4 status: complete — 2026-08-26
+- Packet 06.5 status: complete — 2026-08-26
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Production feature endpoints: none; the lasting authenticated registry is empty
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
@@ -19,8 +20,8 @@
 
 This is the authoritative Phase 06 network-boundary document. The decision
 section was recorded before implementation. The sections below also record the
-completed Packet 06.1–06.4 implementations and evidence. Phase 06 and Gate A
-remain open until Packet 06.5 and the fresh exit audit pass.
+completed Packet 06.1–06.5 implementations and evidence. Phase 06 and Gate A
+remain open until the fresh exit audit and current clean workflow evidence pass.
 
 ## Official Roblox behavior that shapes the design
 
@@ -63,6 +64,16 @@ Anything replicated to a client can be inspected, including endpoint names and
 shared definitions. They are identifiers, not secrets. Authorization and
 handlers remain server-only.
 
+Studio's current `Server & Clients` mode launches separate server and client
+DataModels. `StudioTestService:LeaveTest()` is client-only and documents a
+disconnect from the active multiplayer test, but publishes no latency bound.
+In Studio `0.735.0.7351131` on 2026-08-26, the successful local regression
+delivered the corresponding server disconnect about 63 seconds after the client
+call was accepted. The manual harness therefore retains five-second ordinary
+response checks while bounding only the disconnect phase at 90 seconds and the
+complete protocol/server run at 120 seconds. This observed local latency is
+test-harness evidence, not a production-network timing contract.
+
 ### Primary sources
 
 - [Remote events and callbacks](https://create.roblox.com/docs/scripting/events/remote)
@@ -88,6 +99,10 @@ handlers remain server-only.
 - [`Players.PlayerRemoving`](https://create.roblox.com/docs/reference/engine/classes/Players#PlayerRemoving)
 - [Luau clock comparison](https://luau.org/news/2020-06-20-luau-recap-june-2020/#os-enhancements)
 - [`DataModel.BindToClose`](https://create.roblox.com/docs/reference/engine/classes/DataModel#BindToClose)
+- [Studio multi-client testing](https://create.roblox.com/docs/studio/testing-modes#multi-client-simulation)
+- [`StudioTestService`](https://create.roblox.com/docs/reference/engine/classes/StudioTestService)
+- [`LogService.ClearOutput`](https://create.roblox.com/docs/reference/engine/classes/LogService#ClearOutput)
+- [Luau protected-call and coroutine semantics](https://luau.org/library/#coroutine-library)
 
 ## Approved physical layout
 
@@ -423,7 +438,9 @@ The complete client-to-server Request pipeline is fixed as:
 4. the bounded per-Player correlation ledger classifies, caps, and reserves the
    global request ID;
 5. protected authorization uses only server-derived context;
-6. the contract's strict payload schema produces a detached canonical value;
+6. the contract's strict payload schema produces canonical frozen table
+   containers; an explicitly approved Instance retains its authenticated server
+   identity rather than being copied;
 7. the protected handler returns an authenticated success or public rejection;
 8. success output is validated by the fixed response schema, while every
    failure is translated to the allowlist;
@@ -450,6 +467,39 @@ dispatcher cannot roll back arbitrary authorizer or handler code that mutates
 and then throws, so every future stateful handler must perform all fallible work
 before its atomic commit and must prove that behavior with a mutation sentinel
 before registration approval.
+
+### Non-yielding protected-callback and validation-metadata decision
+
+This decision was recorded on 2026-08-26 during the Packet 06.5 independent
+protocol-security review, before the corresponding source change. Luau permits
+the target of `pcall` to yield, which also yields the calling coroutine. A plain
+protected call therefore does not bound the lifetime of a remote listener: a
+yielding Event handler could accumulate suspended work even when admission is
+rate-limited.
+
+Every endpoint authorizer and handler must instead complete synchronously. The
+dispatcher starts each protected feature callback in a fresh coroutine, resumes
+it exactly once, accepts a result only when the coroutine is dead, and closes a
+directly suspended Luau coroutine immediately. A throw or detected suspension
+follows the same private failure translation: authorization fails closed and a
+handler becomes
+`INTERNAL_ERROR` for a response-required Request or a bounded
+`HANDLER_FAILED` aggregate for an Event. No yielded value or caught error is
+retained, returned, or logged. This mechanism does not claim to cancel an
+engine-owned waiter, scheduled callback, connection, or child task; callback
+code therefore may not wait, yield, spawn, defer, schedule, connect, or otherwise
+create unowned asynchronous work. The endpoint review must reject those APIs;
+the headless suspension test proves only direct Luau suspension and closure. A later
+feature that truly needs an asynchronous operation requires a separately
+reviewed lifecycle-owned job protocol with explicit global and per-player
+bounds, cancellation, deadlines, and mutation semantics; it may not weaken this
+dispatcher implicitly.
+
+Only the dispatcher's strict payload-validation failure path may attach public
+`validationPath` metadata. Feature handlers may construct allowlisted public
+codes, but their rejected outcomes must be metadata-free. This keeps the
+structural shared error constructor useful for wire validation while preventing
+a handler from reflecting a client-influenced string as diagnostic metadata.
 
 The client tracker registers only canonical Request definitions and
 authenticated schemas. It generates and builds every Request envelope, including
@@ -481,11 +531,15 @@ results or flood output.
 
 ## Direction and dispatch rules
 
-A physical `RemoteEvent` is engine-bidirectional, so direction is enforced by
-which listener the server installs and which send method the wrapper exposes.
-A client firing a server-to-client endpoint is anomalous and can never reach a
-feature handler. A response is sent only with `FireClient(originatingPlayer)`;
-there is no caller-selected target or relay API.
+A physical `RemoteEvent` is engine-bidirectional, so the security boundary is
+the server's fixed listener and authenticated-contract binding. The server
+installs no inbound listener for a server-to-client definition and rejects a
+contract with the wrong direction. `ClientRemoteLookup` returns captured raw
+`RemoteEvent` leaves; any narrower client wrapper is an ergonomic API, not an
+authority boundary. A client firing a server-to-client endpoint is anomalous
+but can never reach a feature handler. A private response is sent only with
+`FireClient(originatingPlayer)`; there is no caller-selected target or relay
+API.
 
 There is no action field. There is no service name, handler name, path, Instance
 path, module name, or arbitrary operation selector in an envelope. One physical
@@ -552,44 +606,54 @@ punishment, persistence, analytics delivery, or external sink.
 ## Packet 06.5 adversarial-test and Studio-fixture decision
 
 This decision was recorded on 2026-08-26 before Packet 06.5 test or harness
-source was added. Packet 06.5 changes no production endpoint or networking
-architecture. One deterministic `NetworkSecurity.spec.luau` suite will reuse the
-existing test-only registry definitions and compose the real registry owner,
+source was added. Packet 06.5 changes no production endpoint. Its final
+independent review added only the non-yielding callback and validation-metadata
+hardening recorded above; no generic dispatch or feature architecture was
+introduced. The deterministic `NetworkSecurity.spec.luau` suite reuses the
+existing test-only registry definitions and composes the real registry owner,
 limiter, dispatcher, protocol, payload validation, fixed client lookup, and
-client tracker through captured test adapters. It will consolidate hostile
-payloads, forged authority fields, replay/spam, topology misuse, failure
-translation, disconnect/cleanup, privacy, and mutation-sentinel behavior while
-the existing focused suites remain the exhaustive boundary evidence.
+client tracker through captured test adapters. Its nine integrated cases
+consolidate hostile payloads, forged authority fields, replay/spam, topology
+misuse, failure translation, disconnect/cleanup, privacy, and mutation-sentinel
+behavior while the existing focused suites remain the exhaustive boundary
+evidence.
 
 Actual `RemoteEvent` transport, engine-supplied originating `Player`,
 `FireClient` recipient isolation, replication/marshalling, and live connection
 teardown are Roblox-engine behaviors rather than Lune claims. Reusable Studio
-harness source will therefore live only under unmapped `tests/studio/`. A manual
-unsaved regression may create the two exact temporary harness scripts in Studio
-and a distinct server-owned `ATDPhase06StudioFixture` root. It must never adopt,
-rename, remove, or second-initialize the production `ATDNetwork` root. The
-procedure must remove only those exact temporary instances, leave both places in
-Edit mode, and never save, publish, or enable an external service.
+harness source therefore lives only under unmapped `tests/studio/`. The manual
+unsaved regression injects those exact tracked sources only into the live
+Server & Clients DataModels: one runtime server Script and one runtime
+LocalScript per client. It never creates or edits an Edit-mode instance. The
+server creates a distinct `ATDPhase06StudioFixture` root and must never adopt,
+rename, remove, or second-initialize the production `ATDNetwork` root. Ending
+the local session discards the runtime scripts; the fixture owns exact cleanup.
+Both places remain in Edit mode and are never saved, published, or given an
+external-service permission.
 
-The mandatory endpoint approval boundary will be the standalone
-`REMOTE_SECURITY_CHECKLIST.md`. It will replace the provisional procedure below
-once Packet 06.5 passes; no unexplained omission may permit a future production
-remote to ship.
+The mandatory endpoint approval boundary is the standalone
+`REMOTE_SECURITY_CHECKLIST.md`. It governs the procedure below; no unexplained
+omission may permit a future production remote to ship.
 
 ## Future endpoint registration procedure
 
-Until the final Packet 06.5 checklist is recorded, no production feature remote
-may be added. A later approved feature change must:
+No production feature remote may be added without one completed
+`REMOTE_SECURITY_CHECKLIST.md` approval record. A later approved feature change
+must:
 
 1. add exactly one fixed definition to `ProductionRemotes.luau`, using the
    canonical name grammar and the narrowest Lobby/Match role set;
 2. select only an allowed direction, `ReliableRemoteEvent` transport, Request or
    Event semantic, and explicit response behavior;
-3. add one strict bounded payload schema, one explicit rate policy, one
-   server-derived authorization function, one protected handler, and allowlisted
-   public response behavior;
-4. bind the server handler by its registry constant before lifecycle
-   initialization and expose only the definition-shaped client operation;
+3. for a client-to-server definition, add one strict inbound payload schema,
+   one explicit rate policy, one server-derived authorization function, one
+   synchronous protected handler, and allowlisted public response behavior;
+   for a server-to-client Event, add one strict outbound schema, server-derived
+   recipient/audience rules, and bounded emission/fan-out policy instead;
+4. bind an inbound handler by its registry constant before lifecycle
+   initialization, or capture an outbound leaf only through server ownership;
+   client ergonomics must expose only the definition-shaped operation and are
+   never treated as the direction security boundary;
 5. add positive, boundary, adversarial, role-isolation, duplicate-binding,
    cleanup, privacy, and zero-partial-mutation tests; and
 6. prove the test fixture remains test-only and all production project source
@@ -629,7 +693,8 @@ and passed all 128 cases in deterministic path and declaration order.
 contributes 22 focused cases covering authenticated schema provenance; exact
 string, enum, ID, number, integer, boolean, array, record, optional, and union
 boundaries; exact cap and cap-plus-one behavior; shared nested-union work
-budgeting; canonical detached frozen output; stable paths; cycles and repeated
+budgeting; canonical detached frozen table containers while explicitly approved
+Instances retain authenticated identity; stable paths; cycles and repeated
 references; hostile metatables and keys without metamethod invocation; private
 diagnostic containment; finite `Vector2`, `Vector3`, and all twelve `CFrame`
 components; and explicit exact/subclass Instance class and ancestry policy
@@ -642,13 +707,14 @@ process, authentication, or secret API. The Instance server-context fallback is
 reachable only through the exact non-replicated Test-project module/support
 structure.
 
-Headless foreign datatypes prove validator behavior but cannot prove Roblox's
-wire serialization of non-finite datatype components or a real client's
-execution context. The required unsaved Studio networking regression must send
-the engine-supported non-finite `Vector2`, `Vector3`, and `CFrame` cases through
-the fixed test boundary and prove rejection before mutation; it must also prove
-that the explicit Instance policy accepts only on the running server and rejects
-from a client. No place save, publication, or external service is required.
+At the Packet 06.2 checkpoint, headless foreign datatypes proved validator
+behavior but could not prove Roblox's wire serialization of non-finite datatype
+components or a real client's execution context. Packet 06.5 subsequently ran
+the required unsaved Studio regression: it sent non-finite `Vector2`, `Vector3`,
+and `CFrame` cases through the fixed test boundary, proved rejection before
+mutation, and proved that the explicit Instance policy accepts only on the
+running server and rejects from a client. No place was saved or published, and
+no external service was enabled.
 
 At that checkpoint, the four-project verifier reported 35 ModuleScripts, one
 Script, and one LocalScript in each production build: 32 shared modules, the two
@@ -664,8 +730,9 @@ Packet 06.2 completed with this evidence; Packet 06.3 has since completed.
 
 ## Packet 06.3 completion evidence
 
-The current canonical headless run discovers 12 suites and passes all 145 cases
-in deterministic path and declaration order. `ServerRateLimiter.spec.luau`
+At the Packet 06.3 checkpoint, the canonical headless run discovered 12 suites
+and passed all 145 cases in deterministic path and declaration order.
+`ServerRateLimiter.spec.luau`
 contributes 17 focused cases for exact policy validation, complete global
 client-to-server policy coverage, burst/refill boundaries, independent
 Player/endpoint buckets, finite monotonic clock failures and recovery,
@@ -724,5 +791,55 @@ production projects and Lobby/Match source isolation remains intact.
 The lasting production registry and production rate-policy list remain frozen
 and empty. No gameplay definition, generic bus, `RemoteFunction`, punishment,
 persistence, external service, Phase 07 source, place save, or publication was
-added. Packet 06.4 is complete; Packet 06.5 is next and has not begun. Phase 06
-and Gate A remain open.
+added. Packet 06.4 is complete; Packet 06.5 has since completed. Phase 06 and
+Gate A remain open pending the fresh exit audit.
+
+## Packet 06.5 completion evidence
+
+The canonical headless run discovers 16 suites and passes all 200 cases in
+deterministic path and declaration order. `NetworkSecurity.spec.luau` adds nine
+integrated cases covering cheap malformed-envelope rejection; hostile payload,
+Instance, finite-number, depth, size, cycle, and metatable containment;
+engine-origin-shaped authorization with forged authority rejection; duplicate,
+stale, cross-endpoint, and oversized IDs; independent burst limits; wrong
+direction/kind/unknown topology and arbitrary-path attempts; contained Request
+and Event handler failures; zero partial mutation; bounded privacy-safe
+aggregates; Player removal; and lifecycle re-entry/shutdown cleanup.
+
+`ServerRequestDispatcher.spec.luau` now contributes 21 focused cases. The two
+review-driven additions prove that Request and Event authorizer/handler yields
+are closed with no post-yield work or retained Pending state, and that handler
+rejections cannot supply validation metadata. The dispatcher is the only
+production source changed during Packet 06.5; definitions, policies,
+bootstraps, mappings, and runnable entrypoints are unchanged.
+
+The four-project verifier reports 40 ModuleScripts, one Script, and one
+LocalScript in each production build. Test contains 33 shared modules, exactly
+six mapped common networking modules, 26 test-owned modules, and zero runnable
+scripts, for 65 ModuleScripts total. `tests/studio` is mapped into none of the
+four projects. Production endpoints and policies remain empty, Lobby contains
+no Match source, Match contains no Lobby source, and no other lasting production
+source changed during Packet 06.5.
+
+Three unsaved plain Lobby Play/Stop cycles and three unsaved plain Match cycles
+passed with server service count one, client service count zero, one unique
+empty production `ATDNetwork/v1` tree, and clean shutdown. The final exactly
+two-client Match run passed real `RemoteEvent` transport, engine-supplied
+origin, origin-only responses, forged-field rejection, non-finite Roblox
+datatypes, default and explicit Instance policies, independent burst buckets,
+real `LeaveTest()`/`PlayerRemoving`, per-player state removal, remaining-peer
+service, and fixture cleanup. Its bounded terminals were:
+
+```text
+[ATD_PHASE06_STUDIO][PASS][context=client][case=completed][caseCount=10]
+[ATD_PHASE06_STUDIO][PASS][context=server][caseCount=10][clientCount=2][cleanupState=Cleaned]
+```
+
+Post-pass inspection reported one Folder production root, one Folder `v1`, zero
+endpoints, and zero fixture roots. Client and server log-history audits each
+reported zero forbidden-value matches and zero error records. The runtime-only
+scripts were discarded by ending the local session, both production places
+were left in Edit mode, and no place was saved or published. Exact procedure
+and evidence are in `NETWORK_SECURITY_STUDIO_REGRESSION.md`; the mandatory
+future-remote gate is `REMOTE_SECURITY_CHECKLIST.md`. Packet 06.5 is complete;
+the fresh Phase 06/Gate A exit audit remains open.

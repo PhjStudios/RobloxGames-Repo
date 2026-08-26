@@ -210,8 +210,10 @@ exercise listener-before-dispatcher-before-limiter-before-root LIFO cleanup,
 rollback after partial initialization, preservation of pre-existing root
 conflicts, duplicate-owner/re-entry rejection, both exact Player-removal state
 releases, whole-child shutdown clearing, explicit client correlation clearing,
-and removal of the exact published root. Packet 06.5 and the fresh Phase 06 exit
-audit remain open.
+and removal of the exact published root. Packet 06.5 adds nine integrated
+adversarial cases over those real boundaries; the current canonical run passes
+all 200 cases across 16 suites. Packet 06.5 is complete, and the fresh Phase 06
+exit audit remains open.
 
 Packet 03.3 reran 10 focused cleanup cases through the logger-based constructor.
 Supported runtime types, LIFO/idempotence, state/nesting guards, failure
@@ -248,7 +250,8 @@ application warning or error:
 This table records the then-current pre-network lifecycle. Phase 06 has since
 added one foundation-only `NetworkRegistry` server service and its nested remote,
 limiter, dispatcher, connection, and state ownership while the client remains at
-zero services. The required current unsaved networking regression is pending.
+zero services. The table remains historical rather than current Phase 06 Studio
+evidence.
 
 | Place | Role/PlaceId | Lifecycle | Cleanup | Opposite-role executable source |
 | --- | --- | --- | --- | ---: |
@@ -257,6 +260,17 @@ zero services. The required current unsaved networking regression is pending.
 
 Both Play sessions were stopped and returned to Edit mode. No external service,
 save, or publish operation occurred.
+
+Packet 06.5 subsequently passed the current unsaved networking regression.
+Three plain Lobby and three plain Match Play/Stop cycles each reported one
+server `NetworkRegistry` service, zero client services, and clean shutdown. The
+final runtime-only Match harness used two clients and proved real
+`PlayerRemoving` cleanup while the remaining peer completed another request.
+The test-only fixture's separate cleanup reached `Cleaned`; the production
+`ATDNetwork/v1` tree remained empty; the server and remaining-client terminals
+reported `caseCount=10`; and bounded Output audits reported
+`forbiddenMatches=0` and `errorCount=0`. See
+`docs/NETWORK_SECURITY_STUDIO_REGRESSION.md`.
 
 ## Manual regression procedure
 
@@ -274,5 +288,8 @@ Phase 03 is complete. Packet 03.4 evidence is in
 `docs/GRACEFUL_SHUTDOWN.md`. Packet 04.5 now gates construction before cleanup
 ownership without changing this cleanup behavior. Packet 06.1's completed
 network ownership contract is described in `docs/NETWORK_PROTOCOL.md`; it reuses
-the same contract. Configuration evidence is in
+the same contract. Packet 06.5 is complete with review-driven dispatcher
+hardening, test-only adversarial fixtures, and unsaved Studio evidence; the
+fresh Phase 06/Gate A exit audit remains open.
+Configuration evidence is in
 `docs/CONFIGURATION_VALIDATION.md`.

@@ -59,14 +59,17 @@ mapped as `ReplicatedStorage.Shared`. Packet 02.3 later added the typed
 `PlaceRoles` module and integrated it into both bootstraps; the removed example
 behavior did not return.
 
-### Current bootstrap behavior after Packet 04.5
+### Current bootstrap behavior after Packet 06.5
 
 Both common bootstraps now obtain `ReplicatedStorage` and `RunService`, validate
 the shared place-role configuration, and resolve the project's declared role
 against `game.PlaceId`. An invalid configuration or pairing produces a
 structured error and stops that bootstrap. After successful role validation,
-each bootstrap creates, initializes, and starts a context-specific lifecycle
-runner with zero services. Packet 03.2 then creates a cleanup container and
+each bootstrap creates a context-specific lifecycle runner. The client starts
+that runner with zero services. The server constructs the fixed network owner
+from the empty production registry and rate-policy list, registers one
+`NetworkRegistry` service, and then initializes and starts the runner. Packet
+03.2 then creates a cleanup container and
 registers the runner's existing shutdown operation as its one task. Packet 03.3
 now creates one immutable environment context and context-bound logger per
 bootstrap. Place-role failures use the provisional `Unresolved` role; a valid
@@ -75,7 +78,7 @@ configuration families through the same shared entry point on client and
 server. An invalid graph raises a structured, production-visible error before
 the lifecycle, cleanup owner, or server close hook exists. A valid Studio boot
 emits one configuration-success record, then follows the established harmless
-zero-service ready path. See
+ready path with server service count one and client service count zero. See
 `docs/PLACE_ROLES.md`, `docs/SERVICE_LIFECYCLE.md`, `docs/CLEANUP.md`, and
 `docs/LOGGING.md` for those contracts. Packet 03.4 additionally binds the server
 bootstrap's cleanup container to the single ordered close hook described in
@@ -145,7 +148,7 @@ regenerated with the command above and is not authoritative content.
 
 ## Current Roblox Studio smoke-test procedure
 
-This is a Studio solo integration procedure, not part of the headless 76-case
+This is a Studio solo integration procedure, not part of the headless 200-case
 suite. Its current availability, authorization, evidence, and cleanup fields are
 indexed in `docs/TEST_MATRIX.md`.
 
@@ -157,8 +160,9 @@ Use this procedure for Packet 01.3 regression checks:
 3. Connect the Rojo plugin to the repository server.
 4. In Edit mode, confirm:
    - `ReplicatedStorage` has `ATDPlaceRole = Development`.
-   - Both common `Main` bootstraps contain shared place-role validation and
-     zero-service lifecycle startup.
+   - Both common `Main` bootstraps contain shared place-role validation.
+   - The server bootstrap registers one foundation-only `NetworkRegistry`
+     service; the client bootstrap registers zero services.
    - `ReplicatedStorage.Shared.config.PlaceRoles` exists.
    - `ReplicatedStorage.Shared.config.ConfigurationValidator` exists.
    - `ReplicatedStorage.Shared.lifecycle.ServiceLifecycle` exists.
@@ -174,7 +178,7 @@ Use this procedure for Packet 01.3 regression checks:
 
    ```text
    [ATD][INFO][context=server][role=Development][placeId=100561454756026][environment=studio][subsystem=configuration][event=validated][configurationFamilyCount=9] Core configuration validated
-   [ATD][INFO][context=server][role=Development][placeId=100561454756026][environment=studio][subsystem=bootstrap][event=ready][cleanupState=Active][cleanupTaskCount=1][lifecycleState=Started][serviceCount=0] Server bootstrap ready
+   [ATD][INFO][context=server][role=Development][placeId=100561454756026][environment=studio][subsystem=bootstrap][event=ready][cleanupState=Active][cleanupTaskCount=1][lifecycleState=Started][serviceCount=1] Server bootstrap ready
    [ATD][INFO][context=client][role=Development][placeId=100561454756026][environment=studio][subsystem=configuration][event=validated][configurationFamilyCount=9] Core configuration validated
    [ATD][INFO][context=client][role=Development][placeId=100561454756026][environment=studio][subsystem=bootstrap][event=ready][cleanupState=Active][cleanupTaskCount=1][lifecycleState=Started][serviceCount=0] Client bootstrap ready
    ```
@@ -184,6 +188,8 @@ Use this procedure for Packet 01.3 regression checks:
    - `Workspace.JumpingBricks` does not exist.
    - `ReplicatedStorage.Shared.Example` does not exist.
    - The applicable client or server `Main` bootstrap exists.
+   - `ReplicatedStorage.ATDNetwork` is one Folder with one `v1` Folder and zero
+     endpoint children.
 10. Stop the Play test.
 11. Before Output is cleared, expect the server records:
 
