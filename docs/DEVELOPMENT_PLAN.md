@@ -30,13 +30,13 @@ only change through an explicit architecture decision recorded here.
   Phase 04's separate exit-gate audit also passed on 2026-08-26.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
-  Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, and 06.1 completed on
+  Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, and 06.2 completed on
   2026-08-26.
-- Current checkpoint: Packet 06.1 is complete; Packet 06.2 is next but not
-  begun. The current deterministic suite passes 106 cases across ten suites,
-  all four structural builds pass, the lasting production registry is empty,
-  and the targeted Packet 06.1 architecture/security review has no unresolved
-  P0, P1, or P2 finding. Phase 06 and Gate A remain open.
+- Current checkpoint: Packet 06.2 is complete; Packet 06.3 is next but not
+  begun. The current deterministic suite passes 128 cases across eleven suites,
+  all four structural builds pass, and the lasting production registry remains
+  empty. No gameplay remote or Phase 07 system has begun. Phase 06 and Gate A
+  remain open.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -576,7 +576,7 @@ run are recorded in `docs/CONTINUOUS_INTEGRATION.md`.
 ### Packet 05.4 — Test documentation
 
 **Status:** Complete — 2026-08-26. The authoritative current/deferred test
-inventory is `docs/TEST_MATRIX.md`. Its 37 records cover all six required
+inventory is `docs/TEST_MATRIX.md`. Its initial 37 records cover all six required
 categories with explicit environment, procedure, players/devices, authorization,
 external-service/publication, risk, evidence, cleanup, and prerequisite fields.
 Formatting, linting, the 76-case suite, four-project verifier, local-link audit,
@@ -619,7 +619,15 @@ P2 finding. Exact architecture and evidence are in `docs/NETWORK_PROTOCOL.md`.
 
 ### Packet 06.2 — Payload validation
 
-**Status:** Not begun; this is the next packet.
+**Status:** Complete — 2026-08-26. The authenticated frozen shared schema API
+strictly validates bounded strings/enums, all typed ID families, booleans,
+finite numbers/integers, dense arrays, exact-key records, optional values,
+exactly-one bounded unions, `Vector2`, `Vector3`, `CFrame`, and opt-in
+server-only Instances. One shared validation-work budget contains nested union
+attempts; depth, node, field, item, string, enum, and branch bounds fail closed.
+The 22 focused boundary/adversarial cases and complete 128-case suite pass, as
+does the four-project verifier. Exact architecture and evidence are in
+`docs/NETWORK_PROTOCOL.md`. Packet 06.3 is next and has not begun.
 
 - Add reusable validators for strings, enums, IDs, arrays, vectors, CFrames, and
   finite numeric values.

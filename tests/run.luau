@@ -207,7 +207,10 @@ local function createModuleLoader(dataModel: DataModel): (ModuleScript) -> unkno
 		end
 
 		local environment = {
+			CFrame = roblox.CFrame,
 			Instance = roblox.Instance,
+			Vector2 = roblox.Vector2,
+			Vector3 = roblox.Vector3,
 			game = dataModel,
 			require = loadModule,
 			script = target,

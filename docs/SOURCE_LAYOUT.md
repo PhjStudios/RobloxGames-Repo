@@ -50,6 +50,7 @@ src/
       EnvironmentContext.luau
       Log.luau
     network/
+      PayloadValidation.luau
       ProductionRemotes.luau
       RemoteRegistry.luau
     types/
@@ -85,6 +86,7 @@ tests/
     NetworkFixtures.luau
   negative/
   specs/
+    PayloadValidation.spec.luau
     RemoteRegistry.spec.luau
     RemoteRuntime.spec.luau
   support/
@@ -116,12 +118,19 @@ deterministic whole-configuration boundary described in
 bootstraps before lifecycle startup. It adds no place-specific or gameplay
 service.
 
-Packet 06.1 adds the shared typed registry and
+Packet 06.1 added the shared typed registry and
 empty lasting production definition module, the server-common lifecycle owner,
 and the client-common bounded lookup utility. Only the server bootstrap imports
 the production registry and network owner. No lobby-only, match-only, gameplay,
 or additional runnable entrypoint was added. The architecture and fixed path
 contract are recorded in `docs/NETWORK_PROTOCOL.md`.
+
+Packet 06.2 added only the pure shared `network/PayloadValidation.luau` contract
+and its test-only spec. It reuses lower-level shared `Ids`, `Result`, and
+`Validation` modules and is safe to replicate; neither bootstrap imports it yet
+because the lasting production endpoint registry remains empty. It adds no
+server/client layer, lifecycle service, runnable entrypoint, gameplay schema, or
+place-specific dependency.
 
 ## Bootstrap move manifest
 
@@ -249,6 +258,13 @@ identity in the isolated Test build. Both runtime networking modules stay in
 their appropriate common layer, and the shared production definition graph
 stays safe for replication.
 
+`src/shared/network/PayloadValidation.luau` depends only on the lower-level
+shared `util/Ids`, `util/Result`, and `util/Validation` contracts. Its
+authenticated validators, schemas, and Instance policies contain no client or
+server import and do not select a place role. Live Instance acceptance is
+checked at validation time and fails outside a running server; the isolated
+headless seam is gated by the exact Test-project structure.
+
 ## Automated verification
 
 | Check | Result |
@@ -267,22 +283,23 @@ stays safe for replication.
 The ignored smoke-build artifact was inspected and removed. It can be recreated
 with the build command above.
 
-### Packet 06.1 source-layout completion
+### Packet 06.2 source-layout completion
 
-The current canonical headless run passed 106 of 106 cases across ten suites,
-including 18 registry cases and 12 server-runtime/client-lookup cases. The
-four-project verifier passed with 34 ModuleScripts, one Script, and one
-LocalScript in each production build. That is 36 exact production Lua source
-containers: 31 shared modules, the server-only `Shutdown` and
-`ServerRemoteRegistry` modules, the client-only `ClientRemoteLookup` module, and
-the two common bootstraps.
+The current canonical headless run passes 128 of 128 cases across eleven suites,
+including 18 registry cases, 12 server-runtime/client-lookup cases, and 22 strict
+payload-validation cases. The four-project verifier passes with 35
+ModuleScripts, one Script, and one LocalScript in each production build. That is
+37 exact production Lua source containers: 32 shared modules, the server-only
+`Shutdown` and `ServerRemoteRegistry` modules, the client-only
+`ClientRemoteLookup` module, and the two common bootstraps.
 
-The Test build's production source subset contains all 31 shared modules and
+The Test build's production source subset contains all 32 shared modules and
 exactly the two common networking runtime modules copied under test-only
-`ServerStorage` paths. Its other 19 ModuleScripts are test-owned specs, fixtures,
-support, or negative controls, and it has zero runnable scripts. Lobby contains
-no Match source, Match contains no Lobby source, and lasting production remote
-definitions remain empty. Packet 06.1 is complete; Phase 06 remains open.
+`ServerStorage` paths. Its other 21 ModuleScripts are test-owned specs, fixtures,
+support, or negative controls, so it has 55 ModuleScripts and zero runnable
+scripts. Lobby contains no Match source, Match contains no Lobby source, and
+lasting production remote definitions remain empty. Packets 06.1 and 06.2 are
+complete; Packet 06.3 has not begun, and Phase 06 remains open.
 
 ## Roblox Studio verification
 
@@ -350,7 +367,7 @@ empty or policy-only.
 Default, Lobby, and Match map no test directory.
 `lune run tests/verify-builds.luau` enforces both directions across the complete
 generated DataModels, including an exact positive path/class/source map for all
-36 current production Lua containers and exact source identity for the two
+37 current production Lua containers and exact source identity for the two
 test-mapped runtime networking modules.
 
 This headless boundary and every environment-specific follow-up are indexed in

@@ -8,14 +8,14 @@ that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
 Phase 05 and its fresh combined exit audit are complete. Phase 06 is active;
-Packet 06.1 is complete and Packet 06.2 is next but has not begun.
+Packets 06.1 and 06.2 are complete, and Packet 06.3 is next but has not begun.
 
 The current repository has a fixed remote-registry/network-ownership foundation
-with an empty lasting production endpoint registry. It still has no gameplay,
-persistence, UI, or external-service implementation. A separate private test
-universe has not been created or configured. Future tests are therefore marked
-`Deferred`, `Unavailable`, or `Prohibited`; they are never presented as passing
-evidence.
+and strict shared payload validators with an empty lasting production endpoint
+registry. It still has no gameplay, persistence, UI, or external-service
+implementation. A separate private test universe has not been created or
+configured. Future tests are therefore marked `Deferred`, `Unavailable`, or
+`Prohibited`; they are never presented as passing evidence.
 
 ## Status vocabulary
 
@@ -74,15 +74,16 @@ linked historical document for the original Studio evidence.
 - **External service or publication requirement:** none.
 - **Destructive-data risk:** none; the runner uses only deterministic fixtures
   and an exact ignored build path that it removes.
-- **Expected evidence:** eight suites and 76 tests pass in stable path and
+- **Expected evidence:** eleven suites and 128 tests pass in stable path and
   declaration order; zero discovery, module-load, malformed-root/discovery, and
   runner-crash controls return their documented nonzero exit classes; output
   contains stable suite, case, assertion, code, and path context without private
   sentinels.
 - **Cleanup procedure:** confirm the runner removed its exact temporary test
   place and that `git status --short --ignored` shows no new residue.
-- **Phase or prerequisite:** available now; Packet 05.1 established the runner
-  and Packet 05.2 established the current suite.
+- **Phase or prerequisite:** available now; Packet 05.1 established the runner,
+  Packet 05.2 established the initial contract suite, and Packets 06.1–06.2
+  added the current networking suites.
 
 ### H-02 — Cleanup contract
 
@@ -90,7 +91,7 @@ linked historical document for the original Studio evidence.
   idempotence, nesting/cycles, post-clean guards, cached failures, and sibling
   failure isolation.
 - **Test category:** automated headless unit test.
-- **Current status:** `Passed` as part of the 76-test suite on 2026-08-26.
+- **Current status:** `Passed` as part of the 128-test suite on 2026-08-26.
 - **Environment:** isolated Rojo test DataModel under Lune.
 - **Command or procedure:** run `lune run tests/run.luau`; inspect the ordered
   `cleanup contract` suite in the result.
@@ -112,7 +113,7 @@ linked historical document for the original Studio evidence.
   cross-family rejection, immutable Result envelopes, validation issue paths,
   related paths, codes, causes, path formatting, and freezing.
 - **Test category:** automated headless unit test.
-- **Current status:** `Passed` as part of the 76-test suite on 2026-08-26.
+- **Current status:** `Passed` as part of the 128-test suite on 2026-08-26.
 - **Environment:** isolated Rojo test DataModel under Lune.
 - **Command or procedure:** run `lune run tests/run.luau`; inspect the ordered ID,
   Result, and Validation suites.
@@ -135,7 +136,7 @@ linked historical document for the original Studio evidence.
   lasting empty/policy configuration.
 - **Test category:** automated headless unit/integration test with test-only
   deterministic fixtures.
-- **Current status:** `Passed` as part of the 76-test suite on 2026-08-26.
+- **Current status:** `Passed` as part of the 128-test suite on 2026-08-26.
 - **Environment:** isolated Rojo test DataModel under Lune; fixtures under
   `tests/fixtures` only.
 - **Command or procedure:** run `lune run tests/run.luau`; inspect schema and
@@ -173,10 +174,12 @@ linked historical document for the original Studio evidence.
 - **External service or publication requirement:** none.
 - **Destructive-data risk:** none; generated builds are ignored and exact-path
   temporary outputs are removed.
-- **Expected evidence:** Default, Lobby, and Match each contain exactly 30
-  ModuleScripts, one Script, and one LocalScript; Test contains 29 shared
-  ModuleScripts and no runnable script; Lobby contains no Match source, Match
-  contains no Lobby source, and production contains no test source or marker.
+- **Expected evidence:** Default, Lobby, and Match each contain exactly 35
+  ModuleScripts, one Script, and one LocalScript; Test contains 32 shared
+  ModuleScripts, exactly two test-mapped common networking modules, 21
+  test-owned ModuleScripts, and no runnable script; Lobby contains no Match
+  source, Match contains no Lobby source, and production contains no test source
+  or marker.
 - **Cleanup procedure:** the verifier removes its exact four outputs; confirm no
   generated place remains.
 - **Phase or prerequisite:** available now; mapping details are in
@@ -241,6 +244,36 @@ linked historical document for the original Studio evidence.
 - **Phase or prerequisite:** a dedicated maintenance/regression packet must
   design these tests before or alongside any behavioral change to the Phase 03
   contracts. Historical evidence is linked in the Studio sections below.
+
+### H-08 — Remote registry, runtime ownership, and strict payload validation
+
+- **System or contract:** fixed authenticated remote registry, server-owned
+  parent-last runtime, bounded fixed client lookup, and authenticated composable
+  payload schemas.
+- **Test category:** automated headless protocol/security unit and integration
+  test with deterministic test-only remote definitions and payloads.
+- **Current status:** `Passed` for the Packet 06.1 and 06.2 subset on Windows x64
+  on 2026-08-26; the complete Phase 06 adversarial record remains M-06.
+- **Environment:** isolated Rojo Test DataModel under Lune; production runtime
+  modules are copied to exact test-only `ServerStorage` paths, while shared
+  validators use the normal `ReplicatedStorage.Shared` mapping.
+- **Command or procedure:** run `lune run tests/run.luau`; inspect
+  `RemoteRegistry.spec`, `RemoteRuntime.spec`, and `PayloadValidation.spec`.
+- **Required players or devices:** zero.
+- **Authorization requirement:** none for local non-publishing execution.
+- **External service or publication requirement:** none.
+- **Destructive-data risk:** none; definitions, payloads, and Instances are
+  test-owned, and lasting production endpoints remain empty.
+- **Expected evidence:** all 18 registry, 12 runtime/lookup, and 22 payload cases
+  pass. Strict payload evidence includes exact/cap-plus-one limits, one shared
+  speculative-union work budget, exact deterministic paths, finite
+  numbers/vectors/CFrames, cycles, repeated aliases, hostile metatables/keys,
+  every typed ID family, explicit server-only Instance class/ancestry policy,
+  detached frozen outputs, and privacy-safe failures.
+- **Cleanup procedure:** destroy test-owned Instances and rely on the runner's
+  exact generated-place cleanup; confirm no new residue.
+- **Phase or prerequisite:** Packets 06.1 and 06.2 complete. Packet 06.5 must
+  complete M-06 before a feature remote can ship.
 
 ## Local Studio solo tests
 
@@ -569,12 +602,13 @@ linked historical document for the original Studio evidence.
   containment.
 - **Test category:** automated protocol tests plus Studio multi-client security
   regression.
-- **Current status:** `Deferred` for the complete record. Packet 06.1's headless
-  fixed-registry, ownership, role-isolation, conflict, cleanup, and bounded lookup
-  subset passes; payload, limiter, envelope, authorization, replay, full abuse,
-  and Studio multi-client coverage remain deferred.
-- **Environment:** current isolated Lune DataModel for the Packet 06.1 subset;
-  future Studio Server & Clients with an adversarial client harness.
+- **Current status:** `Deferred` for the complete record. Packets 06.1–06.2's
+  headless fixed-registry, ownership, role-isolation, conflict, cleanup, bounded
+  lookup, strict payload, Instance-policy, and privacy subset passes; limiter,
+  envelope, authorization, replay, full abuse, and Studio multi-client coverage
+  remain deferred.
+- **Environment:** current isolated Lune DataModel for the Packets 06.1–06.2
+  subset; future Studio Server & Clients with an adversarial client harness.
 - **Command or procedure:** run `lune run tests/run.luau` for the current subset.
   Packet 06.5 must define and run the complete stable attack set before any
   feature remote is accepted.
@@ -585,12 +619,15 @@ linked historical document for the original Studio evidence.
 - **External service or publication requirement:** none for the initial gate.
 - **Destructive-data risk:** none locally if all authoritative state is fixture or
   match-local; never log raw private payloads.
-- **Expected evidence:** invalid, oversized, cross-player, replayed, and throttled
-  requests fail closed with bounded stable errors while valid peers remain usable.
+- **Expected evidence:** the current subset proves malformed, oversized, deeply
+  nested, cyclic, hostile-metatable, non-finite, and unexpected-Instance payloads
+  fail closed with stable privacy-safe paths. The completed record must also prove
+  cross-player, replayed, and throttled requests fail closed while valid peers
+  remain usable.
 - **Cleanup procedure:** stop adversarial clients, destroy test-owned remotes, and
   retain no raw payload logs.
-- **Phase or prerequisite:** Packet 06.1 subset complete; Packet 06.5 completes
-  the initial record, expanded by Phase 38.
+- **Phase or prerequisite:** Packets 06.1–06.2 subsets complete; Packet 06.5
+  completes the initial record, expanded by Phase 38.
 
 ## Published-client and private-version tests
 

@@ -2,7 +2,7 @@
 
 ## Decision record
 
-- Status: Phase 05 and Packet 06.1 complete; Packet 06.2 is next
+- Status: Phase 05 and Packets 06.1–06.2 complete; Packet 06.3 is next
 - Research date: 2026-08-26
 - Selected runtime: Lune 0.10.5
 - Rokit tool identifier: `lune-org/lune@0.10.5`
@@ -47,8 +47,11 @@ bootstraps, shutdown hooks, live remote delivery, and other engine integration.
 Genuine Roblox `Instance` cleanup can be exercised through Lune's DataModel
 implementation; the `RBXScriptConnection` cleanup branch may use a narrowly
 registered test double whose `typeof` adapter delegates every unregistered value
-to the native function. Studio remains the authority for engine integration
-regressions.
+to the native function. Packet 06.2 also injects exactly the Lune-provided
+`Vector2`, `Vector3`, and `CFrame` constructors so their real host datatypes and
+non-finite components can exercise the production validators. No generalized
+host-library access is exposed. Studio remains the authority for engine
+integration regressions.
 
 ## Candidates considered
 
@@ -164,6 +167,11 @@ DataModel. Packet 06.1 adds only
 place-specific source, or other server/client path and contains no runnable
 `Script` or `LocalScript`.
 
+Packet 06.2 requires no new project mapping: shared
+`network/PayloadValidation.luau` enters all four projects through the existing
+authoritative `src/shared` mapping, while `PayloadValidation.spec.luau` remains
+under the Test-only spec root.
+
 The production client API accepts only endpoint name and total timeout; it
 internally selects `ProductionRemotes`, actual `ReplicatedStorage`, centralized
 place role, `os.clock()`, and bounded `WaitForChild()`. The dependency-injected
@@ -180,7 +188,8 @@ The coordinator:
 3. deserialize the exact generated DataModel;
 4. load ModuleScripts by Instance identity with cycle detection and caching;
 5. inject only the standard Luau globals, `script`, the isolated `game`,
-   Instance-aware `require`, Roblox `Instance`, and the Lune task scheduler;
+   Instance-aware `require`, Roblox `Instance`, `Vector2`, `Vector3`, `CFrame`,
+   and the Lune task scheduler;
 6. discover normal specs in canonical bytewise path order;
 7. execute cases in their declared order with stable suite and case names;
 8. emit privacy-safe classifications and paths; and
@@ -369,7 +378,7 @@ changing the canonical command or its exit-code contract:
 - `lune run tests/verify-builds.luau` passed with 34 ModuleScripts, one Script,
   and one LocalScript in Default, Lobby, and Match. Test contained 31 shared
   ModuleScripts, exactly the two explicitly mapped networking runtime modules,
-  19 test-owned ModuleScripts, and zero runnable scripts.
+  20 test-owned ModuleScripts, and zero runnable scripts.
 - The verifier retained exact source identity, production test exclusion,
   Lobby/Match source isolation, intended bootstrap counts, and exact generated
   output removal.
@@ -377,3 +386,37 @@ changing the canonical command or its exit-code contract:
 This is focused source/test evidence only. Live Roblox remote delivery and
 shutdown remain subject to the authorized unsaved Studio regression. Packet
 06.1 is complete; Phase 06 and Gate A remain open.
+
+## Packet 06.2 completion verification
+
+Packet 06.2 extends the same normal discovery and restricted loader without
+changing the canonical command or exit-code contract:
+
+- Eleven suites and all 128 cases pass in canonical path and declaration order.
+- `PayloadValidation.spec.luau` contributes 22 cases for authenticated/frozen
+  schema composition; strict string, enumeration, every typed ID family,
+  boolean, finite number/integer, dense array, exact-key record, optional,
+  exactly-one bounded union, `Vector2`, `Vector3`, `CFrame`, and explicit
+  Instance policies.
+- Adversarial cases cover cap and cap-plus-one boundaries, narrower schema
+  limits, one shared validation-work budget including nested speculative union
+  attempts, sparse and unexpected keys, excessive depth/nodes/fields/items,
+  cycles and repeated references, hostile/protected metatables, coercion,
+  NaN/infinity, exact component paths, Instance class/ancestry/running-server
+  boundary checks, output detachment/freezing, and privacy-safe issues.
+- The loader exposes exactly the `@lune/roblox` `Vector2`, `Vector3`, and
+  `CFrame` constructor tables in addition to its existing restricted surface.
+  Production/test ModuleScripts still receive no filesystem, process, network,
+  authentication, or secret API.
+- `lune run tests/verify-builds.luau` passes with 35 ModuleScripts, one Script,
+  and one LocalScript in Default, Lobby, and Match. Test contains 32 shared
+  ModuleScripts, the same two explicitly mapped networking runtime modules, 21
+  test-owned ModuleScripts, and zero runnable scripts, for 55 ModuleScripts
+  total.
+- The verifier retains exact identity for all 37 production Lua containers,
+  production test exclusion, Lobby/Match isolation, intended bootstrap counts,
+  and exact generated-output cleanup. Lasting production remotes remain empty,
+  and no gameplay definition or Phase 07 source was added.
+
+Packet 06.2 is complete. Packet 06.3 is next and has not begun; Phase 06 and
+Gate A remain open.

@@ -151,6 +151,11 @@ local EXPECTED_PRODUCTION_SOURCES: { ProductionSourceDefinition } = table.freeze
 		sourcePath = "src/shared/network/ProductionRemotes.luau",
 	},
 	{
+		dataModelPath = "ReplicatedStorage.Shared.network.PayloadValidation",
+		className = "ModuleScript",
+		sourcePath = "src/shared/network/PayloadValidation.luau",
+	},
+	{
 		dataModelPath = "ReplicatedStorage.Shared.network.RemoteRegistry",
 		className = "ModuleScript",
 		sourcePath = "src/shared/network/RemoteRegistry.luau",
@@ -417,7 +422,7 @@ end
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
 	currentStage = `verify_counts_{definition.name}`
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 34 or scripts ~= 1 or localScripts ~= 1 then
+	if modules ~= 35 or scripts ~= 1 or localScripts ~= 1 then
 		emit("FAIL", definition.name, `PRODUCTION_CLASS_COUNTS_{modules}_{scripts}_{localScripts}`)
 		return false
 	end
@@ -457,7 +462,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			end
 		end
 	end
-	if sharedModules ~= 31 then
+	if sharedModules ~= 32 then
 		emit("FAIL", definition.name, "SHARED_MODULE_COUNT")
 		return false
 	end

@@ -6,6 +6,7 @@
 - Architecture decision recorded: 2026-08-26, before Phase 06 source changes
 - Primary-source research accessed: 2026-08-26
 - Packet 06.1 status: complete — 2026-08-26
+- Packet 06.2 status: complete — 2026-08-26
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Production feature endpoints: none; the lasting authenticated registry is empty
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
@@ -16,8 +17,8 @@
 
 This is the authoritative Phase 06 network-boundary document. The decision
 section was recorded before implementation. The sections below also record the
-completed Packet 06.1 implementation and evidence. Phase 06 and Gate A remain
-open until Packets 06.2–06.5 and the fresh exit audit pass.
+completed Packet 06.1 and 06.2 implementations and evidence. Phase 06 and Gate A
+remain open until Packets 06.3–06.5 and the fresh exit audit pass.
 
 ## Official Roblox behavior that shapes the design
 
@@ -74,6 +75,13 @@ handlers remain server-only.
 - [`Instance.WaitForChild`](https://create.roblox.com/docs/reference/engine/classes/Instance/WaitForChild)
 - [Streaming and Instances sent remotely](https://create.roblox.com/docs/workspace/streaming/techniques#instances-sent-remotely)
 - [Networking and replication performance](https://create.roblox.com/docs/performance-optimization/improve#networking-and-replication)
+- [`typeof` for Roblox host types](https://create.roblox.com/docs/reference/engine/globals/RobloxGlobals#typeof)
+- [Luau standard library and byte-string behavior](https://luau.org/library/)
+- [`Vector2` datatype](https://create.roblox.com/docs/reference/engine/datatypes/Vector2)
+- [`Vector3` datatype](https://create.roblox.com/docs/reference/engine/datatypes/Vector3)
+- [`CFrame` component contract](https://create.roblox.com/docs/reference/engine/datatypes/CFrame)
+- [`Instance` class and ancestry API](https://create.roblox.com/docs/reference/engine/classes/Instance)
+- [`RunService` execution-context API](https://create.roblox.com/docs/reference/engine/classes/RunService)
 
 ## Approved physical layout
 
@@ -201,13 +209,29 @@ normal `StarterPlayerScripts` production location, where the seam is `nil`.
 ## Payload-validation architecture decision
 
 This Packet 06.2 decision was recorded on 2026-08-26 before payload-validator
-source changes. One shared, authenticated, frozen schema API will compose every
+source changes. One shared, authenticated, frozen schema API now composes every
 future remote payload boundary. It reuses `Result`, `Validation.Issue`, and the
 existing typed `Ids` validators; it does not introduce a second result or issue
 shape and contains no gameplay schema.
 
-Every validation starts at the fixed public path `payload` and owns one traversal
-budget. Technical ceilings are depth 8, 512 visited nodes, 64 fields in one
+The constructor surface is fixed: `string(maximumBytes, minimumBytes?)`,
+`enum(values)`, `id(kind)`, `number(minimum, maximum)`,
+`integer(minimum, maximum)`, `boolean()`,
+`array(itemValidator, maximumItems, minimumItems?)`, `record(fields)`,
+`optional(validator)`, `union(branches)`, `vector2()`, `vector3()`, `cframe()`,
+and `instance(policy)`. Instance policies come only from
+`instancePolicy(className, ancestor, allowSubclasses?)`.
+`schema(validator, limits?)` compiles an authenticated root, while
+`schema:validate(value)` or
+`validate(schema, value)` returns the established frozen `Result`. Weak-key
+provenance authenticates validators, schemas, and Instance policies; copied or
+lookalike tables fail closed.
+
+Every validation starts at the fixed public path `payload` and owns one shared
+validation-work/node budget. Optional and union composition cannot reset that
+budget: every speculative union branch and nested union attempt consumes it,
+even though branch-local seen-table state remains isolated for correct matching.
+Technical ceilings are depth 8, 512 work nodes, 64 fields in one
 record, 128 array items, 1,024 bytes in one string, 128 enum values, and eight
 union branches. A trusted remote schema may choose a narrower bound but never a
 wider one. Limits are technical containment, not authorization or gameplay
@@ -221,19 +245,25 @@ order, and union branches in authored order. A bounded union must have exactly
 one successful branch; zero matches and ambiguous multiple matches fail closed.
 All accepted table graphs are detached, owned, and deeply frozen.
 
-Strings and enumerations are exact and non-coercing. Numeric validators reject
-NaN and both infinities before integer/range checks. `Vector2`, `Vector3`, and
-all twelve `CFrame` components must be finite. Optional values accept only an
-actual `nil`. IDs delegate to their exact existing family validator and retain
-only its allowlisted cause code.
+Strings and enumerations are exact and non-coercing. The generic string
+validator intentionally treats strings as opaque bounded bytes, so embedded NUL
+or invalid UTF-8 is not itself a failure; any future human-text contract must
+layer explicit UTF-8 and semantic rules over this byte boundary. Numeric
+validators reject NaN and both infinities before integer/range checks.
+`Vector2` and `Vector3` fail at the exact `X`, `Y`, or `Z` component path;
+`CFrame` checks position components `X`, `Y`, `Z` and rotation components `R00`
+through `R22`. Optional values accept only an actual `nil`. IDs delegate to
+their exact existing family validator and retain only its allowlisted cause
+code.
 
 An Instance validator without a policy rejects every Instance. An explicit
 trusted policy must bind a class, an allowed ancestor, and actual server
 execution context; exact class matching is the default, while any subclass rule
-must be explicit. The payload may never select the class, ancestor, context, or
-Instance path. Headless context injection, if needed for engine-adapter tests,
-must exist only behind the isolated non-replicated Test-project structure and
-must be absent from the production client API.
+must be explicit. Production acceptance additionally requires a live running
+server context; Studio Edit mode and clients fail closed. The payload may never
+select the class, ancestor, context, or Instance path. The headless engine seam
+is gated by the exact isolated non-replicated Test-project structure and is
+absent from the production client API.
 
 ## Direction and dispatch rules
 
@@ -338,21 +368,63 @@ ad hoc remote creation.
 
 ## Packet 06.1 completion evidence
 
-The current canonical headless run discovered ten suites and passed all 106
-cases. Of those, 18 cases cover registry structure, limits, canonical order,
+At Packet 06.1 completion, the canonical headless run discovered ten suites and
+passed all 106 cases. Of those, 18 cases cover registry structure, limits,
+canonical order,
 immutability, provenance, malformed/conflicting definitions, hostile
 metatables, and privacy; 12 cases cover parent-last publication, exact role
 trees, handler completeness and uniqueness, conflict preservation, re-entry,
 rollback, LIFO cleanup, every endpoint leaf shape, production seam exclusion,
 and bounded client lookup. The fixtures exist only under `tests/`.
 
-The four-project structural verifier currently reports 34 ModuleScripts, one
+The Packet 06.1 four-project structural verifier reported 34 ModuleScripts, one
 Script, and one LocalScript in each production build. The Test build's production
 source subset contains 31 shared ModuleScripts plus exactly the two explicitly
-mapped production networking runtime modules; 19 additional ModuleScripts are
+mapped production networking runtime modules; 20 additional ModuleScripts are
 test-owned specs, fixtures, support, or negative controls. Test contains zero
 runnable scripts. Tests and test-only fixtures remain absent from Default,
 Lobby, and Match; Lobby contains no Match source and Match contains no Lobby
 source. The targeted architecture/security review resolved every normal finding
 and finished with no unresolved P0, P1, P2, or P3 finding. Packet 06.1 is
 complete; Phase 06 and Gate A remain open.
+
+## Packet 06.2 completion evidence
+
+The current canonical headless run discovers eleven suites and passes all 128
+cases in deterministic path and declaration order. `PayloadValidation.spec.luau`
+contributes 22 focused cases covering authenticated schema provenance; exact
+string, enum, ID, number, integer, boolean, array, record, optional, and union
+boundaries; exact cap and cap-plus-one behavior; shared nested-union work
+budgeting; canonical detached frozen output; stable paths; cycles and repeated
+references; hostile metatables and keys without metamethod invocation; private
+diagnostic containment; finite `Vector2`, `Vector3`, and all twelve `CFrame`
+components; and explicit exact/subclass Instance class and ancestry policy
+behind the structurally gated server-context boundary.
+
+The restricted Lune ModuleScript environment exposes only the project-required
+Roblox datatype constructors `Vector2`, `Vector3`, and `CFrame` in addition to
+the existing `Instance` surface; it still exposes no filesystem, network,
+process, authentication, or secret API. The Instance server-context fallback is
+reachable only through the exact non-replicated Test-project module/support
+structure.
+
+Headless foreign datatypes prove validator behavior but cannot prove Roblox's
+wire serialization of non-finite datatype components or a real client's
+execution context. The required unsaved Studio networking regression must send
+the engine-supported non-finite `Vector2`, `Vector3`, and `CFrame` cases through
+the fixed test boundary and prove rejection before mutation; it must also prove
+that the explicit Instance policy accepts only on the running server and rejects
+from a client. No place save, publication, or external service is required.
+
+The four-project verifier now reports 35 ModuleScripts, one Script, and one
+LocalScript in each production build: 32 shared modules, the two server-only
+common modules, and the one client-only common module. Test contains the same
+32 shared modules, exactly the two explicitly mapped common networking runtime
+modules, 21 test-owned ModuleScripts, and zero runnable scripts, for 55
+ModuleScripts total. All 37 production Lua source containers match their fixed
+path, class, authoritative file, and source content. Tests remain absent from
+Default, Lobby, and Match; Lobby contains no Match source and Match contains no
+Lobby source. Lasting production endpoints and gameplay catalogs remain empty.
+
+Packet 06.2 is complete. Packet 06.3 is next and has not begun; Phase 06 and
+Gate A remain open, and Phase 07/gameplay work has not begun.
