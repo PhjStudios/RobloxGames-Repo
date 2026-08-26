@@ -54,9 +54,9 @@ jobs:
 
           $archiveEntries = @(Get-ChildItem -LiteralPath $rokitBin -Force)
           if (
-              $archiveEntries.Count -ne 1
-              -or $archiveEntries[0].PSIsContainer
-              -or $archiveEntries[0].Name -cne "rokit.exe"
+              ($archiveEntries.Count -ne 1) -or
+              $archiveEntries[0].PSIsContainer -or
+              ($archiveEntries[0].Name -cne "rokit.exe")
           ) {
               throw "Pinned Rokit archive layout verification failed."
           }
