@@ -212,8 +212,8 @@ conflicts, duplicate-owner/re-entry rejection, both exact Player-removal state
 releases, whole-child shutdown clearing, explicit client correlation clearing,
 and removal of the exact published root. Packet 06.5 adds nine integrated
 adversarial cases over those real boundaries; the current canonical run passes
-all 200 cases across 16 suites. Packet 06.5 is complete, and the fresh Phase 06
-exit audit remains open.
+all 200 cases across 16 suites. Packet 06.5 and the fresh local Phase 06/Gate A
+audit pass; current audit-content CI evidence and its completion record remain.
 
 Packet 03.3 reran 10 focused cleanup cases through the logger-based constructor.
 Supported runtime types, LIFO/idempotence, state/nesting guards, failure
@@ -289,7 +289,8 @@ Phase 03 is complete. Packet 03.4 evidence is in
 ownership without changing this cleanup behavior. Packet 06.1's completed
 network ownership contract is described in `docs/NETWORK_PROTOCOL.md`; it reuses
 the same contract. Packet 06.5 is complete with review-driven dispatcher
-hardening, test-only adversarial fixtures, and unsaved Studio evidence; the
-fresh Phase 06/Gate A exit audit remains open.
+hardening, test-only adversarial fixtures, and unsaved Studio evidence. The
+fresh local Phase 06/Gate A audit passes; current audit-content CI evidence and
+its completion record remain.
 Configuration evidence is in
 `docs/CONFIGURATION_VALIDATION.md`.

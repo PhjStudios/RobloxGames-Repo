@@ -9,13 +9,12 @@ The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
 order. Phases 04 and 05 are complete, Phase 06 is active, and Packets 06.1–06.5
-are complete. The isolated runner executes 200 deterministic cases across 16
-suites, the four project structures pass, and the unsaved Lobby, Match, and
-two-client Studio regressions pass. Phase 05 retains genuine least-privilege
-GitHub workflow evidence; the fresh Phase 06/Gate A audit and its current clean
-workflow evidence are the active checkpoint. The lasting production endpoint
-registry and production rate-policy list remain empty; no gameplay remote or
-Phase 07 system has been added.
+are complete. The fresh local Phase 06/Gate A audit passes: three byte-identical
+200-case runs, all four project structures, the unsaved Lobby/Match checks, and
+the exact current-source two-client Studio regression are green. The current
+audit-content GitHub workflow run and completion record are the only remaining
+gate. The lasting production endpoint registry and production rate-policy list
+remain empty; no gameplay remote or Phase 07 system has been added.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -44,6 +43,7 @@ Phase 07 system has been added.
 - [Network protocol and remote-security architecture](docs/NETWORK_PROTOCOL.md)
 - [Future remote security checklist](docs/REMOTE_SECURITY_CHECKLIST.md)
 - [Unsaved Phase 06 Studio networking regression](docs/NETWORK_SECURITY_STUDIO_REGRESSION.md)
+- [Phase 06 and Gate A combined exit audit](docs/PHASE_06_EXIT_AUDIT.md)
 - [Project instructions](AGENTS.md)
 
 ## Source of truth

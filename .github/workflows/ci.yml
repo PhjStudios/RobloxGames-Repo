@@ -1,4 +1,4 @@
-name: Phase 05 Verification
+name: Repository Verification
 
 on:
   push:

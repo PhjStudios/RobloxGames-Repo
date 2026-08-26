@@ -106,8 +106,23 @@ evidence on Windows x64:
   The existing dispatcher alone gained review-driven non-yielding callback and
   validation-metadata hardening. Phase 07 has not begun.
 
-This is Packet 06.5 evidence, not the Phase 06/Gate A exit record. The fresh
-exit audit and genuine CI evidence remain open.
+This is Packet 06.5 evidence. The fresh local Phase 06/Gate A audit described
+below now passes; its genuine CI evidence and completion record remain open.
+
+### Fresh Phase 06/Gate A verification
+
+The combined exit audit reran `rokit install` and checked the exact selected
+versions: Rokit 1.2.0, Rojo 7.7.0, StyLua 2.5.2, Selene 0.31.0, and Lune 0.10.5.
+No manifest, dependency, lockfile, or tool changed.
+
+The final local tree passed formatting, Selene configuration/lint, three
+byte-identical canonical 200-case runs, all six isolated failure controls, the
+four-project structural verifier, and the exact current-source unsaved Studio
+regression. Each production build retained 40 ModuleScripts, one Script, and
+one LocalScript. Test retained 65 ModuleScripts—33 shared, six authenticated
+common networking copies, and an exact positive allowlist of 26 test-owned
+modules—with zero runnable script. Exact hashes and the pending workflow
+condition are recorded in `docs/PHASE_06_EXIT_AUDIT.md`.
 
 The occupied default Rojo port is expected while a sync session is already
 running. When this occurs, inspect the listener before starting another server;

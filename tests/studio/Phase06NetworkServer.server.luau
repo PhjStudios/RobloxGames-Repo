@@ -15,6 +15,7 @@ local terminal = false
 local finishing = false
 local fixtureCleanup: any = nil
 local fixtureRoot: Folder? = nil
+local fixtureRegistry: any = nil
 local limiter: any = nil
 local dispatcher: any = nil
 
@@ -133,6 +134,9 @@ local assignmentStarted = false
 local leaveStarted = false
 local removalObserved = false
 local finalAcknowledged = false
+local continueSent = false
+local coordinatorActive = true
+local playerCleanupDeadline: number? = nil
 local leavingPlayer: Player? = nil
 local remainingPlayer: Player? = nil
 
@@ -178,14 +182,50 @@ local PROTOCOL_REPORT_KEYS = table.freeze({
 	protocolWindowSeconds = true,
 })
 
+local PROTOCOL_REPORT_CODES = table.freeze({
+	MALFORMED_ENVELOPE = true,
+	INVALID_PLAYER = true,
+	INVALID_RESPONSE_REMOTE = true,
+	DUPLICATE_REQUEST = true,
+	STALE_REQUEST = true,
+	NOT_AUTHORIZED = true,
+	INVALID_PAYLOAD = true,
+	HANDLER_FAILED = true,
+	INVALID_HANDLER_OUTCOME = true,
+	INVALID_RESPONSE_PAYLOAD = true,
+	UNAVAILABLE = true,
+	RESPONSE_SEND_FAILED = true,
+	MULTIPLE_SIGNALS = true,
+})
+
+local function isSafeReportCount(value: unknown, maximum: number): boolean
+	return type(value) == "number"
+		and value == value
+		and value ~= math.huge
+		and value ~= -math.huge
+		and value % 1 == 0
+		and value >= 1
+		and value <= maximum
+end
+
+local function isAllowedReportEndpoint(value: unknown): boolean
+	if type(value) ~= "string" or #value > RemoteRegistry.MAX_NAME_BYTES then
+		return false
+	end
+	if value == "<multiple>" then
+		return true
+	end
+	local registry = fixtureRegistry
+	return registry ~= nil and registry:get(value) ~= nil
+end
+
 local function captureRateReport(report: any)
 	if
 		not hasExactKeys(report, RATE_REPORT_KEYS, 4)
+		or not table.isfrozen(report)
 		or report.code ~= "RATE_LIMITED"
-		or type(report.endpoint) ~= "string"
-		or type(report.rateLimitRejectionCount) ~= "number"
-		or report.rateLimitRejectionCount < 1
-		or report.rateLimitRejectionCount > ServerRateLimiter.MAX_AGGREGATE_REJECTIONS
+		or not isAllowedReportEndpoint(report.endpoint)
+		or not isSafeReportCount(report.rateLimitRejectionCount, ServerRateLimiter.MAX_AGGREGATE_REJECTIONS)
 		or report.rateLimitWindowSeconds ~= ServerRateLimiter.REPORT_INTERVAL_SECONDS
 	then
 		reportShapeInvalid = true
@@ -197,11 +237,11 @@ end
 local function captureProtocolReport(report: any)
 	if
 		not hasExactKeys(report, PROTOCOL_REPORT_KEYS, 4)
+		or not table.isfrozen(report)
 		or type(report.code) ~= "string"
-		or type(report.endpoint) ~= "string"
-		or type(report.protocolRejectionCount) ~= "number"
-		or report.protocolRejectionCount < 1
-		or report.protocolRejectionCount > ServerRequestDispatcher.MAX_AGGREGATE_SIGNALS
+		or PROTOCOL_REPORT_CODES[report.code] ~= true
+		or not isAllowedReportEndpoint(report.endpoint)
+		or not isSafeReportCount(report.protocolRejectionCount, ServerRequestDispatcher.MAX_AGGREGATE_SIGNALS)
 		or report.protocolWindowSeconds ~= ServerRequestDispatcher.REPORT_INTERVAL_SECONDS
 	then
 		reportShapeInvalid = true
@@ -237,21 +277,25 @@ local function finishSuccessfully()
 
 	local limiterStats = limiter:getStats()
 	local dispatcherStats = dispatcher:getStats()
-	if
-		identityMutationCount ~= 5
-		or numericMutationCount ~= 2
-		or defaultInstanceMutationCount ~= 0
-		or explicitInstanceMutationCount ~= 2
-		or burstMutationCount ~= 2
-		or not removalObserved
-		or not finalAcknowledged
-		or limiterStats.trackedPlayerCount ~= 1
-		or dispatcherStats.trackedPlayerCount ~= 1
-		or dispatcherStats.pendingRequestCount ~= 0
-		or reportShapeInvalid
-		or #rateReports < 1
-		or #protocolReports < 1
-	then
+	local finalChecks = {
+		identityMutationCount == 5,
+		numericMutationCount == 2,
+		defaultInstanceMutationCount == 0,
+		explicitInstanceMutationCount == 2,
+		burstMutationCount == 2,
+		removalObserved,
+		finalAcknowledged,
+		limiterStats.trackedPlayerCount == 1,
+		dispatcherStats.trackedPlayerCount == 1 and dispatcherStats.pendingRequestCount == 0,
+		not reportShapeInvalid and #rateReports >= 1 and #protocolReports >= 1,
+	}
+	local passedCheckCount = 0
+	for _, passed in finalChecks do
+		if passed then
+			passedCheckCount += 1
+		end
+	end
+	if passedCheckCount ~= #finalChecks then
 		finishing = false
 		failHarness("FINAL_ASSERTION_FAILED")
 		return
@@ -277,7 +321,116 @@ local function finishSuccessfully()
 
 	terminal = true
 	finishing = false
-	print("[ATD_PHASE06_STUDIO][PASS][context=server][caseCount=10][clientCount=2][cleanupState=Cleaned]")
+	print(
+		`[ATD_PHASE06_STUDIO][PASS][context=server][caseCount={passedCheckCount}][clientCount=2][cleanupState=Cleaned]`
+	)
+end
+
+local function advanceAssignment(): boolean
+	if assignmentStarted or countKeys(helloPlayers) ~= CLIENT_COUNT then
+		return true
+	end
+	assignmentStarted = true
+
+	local activePlayers = {}
+	for player in helloPlayers do
+		if player.Parent == Players then
+			table.insert(activePlayers, player)
+		end
+	end
+	table.sort(activePlayers, function(left: Player, right: Player): boolean
+		if left.UserId == right.UserId then
+			return left.Name < right.Name
+		end
+		return left.UserId < right.UserId
+	end)
+	if #activePlayers ~= CLIENT_COUNT or #Players:GetPlayers() ~= CLIENT_COUNT then
+		failHarness("CLIENT_COUNT_MISMATCH")
+		return false
+	end
+
+	local assignmentRemote = endpointRemotes[ASSIGNMENT_ENDPOINT].event
+	if assignmentRemote == nil then
+		failHarness("ASSIGNMENT_REMOTE_MISSING")
+		return false
+	end
+	for slot, player in activePlayers do
+		assignedSlots[player] = slot
+		if not fireFixedEvent(assignmentRemote, player, { slot = slot }) then
+			failHarness("ASSIGNMENT_SEND_FAILED")
+			return false
+		end
+	end
+	return true
+end
+
+local function advanceLeave(): boolean
+	if leaveStarted or countKeys(completedPlayers) ~= CLIENT_COUNT then
+		return true
+	end
+	leaveStarted = true
+
+	for player, slot in assignedSlots do
+		if slot == 1 then
+			leavingPlayer = player
+		else
+			remainingPlayer = player
+		end
+	end
+	local leaveRemote = endpointRemotes[LEAVE_ENDPOINT].event
+	if leavingPlayer == nil or remainingPlayer == nil or leaveRemote == nil then
+		failHarness("LEAVE_STATE_MISSING")
+		return false
+	end
+	if not fireFixedEvent(leaveRemote, remainingPlayer :: Player, { leave = false }) then
+		failHarness("LEAVE_BARRIER_FAILED")
+		return false
+	end
+	if not fireFixedEvent(leaveRemote, leavingPlayer :: Player, { leave = true }) then
+		failHarness("LEAVE_EVENT_FAILED")
+		return false
+	end
+	return true
+end
+
+local function advanceRemoval(): boolean
+	if not removalObserved or continueSent then
+		return true
+	end
+
+	local currentRemaining = remainingPlayer
+	local cleanupDeadline = playerCleanupDeadline
+	if currentRemaining == nil or cleanupDeadline == nil then
+		failHarness("PLAYER_CLEANUP_STATE_MISSING")
+		return false
+	end
+	local limiterStats = limiter:getStats()
+	local dispatcherStats = dispatcher:getStats()
+	local cleanupReady = currentRemaining.Parent == Players
+		and limiterStats.trackedPlayerCount == 1
+		and dispatcherStats.trackedPlayerCount == 1
+		and dispatcherStats.pendingRequestCount == 0
+	if cleanupReady then
+		continueSent = true
+		local continueRemote = endpointRemotes[CONTINUE_ENDPOINT].event
+		if continueRemote == nil or not fireFixedEvent(continueRemote, currentRemaining, { continue = true }) then
+			failHarness("CONTINUE_EVENT_FAILED")
+			return false
+		end
+	elseif os.clock() >= cleanupDeadline then
+		failHarness("PLAYER_CLEANUP_FAILED")
+		return false
+	end
+	return true
+end
+
+local function advanceCoordinator()
+	if not advanceAssignment() or not advanceLeave() or not advanceRemoval() then
+		return
+	end
+	if finalAcknowledged and removalObserved then
+		finishSuccessfully()
+	end
 end
 
 local setupSucceeded = pcall(function()
@@ -405,10 +558,14 @@ local setupSucceeded = pcall(function()
 	local registryResult = RemoteRegistry.create(definitions)
 	requireSetup(registryResult.ok, "REGISTRY_CREATION_FAILED")
 	local registry = registryResult.value
+	fixtureRegistry = registry
 
 	local context = EnvironmentContext.new("server", "Match", game.PlaceId, true)
 	local logger = Log.new(context)
 	fixtureCleanup = Cleanup.new(logger, "phase06-studio-network")
+	fixtureCleanup:add(function()
+		coordinatorActive = false
+	end)
 
 	local root = Instance.new("Folder")
 	root.Name = FIXTURE_ROOT_NAME
@@ -619,42 +776,6 @@ local setupSucceeded = pcall(function()
 			if payload.ready == true and helloPlayers[serverContext.player] ~= true then
 				helloPlayers[serverContext.player] = true
 			end
-			if countKeys(helloPlayers) == CLIENT_COUNT and not assignmentStarted then
-				assignmentStarted = true
-				task.defer(function()
-					if terminal or finishing then
-						return
-					end
-					local activePlayers = {}
-					for player in helloPlayers do
-						if player.Parent == Players then
-							table.insert(activePlayers, player)
-						end
-					end
-					table.sort(activePlayers, function(left: Player, right: Player): boolean
-						if left.UserId == right.UserId then
-							return left.Name < right.Name
-						end
-						return left.UserId < right.UserId
-					end)
-					if #activePlayers ~= CLIENT_COUNT or #Players:GetPlayers() ~= CLIENT_COUNT then
-						failHarness("CLIENT_COUNT_MISMATCH")
-						return
-					end
-					local assignmentRemote = endpointRemotes[ASSIGNMENT_ENDPOINT].event
-					if assignmentRemote == nil then
-						failHarness("ASSIGNMENT_REMOTE_MISSING")
-						return
-					end
-					for slot, player in activePlayers do
-						assignedSlots[player] = slot
-						if not fireFixedEvent(assignmentRemote, player, { slot = slot }) then
-							failHarness("ASSIGNMENT_SEND_FAILED")
-							return
-						end
-					end
-				end)
-			end
 			return ServerRequestDispatcher.success(nil)
 		end
 	)
@@ -669,33 +790,6 @@ local setupSucceeded = pcall(function()
 			if payload.complete == true then
 				completedPlayers[serverContext.player] = true
 			end
-			if countKeys(completedPlayers) == CLIENT_COUNT and not leaveStarted then
-				leaveStarted = true
-				task.defer(function()
-					if terminal or finishing then
-						return
-					end
-					for player, slot in assignedSlots do
-						if slot == 1 then
-							leavingPlayer = player
-						else
-							remainingPlayer = player
-						end
-					end
-					local leaveRemote = endpointRemotes[LEAVE_ENDPOINT].event
-					if leavingPlayer == nil or remainingPlayer == nil or leaveRemote == nil then
-						failHarness("LEAVE_STATE_MISSING")
-						return
-					end
-					if not fireFixedEvent(leaveRemote, remainingPlayer :: Player, { leave = false }) then
-						failHarness("LEAVE_BARRIER_FAILED")
-						return
-					end
-					if not fireFixedEvent(leaveRemote, leavingPlayer :: Player, { leave = true }) then
-						failHarness("LEAVE_EVENT_FAILED")
-					end
-				end)
-			end
 			return ServerRequestDispatcher.success(nil)
 		end
 	)
@@ -709,7 +803,6 @@ local setupSucceeded = pcall(function()
 		function(serverContext: any, payload: any): any
 			if payload.complete == true and serverContext.player == remainingPlayer and removalObserved then
 				finalAcknowledged = true
-				task.defer(finishSuccessfully)
 			end
 			return ServerRequestDispatcher.success(nil)
 		end
@@ -747,40 +840,7 @@ local setupSucceeded = pcall(function()
 			return
 		end
 		removalObserved = true
-		task.defer(function()
-			if terminal or finishing then
-				return
-			end
-			local currentRemaining = remainingPlayer
-			local cleanupDeadline = os.clock() + PLAYER_CLEANUP_TIMEOUT_SECONDS
-			local cleanupReady = false
-			repeat
-				if terminal or finishing then
-					return
-				end
-				local limiterStats = limiter:getStats()
-				local dispatcherStats = dispatcher:getStats()
-				cleanupReady = currentRemaining ~= nil
-					and currentRemaining.Parent == Players
-					and limiterStats.trackedPlayerCount == 1
-					and dispatcherStats.trackedPlayerCount == 1
-					and dispatcherStats.pendingRequestCount == 0
-				if not cleanupReady then
-					task.wait()
-				end
-			until cleanupReady or os.clock() >= cleanupDeadline
-			if not cleanupReady then
-				failHarness("PLAYER_CLEANUP_FAILED")
-				return
-			end
-			local continueRemote = endpointRemotes[CONTINUE_ENDPOINT].event
-			if
-				continueRemote == nil
-				or not fireFixedEvent(continueRemote, currentRemaining :: Player, { continue = true })
-			then
-				failHarness("CONTINUE_EVENT_FAILED")
-			end
-		end)
+		playerCleanupDeadline = os.clock() + PLAYER_CLEANUP_TIMEOUT_SECONDS
 	end))
 
 	requireSetup(ReplicatedStorage:FindFirstChild(FIXTURE_ROOT_NAME) == nil, "LATE_FIXTURE_ROOT_CONFLICT")
@@ -797,8 +857,18 @@ if terminal then
 	return
 end
 
-task.delay(TOTAL_TIMEOUT_SECONDS, function()
-	if not terminal and not finishing then
-		failHarness("TIMEOUT")
+local coordinatorDeadline = os.clock() + TOTAL_TIMEOUT_SECONDS
+while coordinatorActive and not terminal do
+	local advanced = pcall(advanceCoordinator)
+	if not advanced then
+		finishing = false
+		failHarness("COORDINATOR_FAILED")
 	end
-end)
+	if coordinatorActive and not terminal then
+		if os.clock() >= coordinatorDeadline then
+			failHarness("TIMEOUT")
+		else
+			task.wait()
+		end
+	end
+end

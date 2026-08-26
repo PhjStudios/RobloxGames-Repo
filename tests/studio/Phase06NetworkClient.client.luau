@@ -9,8 +9,10 @@ local RunService = game:GetService("RunService")
 local StudioTestService = game:GetService("StudioTestService")
 
 local Shared = ReplicatedStorage:FindFirstChild("Shared")
+local EXPECTED_CASE_COUNT = 10
 local terminal = false
 local connections: { RBXScriptConnection } = {}
+local completedCaseCount = 0
 
 local function cleanupConnections()
 	for index = #connections, 1, -1 do
@@ -30,13 +32,21 @@ local function failHarness(code: string)
 	print(`[ATD_PHASE06_STUDIO][FAIL][context=client][code={code}]`)
 end
 
-local function passHarness(caseName: string, caseCount: number)
+local function passHarness(caseName: string)
 	if terminal then
+		return
+	end
+	if completedCaseCount ~= EXPECTED_CASE_COUNT then
+		failHarness("CASE_COUNT_MISMATCH")
 		return
 	end
 	terminal = true
 	cleanupConnections()
-	print(`[ATD_PHASE06_STUDIO][PASS][context=client][case={caseName}][caseCount={caseCount}]`)
+	print(`[ATD_PHASE06_STUDIO][PASS][context=client][case={caseName}][caseCount={completedCaseCount}]`)
+end
+
+local function recordCase()
+	completedCaseCount += 1
 end
 
 if not RunService:IsStudio() or not RunService:IsClient() or not RunService:IsRunning() then
@@ -436,6 +446,7 @@ local runSucceeded = pcall(function()
 		return
 	end
 	local slot = assignedSlot :: number
+	recordCase()
 
 	local sharedRequestId = "IdentityShared"
 	if not sendRequest(IDENTITY_ENDPOINT, sharedRequestId, { value = 1 }) then
@@ -451,6 +462,7 @@ local runSucceeded = pcall(function()
 		failHarness("CROSS_PLAYER_RESPONSE")
 		return
 	end
+	recordCase()
 
 	local otherUserId = 0
 	for _, player in Players:GetPlayers() do
@@ -470,6 +482,7 @@ local runSucceeded = pcall(function()
 		failHarness("FORGED_FIELD_NOT_REJECTED")
 		return
 	end
+	recordCase()
 
 	local finiteVector2 = Vector2.new(1, 2)
 	local finiteVector3 = Vector3.new(1, 2, 3)
@@ -523,6 +536,7 @@ local runSucceeded = pcall(function()
 		failHarness("FINITE_NUMERIC_FAILED")
 		return
 	end
+	recordCase()
 
 	local localInstanceSchema = PayloadValidation.schema(PayloadValidation.record({
 		reference = PayloadValidation.instance(
@@ -543,6 +557,7 @@ local runSucceeded = pcall(function()
 		failHarness("DEFAULT_INSTANCE_NOT_REJECTED")
 		return
 	end
+	recordCase()
 
 	local explicitOkId = `ExplicitOk{slot}`
 	if
@@ -568,6 +583,7 @@ local runSucceeded = pcall(function()
 		failHarness("INSTANCE_CLASS_NOT_REJECTED")
 		return
 	end
+	recordCase()
 
 	local burstFirstId = `BurstFirst{slot}`
 	local burstSecondId = `BurstSecond{slot}`
@@ -580,6 +596,7 @@ local runSucceeded = pcall(function()
 		failHarness("BURST_ISOLATION_FAILED")
 		return
 	end
+	recordCase()
 
 	local afterBurstId = `IdentityAfterBurst{slot}`
 	if
@@ -589,6 +606,7 @@ local runSucceeded = pcall(function()
 		failHarness("ACTION_ISOLATION_FAILED")
 		return
 	end
+	recordCase()
 
 	if not sendEvent(COMPLETE_ENDPOINT, { complete = true }) then
 		failHarness("COMPLETE_SEND_FAILED")
@@ -643,6 +661,7 @@ local runSucceeded = pcall(function()
 		failHarness("POST_DISCONNECT_REQUEST_FAILED")
 		return
 	end
+	recordCase()
 	if not sendEvent(FINAL_ACK_ENDPOINT, { complete = true }) then
 		failHarness("FINAL_ACK_FAILED")
 		return
@@ -653,15 +672,10 @@ local runSucceeded = pcall(function()
 		failHarness("FINISHED_EVENT_TIMEOUT")
 		return
 	end
-	passHarness("completed", 10)
+	recordCase()
+	passHarness("completed")
 end)
 
 if not runSucceeded and not terminal then
 	failHarness("CLIENT_EXECUTION_FAILED")
 end
-
-task.delay(PROTOCOL_TIMEOUT_SECONDS, function()
-	if not terminal then
-		failHarness("TIMEOUT")
-	end
-end)

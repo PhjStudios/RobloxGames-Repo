@@ -6,9 +6,10 @@
 - Status: Complete — 2026-08-26
 - Research date: 2026-08-26
 - Target runner: GitHub-hosted Windows Server 2025 x64 (`windows-2025`)
-- Workflow: `.github/workflows/ci.yml`, `Phase 05 Verification`
+- Workflow: `.github/workflows/ci.yml`, `Repository Verification`
 - Required job: `Windows verification`
-- Verification branch: `codex/phase-05-ci-verification`
+- Phase 05 evidence branch: `codex/phase-05-ci-verification`
+- Current Phase 06 evidence branch: `codex/phase-06-network-security`
 - Workflow authority: verification only; no deployment, release, package, or
   Roblox publication authority
 
@@ -150,3 +151,22 @@ The public API confirmed the exact commit, `push` event, successful `Windows
 verification` job and every required step, and `total_count = 0` retained
 artifacts. This completed the genuine remote condition for the Phase 05 exit
 gate without changing workflow authority.
+
+## Phase 06 evidence status
+
+The workflow's phase-specific display name was replaced with the stable
+`Repository Verification` name during the Phase 06 exit audit. No trigger,
+permission, action, digest, tool pin, command, residue condition, or workflow
+authority changed.
+
+Packet 06.5 commit `6c690fee71761165f24f7bd279bd0b3310ea2509`
+passed every required step in
+[run 33014884391](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/33014884391)
+([job 98330403303](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/33014884391/job/98330403303)).
+That packet run is clean evidence for its exact commit but does not substitute
+for the fresh combined Gate A state.
+
+The local Phase 06/Gate A audit passes. Its audit-content commit and genuine
+clean workflow run are pending; Phase 06 and Gate A remain open until the
+ordinary completion-record commit cites that run. Phase 05's intentional
+negative-control commits are not recreated for Phase 06.

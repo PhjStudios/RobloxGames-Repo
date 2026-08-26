@@ -287,7 +287,8 @@ Phase 03 is complete. Packet 03.4 evidence is in
 04.5 placed their centralized gate before runner construction without changing
 this lifecycle behavior. Packets 06.1–06.5 add only the common server network
 service, its nested limiter/dispatcher ownership, and test-only security
-evidence described in `docs/NETWORK_PROTOCOL.md`. Packet 06.5 is complete; the
-fresh Phase 06/Gate A exit audit remains open.
+evidence described in `docs/NETWORK_PROTOCOL.md`. Packet 06.5 and the fresh
+local Phase 06/Gate A audit pass; current audit-content CI evidence and its
+completion record remain open.
 Configuration evidence remains in
 `docs/CONFIGURATION_VALIDATION.md`.

@@ -172,9 +172,11 @@ Additional assertions passed:
   `ProductionRateLimits`, `ServerRemoteRegistry`, `ServerRateLimiter`,
   `ServerRequestDispatcher`, `ClientRemoteLookup`, and `ClientRequestTracker`
   under test-only `ServerStorage` paths. Its test-owned
-  spec/fixture/support/negative-control set now contains 26 ModuleScripts. The
-  complete Test build therefore contains 65 ModuleScripts and no runnable Script
-  or LocalScript.
+  spec/fixture/support/negative-control set contains 26 ModuleScripts, each
+  authenticated against an exact DataModel path, class, authoritative test
+  file, and byte-for-byte source. Unlisted Test-owned source fails the
+  verifier. The complete Test build therefore contains 65 ModuleScripts and no
+  runnable Script or LocalScript.
 - The two tracked `tests/studio` manual harness sources occur in no generated
   DataModel; they are absent even from the Test build.
 - All builds contain `ReplicatedStorage.Shared`.
@@ -227,9 +229,9 @@ and frozen policy list remain empty.
 For Packet 06.5, `lobby.project.json` was connected only to Lobby and
 `match.project.json` only to Match, one at a time. Three unsaved cycles passed in
 each role, followed by the final two-client networking regression. Both places
-were left in Edit mode without saving or publishing. Packet 06.5 is complete;
-the fresh Phase 06/Gate A exit audit and CI evidence remain open, and Phase 07
-has not begun.
+were left in Edit mode without saving or publishing. Packet 06.5 and the fresh
+local Phase 06/Gate A audit pass; current audit-content CI evidence and its
+completion record remain open, and Phase 07 has not begun.
 
 ## Scope boundary and next gate
 

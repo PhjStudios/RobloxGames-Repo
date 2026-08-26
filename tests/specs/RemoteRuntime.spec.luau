@@ -212,12 +212,121 @@ local function shutdown(server: Server)
 	lifecycle.shutdown()
 end
 
+local activeServers: { Server }? = nil
+local activeInstances: { Instance }? = nil
+local releasedInstances: { [Instance]: boolean }? = nil
+
+local function ownServer(server: Server): Server
+	local servers = activeServers
+	if servers == nil then
+		error("[ATD_TEST_FIXTURE][code=RUNTIME_OWNER_INACTIVE]", 0)
+	end
+	table.insert(servers, server)
+	return server
+end
+
+local function createOwnedServer(...: any): Server
+	return ownServer(ServerRemoteRegistry.new(...))
+end
+
+local function ownInstance(instance: any): any
+	local instances = activeInstances
+	if instances == nil then
+		error("[ATD_TEST_FIXTURE][code=RUNTIME_OWNER_INACTIVE]", 0)
+	end
+	table.insert(instances, instance)
+	return instance
+end
+
+local function destroyOwned(instance: Instance)
+	local released = releasedInstances
+	if released == nil then
+		error("[ATD_TEST_FIXTURE][code=RUNTIME_OWNER_INACTIVE]", 0)
+	end
+	if released[instance] == true then
+		return
+	end
+	instance:Destroy()
+	released[instance] = true
+end
+
+local function cleanupOwnedServer(server: Server): boolean
+	local stateRead, state = pcall(function()
+		return server:getState()
+	end)
+	if not stateRead then
+		return false
+	end
+
+	if state == "Initialized" then
+		if not pcall(start, server) then
+			return false
+		end
+		state = "Started"
+	end
+	if state == "Started" then
+		return pcall(shutdown, server)
+	end
+	return state == "Registering" or state == "Failed" or state == "Shutdown"
+end
+
+local function cleanupOwnedRuntime(): boolean
+	local cleanupSucceeded = true
+	local instances = activeInstances or {}
+	local released = releasedInstances or {}
+	for index = #instances, 1, -1 do
+		local instance = instances[index]
+		if released[instance] ~= true and not pcall(function()
+			instance:Destroy()
+		end) then
+			cleanupSucceeded = false
+		end
+	end
+
+	local servers = activeServers or {}
+	for index = #servers, 1, -1 do
+		if not cleanupOwnedServer(servers[index]) then
+			cleanupSucceeded = false
+		end
+	end
+
+	local leftoverRoot = ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME)
+	if leftoverRoot ~= nil and not pcall(function()
+		leftoverRoot:Destroy()
+	end) then
+		cleanupSucceeded = false
+	end
+	activeInstances = nil
+	activeServers = nil
+	releasedInstances = nil
+	return cleanupSucceeded
+end
+
+local function runtimeCase(name: string, callback: (Assertions) -> ())
+	return TestHarness.case(name, function(assertions)
+		if activeServers ~= nil or activeInstances ~= nil or releasedInstances ~= nil then
+			error("[ATD_TEST_FIXTURE][code=RUNTIME_OWNER_REENTRY]", 0)
+		end
+		activeServers = {}
+		activeInstances = {}
+		releasedInstances = {}
+		local succeeded, failure = pcall(callback, assertions)
+		local cleanupSucceeded = cleanupOwnedRuntime()
+		if not cleanupSucceeded then
+			error(`[ATD_TEST_FIXTURE][code=RUNTIME_OWNER_CLEANUP_FAILED][caseFailed={not succeeded}]`, 0)
+		end
+		if not succeeded then
+			error(failure, 0)
+		end
+	end)
+end
+
 local function assertNoPublishedRoot(assertions: Assertions)
 	assertions.isNil(ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME))
 end
 
 return TestHarness.suite("fixed remote runtime and client lookup", {
-	TestHarness.case(
+	runtimeCase(
 		"publishes the exact Match tree only after binding and disconnects before destruction",
 		function(assertions)
 			assertNoPublishedRoot(assertions)
@@ -233,7 +342,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			local sentPlayer: Player? = nil
 			local sentEnvelope: ServerRequestDispatcher.ResponseEnvelope? = nil
 
-			local server = ServerRemoteRegistry.new(
+			local server = createOwnedServer(
 				loggerFor("Match"),
 				FULL_REGISTRY,
 				ReplicatedStorage,
@@ -332,7 +441,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 
 			start(server)
 			assertions.equal(server:getState(), "Started")
-			local player = Instance.new("Player")
+			local player = ownInstance(Instance.new("Player")) :: Player
 			player.Parent = game:GetService("Players")
 			local clientEventCallback = callbacks.TestClientEvent
 			clientEventCallback(player, { payload = { marker = PRIVATE_SENTINEL } })
@@ -356,7 +465,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 					assertions.equal((sentEnvelope.payload :: any).accepted, true)
 				end
 			end
-			player:Destroy()
+			destroyOwned(player)
 			shutdown(server)
 			assertions.equal(server:getState(), "Shutdown")
 			assertions.equal(#disconnectedNames, 3)
@@ -369,7 +478,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		end
 	),
 
-	TestHarness.case("keeps Lobby Match and Development endpoint sets isolated", function(assertions)
+	runtimeCase("keeps Lobby Match and Development endpoint sets isolated", function(assertions)
 		assertNoPublishedRoot(assertions)
 		local expectations = {
 			Lobby = "TestResponseRequest,TestServerEvent",
@@ -378,7 +487,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		}
 
 		for _, role in { "Lobby", "Match", "Development" } :: { RuntimePlaceRole } do
-			local server = ServerRemoteRegistry.new(
+			local server = createOwnedServer(
 				loggerFor(role),
 				FULL_REGISTRY,
 				ReplicatedStorage,
@@ -406,12 +515,12 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		end
 	end),
 
-	TestHarness.case(
+	runtimeCase(
 		"rejects unknown inactive wrong-direction invalid and duplicate bindings privately",
 		function(assertions)
 			assertNoPublishedRoot(assertions)
 			local invalidRatePolicies = captureError(assertions, function()
-				ServerRemoteRegistry.new(loggerFor("Lobby"), FULL_REGISTRY, ReplicatedStorage, "Lobby", {
+				createOwnedServer(loggerFor("Lobby"), FULL_REGISTRY, ReplicatedStorage, "Lobby", {
 					{
 						endpoint = PRIVATE_SENTINEL .. "/arbitrary/path",
 						policy = ServerRateLimiter.DEFAULT_POLICY,
@@ -422,7 +531,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			assertions.contains(invalidRatePolicies, "[validationPath=policies[1].endpoint]")
 			assertions.isNil(string.find(invalidRatePolicies, PRIVATE_SENTINEL, 1, true))
 
-			local server = ServerRemoteRegistry.new(
+			local server = createOwnedServer(
 				loggerFor("Lobby"),
 				FULL_REGISTRY,
 				ReplicatedStorage,
@@ -490,9 +599,9 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		end
 	),
 
-	TestHarness.case("fails closed on missing contracts and rolls back a partial listener bind", function(assertions)
+	runtimeCase("fails closed on missing contracts and rolls back a partial listener bind", function(assertions)
 		assertNoPublishedRoot(assertions)
-		local missingServer = ServerRemoteRegistry.new(
+		local missingServer = createOwnedServer(
 			loggerFor("Match"),
 			FULL_REGISTRY,
 			ReplicatedStorage,
@@ -514,7 +623,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		local disconnectCount = 0
 		local rollbackLimiterDependencies, rollbackDispatcherDependencies, rollbackChildDisconnects =
 			countingChildDependencies()
-		local rollbackServer = ServerRemoteRegistry.new(
+		local rollbackServer = createOwnedServer(
 			loggerFor("Match"),
 			FULL_REGISTRY,
 			ReplicatedStorage,
@@ -547,7 +656,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 
 		local invalidLimiterDependencies, invalidDispatcherDependencies, invalidChildDisconnects =
 			countingChildDependencies()
-		local invalidConnectionServer = ServerRemoteRegistry.new(
+		local invalidConnectionServer = createOwnedServer(
 			loggerFor("Match"),
 			FULL_REGISTRY,
 			ReplicatedStorage,
@@ -572,7 +681,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		local dispatcherFailureLimiterDisconnects = 0
 		local dispatcherFailureAttempts = 0
 		local endpointConnectionAttempts = 0
-		local dispatcherFailureServer = ServerRemoteRegistry.new(
+		local dispatcherFailureServer = createOwnedServer(
 			loggerFor("Match"),
 			FULL_REGISTRY,
 			ReplicatedStorage,
@@ -625,12 +734,12 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		assertNoPublishedRoot(assertions)
 	end),
 
-	TestHarness.case("preserves pre-existing root conflicts and distinguishes their classes", function(assertions)
+	runtimeCase("preserves pre-existing root conflicts and distinguishes their classes", function(assertions)
 		assertNoPublishedRoot(assertions)
-		local existingFolder = Instance.new("Folder")
+		local existingFolder = ownInstance(Instance.new("Folder")) :: Folder
 		existingFolder.Name = RemoteRegistry.ROOT_NAME
 		existingFolder.Parent = ReplicatedStorage
-		local folderServer = ServerRemoteRegistry.new(
+		local folderServer = createOwnedServer(
 			loggerFor("Lobby"),
 			EMPTY_REGISTRY,
 			ReplicatedStorage,
@@ -645,12 +754,12 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		end)
 		assertCode(assertions, folderConflict, "ROOT_CONFLICT")
 		assertions.equal(existingFolder.Parent, ReplicatedStorage)
-		existingFolder:Destroy()
+		destroyOwned(existingFolder)
 
-		local existingModel = Instance.new("Model")
+		local existingModel = ownInstance(Instance.new("Model")) :: Model
 		existingModel.Name = RemoteRegistry.ROOT_NAME
 		existingModel.Parent = ReplicatedStorage
-		local modelServer = ServerRemoteRegistry.new(
+		local modelServer = createOwnedServer(
 			loggerFor("Lobby"),
 			EMPTY_REGISTRY,
 			ReplicatedStorage,
@@ -665,13 +774,13 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		end)
 		assertCode(assertions, classConflict, "ROOT_WRONG_CLASS")
 		assertions.equal(existingModel.Parent, ReplicatedStorage)
-		existingModel:Destroy()
+		destroyOwned(existingModel)
 		assertNoPublishedRoot(assertions)
 	end),
 
-	TestHarness.case("allows only one owner when listener binding re-enters initialization", function(assertions)
+	runtimeCase("allows only one owner when listener binding re-enters initialization", function(assertions)
 		assertNoPublishedRoot(assertions)
-		local winner = ServerRemoteRegistry.new(
+		local winner = createOwnedServer(
 			loggerFor("Match"),
 			FULL_REGISTRY,
 			ReplicatedStorage,
@@ -685,7 +794,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 
 		local reentered = false
 		local loserDisconnectCount = 0
-		local loser = ServerRemoteRegistry.new(
+		local loser = createOwnedServer(
 			loggerFor("Match"),
 			FULL_REGISTRY,
 			ReplicatedStorage,
@@ -721,9 +830,9 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		assertNoPublishedRoot(assertions)
 	end),
 
-	TestHarness.case("rejects lifecycle and contract re-entry without duplicating ownership", function(assertions)
+	runtimeCase("rejects lifecycle and contract re-entry without duplicating ownership", function(assertions)
 		assertNoPublishedRoot(assertions)
-		local server = ServerRemoteRegistry.new(
+		local server = createOwnedServer(
 			loggerFor("Development"),
 			EMPTY_REGISTRY,
 			ReplicatedStorage,
@@ -758,11 +867,27 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		end)
 		assertCode(assertions, shutdownAgain, "INVALID_STATE")
 		assertNoPublishedRoot(assertions)
+
+		local initializedOwner = createOwnedServer(
+			loggerFor("Development"),
+			EMPTY_REGISTRY,
+			ReplicatedStorage,
+			"Development",
+			EMPTY_RATE_BINDINGS,
+			nil,
+			TEST_LIMITER_DEPENDENCIES,
+			TEST_DISPATCHER_DEPENDENCIES
+		)
+		initialize(initializedOwner)
+		assertions.equal(initializedOwner:getState(), "Initialized")
+		assertions.isTrue(cleanupOwnedRuntime())
+		assertions.equal(initializedOwner:getState(), "Shutdown")
+		assertNoPublishedRoot(assertions)
 	end),
 
-	TestHarness.case("resolves only fixed active leaves through one decreasing total deadline", function(assertions)
+	runtimeCase("resolves only fixed active leaves through one decreasing total deadline", function(assertions)
 		assertNoPublishedRoot(assertions)
-		local server = ServerRemoteRegistry.new(
+		local server = createOwnedServer(
 			loggerFor("Match"),
 			FULL_REGISTRY,
 			ReplicatedStorage,
@@ -811,9 +936,9 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		assertNoPublishedRoot(assertions)
 	end),
 
-	TestHarness.case("resolves event and no-response request leaves without fabricating siblings", function(assertions)
+	runtimeCase("resolves event and no-response request leaves without fabricating siblings", function(assertions)
 		assertNoPublishedRoot(assertions)
-		local server = ServerRemoteRegistry.new(
+		local server = createOwnedServer(
 			loggerFor("Match"),
 			FULL_REGISTRY,
 			ReplicatedStorage,
@@ -850,9 +975,9 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		assertNoPublishedRoot(assertions)
 	end),
 
-	TestHarness.case("keeps dependency injection absent from a production-located module", function(assertions)
+	runtimeCase("keeps dependency injection absent from a production-located module", function(assertions)
 		local sourceModule = script.Parent.Parent.ProductionClientNetworking.ClientRemoteLookup
-		local productionLocatedClone = sourceModule:Clone()
+		local productionLocatedClone = ownInstance(sourceModule:Clone()) :: ModuleScript
 		productionLocatedClone.Name = "ClientRemoteLookupProductionLocationProbe"
 		productionLocatedClone.Parent = ReplicatedStorage
 
@@ -860,10 +985,10 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		assertions.equal(type(loaded.resolve), "function")
 		assertions.isNil(loaded.resolveForTests)
 		assertions.isTrue(table.isfrozen(loaded))
-		productionLocatedClone:Destroy()
+		destroyOwned(productionLocatedClone)
 	end),
 
-	TestHarness.case(
+	runtimeCase(
 		"rejects arbitrary inactive malformed and counterfeit lookups without creating Instances",
 		function(assertions)
 			assertNoPublishedRoot(assertions)
@@ -896,11 +1021,11 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			local invalidTimeout =
 				resolveForTests(FULL_REGISTRY, ReplicatedStorage, "Lobby", "TestServerEvent", 6, clock, waitAdapter)
 			assertLookupCode(assertions, invalidTimeout, "INVALID_TIMEOUT")
-			local invalidParentInstance = Instance.new("Folder")
+			local invalidParentInstance = ownInstance(Instance.new("Folder")) :: Folder
 			local invalidParent =
 				resolveForTests(FULL_REGISTRY, invalidParentInstance, "Lobby", "TestServerEvent", 1, clock, waitAdapter)
 			assertLookupCode(assertions, invalidParent, "INVALID_PARENT")
-			invalidParentInstance:Destroy()
+			destroyOwned(invalidParentInstance)
 			local counterfeit =
 				resolveForTests({} :: any, ReplicatedStorage, "Lobby", "TestServerEvent", 1, clock, waitAdapter)
 			assertLookupCode(assertions, counterfeit, "INVALID_REGISTRY")
@@ -940,7 +1065,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 				assertions.isNil(string.find(failedWait.error.message, PRIVATE_SENTINEL, 1, true))
 			end
 
-			local unrelatedRoot = Instance.new("Folder")
+			local unrelatedRoot = ownInstance(Instance.new("Folder")) :: Folder
 			unrelatedRoot.Name = RemoteRegistry.ROOT_NAME
 			local unrelated = resolveForTests(
 				FULL_REGISTRY,
@@ -954,14 +1079,14 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 				end
 			)
 			assertLookupCode(assertions, unrelated, "UNEXPECTED_INSTANCE")
-			unrelatedRoot:Destroy()
+			destroyOwned(unrelatedRoot)
 			assertNoPublishedRoot(assertions)
 		end
 	),
 
-	TestHarness.case("fails on wrong classes clock anomalies and elapsed total deadlines", function(assertions)
+	runtimeCase("fails on wrong classes clock anomalies and elapsed total deadlines", function(assertions)
 		assertNoPublishedRoot(assertions)
-		local root = Instance.new("Folder")
+		local root = ownInstance(Instance.new("Folder")) :: Folder
 		root.Name = RemoteRegistry.ROOT_NAME
 		local version = Instance.new("Folder")
 		version.Name = RemoteRegistry.VERSION_NAME
@@ -992,7 +1117,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			assertions.equal(wrongClass.error.path, "ATDNetwork.v1.TestResponseRequest.Request")
 		end
 		assertions.isNil(endpoint:FindFirstChild("Response"))
-		root:Destroy()
+		destroyOwned(root)
 
 		local clockReads = 0
 		local backwards = resolveForTests(FULL_REGISTRY, ReplicatedStorage, "Lobby", "TestServerEvent", 1, function()
@@ -1003,7 +1128,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		end)
 		assertLookupCode(assertions, backwards, "CLOCK_ANOMALY")
 
-		local deadlineRoot = Instance.new("Folder")
+		local deadlineRoot = ownInstance(Instance.new("Folder")) :: Folder
 		deadlineRoot.Name = RemoteRegistry.ROOT_NAME
 		local deadlineVersion = Instance.new("Folder")
 		deadlineVersion.Name = RemoteRegistry.VERSION_NAME
@@ -1026,7 +1151,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		assertions.equal(#remainingValues, 2)
 		assertions.isTrue(remainingValues[2] < remainingValues[1])
 		assertions.isNil(deadlineVersion:FindFirstChild("TestServerEvent"))
-		deadlineRoot:Destroy()
+		destroyOwned(deadlineRoot)
 		assertNoPublishedRoot(assertions)
 	end),
 })

@@ -7,9 +7,9 @@ Ant Tower Defense. Packet 05.4 created it on 2026-08-26. It separates checks
 that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
-Phase 05 and its fresh combined exit audit are complete. Packets 06.1–06.5 are
-complete; Phase 06 remains active while the fresh Gate A/Phase 06 exit audit and
-its genuine CI evidence are open. Phase 07 has not begun.
+Phase 05 and its fresh combined exit audit are complete. Packets 06.1–06.5 and
+the fresh local Gate A/Phase 06 audit pass; Phase 06 remains active while the
+audit-content GitHub run and completion record are open. Phase 07 has not begun.
 
 The current repository has a fixed remote-registry/network-ownership foundation,
 strict shared payload validators, a server-authoritative token-bucket limiter,
@@ -192,12 +192,15 @@ linked historical document for the original Studio evidence.
   Lobby contains no Match
   source, Match contains no Lobby source, and production contains no test source
   or marker. The two manual `tests/studio` harness sources are mapped nowhere
-  and occur in none of the four builds.
+  and occur in none of the four builds. Every one of the 26 Test-owned
+  ModuleScripts is independently matched to an exact DataModel path, class,
+  authoritative file, and byte-for-byte source; unlisted Test-owned source
+  fails the verifier.
 - **Cleanup procedure:** the verifier removes its exact four outputs; confirm no
   generated place remains.
 - **Phase or prerequisite:** available now; mapping details are in
-  [Rojo Project Definitions](ROJO_PROJECTS.md). The Phase 06/Gate A exit audit
-  must record the pending current Actions pass.
+  [Rojo Project Definitions](ROJO_PROJECTS.md). The local Phase 06/Gate A exit
+  audit passes; its current Actions pass remains pending.
 
 ### H-06 — Formatting, linting, and genuine CI enforcement
 
@@ -301,8 +304,9 @@ linked historical document for the original Studio evidence.
   exact generated-place cleanup; confirm no new residue.
 - **Phase or prerequisite:** Packets 06.1–06.5 and the initial M-06 record are
   complete. Every future feature remote must still satisfy the
-  [remote-security checklist](REMOTE_SECURITY_CHECKLIST.md) before it can ship;
-  the fresh Phase 06/Gate A exit audit remains open.
+  [remote-security checklist](REMOTE_SECURITY_CHECKLIST.md) before it can ship.
+  The fresh local Phase 06/Gate A audit passes; its current Actions evidence and
+  completion record remain open.
 
 ### H-09 — Request correlation, dispatch, and public errors
 
@@ -345,7 +349,8 @@ linked historical document for the original Studio evidence.
   place.
 - **Phase or prerequisite:** Packets 06.1–06.5 and the initial M-06 record are
   complete. Every future feature remote still requires its approved boundary
-  checklist; the fresh Phase 06/Gate A exit audit remains open.
+  checklist. The fresh local Phase 06/Gate A audit passes; its current Actions
+  evidence and completion record remain open.
 
 ## Local Studio solo tests
 
@@ -687,9 +692,10 @@ linked historical document for the original Studio evidence.
   containment.
 - **Test category:** automated protocol tests plus Studio multi-client security
   regression.
-- **Current status:** `Passed` for the initial Phase 06 record on 2026-08-26.
-  Nine integrated headless adversarial cases passed together with the
-  [exact unsaved two-client Studio evidence][phase-06-two-client-evidence].
+- **Current status:** `Passed` for the fresh Phase 06/Gate A local record on
+  2026-08-26. Three byte-identical complete 200-case runs and nine integrated
+  headless adversarial cases passed together with the
+  [exact current-source unsaved two-client Studio evidence][phase-06-two-client-evidence].
 - **Environment:** isolated Lune Test DataModel for deterministic protocol logic;
   correctly paired Match Studio `Server & Clients` with exactly two clients for
   engine transport, origin, routing, datatype, and disconnect behavior. The two
@@ -724,11 +730,12 @@ linked historical document for the original Studio evidence.
   ending the session discards all runtime-only harness scripts. Both places
   return to Edit mode without save or publication.
 - **Phase or prerequisite:** Packets 06.1–06.5 complete the initial foundation
-  record; the fresh Phase 06/Gate A exit audit remains open. This pass does not
-  cover or approve gameplay remotes, published-client behavior, adverse-network
-  simulation, reconnect/teleport behavior, devices, persistence, or external
-  services. Those rows remain deferred or unavailable, and later Phase 38
-  expands M-06 only after its affected systems exist.
+  record and the fresh local exit audit passes. Phase 06/Gate A remains open
+  only for current clean Actions evidence and its completion record. This pass
+  does not cover or approve gameplay remotes, published-client behavior,
+  adverse-network simulation, reconnect/teleport behavior, devices,
+  persistence, or external services. Those rows remain deferred or unavailable,
+  and later Phase 38 expands M-06 only after its affected systems exist.
 
 ## Published-client and private-version tests
 

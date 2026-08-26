@@ -365,5 +365,6 @@ valid startup path before shutdown registration, while preserving the one-hook
 shutdown behavior recorded here. Current bootstrap evidence is in
 `docs/CONFIGURATION_VALIDATION.md`.
 
-Packet 06.5 is complete with headless security and unsaved Studio networking
-evidence. The fresh Phase 06/Gate A exit audit remains open.
+Packet 06.5 and the fresh local Phase 06/Gate A audit pass with headless
+security and unsaved Studio networking evidence. Current audit-content CI
+evidence and its completion record remain open.

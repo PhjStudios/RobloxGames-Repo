@@ -10,6 +10,7 @@
 - Packet 06.3 status: complete — 2026-08-26
 - Packet 06.4 status: complete — 2026-08-26
 - Packet 06.5 status: complete — 2026-08-26
+- Fresh Phase 06/Gate A local audit: passed — 2026-08-26; clean CI pending
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Production feature endpoints: none; the lasting authenticated registry is empty
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
@@ -20,8 +21,9 @@
 
 This is the authoritative Phase 06 network-boundary document. The decision
 section was recorded before implementation. The sections below also record the
-completed Packet 06.1–06.5 implementations and evidence. Phase 06 and Gate A
-remain open until the fresh exit audit and current clean workflow evidence pass.
+completed Packet 06.1–06.5 implementations and evidence. The fresh local exit
+audit now passes; Phase 06 and Gate A remain open until its current clean
+workflow evidence and completion record pass.
 
 ## Official Roblox behavior that shapes the design
 
@@ -86,19 +88,19 @@ test-harness evidence, not a production-network timing contract.
 - [Server-side detection and directional remotes](https://create.roblox.com/docs/scripting/security/server-side-detection)
 - [Replication and confidentiality](https://create.roblox.com/docs/scripting/security/access-control)
 - [Replication ordering](https://create.roblox.com/docs/scripting/attributes#replication-order)
-- [`Instance.WaitForChild`](https://create.roblox.com/docs/reference/engine/classes/Instance/WaitForChild)
+- [`Instance.WaitForChild`](https://create.roblox.com/docs/reference/engine/classes/Instance.md#WaitForChild)
 - [Streaming and Instances sent remotely](https://create.roblox.com/docs/workspace/streaming/techniques#instances-sent-remotely)
 - [Networking and replication performance](https://create.roblox.com/docs/performance-optimization/improve#networking-and-replication)
 - [`typeof` for Roblox host types](https://create.roblox.com/docs/reference/engine/globals/RobloxGlobals#typeof)
 - [Luau standard library and byte-string behavior](https://luau.org/library/)
 - [`Vector2` datatype](https://create.roblox.com/docs/reference/engine/datatypes/Vector2)
 - [`Vector3` datatype](https://create.roblox.com/docs/reference/engine/datatypes/Vector3)
-- [`CFrame` component contract](https://create.roblox.com/docs/reference/engine/datatypes/CFrame)
-- [`Instance` class and ancestry API](https://create.roblox.com/docs/reference/engine/classes/Instance)
+- [`CFrame` component contract](https://create.roblox.com/docs/reference/engine/datatypes/CFrame.md)
+- [`Instance` class and ancestry API](https://create.roblox.com/docs/reference/engine/classes/Instance.md)
 - [`RunService` execution-context API](https://create.roblox.com/docs/reference/engine/classes/RunService)
-- [`Players.PlayerRemoving`](https://create.roblox.com/docs/reference/engine/classes/Players#PlayerRemoving)
+- [`Players.PlayerRemoving`](https://create.roblox.com/docs/reference/engine/classes/Players.md#PlayerRemoving)
 - [Luau clock comparison](https://luau.org/news/2020-06-20-luau-recap-june-2020/#os-enhancements)
-- [`DataModel.BindToClose`](https://create.roblox.com/docs/reference/engine/classes/DataModel#BindToClose)
+- [`DataModel.BindToClose`](https://create.roblox.com/docs/reference/engine/classes/DataModel.md#BindToClose)
 - [Studio multi-client testing](https://create.roblox.com/docs/studio/testing-modes#multi-client-simulation)
 - [`StudioTestService`](https://create.roblox.com/docs/reference/engine/classes/StudioTestService)
 - [`LogService.ClearOutput`](https://create.roblox.com/docs/reference/engine/classes/LogService#ClearOutput)
@@ -683,7 +685,9 @@ runnable scripts. Tests and test-only fixtures remain absent from Default,
 Lobby, and Match; Lobby contains no Match source and Match contains no Lobby
 source. The targeted architecture/security review resolved every normal finding
 and finished with no unresolved P0, P1, P2, or P3 finding. Packet 06.1 is
-complete; Phase 06 and Gate A remain open.
+complete. Packets 06.2–06.5 and the fresh local exit audit have since passed;
+Phase 06 and Gate A remain open for current audit-content CI evidence and its
+completion record.
 
 ## Packet 06.2 completion evidence
 
@@ -791,8 +795,9 @@ production projects and Lobby/Match source isolation remains intact.
 The lasting production registry and production rate-policy list remain frozen
 and empty. No gameplay definition, generic bus, `RemoteFunction`, punishment,
 persistence, external service, Phase 07 source, place save, or publication was
-added. Packet 06.4 is complete; Packet 06.5 has since completed. Phase 06 and
-Gate A remain open pending the fresh exit audit.
+added. Packet 06.4 is complete; Packet 06.5 has since completed. The fresh local
+exit audit now passes; Phase 06 and Gate A remain open for current clean CI
+evidence and its completion record.
 
 ## Packet 06.5 completion evidence
 
@@ -841,5 +846,30 @@ reported zero forbidden-value matches and zero error records. The runtime-only
 scripts were discarded by ending the local session, both production places
 were left in Edit mode, and no place was saved or published. Exact procedure
 and evidence are in `NETWORK_SECURITY_STUDIO_REGRESSION.md`; the mandatory
-future-remote gate is `REMOTE_SECURITY_CHECKLIST.md`. Packet 06.5 is complete;
-the fresh Phase 06/Gate A exit audit remains open.
+future-remote gate is `REMOTE_SECURITY_CHECKLIST.md`. Packet 06.5 and the fresh
+local Phase 06/Gate A audit pass; current clean CI evidence and its completion
+record remain open.
+
+## Fresh Phase 06/Gate A audit evidence
+
+The combined exit audit reran the exact pinned toolchain, formatting, Selene,
+three byte-identical 200-case canonical runs, all six isolated failure controls,
+and the complete four-project verifier. The verifier now also authenticates all
+26 Test-owned ModuleScripts against an exact path/class/authoritative-source
+allowlist; unlisted Test-owned source fails. Production remains 40
+ModuleScripts, one Script, and one LocalScript per project, while Test remains
+65 ModuleScripts with no runnable script.
+
+The accepted fresh two-client Studio run used the exact tracked server SHA-256
+`883bcdb665f54cb5adff9f935af90992cc5b71e5a486f7293a6f5a2f27bdec6a`
+and client SHA-256
+`8223e9e95dfb4caee94986da9f722917b68ec23ee5e7c7e1992d2173fc1ea290`.
+It repeated the ten engine assertions, real disconnect and cleanup, remaining-
+peer service, empty production topology, zero fixture residue, zero forbidden
+log matches, and zero error records. Both places returned to Edit mode without
+save or publication.
+
+Exact combined evidence is in `PHASE_06_EXIT_AUDIT.md`. Phase 06 and Gate A
+remain open only for that audit-content commit's clean GitHub workflow run and
+the ordinary completion record that cites it. No gameplay endpoint or Phase 07
+system is approved or implemented by this audit.

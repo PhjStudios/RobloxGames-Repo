@@ -465,6 +465,7 @@ report, privacy, bootstrap, and Studio evidence is recorded in
 
 Packets 06.1–06.5 make and test the narrow `network` vocabulary and aggregate-field
 extensions recorded above. The lasting production registry and rate-policy list
-remain empty, and no gameplay endpoint was created. Packet 06.5 is complete;
-the fresh Phase 06/Gate A exit audit remains open. The architecture and privacy
-boundary are recorded in `docs/NETWORK_PROTOCOL.md`.
+remain empty, and no gameplay endpoint was created. Packet 06.5 and the fresh
+local Phase 06/Gate A audit pass; current audit-content CI evidence and its
+completion record remain. The architecture and privacy boundary are recorded
+in `docs/NETWORK_PROTOCOL.md`.

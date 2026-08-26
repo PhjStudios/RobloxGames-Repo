@@ -359,14 +359,17 @@ paths. It maps four server modules (`ProductionRateLimits`,
 `ServerRemoteRegistry`, `ServerRateLimiter`, and `ServerRequestDispatcher`) and
 two client modules (`ClientRemoteLookup` and `ClientRequestTracker`). The full
 Test build now contains 65 ModuleScripts: those 33 shared modules, six mapped
-networking modules, and 26 test-owned modules. It has zero runnable scripts.
+networking modules, and 26 test-owned modules. The verifier authenticates every
+one of those 26 test-owned modules by exact DataModel path, class,
+authoritative file, and byte-for-byte source; unlisted test source fails. Test
+has zero runnable scripts.
 Lobby contains no Match source, Match contains no Lobby source, and lasting
 production remote definitions and rate policies remain empty. Production
 remains at 40 ModuleScripts, one Script, and one LocalScript. The existing
 dispatcher now enforces synchronous non-yielding feature callbacks and reserves
-validation metadata to its own strict payload failure path. Packet 06.5 is
-complete; the fresh Phase 06/Gate A exit audit and CI evidence remain open, and
-Phase 07 has not begun.
+validation metadata to its own strict payload failure path. Packet 06.5 and the
+fresh local Phase 06/Gate A audit pass; current audit-content CI evidence and
+its completion record remain open, and Phase 07 has not begun.
 
 ## Roblox Studio verification
 
@@ -453,8 +456,9 @@ nowhere.
 Default, Lobby, and Match map no test directory.
 `lune run tests/verify-builds.luau` enforces both directions across the complete
 generated DataModels, including an exact positive path/class/source map for all
-42 current production Lua containers and exact source identity for the six
-test-mapped networking modules.
+42 current production Lua containers, exact source identity for the six
+test-mapped networking modules, and an exact positive path/class/source map for
+all 26 Test-owned ModuleScripts.
 
 This headless boundary and every environment-specific follow-up are indexed in
 `docs/TEST_MATRIX.md`; passing it does not substitute for published-client,

@@ -2,7 +2,7 @@
 
 ## Decision record
 
-- Status: Phase 05 and Packets 06.1–06.5 complete; fresh Phase 06/Gate A exit audit is next
+- Status: Phase 05 and Packets 06.1–06.5 complete; fresh local Phase 06/Gate A audit passed, CI pending
 - Research date: 2026-08-26
 - Selected runtime: Lune 0.10.5
 - Rokit tool identifier: `lune-org/lune@0.10.5`
@@ -393,7 +393,9 @@ changing the canonical command or its exit-code contract:
 
 This is focused source/test evidence only. Live Roblox remote delivery and
 shutdown remain subject to the authorized unsaved Studio regression. Packet
-06.1 is complete; Phase 06 and Gate A remain open.
+06.1 is complete. Packets 06.2–06.5 and the fresh local exit audit have since
+passed; Phase 06 and Gate A remain open for current audit-content CI evidence
+and its completion record.
 
 ## Packet 06.2 completion verification
 
@@ -528,5 +530,37 @@ without changing the canonical command or its exit-code contract:
   hardening; lasting remote definitions and policies remain empty, and Phase 07
   has not begun.
 
-Packet 06.5 is complete with this packet-level evidence. Phase 06 and Gate A
-remain open pending the fresh exit audit and its genuine CI evidence.
+Packet 06.5 is complete with this packet-level evidence. The fresh local exit
+audit described below now passes; Phase 06 and Gate A remain open for its
+genuine CI evidence and completion record.
+
+## Fresh Phase 06/Gate A runner evidence
+
+After the exit-review remediations, three consecutive canonical runs from the
+exact current tree each passed all 200 cases in the same 16-suite order. Every
+captured stdout stream was 40,375 UTF-8 bytes with SHA-256
+`cdca55905ec1c9c6dca262ae120aaf35546bdb355ef2fbe61947eda7da370f7c`;
+the three strings were byte-identical and every stderr stream was empty.
+
+The six isolated controls also returned their existing exact exit/code pairs:
+assertion `1`/`ASSERT_EQUAL_FAILED`; zero discovery `2`/`ZERO_TESTS`;
+module load `2`/`MODULE_EXECUTION_FAILED`; malformed discovery
+`2`/`MISNAMED_SPEC`; wrong-class root `2`/`ROOT_WRONG_CLASS`; and runner crash
+`3`/`RUNNER_CRASH`. Their combined observable output contained none of the
+embedded private values or the integrated network sentinel.
+
+The structural verifier now treats the complete Test-owned surface as a
+positive allowlist rather than only a count: all 26 test-owned ModuleScripts
+must match an exact DataModel path, class, authoritative file, and byte-for-byte
+source. It continues to count the 33 shared modules, authenticate the six copied
+common networking modules, reject runnable test scripts, prove production test
+exclusion and role isolation, and remove only its exact four outputs.
+
+The exact current-source Studio harnesses then passed the two-client engine
+regression with the server SHA-256
+`883bcdb665f54cb5adff9f935af90992cc5b71e5a486f7293a6f5a2f27bdec6a`
+and client SHA-256
+`8223e9e95dfb4caee94986da9f722917b68ec23ee5e7c7e1992d2173fc1ea290`.
+The full local runner, shipping, and Studio record is in
+`PHASE_06_EXIT_AUDIT.md`. Phase 06 and Gate A remain open only for the current
+audit-content workflow run and its completion record; Phase 07 has not begun.

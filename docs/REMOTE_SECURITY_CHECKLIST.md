@@ -380,7 +380,9 @@ feature endpoint. Its test-only definitions and Studio fixture are evidence for
 the foundation, not entries that may be copied into the production registry.
 Packet 06.5's 200-case headless run and unsaved two-client engine regression are
 recorded in `docs/NETWORK_PROTOCOL.md` and
-`docs/NETWORK_SECURITY_STUDIO_REGRESSION.md`. The fresh Phase 06 exit audit will
-record the combined foundation evidence and current workflow run. The next
-feature packet must still complete this checklist for each endpoint it proposes;
-no test-only fixture is an approved production endpoint.
+`docs/NETWORK_SECURITY_STUDIO_REGRESSION.md`. The fresh Phase 06 exit audit
+records the combined foundation evidence in `docs/PHASE_06_EXIT_AUDIT.md`; its
+local combined state now passes, while current clean CI evidence and the
+completion record remain open. The next
+feature packet must still complete this checklist for each endpoint it
+proposes; no test-only fixture is an approved production endpoint.

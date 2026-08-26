@@ -11,7 +11,7 @@ type BuildDefinition = {
 	role: "Default" | "Lobby" | "Match" | "Test",
 }
 
-type ProductionSourceDefinition = {
+type SourceDefinition = {
 	dataModelPath: string,
 	className: "ModuleScript" | "Script" | "LocalScript",
 	sourcePath: string,
@@ -24,7 +24,7 @@ local BUILDS: { BuildDefinition } = {
 	{ name = "Match", project = "match.project.json", output = "build/verify-match.rbxlx", role = "Match" },
 	{ name = "Test", project = "test.project.json", output = "build/verify-test.rbxlx", role = "Test" },
 }
-local EXPECTED_PRODUCTION_SOURCES: { ProductionSourceDefinition } = table.freeze({
+local EXPECTED_PRODUCTION_SOURCES: { SourceDefinition } = table.freeze({
 	{
 		dataModelPath = "ReplicatedStorage.Shared.config.Assets",
 		className = "ModuleScript",
@@ -236,6 +236,138 @@ local EXPECTED_PRODUCTION_SOURCES: { ProductionSourceDefinition } = table.freeze
 		sourcePath = "src/client/common/networking/ClientRequestTracker.luau",
 	},
 })
+local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.ConfigurationFixtures",
+		className = "ModuleScript",
+		sourcePath = "tests/fixtures/ConfigurationFixtures.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.NetworkFixtures",
+		className = "ModuleScript",
+		sourcePath = "tests/fixtures/NetworkFixtures.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.Cleanup.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/Cleanup.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.ClientRequestTracker.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/ClientRequestTracker.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.ConfigurationContractEdges.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/ConfigurationContractEdges.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.ConfigurationFailures.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/ConfigurationFailures.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.ConfigurationLoaded.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/ConfigurationLoaded.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.ConfigurationPrivacy.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/ConfigurationPrivacy.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.ConfigurationSchemas.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/ConfigurationSchemas.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.CoreContracts.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/CoreContracts.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.NetworkSecurity.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/NetworkSecurity.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.PayloadValidation.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/PayloadValidation.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.RemoteRegistry.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/RemoteRegistry.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.RemoteRuntime.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/RemoteRuntime.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.RequestProtocol.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/RequestProtocol.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.ServerRateLimiter.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/ServerRateLimiter.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.ServerRequestDispatcher.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/ServerRequestDispatcher.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.Smoke.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/Smoke.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Support.RobloxAdapter",
+		className = "ModuleScript",
+		sourcePath = "tests/support/RobloxAdapter.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Support.TestHarness",
+		className = "ModuleScript",
+		sourcePath = "tests/support/TestHarness.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Support.TestRunner",
+		className = "ModuleScript",
+		sourcePath = "tests/support/TestRunner.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.NegativeControls.Assertion.IntentionalFailure.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/negative/assertion/IntentionalFailure.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.NegativeControls.Dependencies.BrokenDependency",
+		className = "ModuleScript",
+		sourcePath = "tests/negative/dependencies/BrokenDependency.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.NegativeControls.MalformedDiscovery.Misnamed",
+		className = "ModuleScript",
+		sourcePath = "tests/negative/malformed-discovery/Misnamed.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.NegativeControls.MalformedRoot.Specs.WouldPass.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/negative/malformed-root/WouldPass.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.NegativeControls.ModuleLoad.IntentionalLoadFailure.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/negative/module-load/IntentionalLoadFailure.spec.luau",
+	},
+})
 
 local createdBuildDirectory = false
 local ownedOutputs: { [string]: boolean } = {}
@@ -343,7 +475,7 @@ local function isLuaSourceContainer(instance: Instance): boolean
 end
 
 local function verifyProductionSources(dataModel: DataModel, definition: BuildDefinition): boolean
-	local expectedByPath: { [string]: ProductionSourceDefinition } = {}
+	local expectedByPath: { [string]: SourceDefinition } = {}
 	for _, expected in EXPECTED_PRODUCTION_SOURCES do
 		if expectedByPath[expected.dataModelPath] ~= nil then
 			emit("FAIL", definition.name, "EXPECTED_SOURCE_PATH_DUPLICATE", expected.dataModelPath)
@@ -443,6 +575,98 @@ local function verifyRoleLayers(dataModel: DataModel, role: "Default" | "Lobby" 
 		and hasChild(clientContainer, "lobby") == expectedLobby
 		and hasChild(serverContainer, "match") == expectedMatch
 		and hasChild(clientContainer, "match") == expectedMatch
+end
+
+local function hasAncestor(instance: Instance, ancestor: Instance): boolean
+	local current = instance.Parent
+	while current ~= nil do
+		if current == ancestor then
+			return true
+		end
+		current = current.Parent
+	end
+	return false
+end
+
+local function verifyTestOwnedSources(
+	dataModel: DataModel,
+	definition: BuildDefinition,
+	shared: Instance,
+	productionServerNetworking: Instance,
+	productionClientNetworking: Instance
+): boolean
+	local expectedByPath: { [string]: SourceDefinition } = {}
+	for _, expected in EXPECTED_TEST_OWNED_SOURCES do
+		if expectedByPath[expected.dataModelPath] ~= nil then
+			emit("FAIL", definition.name, "EXPECTED_TEST_SOURCE_PATH_DUPLICATE", expected.dataModelPath)
+			return false
+		end
+		expectedByPath[expected.dataModelPath] = expected
+	end
+
+	local actualSources: { ModuleScript } = {}
+	for _, descendant in dataModel:GetDescendants() do
+		if
+			descendant.ClassName == "ModuleScript"
+			and not hasAncestor(descendant, shared)
+			and not hasAncestor(descendant, productionServerNetworking)
+			and not hasAncestor(descendant, productionClientNetworking)
+		then
+			table.insert(actualSources, descendant :: ModuleScript)
+		end
+	end
+	table.sort(actualSources, function(left, right)
+		local leftPath = left:GetFullName()
+		local rightPath = right:GetFullName()
+		if leftPath ~= rightPath then
+			return leftPath < rightPath
+		end
+		return left.Source < right.Source
+	end)
+
+	if #actualSources ~= #EXPECTED_TEST_OWNED_SOURCES then
+		emit("FAIL", definition.name, `TEST_OWNED_SOURCE_COUNT_{#actualSources}`)
+		return false
+	end
+
+	local actualByPath: { [string]: ModuleScript } = {}
+	local previousPath: string? = nil
+	for _, actual in actualSources do
+		local path = actual:GetFullName()
+		if path == previousPath then
+			emit("FAIL", definition.name, "TEST_OWNED_SOURCE_PATH_DUPLICATE", path)
+			return false
+		end
+		previousPath = path
+		if expectedByPath[path] == nil then
+			emit("FAIL", definition.name, "TEST_OWNED_SOURCE_UNEXPECTED", path)
+			return false
+		end
+		actualByPath[path] = actual
+	end
+
+	for _, expected in EXPECTED_TEST_OWNED_SOURCES do
+		local actual = actualByPath[expected.dataModelPath]
+		if actual == nil then
+			emit("FAIL", definition.name, "TEST_OWNED_SOURCE_MISSING", expected.dataModelPath)
+			return false
+		end
+		if actual.ClassName ~= expected.className then
+			emit("FAIL", definition.name, "TEST_OWNED_SOURCE_CLASS_MISMATCH", expected.dataModelPath)
+			return false
+		end
+		if not fs.isFile(expected.sourcePath) then
+			emit("FAIL", definition.name, "TEST_OWNED_AUTHORITATIVE_SOURCE_MISSING", expected.dataModelPath)
+			return false
+		end
+		local readSucceeded, expectedSource = pcall(fs.readFile, expected.sourcePath)
+		if not readSucceeded or actual.Source ~= expectedSource then
+			emit("FAIL", definition.name, "TEST_OWNED_SOURCE_CONTENT_MISMATCH", expected.dataModelPath)
+			return false
+		end
+	end
+
+	return true
 end
 
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
@@ -585,11 +809,18 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 		end
 	end
 	local networkingModules = 6
-	local testOwnedModules = modules - sharedModules - networkingModules
-	if testOwnedModules ~= 26 then
-		emit("FAIL", definition.name, `TEST_OWNED_MODULE_COUNT_{testOwnedModules}`)
+	if
+		not verifyTestOwnedSources(
+			dataModel,
+			definition,
+			shared :: Instance,
+			productionServerNetworking :: Instance,
+			productionClientNetworking :: Instance
+		)
+	then
 		return false
 	end
+	local testOwnedModules = #EXPECTED_TEST_OWNED_SOURCES
 
 	emit(
 		"PASS",

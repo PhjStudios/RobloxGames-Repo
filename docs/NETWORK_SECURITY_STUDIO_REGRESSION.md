@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-- Status: **Passed**
+- Status: **Passed — fresh Gate A rerun**
 - Date: 2026-08-26
 - Operator: Codex, under the repository owner's explicit Phase 06 authorization
 - Studio version: `0.735.0.7351131`; installation build directory
@@ -34,6 +34,14 @@ The tracked harness sources are:
 - `tests/studio/Phase06NetworkServer.server.luau`
 - `tests/studio/Phase06NetworkClient.client.luau`
 
+The exact sources staged for the accepted Gate A run matched the tracked files
+both before injection and after the session:
+
+- server SHA-256:
+  `883bcdb665f54cb5adff9f935af90992cc5b71e5a486f7293a6f5a2f27bdec6a`;
+- client SHA-256:
+  `8223e9e95dfb4caee94986da9f722917b68ec23ee5e7c7e1992d2173fc1ea290`.
+
 `tests/studio` is absent from Default, Lobby, Match, and Test mappings. The
 sources are injected only into live local-test DataModels after `Server &
 Clients` starts:
@@ -47,8 +55,12 @@ No temporary Script is created in the Edit DataModel. Ending the test discards
 all three runtime scripts. The harness server alone creates the distinct
 `ReplicatedStorage.ATDPhase06StudioFixture` test root parent-last. One fixture
 Cleanup container owns the root, listeners, limiter, dispatcher, and
-player-removal state. Clients use bounded exact-segment lookup and create no
-Instance.
+player-removal state. Every protected remote and `PlayerRemoving` callback is
+non-yielding and records only bounded state; one protected main coordinator
+performs waits and ordered transitions outside those callbacks. The Cleanup
+container owns coordinator cancellation, while the terminal/finishing gates
+prevent it from advancing during reverse resource teardown. Clients use bounded
+exact-segment lookup and create no Instance.
 
 The production bootstrap separately owns the unique
 `ReplicatedStorage.ATDNetwork/v1` tree. The fixture must never adopt, delete,
@@ -182,9 +194,11 @@ timeouts, install an Edit-mode Script, or weaken the disconnect requirement.
 
 ### Final two-client run
 
-The final post-review pass was 2026-08-26 17:06 local (`America/Toronto`). The
-disconnect was logged at `17:06:57.105`, the remaining client passed at
-`17:06:57.214`, and the server passed at `17:06:57.455`.
+The accepted fresh Gate A pass launched the existing current-source server and
+both client scripts within one second at `2026-08-26 18:07:38` local
+(`America/Toronto`; `22:07:38Z`). The real client disconnect was logged at
+`18:08:40.666`, the remaining client passed at `18:08:40.816`, and the server
+passed at `18:08:41.050`.
 
 ```text
 [ATD_PHASE06_STUDIO][PASS][context=client][case=completed][caseCount=10]
@@ -199,8 +213,11 @@ Post-pass bounded records:
 [ATD_PHASE06_STUDIO][INSPECT][context=server][rootCount=1][rootClass=Folder][versionClass=Folder][endpointCount=0][fixtureCount=0]
 ```
 
-The server inspection completed at `17:07:54.136`; the server and client log
-audits completed at `17:07:55.103` and `17:08:22.296`, respectively.
+The server inspection completed at `18:09:49.430`; the server and client log
+audits completed at `18:10:36.995` and `18:11:01.344`, respectively. Each log
+audit dynamically assembled the private sentinel, representative request IDs
+and values, and terminal failure markers so its own command could not create a
+false match. Both also required zero `MessageError` records.
 
 Observed engine behavior and assertions:
 
