@@ -196,9 +196,19 @@ local EXPECTED_PRODUCTION_SOURCES: { ProductionSourceDefinition } = table.freeze
 		sourcePath = "src/server/common/bootstrap/Shutdown.luau",
 	},
 	{
+		dataModelPath = "ServerScriptService.Server.common.networking.ProductionRateLimits",
+		className = "ModuleScript",
+		sourcePath = "src/server/common/networking/ProductionRateLimits.luau",
+	},
+	{
 		dataModelPath = "ServerScriptService.Server.common.networking.ServerRemoteRegistry",
 		className = "ModuleScript",
 		sourcePath = "src/server/common/networking/ServerRemoteRegistry.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.common.networking.ServerRateLimiter",
+		className = "ModuleScript",
+		sourcePath = "src/server/common/networking/ServerRateLimiter.luau",
 	},
 	{
 		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.common.bootstrap.Main",
@@ -422,7 +432,7 @@ end
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
 	currentStage = `verify_counts_{definition.name}`
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 35 or scripts ~= 1 or localScripts ~= 1 then
+	if modules ~= 37 or scripts ~= 1 or localScripts ~= 1 then
 		emit("FAIL", definition.name, `PRODUCTION_CLASS_COUNTS_{modules}_{scripts}_{localScripts}`)
 		return false
 	end
@@ -486,49 +496,68 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 		return false
 	end
 
-	local expectedNetworkingSources = {
+	local expectedNetworkingContainers = {
 		{
 			container = productionServerNetworking,
-			moduleName = "ServerRemoteRegistry",
-			sourcePath = "src/server/common/networking/ServerRemoteRegistry.luau",
+			sources = {
+				{
+					moduleName = "ProductionRateLimits",
+					sourcePath = "src/server/common/networking/ProductionRateLimits.luau",
+				},
+				{
+					moduleName = "ServerRemoteRegistry",
+					sourcePath = "src/server/common/networking/ServerRemoteRegistry.luau",
+				},
+				{
+					moduleName = "ServerRateLimiter",
+					sourcePath = "src/server/common/networking/ServerRateLimiter.luau",
+				},
+			},
 		},
 		{
 			container = productionClientNetworking,
-			moduleName = "ClientRemoteLookup",
-			sourcePath = "src/client/common/networking/ClientRemoteLookup.luau",
+			sources = {
+				{
+					moduleName = "ClientRemoteLookup",
+					sourcePath = "src/client/common/networking/ClientRemoteLookup.luau",
+				},
+			},
 		},
 	}
-	for _, expected in expectedNetworkingSources do
-		if expected.container == nil or expected.container.ClassName ~= "Folder" then
+	for _, expectedContainer in expectedNetworkingContainers do
+		local container = expectedContainer.container
+		if container == nil or container.ClassName ~= "Folder" then
 			emit("FAIL", definition.name, "TEST_NETWORKING_CONTAINER_MISSING")
 			return false
 		end
 
-		local descendants = collectDescendants(expected.container)
-		if #descendants ~= 1 then
+		local descendants = collectDescendants(container)
+		if #descendants ~= #expectedContainer.sources then
 			emit("FAIL", definition.name, "TEST_NETWORKING_SOURCE_COUNT")
 			return false
 		end
 
-		local module = descendants[1]
-		if module.ClassName ~= "ModuleScript" or module.Name ~= expected.moduleName then
-			emit("FAIL", definition.name, "TEST_NETWORKING_SOURCE_MISMATCH", module:GetFullName())
-			return false
-		end
+		for _, expectedSourceDefinition in expectedContainer.sources do
+			local module = container:FindFirstChild(expectedSourceDefinition.moduleName)
+			if module == nil or module.ClassName ~= "ModuleScript" then
+				emit("FAIL", definition.name, "TEST_NETWORKING_SOURCE_MISMATCH", container:GetFullName())
+				return false
+			end
 
-		if not fs.isFile(expected.sourcePath) then
-			emit("FAIL", definition.name, "TEST_NETWORKING_AUTHORITATIVE_SOURCE_MISSING", module:GetFullName())
-			return false
-		end
+			if not fs.isFile(expectedSourceDefinition.sourcePath) then
+				emit("FAIL", definition.name, "TEST_NETWORKING_AUTHORITATIVE_SOURCE_MISSING", module:GetFullName())
+				return false
+			end
 
-		local readSucceeded, expectedSource = pcall(fs.readFile, expected.sourcePath)
-		if not readSucceeded or (module :: ModuleScript).Source ~= expectedSource then
-			emit("FAIL", definition.name, "TEST_NETWORKING_SOURCE_CONTENT_MISMATCH", module:GetFullName())
-			return false
+			local readSucceeded, expectedSource = pcall(fs.readFile, expectedSourceDefinition.sourcePath)
+			if not readSucceeded or (module :: ModuleScript).Source ~= expectedSource then
+				emit("FAIL", definition.name, "TEST_NETWORKING_SOURCE_CONTENT_MISMATCH", module:GetFullName())
+				return false
+			end
 		end
 	end
 
-	emit("PASS", definition.name, `SHARED_MODULES_{sharedModules}_NETWORKING_MODULES_2_RUNNABLE_SCRIPTS_0`)
+	emit("PASS", definition.name, `SHARED_MODULES_{sharedModules}_NETWORKING_MODULES_4_RUNNABLE_SCRIPTS_0`)
 	return true
 end
 

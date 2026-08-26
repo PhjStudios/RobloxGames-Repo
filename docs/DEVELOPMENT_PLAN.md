@@ -30,13 +30,13 @@ only change through an explicit architecture decision recorded here.
   Phase 04's separate exit-gate audit also passed on 2026-08-26.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
-  Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, and 06.2 completed on
-  2026-08-26.
-- Current checkpoint: Packet 06.2 is complete; Packet 06.3 is next but not
-  begun. The current deterministic suite passes 128 cases across eleven suites,
-  all four structural builds pass, and the lasting production registry remains
-  empty. No gameplay remote or Phase 07 system has begun. Phase 06 and Gate A
-  remain open.
+  Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, and 06.3
+  completed on 2026-08-26.
+- Current checkpoint: Packet 06.3 is complete; Packet 06.4 is next but not
+  begun. The current deterministic suite passes 145 cases across 12 suites, all
+  four structural builds pass, and the lasting production registry and
+  production rate-policy list remain empty. No gameplay remote or Phase 07
+  system has begun. Phase 06 and Gate A remain open.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -625,9 +625,9 @@ finite numbers/integers, dense arrays, exact-key records, optional values,
 exactly-one bounded unions, `Vector2`, `Vector3`, `CFrame`, and opt-in
 server-only Instances. One shared validation-work budget contains nested union
 attempts; depth, node, field, item, string, enum, and branch bounds fail closed.
-The 22 focused boundary/adversarial cases and complete 128-case suite pass, as
-does the four-project verifier. Exact architecture and evidence are in
-`docs/NETWORK_PROTOCOL.md`. Packet 06.3 is next and has not begun.
+The 22 focused boundary/adversarial cases and complete 128-case suite passed at
+this checkpoint, as did the four-project verifier. Exact architecture and
+evidence are in `docs/NETWORK_PROTOCOL.md`. Packet 06.3 has since completed.
 
 - Add reusable validators for strings, enums, IDs, arrays, vectors, CFrames, and
   finite numeric values.
@@ -635,6 +635,16 @@ does the four-project verifier. Exact architecture and evidence are in
 - Reject NaN, infinity, oversized strings, and unexpected keys.
 
 ### Packet 06.3 — Server rate limiting
+
+**Status:** Complete — 2026-08-26. The server-only, authenticated policy set and
+per-Player/per-endpoint token-bucket limiter are implemented under the existing
+`NetworkRegistry` lifecycle service. Policies are explicit and bounded, clocks
+are server-local and monotonic, player removal and lifecycle shutdown clear
+state, and global interval-limited aggregate warnings expose only fixed safe
+fields. The 17 dedicated limiter cases and complete 145-case, 12-suite run pass,
+as does the four-project structural verifier. Production definitions and
+policies remain empty. Packet 06.4 is next and has not begun; Phase 06 and Gate
+A remain open.
 
 - Implement per-player token buckets or bounded cooldowns.
 - Allow action-specific limits.

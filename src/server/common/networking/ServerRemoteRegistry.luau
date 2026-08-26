@@ -1,11 +1,13 @@
 --!strict
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
 local RemoteRegistry = require(ReplicatedStorage.Shared.network.RemoteRegistry)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
 local Cleanup = require(ReplicatedStorage.Shared.util.Cleanup)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
+local ServerRateLimiter = require(script.Parent.ServerRateLimiter)
 
 export type NetworkState =
 	"Registering"
@@ -18,9 +20,21 @@ export type NetworkState =
 	| "Failed"
 export type Handler = (player: Player, ...unknown) -> ()
 export type ConnectAdapter = (remote: RemoteEvent, handler: Handler) -> RBXScriptConnection
+export type LimiterDependencies = {
+	players: Instance?,
+	clock: ServerRateLimiter.Clock?,
+	connectPlayerRemoving: ServerRateLimiter.ConnectPlayerRemoving?,
+	reporter: ServerRateLimiter.Reporter?,
+}
 
 type HandlerMap = { [string]: Handler }
 type RemoteMap = { [string]: RemoteEvent }
+type ResolvedLimiterDependencies = {
+	players: Instance,
+	clock: ServerRateLimiter.Clock,
+	connectPlayerRemoving: ServerRateLimiter.ConnectPlayerRemoving?,
+	reporter: ServerRateLimiter.Reporter?,
+}
 
 type ServerData = {
 	logger: Log.Logger,
@@ -28,11 +42,14 @@ type ServerData = {
 	replicatedStorage: ReplicatedStorage,
 	role: RemoteRegistry.RuntimePlaceRole,
 	connectAdapter: ConnectAdapter,
+	ratePolicySet: ServerRateLimiter.PolicySet,
+	limiterDependencies: ResolvedLimiterDependencies,
 	activeDefinitions: { RemoteRegistry.Definition },
 	activeDefinitionsByName: { [string]: RemoteRegistry.Definition },
 	handlers: HandlerMap,
 	state: NetworkState,
 	cleanup: Cleanup.Container?,
+	rateLimiter: ServerRateLimiter.Limiter?,
 	root: Folder?,
 	serviceDefinition: ServiceLifecycle.ServiceDefinition?,
 }
@@ -48,6 +65,12 @@ local UNKNOWN_ENDPOINT = "<unknown>"
 local SERVICE_NAME = "NetworkRegistry"
 local CLEANUP_LABEL = "network-registry"
 local SERVER_REGISTRY = setmetatable({}, { __mode = "k" }) :: { [any]: boolean }
+local LIMITER_DEPENDENCY_FIELDS: { [string]: boolean } = table.freeze({
+	clock = true,
+	connectPlayerRemoving = true,
+	players = true,
+	reporter = true,
+})
 
 local function defaultConnect(remote: RemoteEvent, handler: Handler): RBXScriptConnection
 	return remote.OnServerEvent:Connect(handler)
@@ -72,11 +95,102 @@ local function fail(server: ServerData, event: string, code: string, endpoint: s
 	})
 end
 
-local function failConstruction(logger: Log.Logger, code: string, message: string): never
-	logger:error("network", "construction_rejected", message, {
+local function failConstruction(logger: Log.Logger, code: string, message: string, validationPath: string?): never
+	local fields: Log.Fields = {
 		code = code,
 		endpoint = UNKNOWN_ENDPOINT,
 		networkState = "Uninitialized",
+	}
+	if validationPath ~= nil then
+		fields.validationPath = validationPath
+	end
+	logger:error("network", "construction_rejected", message, fields)
+end
+
+local function resolveLimiterDependencies(logger: Log.Logger, value: LimiterDependencies?): ResolvedLimiterDependencies
+	if value == nil then
+		return table.freeze({
+			players = Players,
+			clock = os.clock,
+			connectPlayerRemoving = nil,
+			reporter = nil,
+		})
+	end
+	if type(value) ~= "table" or getmetatable(value) ~= nil then
+		failConstruction(
+			logger,
+			"INVALID_LIMITER_DEPENDENCIES",
+			"Rate-limiter dependencies must be an exact plain record",
+			"limiterDependencies"
+		)
+	end
+
+	local rawDependencies = value :: { [any]: unknown }
+	for rawKey in next, rawDependencies do
+		if type(rawKey) ~= "string" or LIMITER_DEPENDENCY_FIELDS[rawKey] ~= true then
+			failConstruction(
+				logger,
+				"INVALID_LIMITER_DEPENDENCIES",
+				"Rate-limiter dependencies contain an unsupported field",
+				"limiterDependencies"
+			)
+		end
+	end
+
+	local players = rawget(rawDependencies, "players")
+	if players == nil then
+		players = Players
+	end
+	local classRead, isPlayers = pcall(function(): boolean
+		return typeof(players) == "Instance" and (players :: Instance):IsA("Players")
+	end)
+	if not classRead or not isPlayers then
+		failConstruction(
+			logger,
+			"INVALID_LIMITER_DEPENDENCIES",
+			"Rate-limiter players dependency must be the Players service",
+			"limiterDependencies.players"
+		)
+	end
+
+	local clock = rawget(rawDependencies, "clock")
+	if clock == nil then
+		clock = os.clock
+	end
+	if type(clock) ~= "function" then
+		failConstruction(
+			logger,
+			"INVALID_LIMITER_DEPENDENCIES",
+			"Rate-limiter clock dependency must be a function",
+			"limiterDependencies.clock"
+		)
+	end
+
+	local connectPlayerRemoving = rawget(rawDependencies, "connectPlayerRemoving")
+	if connectPlayerRemoving ~= nil and type(connectPlayerRemoving) ~= "function" then
+		failConstruction(
+			logger,
+			"INVALID_LIMITER_DEPENDENCIES",
+			"Rate-limiter PlayerRemoving connector must be a function or nil",
+			"limiterDependencies.connectPlayerRemoving"
+		)
+	end
+
+	local reporter = rawget(rawDependencies, "reporter")
+	if reporter ~= nil and type(reporter) ~= "function" then
+		failConstruction(
+			logger,
+			"INVALID_LIMITER_DEPENDENCIES",
+			"Rate-limiter reporter must be a function or nil",
+			"limiterDependencies.reporter"
+		)
+	end
+
+	return table.freeze({
+		players = players :: Instance,
+		clock = clock :: ServerRateLimiter.Clock,
+		connectPlayerRemoving = connectPlayerRemoving :: ServerRateLimiter.ConnectPlayerRemoving?,
+		reporter = reporter :: ServerRateLimiter.Reporter?,
 	})
 end
 
@@ -135,12 +249,14 @@ end
 local function rollback(server: ServerData): boolean
 	local cleanup = server.cleanup
 	if cleanup == nil then
+		server.rateLimiter = nil
 		return true
 	end
 
 	local succeeded = pcall(function()
 		cleanup:cleanup()
 	end)
+	server.rateLimiter = nil
 	if succeeded then
 		server.cleanup = nil
 		server.root = nil
@@ -307,6 +423,56 @@ local function initialize(server: ServerData)
 	end
 
 	local remoteMap = remotesOrError :: RemoteMap
+	local limiterDependencies = server.limiterDependencies
+	local limiterCreated, limiterValue = pcall(
+		ServerRateLimiter.new,
+		server.logger,
+		limiterDependencies.players,
+		server.ratePolicySet,
+		limiterDependencies.clock,
+		limiterDependencies.connectPlayerRemoving,
+		limiterDependencies.reporter
+	)
+	if not limiterCreated then
+		rejectInitialization(
+			server,
+			"RATE_LIMITER_CREATION_FAILED",
+			UNKNOWN_ENDPOINT,
+			"The server rate limiter could not be created"
+		)
+	end
+
+	local rateLimiter = limiterValue :: ServerRateLimiter.Limiter
+	server.rateLimiter = rateLimiter
+	local limiterInitialized, limiterCleanupValue = pcall(function()
+		return rateLimiter:initialize()
+	end)
+	if not limiterInitialized then
+		rejectInitialization(
+			server,
+			"RATE_LIMITER_INITIALIZATION_FAILED",
+			UNKNOWN_ENDPOINT,
+			"The server rate limiter could not initialize its owned resources"
+		)
+	end
+
+	local limiterCleanup = limiterCleanupValue :: Cleanup.Container
+	local limiterOwned = pcall(function()
+		(server.cleanup :: Cleanup.Container):add(limiterCleanup)
+	end)
+	if not limiterOwned then
+		pcall(function()
+			limiterCleanup:cleanup()
+		end)
+		server.rateLimiter = nil
+		rejectInitialization(
+			server,
+			"OWNERSHIP_FAILED",
+			UNKNOWN_ENDPOINT,
+			"The server rate limiter could not be registered for cleanup"
+		)
+	end
+
 	for _, definition in server.activeDefinitions do
 		if definition.direction == "ClientToServer" then
 			local handler = server.handlers[definition.name] :: Handler
@@ -378,6 +544,51 @@ local function start(server: ServerData)
 	end
 
 	server.state = "Starting"
+	local rateLimiter = server.rateLimiter
+	if rateLimiter == nil then
+		local rollbackSucceeded = rollback(server)
+		server.state = "Failed"
+		if not rollbackSucceeded then
+			fail(
+				server,
+				"start_rejected",
+				"ROLLBACK_FAILED",
+				UNKNOWN_ENDPOINT,
+				"Network start failed and owned resources could not be cleaned completely"
+			)
+		end
+		fail(
+			server,
+			"start_rejected",
+			"RATE_LIMITER_MISSING",
+			UNKNOWN_ENDPOINT,
+			"Network start requires its initialized server rate limiter"
+		)
+	end
+
+	local limiterStarted = pcall(function()
+		rateLimiter:start()
+	end)
+	if not limiterStarted then
+		local rollbackSucceeded = rollback(server)
+		server.state = "Failed"
+		if not rollbackSucceeded then
+			fail(
+				server,
+				"start_rejected",
+				"ROLLBACK_FAILED",
+				UNKNOWN_ENDPOINT,
+				"Network start failed and owned resources could not be cleaned completely"
+			)
+		end
+		fail(
+			server,
+			"start_rejected",
+			"RATE_LIMITER_START_FAILED",
+			UNKNOWN_ENDPOINT,
+			"The server rate limiter could not enter its started state"
+		)
+	end
 	server.state = "Started"
 end
 
@@ -478,7 +689,9 @@ function ServerRemoteRegistry.new(
 	registry: RemoteRegistry.Registry,
 	replicatedStorage: Instance,
 	role: RemoteRegistry.RuntimePlaceRole,
-	connectAdapter: ConnectAdapter?
+	ratePolicyBindings: unknown,
+	connectAdapter: ConnectAdapter?,
+	limiterDependencies: LimiterDependencies?
 ): Server
 	if not Log.isLogger(logger) then
 		error(
@@ -495,9 +708,20 @@ function ServerRemoteRegistry.new(
 	if role ~= "Development" and role ~= "Lobby" and role ~= "Match" then
 		failConstruction(logger, "INVALID_ROLE", "ServerRemoteRegistry requires Development, Lobby, or Match")
 	end
+
+	local policySetResult = ServerRateLimiter.createPolicySet(registry, role, ratePolicyBindings)
+	if not policySetResult.ok then
+		failConstruction(
+			logger,
+			policySetResult.error.code,
+			"ServerRemoteRegistry rejected its fixed rate-limit policy bindings",
+			policySetResult.error.path
+		)
+	end
 	if connectAdapter ~= nil and type(connectAdapter) ~= "function" then
 		failConstruction(logger, "INVALID_CONNECT_ADAPTER", "The endpoint connector must be a function or nil")
 	end
+	local resolvedLimiterDependencies = resolveLimiterDependencies(logger, limiterDependencies)
 
 	local activeDefinitions = registry:listForRole(role)
 	local activeDefinitionsByName: { [string]: RemoteRegistry.Definition } = {}
@@ -511,11 +735,14 @@ function ServerRemoteRegistry.new(
 		replicatedStorage = replicatedStorage :: ReplicatedStorage,
 		role = role,
 		connectAdapter = connectAdapter or defaultConnect,
+		ratePolicySet = policySetResult.value,
+		limiterDependencies = resolvedLimiterDependencies,
 		activeDefinitions = activeDefinitions,
 		activeDefinitionsByName = activeDefinitionsByName,
 		handlers = {},
 		state = "Registering",
 		cleanup = nil,
+		rateLimiter = nil,
 		root = nil,
 		serviceDefinition = nil,
 	}, Server) :: Server

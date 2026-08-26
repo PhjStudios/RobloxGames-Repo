@@ -4,6 +4,7 @@ local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local RobloxAdapter = require(script.Parent.Parent.Support.RobloxAdapter)
 local NetworkFixtures = require(script.Parent.Parent.Fixtures.NetworkFixtures)
 local ServerRemoteRegistry = require(script.Parent.Parent.ProductionServerNetworking.ServerRemoteRegistry)
+local ServerRateLimiter = require(script.Parent.Parent.ProductionServerNetworking.ServerRateLimiter)
 local ClientRemoteLookup = require(script.Parent.Parent.ProductionClientNetworking.ClientRemoteLookup)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -34,6 +35,30 @@ end
 
 local FULL_REGISTRY = makeRegistry(NetworkFixtures.validDefinitions())
 local EMPTY_REGISTRY = makeRegistry({})
+
+local function defaultRateBindings(registry: Registry): { ServerRateLimiter.PolicyBinding }
+	local bindings: { ServerRateLimiter.PolicyBinding } = {}
+	for _, definition in registry:list() do
+		if definition.direction == "ClientToServer" then
+			table.insert(bindings, {
+				endpoint = definition.name,
+				policy = ServerRateLimiter.DEFAULT_POLICY,
+			})
+		end
+	end
+	return bindings
+end
+
+local FULL_RATE_BINDINGS = defaultRateBindings(FULL_REGISTRY)
+local EMPTY_RATE_BINDINGS = defaultRateBindings(EMPTY_REGISTRY)
+local TEST_LIMITER_DEPENDENCIES: ServerRemoteRegistry.LimiterDependencies = table.freeze({
+	clock = function(): number
+		return 0
+	end,
+	connectPlayerRemoving = function(_callback: ServerRateLimiter.PlayerRemovingHandler): RBXScriptConnection
+		return RobloxAdapter.createConnection(function() end) :: any
+	end,
+})
 
 local function loggerFor(role: RuntimePlaceRole): Log.Logger
 	return Log.new(EnvironmentContext.new("server", role, 0, false))
@@ -129,6 +154,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			assertNoPublishedRoot(assertions)
 			local connectedNames = {}
 			local disconnectedNames = {}
+			local cleanupOrder = {}
 			local publishedDuringConnect = false
 			local rootMissingDuringDisconnect = false
 			local callbacks: { [string]: ServerRemoteRegistry.Handler } = {}
@@ -140,8 +166,10 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 				FULL_REGISTRY,
 				ReplicatedStorage,
 				"Match",
+				FULL_RATE_BINDINGS,
 				fakeConnector(function(remote)
 					table.insert(disconnectedNames, remote.Parent.Name)
+					table.insert(cleanupOrder, `Remote:{remote.Parent.Name}`)
 					if ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME) == nil then
 						rootMissingDuringDisconnect = true
 					end
@@ -152,7 +180,22 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 					if root.Parent ~= nil or ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME) ~= nil then
 						publishedDuringConnect = true
 					end
-				end)
+				end),
+				{
+					clock = function(): number
+						return 0
+					end,
+					connectPlayerRemoving = function(
+						_callback: ServerRateLimiter.PlayerRemovingHandler
+					): RBXScriptConnection
+						return RobloxAdapter.createConnection(function()
+							table.insert(cleanupOrder, "PlayerRemoving")
+							if ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME) == nil then
+								rootMissingDuringDisconnect = true
+							end
+						end) :: any
+					end,
+				}
 			)
 			bindActiveHandlers(server, "Match", function(player: Player)
 				handledCount += 1
@@ -200,6 +243,10 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			shutdown(server)
 			assertions.equal(server:getState(), "Shutdown")
 			assertions.equal(#disconnectedNames, 3)
+			assertions.equal(
+				table.concat(cleanupOrder, ","),
+				"Remote:TestResponseRequest,Remote:TestNoResponseRequest,Remote:TestClientEvent,PlayerRemoving"
+			)
 			assertions.isFalse(rootMissingDuringDisconnect)
 			assertNoPublishedRoot(assertions)
 		end
@@ -219,7 +266,9 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 				FULL_REGISTRY,
 				ReplicatedStorage,
 				role,
-				fakeConnector(nil, nil)
+				FULL_RATE_BINDINGS,
+				fakeConnector(nil, nil),
+				TEST_LIMITER_DEPENDENCIES
 			)
 			bindActiveHandlers(server, role)
 			initialize(server)
@@ -243,12 +292,26 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		"rejects unknown inactive wrong-direction invalid and duplicate bindings privately",
 		function(assertions)
 			assertNoPublishedRoot(assertions)
+			local invalidRatePolicies = captureError(assertions, function()
+				ServerRemoteRegistry.new(loggerFor("Lobby"), FULL_REGISTRY, ReplicatedStorage, "Lobby", {
+					{
+						endpoint = PRIVATE_SENTINEL .. "/arbitrary/path",
+						policy = ServerRateLimiter.DEFAULT_POLICY,
+					},
+				})
+			end)
+			assertCode(assertions, invalidRatePolicies, "UNKNOWN_ENDPOINT")
+			assertions.contains(invalidRatePolicies, "[validationPath=policies[1].endpoint]")
+			assertions.isNil(string.find(invalidRatePolicies, PRIVATE_SENTINEL, 1, true))
+
 			local server = ServerRemoteRegistry.new(
 				loggerFor("Lobby"),
 				FULL_REGISTRY,
 				ReplicatedStorage,
 				"Lobby",
-				fakeConnector(nil, nil)
+				FULL_RATE_BINDINGS,
+				fakeConnector(nil, nil),
+				TEST_LIMITER_DEPENDENCIES
 			)
 
 			local unknown = captureError(assertions, function()
@@ -291,7 +354,9 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			FULL_REGISTRY,
 			ReplicatedStorage,
 			"Match",
-			fakeConnector(nil, nil)
+			FULL_RATE_BINDINGS,
+			fakeConnector(nil, nil),
+			TEST_LIMITER_DEPENDENCIES
 		)
 		local missing = captureError(assertions, function()
 			initialize(missingServer)
@@ -308,6 +373,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			FULL_REGISTRY,
 			ReplicatedStorage,
 			"Match",
+			FULL_RATE_BINDINGS,
 			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Handler): RBXScriptConnection
 				connectionAttempts += 1
 				if connectionAttempts == 2 then
@@ -316,7 +382,8 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 				return RobloxAdapter.createConnection(function()
 					disconnectCount += 1
 				end) :: any
-			end
+			end,
+			TEST_LIMITER_DEPENDENCIES
 		)
 		bindActiveHandlers(rollbackServer, "Match")
 		local connectionFailure = captureError(assertions, function()
@@ -334,9 +401,11 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			FULL_REGISTRY,
 			ReplicatedStorage,
 			"Match",
+			FULL_RATE_BINDINGS,
 			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Handler): RBXScriptConnection
 				return { Disconnect = function() end } :: any
-			end
+			end,
+			TEST_LIMITER_DEPENDENCIES
 		)
 		bindActiveHandlers(invalidConnectionServer, "Match")
 		local invalidConnection = captureError(assertions, function()
@@ -352,7 +421,15 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		local existingFolder = Instance.new("Folder")
 		existingFolder.Name = RemoteRegistry.ROOT_NAME
 		existingFolder.Parent = ReplicatedStorage
-		local folderServer = ServerRemoteRegistry.new(loggerFor("Lobby"), EMPTY_REGISTRY, ReplicatedStorage, "Lobby")
+		local folderServer = ServerRemoteRegistry.new(
+			loggerFor("Lobby"),
+			EMPTY_REGISTRY,
+			ReplicatedStorage,
+			"Lobby",
+			EMPTY_RATE_BINDINGS,
+			nil,
+			TEST_LIMITER_DEPENDENCIES
+		)
 		local folderConflict = captureError(assertions, function()
 			initialize(folderServer)
 		end)
@@ -363,7 +440,15 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		local existingModel = Instance.new("Model")
 		existingModel.Name = RemoteRegistry.ROOT_NAME
 		existingModel.Parent = ReplicatedStorage
-		local modelServer = ServerRemoteRegistry.new(loggerFor("Lobby"), EMPTY_REGISTRY, ReplicatedStorage, "Lobby")
+		local modelServer = ServerRemoteRegistry.new(
+			loggerFor("Lobby"),
+			EMPTY_REGISTRY,
+			ReplicatedStorage,
+			"Lobby",
+			EMPTY_RATE_BINDINGS,
+			nil,
+			TEST_LIMITER_DEPENDENCIES
+		)
 		local classConflict = captureError(assertions, function()
 			initialize(modelServer)
 		end)
@@ -380,7 +465,9 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			FULL_REGISTRY,
 			ReplicatedStorage,
 			"Match",
-			fakeConnector(nil, nil)
+			FULL_RATE_BINDINGS,
+			fakeConnector(nil, nil),
+			TEST_LIMITER_DEPENDENCIES
 		)
 		bindActiveHandlers(winner, "Match")
 
@@ -391,6 +478,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			FULL_REGISTRY,
 			ReplicatedStorage,
 			"Match",
+			FULL_RATE_BINDINGS,
 			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Handler): RBXScriptConnection
 				if not reentered then
 					reentered = true
@@ -399,7 +487,8 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 				return RobloxAdapter.createConnection(function()
 					loserDisconnectCount += 1
 				end) :: any
-			end
+			end,
+			TEST_LIMITER_DEPENDENCIES
 		)
 		bindActiveHandlers(loser, "Match")
 
@@ -421,8 +510,15 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 
 	TestHarness.case("rejects lifecycle and handler re-entry without duplicating ownership", function(assertions)
 		assertNoPublishedRoot(assertions)
-		local server =
-			ServerRemoteRegistry.new(loggerFor("Development"), EMPTY_REGISTRY, ReplicatedStorage, "Development")
+		local server = ServerRemoteRegistry.new(
+			loggerFor("Development"),
+			EMPTY_REGISTRY,
+			ReplicatedStorage,
+			"Development",
+			EMPTY_RATE_BINDINGS,
+			nil,
+			TEST_LIMITER_DEPENDENCIES
+		)
 		initialize(server)
 		local root = ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME)
 		assertions.isNotNil(root)
@@ -457,7 +553,9 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			FULL_REGISTRY,
 			ReplicatedStorage,
 			"Match",
-			fakeConnector(nil, nil)
+			FULL_RATE_BINDINGS,
+			fakeConnector(nil, nil),
+			TEST_LIMITER_DEPENDENCIES
 		)
 		bindActiveHandlers(server, "Match")
 		initialize(server)
@@ -505,7 +603,9 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			FULL_REGISTRY,
 			ReplicatedStorage,
 			"Match",
-			fakeConnector(nil, nil)
+			FULL_RATE_BINDINGS,
+			fakeConnector(nil, nil),
+			TEST_LIMITER_DEPENDENCIES
 		)
 		bindActiveHandlers(server, "Match")
 		initialize(server)

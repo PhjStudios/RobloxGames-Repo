@@ -8,6 +8,7 @@ local Log = require(ReplicatedStorage.Shared.logging.Log)
 local ProductionRemotes = require(ReplicatedStorage.Shared.network.ProductionRemotes)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
 local Cleanup = require(ReplicatedStorage.Shared.util.Cleanup)
+local ProductionRateLimits = require(script.Parent.Parent.networking.ProductionRateLimits)
 local ServerRemoteRegistry = require(script.Parent.Parent.networking.ServerRemoteRegistry)
 local Shutdown = require(script.Parent.Shutdown)
 
@@ -52,7 +53,8 @@ log:info("configuration", "validated", "Core configuration validated", {
 	configurationFamilyCount = ConfigurationValidator.FAMILY_COUNT,
 })
 
-local serverRemoteRegistry = ServerRemoteRegistry.new(log, ProductionRemotes, ReplicatedStorage, roleResult.role)
+local serverRemoteRegistry =
+	ServerRemoteRegistry.new(log, ProductionRemotes, ReplicatedStorage, roleResult.role, ProductionRateLimits)
 local lifecycleRunner = ServiceLifecycle.new(log)
 lifecycleRunner:register(serverRemoteRegistry:getServiceDefinition())
 lifecycleRunner:initialize()

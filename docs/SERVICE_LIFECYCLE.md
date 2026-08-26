@@ -131,9 +131,9 @@ resolves one environment context, creates one local logger, calls the shared
 `ConfigurationValidator.validateLoaded()` gate, and passes the logger to the
 runner only after success. The client initializes and starts its empty runner.
 The server first creates `ServerRemoteRegistry` from the empty authenticated
-production registry and registers its frozen `NetworkRegistry` service
-definition, then initializes and starts the runner. Their current Studio-only
-ready records therefore include:
+production registry and frozen empty production rate-policy list, registers its
+frozen `NetworkRegistry` service definition, then initializes and starts the
+runner. Their current Studio-only ready records therefore include:
 
 ```text
 server: [lifecycleState=Started][serviceCount=1]
@@ -153,11 +153,16 @@ rollback. The valid path and every lifecycle state contract remain unchanged.
 
 The network service has no declared dependencies. Its lifecycle callbacks own a
 separate typed state machine: initialize creates and binds the fixed server-owned
-tree before parent-last publication, start changes no endpoint definition, and
-shutdown cleans its exact listeners and root. Duplicate initialization, start,
-shutdown, or handler registration is rejected by the network owner rather than
-creating duplicate resources. The existing reverse lifecycle and outer
-bootstrap cleanup remain the sole shutdown route.
+tree before parent-last publication, initializes the server limiter, and owns
+all of it through one parent cleanup container. The parent registers the remote
+root first, the limiter child second, and inbound listeners last. Reverse LIFO
+cleanup therefore disconnects listeners, disconnects the limiter's
+`PlayerRemoving` connection and clears its buckets/aggregate, then destroys the
+root. Start starts the limiter before the network owner reaches `Started` and
+changes no endpoint definition. Duplicate initialization, start, shutdown, or
+handler registration is rejected rather than creating duplicate resources. The
+existing reverse lifecycle and outer bootstrap cleanup remain the sole shutdown
+route; Packet 06.3 adds no service or independent close hook.
 
 ## Focused Studio Edit-mode validation
 
@@ -180,7 +185,7 @@ checking that some error occurred. This was executed against the synchronized
 Lobby copy of the real module, not a rewritten test double. Packet 03.1 did not
 pull a persistent framework forward.
 
-Phase 05 subsequently added a repository-owned runner. Its current 106 cases do
+Phase 05 subsequently added a repository-owned runner. Its current 145 cases do
 not include a dedicated general `ServiceLifecycle` suite; the Packet 06.1
 runtime suite instead exercises the frozen network service definition and its
 initialize/start/shutdown state adapter. The evidence in this section remains
@@ -247,8 +252,10 @@ remain preserved by policy.
 Phase 03 is complete. Packet 03.4 evidence is in
 `docs/GRACEFUL_SHUTDOWN.md`. Phase 04 added pure content contracts, and Packet
 04.5 placed their centralized gate before runner construction without changing
-this lifecycle behavior. Packet 06.1's source and 106-of-106 completion evidence
-add only the common server network service described in
-`docs/NETWORK_PROTOCOL.md`. Packet 06.1 is complete; Phase 06 remains open.
+this lifecycle behavior. Packets 06.1–06.3 add only the common server network
+service and its nested limiter ownership described in
+`docs/NETWORK_PROTOCOL.md`. The 12 runtime/lookup and 17 dedicated limiter cases
+pass within the complete 145-case suite. Packet 06.4 is next and has not begun;
+Phase 06 and Gate A remain open.
 Configuration evidence remains in
 `docs/CONFIGURATION_VALIDATION.md`.

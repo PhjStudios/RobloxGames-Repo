@@ -185,11 +185,13 @@ task forms, idempotence, nesting/cycles, reentry, post-clean guards, cached
 failures, and sibling failure isolation. Run `lune run tests/run.luau`; the
 environment distinction and cleanup rules are indexed in `docs/TEST_MATRIX.md`.
 
-The current 106-case run also includes 12 Packet 06.1 runtime cases. They prove
-listener-before-root destruction, rollback after a partial listener bind,
-preservation of pre-existing root conflicts, duplicate-owner/re-entry rejection,
-and shutdown removal of the exact published root. Packet 06.1 is complete;
-Phase 06 remains open.
+The current 145-case run also includes 12 network-runtime and 17 rate-limiter
+cases. They prove listener-before-limiter-before-root LIFO cleanup, rollback
+after partial listener or limiter initialization, preservation of pre-existing
+root conflicts, duplicate-owner/re-entry rejection, exact Player-removal state
+release, whole-limiter shutdown clearing, and removal of the exact published
+root. Packets 06.1–06.3 are complete; Packet 06.4 has not begun, and Phase 06
+remains open.
 
 Packet 03.3 reran 10 focused cleanup cases through the logger-based constructor.
 Supported runtime types, LIFO/idempotence, state/nesting guards, failure

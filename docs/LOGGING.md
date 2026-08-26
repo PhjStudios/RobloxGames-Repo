@@ -27,7 +27,9 @@ Those fields record Packet 03.3 at completion. Packet 06.1 adds the common
 server network registry as an integrated consumer and
 narrowly extends the closed vocabulary with the `network` subsystem plus
 `endpoint` and `networkState`. It adds no remote log sink or client-authored log
-path.
+path. Packet 06.3 adds only the finite numeric fields
+`rateLimitRejectionCount` and `rateLimitWindowSeconds` for one bounded global
+abuse aggregate; it still adds no remote sink or per-request log path.
 
 ## Architecture boundary
 
@@ -180,6 +182,8 @@ The current complete custom-field allowlist is:
 | `issueCount` | Number of root validation issues in a frozen report |
 | `lifecycleState` | Typed lifecycle state |
 | `networkState` | Typed network-owner lifecycle state or static construction state |
+| `rateLimitRejectionCount` | Saturating count of aggregated server-side rejections |
+| `rateLimitWindowSeconds` | Fixed finite aggregate-reporting window |
 | `service` | Static service label or `<runner>` |
 | `serviceCount` | Number of registered lifecycle services |
 | `state` | Typed state attached to an error |
@@ -267,8 +271,14 @@ registry name or `<unknown>` in `endpoint`. Unknown, malformed, arbitrary-path,
 or non-string endpoint inputs are never copied into a record. Connector errors,
 handler values, callback errors, payloads, request IDs, Players, UserIds, and
 Instance paths are discarded rather than stringified. Packet 06.1 emits no
-per-request records; later rate-limit and malformed-request signals must remain
-aggregated and interval-limited as required by `docs/NETWORK_PROTOCOL.md`.
+per-request records. Packet 06.3 adds one global O(1) rate-limit rejection
+aggregate: the first rejection may emit one static warning, later warnings are
+limited to one per ten-second window across all endpoints, the pending count
+saturates at 4,096, and the endpoint is one authenticated canonical name or the
+static token `<multiple>`. Reporter failure is contained and advances the
+cadence. No Player, UserId, request ID, payload, token balance, timestamp,
+caught error, or trace is retained or logged. Packet 06.4 remains responsible
+for aggregating malformed dispatcher input under the same privacy boundary.
 
 ## Bootstrap integration
 
@@ -286,7 +296,8 @@ The common server and client bootstraps now follow the same sequence:
    cleanup, or shutdown resource.
 8. On success, emit a Studio-only `configuration/validated` record. The client
    creates an empty lifecycle runner; the server constructs the fixed network
-   owner and registers its `NetworkRegistry` service before lifecycle
+   owner from the empty production registry and empty production rate-policy
+   list and registers its one `NetworkRegistry` service before lifecycle
    initialization. Both create a `bootstrap` cleanup container with the same
    logger.
 9. Emit one Studio-only `ready` record containing resolved context, lifecycle
@@ -323,11 +334,13 @@ structured failures, continued cleanup after a task failure, exact cached
 aggregate behavior, and suppression of arbitrary callback error reasons.
 
 These are focused packet harnesses, not a committed test framework. Phase 05
-later added a repository-owned runner. The current 106 cases have no dedicated
+later added a repository-owned runner. The current 145 cases have no dedicated
 full `Log` or `EnvironmentContext` suite, though the 12 Packet 06.1 runtime cases
 exercise genuine loggers and prove private endpoint and connector sentinels are
-absent from network failures. The Studio evidence here and the deferred reusable
-coverage boundary are indexed in `docs/TEST_MATRIX.md`.
+absent from network failures. Packet 06.3's 17 limiter cases additionally prove
+aggregate cadence/count bounds, reporter failure isolation, and absence of
+private identity and clock sentinels. The Studio evidence here and the deferred
+reusable coverage boundary are indexed in `docs/TEST_MATRIX.md`.
 
 ## Toolchain and build verification
 
@@ -411,7 +424,9 @@ Phase 04 packet to extend the public vocabulary, narrowly adding the
 report, privacy, bootstrap, and Studio evidence is recorded in
 `docs/CONFIGURATION_VALIDATION.md`.
 
-Packet 06.1's source and 106-of-106 headless completion evidence make the
-narrow `network` vocabulary extension recorded above. It creates no gameplay
-endpoint. Packet 06.1 is complete; Phase 06 and Gate A remain open. Its
-architecture and privacy boundary are recorded in `docs/NETWORK_PROTOCOL.md`.
+Packets 06.1–06.3 make the narrow `network` vocabulary and aggregate-field
+extensions recorded above. The complete 145-case, 12-suite headless run includes
+17 dedicated limiter cases. The lasting production registry and rate-policy
+list remain empty, and no gameplay endpoint was created. Packet 06.4 is next and
+has not begun; Phase 06 and Gate A remain open. The architecture and privacy
+boundary are recorded in `docs/NETWORK_PROTOCOL.md`.

@@ -7,7 +7,7 @@
 - Primary-source research accessed: 2026-08-26
 - Packet 06.1 status: complete — 2026-08-26
 - Packet 06.2 status: complete — 2026-08-26
-- Packet 06.3 architecture decision: recorded — 2026-08-26; implementation pending
+- Packet 06.3 status: complete — 2026-08-26
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Production feature endpoints: none; the lasting authenticated registry is empty
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
@@ -18,8 +18,8 @@
 
 This is the authoritative Phase 06 network-boundary document. The decision
 section was recorded before implementation. The sections below also record the
-completed Packet 06.1 and 06.2 implementations and evidence. Phase 06 and Gate A
-remain open until Packets 06.3–06.5 and the fresh exit audit pass.
+completed Packet 06.1–06.3 implementations and evidence. Phase 06 and Gate A
+remain open until Packets 06.4–06.5 and the fresh exit audit pass.
 
 ## Official Roblox behavior that shapes the design
 
@@ -273,9 +273,9 @@ absent from the production client API.
 
 This Packet 06.3 decision was recorded on 2026-08-26 before rate-limiter source
 changes. The existing `NetworkRegistry` lifecycle service remains the sole
-production network owner. A server-only limiter module will be owned as a child
-of its existing `Cleanup` container; no second service, independent shutdown
-hook, shared/client limiter, punishment system, or analytics sink is added.
+production network owner. The server-only limiter is owned as a child of its
+existing `Cleanup` container; no second service, independent shutdown hook,
+shared/client limiter, punishment system, or analytics sink is added.
 
 One authenticated frozen policy is required for every definition whose fixed
 registry direction is `ClientToServer`, including definitions inactive in the
@@ -386,11 +386,13 @@ valid request.
 ## Lifecycle and cleanup ownership
 
 One common server network service is registered before lifecycle initialization.
-Beginning with Packet 06.1, it owns the server-created root and every listener
-connection through one `Cleanup` container. Later Phase 06 packets will extend
-the same owner with rate-limit state, correlation history, and the
-player-removal connection. The root is registered before connections so LIFO
-cleanup disconnects listeners before destroying Instances.
+It owns the server-created root, limiter child, Player-removal connection, and
+every endpoint-listener connection through nested `Cleanup` containers. The
+parent registers the root first, the limiter child second, and inbound listeners
+last. LIFO cleanup therefore disconnects endpoint listeners first, then the
+limiter child disconnects `PlayerRemoving` and clears bucket/aggregate state,
+then the parent destroys the remote tree. Packet 06.4 will extend the same owner
+with bounded correlation state.
 
 Initialization preflights conflicts before publishing the tree and rolls back
 its own partial work if any step fails. Shutdown clears bounded per-player state,
@@ -461,8 +463,9 @@ complete; Phase 06 and Gate A remain open.
 
 ## Packet 06.2 completion evidence
 
-The current canonical headless run discovers eleven suites and passes all 128
-cases in deterministic path and declaration order. `PayloadValidation.spec.luau`
+At Packet 06.2 completion, the canonical headless run discovered eleven suites
+and passed all 128 cases in deterministic path and declaration order.
+`PayloadValidation.spec.luau`
 contributes 22 focused cases covering authenticated schema provenance; exact
 string, enum, ID, number, integer, boolean, array, record, optional, and union
 boundaries; exact cap and cap-plus-one behavior; shared nested-union work
@@ -487,15 +490,39 @@ the fixed test boundary and prove rejection before mutation; it must also prove
 that the explicit Instance policy accepts only on the running server and rejects
 from a client. No place save, publication, or external service is required.
 
-The four-project verifier now reports 35 ModuleScripts, one Script, and one
-LocalScript in each production build: 32 shared modules, the two server-only
-common modules, and the one client-only common module. Test contains the same
+At that checkpoint, the four-project verifier reported 35 ModuleScripts, one
+Script, and one LocalScript in each production build: 32 shared modules, the two
+server-only common modules, and the one client-only common module. Test contains the same
 32 shared modules, exactly the two explicitly mapped common networking runtime
 modules, 21 test-owned ModuleScripts, and zero runnable scripts, for 55
-ModuleScripts total. All 37 production Lua source containers match their fixed
-path, class, authoritative file, and source content. Tests remain absent from
+ModuleScripts total. At that checkpoint, all 37 production Lua source containers
+matched their fixed path, class, authoritative file, and source content. Tests remain absent from
 Default, Lobby, and Match; Lobby contains no Match source and Match contains no
 Lobby source. Lasting production endpoints and gameplay catalogs remain empty.
 
-Packet 06.2 is complete. Packet 06.3 is next and has not begun; Phase 06 and
+Packet 06.2 completed with this evidence; Packet 06.3 has since completed.
+
+## Packet 06.3 completion evidence
+
+The current canonical headless run discovers 12 suites and passes all 145 cases
+in deterministic path and declaration order. `ServerRateLimiter.spec.luau`
+contributes 17 focused cases for exact policy validation, complete global
+client-to-server policy coverage, burst/refill boundaries, independent
+Player/endpoint buckets, finite monotonic clock failures and recovery,
+Player-removal and shutdown cleanup, bounded state, aggregate warning cadence,
+reporter failure isolation, and privacy. `RemoteRuntime.spec.luau` retains its
+12 ownership/lookup cases while also proving the limiter child participates in
+the parent's exact LIFO lifecycle order.
+
+The four-project verifier reports 37 ModuleScripts, one Script, and one
+LocalScript in each production build, for 39 exact production Lua source
+containers. Test contains 32 shared modules, exactly four explicitly mapped
+common networking modules, 22 test-owned ModuleScripts, and zero runnable
+scripts, for 58 ModuleScripts total. Tests remain absent from Default, Lobby,
+and Match; Lobby contains no Match source and Match contains no Lobby source.
+The lasting production registry and frozen production rate-policy list are both
+empty, and no gameplay definition, punishment, persistence, analytics, external
+service, or Phase 07 source was added.
+
+Packet 06.3 is complete. Packet 06.4 is next and has not begun; Phase 06 and
 Gate A remain open, and Phase 07/gameplay work has not begun.

@@ -142,20 +142,23 @@ Roblox server close
 ```
 
 The current bootstrap cleanup container owns one task: shut down its lifecycle
-runner if that runner is still `Started`. The current lifecycle runner owns zero
-gameplay services, so ordinary Play-Stop completion transitions directly from
-`Started` to `Shutdown`, then the cleanup container transitions to `Cleaned`.
+runner if that runner is still `Started`. The lifecycle runner owns one
+foundation service, `NetworkRegistry`, and still owns zero gameplay services.
+That service's nested cleanup disconnects inbound listeners, disconnects its
+rate limiter's `PlayerRemoving` listener, clears limiter state, and destroys the
+server-owned remote tree. Ordinary Play-Stop completion then transitions the
+lifecycle runner from `Started` to `Shutdown` and the bootstrap container to
+`Cleaned`.
 
 Packet 04.5 now validates the complete core configuration before constructing
 the lifecycle runner, cleanup container, or this `BindToClose` hook. Rejected
 boot therefore creates no shutdown-owned resource and needs no partial cleanup.
 Successful validation follows the same single-hook sequence above unchanged.
 
-When future cleanup resources are registered in the same container, the cleanup
-utility releases them in last-in, first-out order. When future services are
-registered, lifecycle shutdown traverses the already-resolved dependency order
-in reverse, so dependents release before their foundations. A second cleanup
-call after successful completion remains an idempotent no-op.
+Cleanup resources are released in last-in, first-out order. When future services
+are registered, lifecycle shutdown traverses the already-resolved dependency
+order in reverse, so dependents release before their foundations. A second
+cleanup call after successful completion remains an idempotent no-op.
 
 Cleanup continues across independently owned task failures and aggregates them.
 The lifecycle runner retains its Packet 03.1 contract: a lifecycle method failure

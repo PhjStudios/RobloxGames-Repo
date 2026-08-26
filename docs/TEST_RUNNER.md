@@ -2,7 +2,7 @@
 
 ## Decision record
 
-- Status: Phase 05 and Packets 06.1–06.2 complete; Packet 06.3 is next
+- Status: Phase 05 and Packets 06.1–06.3 complete; Packet 06.4 is next
 - Research date: 2026-08-26
 - Selected runtime: Lune 0.10.5
 - Rokit tool identifier: `lune-org/lune@0.10.5`
@@ -39,11 +39,13 @@ pretend to reproduce Roblox engine behavior.
 
 The principal compatibility risk is semantic drift between Lune's partial
 Roblox environment and the live engine. The suite primarily targets pure shared
-contracts. Packet 06.1 additionally maps only the two common networking runtime
-ModuleScripts into test-only `ServerStorage`, where an injected connection
-adapter exercises their deterministic ownership and lookup logic without
-claiming a full engine simulation. The project still excludes client/server
-bootstraps, shutdown hooks, live remote delivery, and other engine integration.
+contracts. Packets 06.1 and 06.3 additionally map only four common networking
+ModuleScripts into test-only `ServerStorage`: the production policy module,
+server registry owner, server limiter, and client lookup. Injected connection,
+clock, Player-removal, and reporter adapters exercise deterministic ownership,
+lookup, token-bucket, cleanup, and aggregate-reporting logic without claiming a
+full engine simulation. The project still excludes client/server bootstraps,
+shutdown hooks, live remote delivery, and other engine integration.
 Genuine Roblox `Instance` cleanup can be exercised through Lune's DataModel
 implementation; the `RBXScriptConnection` cleanup branch may use a narrowly
 registered test double whose `typeof` adapter delegates every unregistered value
@@ -160,12 +162,14 @@ tools.
 
 `test.project.json` is build-only and has no `servePlaceIds`. It maps the
 authoritative `src/shared` tree plus explicit `tests/` roots into an isolated
-DataModel. Packet 06.1 adds only
+DataModel. Packet 06.1 added
 `src/server/common/networking/ServerRemoteRegistry.luau` and
-`src/client/common/networking/ClientRemoteLookup.luau` beneath explicit
-`ServerStorage.AutomatedTests` roots. It maps no bootstrap, shutdown hook,
-place-specific source, or other server/client path and contains no runnable
-`Script` or `LocalScript`.
+`src/client/common/networking/ClientRemoteLookup.luau`; Packet 06.3 added
+`src/server/common/networking/ProductionRateLimits.luau` and
+`src/server/common/networking/ServerRateLimiter.luau`. These four exact modules
+sit beneath explicit `ServerStorage.AutomatedTests` roots. The project maps no
+bootstrap, shutdown hook, place-specific source, or other server/client path
+and contains no runnable `Script` or `LocalScript`.
 
 Packet 06.2 requires no new project mapping: shared
 `network/PayloadValidation.luau` enters all four projects through the existing
@@ -418,5 +422,31 @@ changing the canonical command or exit-code contract:
   and exact generated-output cleanup. Lasting production remotes remain empty,
   and no gameplay definition or Phase 07 source was added.
 
-Packet 06.2 is complete. Packet 06.3 is next and has not begun; Phase 06 and
-Gate A remain open.
+Packet 06.2 completed with this evidence; Packet 06.3 has since completed.
+
+## Packet 06.3 completion verification
+
+Packet 06.3 extends the same normal discovery and restricted loader without
+changing the canonical command or its exit-code contract:
+
+- Twelve suites and all 145 cases pass in canonical path and declaration order.
+- `ServerRateLimiter.spec.luau` contributes 17 cases for authenticated/frozen
+  policy construction and complete inbound coverage, exact burst/refill
+  boundaries, independent Player/endpoint state, non-finite/backwards/throwing
+  clock containment and recovery, Player-removal and shutdown cleanup, bounded
+  state, global aggregate cadence/count saturation, reporter failure isolation,
+  and privacy-safe results and diagnostics.
+- `RemoteRuntime.spec.luau` retains 12 cases while proving the limiter child is
+  initialized and started under the one `NetworkRegistry` lifecycle service and
+  participates in exact parent LIFO cleanup.
+- `lune run tests/verify-builds.luau` passes with 37 ModuleScripts, one Script,
+  and one LocalScript in Default, Lobby, and Match. Test contains 32 shared
+  ModuleScripts, exactly four mapped networking modules, 22 test-owned
+  ModuleScripts, and zero runnable scripts, for 58 ModuleScripts total.
+- The verifier retains exact identity for all 39 production Lua containers,
+  production test exclusion, Lobby/Match isolation, intended bootstrap counts,
+  and exact generated-output cleanup. The lasting production registry and
+  frozen production rate-policy list remain empty.
+
+Packet 06.3 is complete. Packet 06.4 is next and has not begun; Phase 06 and
+Gate A remain open, and no gameplay or Phase 07 source has begun.
