@@ -20,6 +20,8 @@ order.
 - [Combined, lobby, and match Rojo projects](docs/ROJO_PROJECTS.md)
 - [Typed place-role configuration and validation](docs/PLACE_ROLES.md)
 - [Studio multi-place gate and live verification](docs/MULTI_PLACE_GATE.md)
+- [Typed common service lifecycle contract](docs/SERVICE_LIFECYCLE.md)
+- [Typed cleanup utility and ownership contract](docs/CLEANUP.md)
 - [Project instructions](AGENTS.md)
 
 ## Source of truth
@@ -38,6 +40,7 @@ separate shared, lobby-only, match-only, server, and client responsibilities:
     src/
       shared/
         config/
+        lifecycle/
         network/
         types/
         util/

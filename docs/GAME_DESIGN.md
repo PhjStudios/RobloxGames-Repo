@@ -16,7 +16,7 @@ production-data changes, or monetization.
 - Recorded: 2026-08-25
 - Packet: 00.2
 - Status: Accepted for core development
-- Next roadmap packet: 03.1, Bootstrap lifecycle contract
+- Next roadmap packet: 03.3, Logging and environment context
 
 ## Product identity and game loop
 

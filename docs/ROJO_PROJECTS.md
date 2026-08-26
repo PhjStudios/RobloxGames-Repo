@@ -152,9 +152,9 @@ Additional assertions passed:
   or duplicated runtime PlaceId. Packet 02.3 later added only their role
   attributes.
 
-Current Packet 02.3 builds additionally contain the shared `PlaceRoles`
-ModuleScript in all three projects. The source-layer isolation above remains
-unchanged.
+Current Packet 03.2 builds additionally contain the shared `PlaceRoles`,
+`ServiceLifecycle`, and `Cleanup` ModuleScripts in all three projects. The
+source-layer isolation above remains unchanged.
 
 The inspected ignored build artifacts were removed. They can be recreated with
 the commands above.

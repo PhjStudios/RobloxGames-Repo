@@ -59,13 +59,18 @@ mapped as `ReplicatedStorage.Shared`. Packet 02.3 later added the typed
 `PlaceRoles` module and integrated it into both bootstraps; the removed example
 behavior did not return.
 
-### Current bootstrap behavior after Packet 02.3
+### Current bootstrap behavior after Packet 03.2
 
 Both common bootstraps now obtain `ReplicatedStorage` and `RunService`, validate
 the shared place-role configuration, and resolve the project's declared role
 against `game.PlaceId`. An invalid configuration or pairing produces a
-structured error and stops that bootstrap. A valid Studio boot remains harmless
-and emits one ready record. See `docs/PLACE_ROLES.md` for the current contract.
+structured error and stops that bootstrap. After successful role validation,
+each bootstrap creates, initializes, and starts a context-specific lifecycle
+runner with zero services. Packet 03.2 then creates a context-labelled cleanup
+container and registers the runner's existing shutdown operation as its one
+task. A valid Studio boot remains harmless and emits one ready record. See
+`docs/PLACE_ROLES.md`, `docs/SERVICE_LIFECYCLE.md`, and `docs/CLEANUP.md` for the
+current contracts.
 
 ## Bootstrap log contract
 
@@ -88,6 +93,15 @@ startup failures visible without pulling later architecture forward.
 Packet 02.3 extended successful records with `[role=<Development|Lobby|Match>]`
 and added structured place-role rejection records. It still did not add the
 Phase 03 logger or lifecycle framework.
+
+Packet 03.1 subsequently extended successful records with
+`[lifecycleState=Started][serviceCount=0]`. It added a focused lifecycle runner,
+not the Packet 03.3 logging framework. Ready diagnostics remain direct,
+Studio-only strings.
+
+Packet 03.2 extended those records with
+`[cleanupState=Active][cleanupTaskCount=1]`. It did not add a shutdown trigger;
+Packet 03.4 still owns that behavior.
 
 ## Automated verification
 
@@ -116,16 +130,19 @@ Use this procedure for Packet 01.3 regression checks:
 3. Connect the Rojo plugin to the repository server.
 4. In Edit mode, confirm:
    - `ReplicatedStorage` has `ATDPlaceRole = Development`.
-   - Both common `Main` bootstraps contain shared place-role validation.
+   - Both common `Main` bootstraps contain shared place-role validation and
+     zero-service lifecycle startup.
    - `ReplicatedStorage.Shared.config.PlaceRoles` exists.
+   - `ReplicatedStorage.Shared.lifecycle.ServiceLifecycle` exists.
+   - `ReplicatedStorage.Shared.util.Cleanup` exists.
    - `ReplicatedStorage.Shared.Example` does not exist.
 5. Open Output and clear old messages if verifying manually.
 6. Start a local Play test.
 7. Confirm Output contains one server record and one client record:
 
    ```text
-   [ATD][INFO][context=server][subsystem=bootstrap][event=ready][role=Development][placeId=100561454756026] Server bootstrap ready
-   [ATD][INFO][context=client][subsystem=bootstrap][event=ready][role=Development][placeId=100561454756026] Client bootstrap ready
+   [ATD][INFO][context=server][subsystem=bootstrap][event=ready][role=Development][placeId=100561454756026][lifecycleState=Started][serviceCount=0][cleanupState=Active][cleanupTaskCount=1] Server bootstrap ready
+   [ATD][INFO][context=client][subsystem=bootstrap][event=ready][role=Development][placeId=100561454756026][lifecycleState=Started][serviceCount=0][cleanupState=Active][cleanupTaskCount=1] Client bootstrap ready
    ```
 
 8. Confirm there is no script error or warning from either bootstrap.

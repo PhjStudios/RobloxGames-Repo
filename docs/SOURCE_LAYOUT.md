@@ -24,6 +24,10 @@ src/
   shared/
     config/
       PlaceRoles.luau
+    lifecycle/
+      ServiceLifecycle.luau
+    util/
+      Cleanup.luau
   server/
     common/
       bootstrap/
@@ -48,9 +52,10 @@ not Luau modules or runnable scripts. Rojo represents the directories as empty
 folders and does not create instances for the `.gitkeep` files themselves.
 
 `src/shared` remains the location for code that is safe and useful across both
-execution contexts and both place roles. Packet 02.3 added the first real shared
-module, the typed place-role configuration described in
-`docs/PLACE_ROLES.md`.
+execution contexts and both place roles. Packet 02.3 added the typed place-role
+configuration described in `docs/PLACE_ROLES.md`. Packet 03.1 added the typed
+service lifecycle contract described in `docs/SERVICE_LIFECYCLE.md`. Packet 03.2
+added the ownership utility described in `docs/CLEANUP.md`.
 
 ## Bootstrap move manifest
 
@@ -145,8 +150,10 @@ place's services.
 | `client/lobby` | `shared`, `client/common`, `client/lobby` | `client/match`, all server layers |
 | `client/match` | `shared`, `client/common`, `client/match` | `client/lobby`, all server layers |
 
-The only current `require` calls are the common client and server bootstraps
-loading `ReplicatedStorage.Shared.config.PlaceRoles`. Both follow the allowed
+The current common client and server bootstraps require only
+`ReplicatedStorage.Shared.config.PlaceRoles` and
+`ReplicatedStorage.Shared.lifecycle.ServiceLifecycle`, plus
+`ReplicatedStorage.Shared.util.Cleanup`. All imports follow the allowed
 common-to-shared dependency direction. No cross-role import exists.
 
 ## Automated verification

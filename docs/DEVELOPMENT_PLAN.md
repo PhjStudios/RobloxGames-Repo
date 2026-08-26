@@ -28,8 +28,8 @@ only change through an explicit architecture decision recorded here.
   server bootstraps; temporary example behavior has been removed.
 - Current implementation phase: Phase 03.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
-  02.2, 02.3, and 02.4 on 2026-08-25.
-- Next packet: 03.1, bootstrap lifecycle contract. It has not begun.
+  02.2, 02.3, 02.4, 03.1, and 03.2 on 2026-08-25.
+- Next packet: 03.3, logging and environment context. It has not begun.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -411,12 +411,17 @@ and connection cleanup.
 
 ### Packet 03.1 — Bootstrap lifecycle contract
 
+**Status:** Complete — 2026-08-25. Evidence:
+`docs/SERVICE_LIFECYCLE.md`.
+
 - Define service registration, initialization, start, and shutdown stages.
 - Reject duplicate service names.
 - Make dependency order explicit.
 - Provide clear development errors with service context.
 
 ### Packet 03.2 — Cleanup utility
+
+**Status:** Complete — 2026-08-25. Evidence: `docs/CLEANUP.md`.
 
 - Implement a small typed cleanup utility for connections, instances, callbacks,
   threads, and nested cleanup containers.
