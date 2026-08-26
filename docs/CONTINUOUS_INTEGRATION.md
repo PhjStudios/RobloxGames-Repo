@@ -3,19 +3,19 @@
 ## Packet status
 
 - Packet: 05.3
-- Status: In progress; local workflow design recorded, genuine GitHub evidence
-  not yet obtained
+- Status: Complete — 2026-08-26
 - Research date: 2026-08-26
 - Target runner: GitHub-hosted Windows Server 2025 x64 (`windows-2025`)
 - Workflow: `.github/workflows/ci.yml`, `Phase 05 Verification`
 - Required job: `Windows verification`
+- Verification branch: `codex/phase-05-ci-verification`
 - Workflow authority: verification only; no deployment, release, package, or
   Roblox publication authority
 
-This record was written before the workflow was added. It documents the exact
-executable supply chain and the evidence that Packet 05.3 must obtain. A local
-workflow inspection or simulated command run is not a substitute for genuine
-GitHub Actions runs.
+The dependency decision and executable supply chain were recorded before the
+workflow was added. This final record also contains the genuine GitHub Actions
+negative controls and clean runs required by Packet 05.3; local inspection or a
+simulated command run was not used as a substitute.
 
 ## Dependency and action decision
 
@@ -94,20 +94,40 @@ The workflow must not use `continue-on-error` on a required check. Commands
 remain the same repository-owned commands used locally; CI does not maintain a
 parallel test or build implementation.
 
-## Required negative and clean evidence
+## Genuine negative and clean evidence
 
-Packet 05.3 is not complete until the following genuine GitHub evidence is
-recorded. Each negative control must be an ordinary pushed commit and must be
-followed by an ordinary restoring commit; history must not be rewritten.
+All evidence below came from ordinary commits pushed to
+`codex/phase-05-ci-verification`. Each deliberate failure was followed by an
+ordinary restoring commit. No force-push, history rewrite, pull request,
+deployment, publication, repository-setting change, repository-configured
+secret, external credential, or Roblox credential was introduced or referenced
+by the workflow. Checkout used only GitHub's implicit least-privilege token.
 
-| Evidence | Required result | Current status |
+| Evidence | Commit and genuine run | Result |
 | --- | --- | --- |
-| Deliberate formatting or Selene violation | The intended formatting/lint step fails before later checks. | Not run |
-| Restored formatting/lint state plus deliberately broken definition or expectation | Formatting and lint pass; the automated-test step fails for the intended stable assertion/definition reason. | Not run |
-| Final restoring commit | Every required step passes in one complete workflow run. | Not run |
+| Initial live run / bootstrap defect | Foundation commit `95c13801fa11f92eca33b342e75461f5fee32f75`; [run 1](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32969869700), [job 98180817628](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32969869700/job/98180817628) | Failed before checks at `Install pinned Rokit toolchain`. The log identified a PowerShell parser error caused by leading continuation-line `-or` tokens. This was an implementation defect, not a required negative control. |
+| Corrected clean baseline | Parser-fix commit `cf1d79b7f6722eff9c53b238ed9c113ac64ed29f`; [run 2](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32970317159), [job 98182245919](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32970317159/job/98182245919) | Passed every required step. |
+| Formatting negative control | `02dfbe833743961d93820017c8a5e82399f11054` (`test(ci): prove formatting failure`); [run 3](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32970475786), [job 98182761351](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32970475786/job/98182761351) | Setup and pinned-version checks passed. `Check Luau formatting` failed with exit 1 and named `tests/specs/Smoke.spec.luau`; all later required checks were skipped. |
+| Formatting restoration | `2c5f8592ad987963609ab361a731b111509e91d0` (`test(ci): restore formatting control`); [run 4](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32970674430), [job 98183409900](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32970674430/job/98183409900) | Complete clean pass before the next control. |
+| Expectation negative control | `60a0aae4e61fee31f4c5a37e8b1deef9b4711b1e` (`test(ci): prove automated test failure`); [run 5](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32970860256), [job 98184011544](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32970860256/job/98184011544) | Formatting, Selene configuration, and lint all passed. `Run deterministic unit tests` then failed with `ASSERT_EQUAL_FAILED`, suite `runner smoke`, case and path context, and summary `failed=1`, `passed=75`, `tests=76`. |
+| Expectation restoration | `d946c8f888488b1c4780baf8b7a704344ae6403d` (`test(ci): restore automated test control`); [run 6](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32971057779), [job 98184643132](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32971057779/job/98184643132) | Complete clean pass before the stricter exit-gate controls. |
+| Selene-lint negative control | `9c8b2609929374731934f4488d8407145a6425ba` (`test(ci): prove Selene lint failure`); [run 7](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32972023099), [job 98187762689](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32972023099/job/98187762689) | Setup, pinned versions, formatting, and Selene configuration validation passed. `Lint Luau` failed with exit 1 on exactly one `unused_variable` warning and no errors or parse errors. |
+| Selene-lint restoration | `ae4d39440ece57a038b8ed673402ecd423711f12` (`test(ci): restore Selene lint control`); [run 8](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32972218109), [job 98188400918](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32972218109/job/98188400918) | Complete clean pass before the broken-definition control. |
+| Broken-definition negative control | `d6dd2e2a51cb312b27a99007a001ce1013871107` (`test(ci): prove broken definition failure`); [run 9](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32972524397), [job 98189368945](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32972524397/job/98189368945) | A test-only Tower definition used a negative placement cost. Formatting and lint passed; the test step failed with `ASSERT_TRUE_FAILED`, exact schema suite/case/path context, and summary `failed=1`, `passed=75`, `tests=76`. Lasting authored catalogs were unchanged. |
+| Final restoration | `877b5f71c0446bccfd73df565931aa34985857d6` (`test(ci): restore broken definition control`); [run 10](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32972680148), [job 98189867916](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32972680148/job/98189867916) | Complete clean pass. Every required workflow step succeeded. |
 
-The final evidence must record branch, commits, workflow/run/job names, URLs,
-conclusions, restoring commits, actual runner image, permissions, absence of
-retained artifacts, and the final clean repository state. If authentication,
-write permission, or Actions availability prevents those runs, Packet 05.3 is
-blocked rather than simulated.
+The final successful job used Actions Runner `2.336.0`, image
+`windows-2025-vs2026` version `20260818.207.1`, and reported only
+`Contents: read` plus GitHub's implicit `Metadata: read`. It verified Rokit
+1.2.0, Rojo 7.7.0, StyLua 2.5.2, Selene 0.31.0, and Lune 0.10.5; reported zero
+Selene errors, warnings, and parse errors; passed all 76 tests in eight suites;
+and emitted all four structural build markers:
+
+- Default, Lobby, and Match: `MODULES_30_SCRIPTS_1_LOCALSCRIPTS_1`
+- Test: `SHARED_MODULES_29_RUNNABLE_SCRIPTS_0`
+
+GitHub's run-artifact API returned an empty artifact list for inspected clean
+runs 2, 6, and 10. At the restoration evidence checkpoint, the local branch
+matched its remote with no tracked or untracked residue and only the
+pre-existing ignored `sourcemap.json`. Packet 05.3 therefore satisfies its
+genuine negative-control and clean-run gate.

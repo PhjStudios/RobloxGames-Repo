@@ -8,10 +8,11 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phase 04 and Packets 05.1-05.2 are complete. The isolated runner now
-executes 76 deterministic pure-contract cases across eight suites. Packet 05.3,
-GitHub continuous integration, is in progress and has not yet completed its
-required genuine negative and clean runs.
+order. Phase 04 and Packets 05.1-05.3 are complete. The isolated runner executes
+76 deterministic pure-contract cases across eight suites, and the
+least-privilege GitHub workflow has genuine formatting, Selene-lint,
+broken-expectation, broken-definition, restoration, and clean-run evidence.
+Packet 05.4, the test matrix and documentation reconciliation, is next.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)

@@ -30,11 +30,11 @@ only change through an explicit architecture decision recorded here.
   exit-gate audit passed on 2026-08-26.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
-  Packets 04.3, 04.4, 04.5, 05.1, and 05.2 completed on 2026-08-26.
-- Next checkpoint: Packet 05.3. The 76-case deterministic contract suite and
-  its exact production-build exclusion checks are complete. The CI workflow is
-  locally implemented, but genuine GitHub negative and clean runs are not yet
-  verified.
+  Packets 04.3, 04.4, 04.5, 05.1, 05.2, and 05.3 completed on 2026-08-26.
+- Next checkpoint: Packet 05.4. The 76-case deterministic contract suite,
+  exact production-build exclusion checks, and genuine GitHub formatting,
+  Selene-lint, broken-expectation, broken-definition, restoration, and clean-run
+  evidence are complete.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -557,9 +557,10 @@ unresolved P0, P1, or P2 issue.
 
 ### Packet 05.3 — GitHub continuous integration
 
-**Status:** In progress — 2026-08-26. The least-privilege workflow and pinned
-bootstrap are locally verified; genuine GitHub evidence remains required.
-Evidence: `docs/CONTINUOUS_INTEGRATION.md`.
+**Status:** Complete — 2026-08-26. The least-privilege workflow, pinned
+bootstrap, genuine formatting, Selene-lint, broken-expectation, and
+broken-definition controls, ordinary restoring commits, and final clean GitHub
+run are recorded in `docs/CONTINUOUS_INTEGRATION.md`.
 
 - Add a workflow that installs pinned tools.
 - Run formatting checks, Selene, tests, and Rojo builds.
@@ -574,8 +575,9 @@ Evidence: `docs/CONTINUOUS_INTEGRATION.md`.
 - Record currently unavailable or deferred tests and the exact environment,
   authorization, device, or production-safety prerequisite for each one.
 
-**Exit gate:** A deliberately broken definition or lint error fails CI, while the
-clean project passes locally and in GitHub.
+**Exit gate:** Deliberate formatting, Selene-lint, broken-expectation, and
+broken-definition controls fail through their intended paths, while the clean
+project passes locally and in GitHub.
 
 ## Phase 06 — Network protocol and remote-security foundation
 

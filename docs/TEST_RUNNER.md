@@ -2,8 +2,7 @@
 
 ## Decision record
 
-- Status: Packets 05.1 and 05.2 complete; Packet 05.3 locally in progress with
-  genuine GitHub evidence pending
+- Status: Packets 05.1, 05.2, and 05.3 complete; Packet 05.4 is next
 - Research date: 2026-08-26
 - Selected runtime: Lune 0.10.5
 - Rokit tool identifier: `lune-org/lune@0.10.5`
