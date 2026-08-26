@@ -387,8 +387,9 @@ Every terminal success or rejection, including an admitted rate-limit rejection,
 moves it to completed history before a response send. A repeated in-flight ID is
 a duplicate and is dropped without a second response, because a duplicate
 rejection could race and incorrectly terminate the original client pending
-request. A retained completed ID is stale and may receive `STALE_REQUEST` on the
-incoming endpoint's response leaf. The same ID on another endpoint is still a
+request. A retained completed ID is stale. A response-required replay always
+receives `STALE_REQUEST` on the incoming endpoint's captured response leaf; a
+no-response Request sends nothing. The same ID on another endpoint is still a
 duplicate or stale replay. Once count eviction removes an ID, it is first-seen
 again; correlation never promises idempotency or exactly-once effects.
 
@@ -433,10 +434,12 @@ feature code that mutates and then throws, so every future stateful handler must
 perform all fallible work before its atomic commit and must prove that behavior
 with a mutation sentinel before registration approval.
 
-The client tracker registers only canonical response-required Request
-definitions and authenticated schemas. It holds at most 32 global Pending states
-and 128 recent terminal IDs, generates bounded IDs with collision checks, and
-exposes frozen `Pending`, `Success`, and `Rejected` records without UI. A
+The client tracker registers only canonical Request definitions and
+authenticated schemas. It generates and builds every Request envelope, including
+no-response Requests, but allocates Pending state and a response schema/listener
+only when the registry requires a response. It holds at most 32 global Pending
+states and 128 recent terminal IDs, generates bounded IDs with collision checks,
+and exposes frozen `Pending`, `Success`, and `Rejected` records without UI. A
 response listener supplies its captured definition identity; an unknown or
 completed ID is stale, while a live ID arriving through another endpoint is
 mismatched. Malformed envelopes, public errors, or success payloads and
