@@ -146,6 +146,11 @@ runner if that runner is still `Started`. The current lifecycle runner owns zero
 gameplay services, so ordinary Play-Stop completion transitions directly from
 `Started` to `Shutdown`, then the cleanup container transitions to `Cleaned`.
 
+Packet 04.5 now validates the complete core configuration before constructing
+the lifecycle runner, cleanup container, or this `BindToClose` hook. Rejected
+boot therefore creates no shutdown-owned resource and needs no partial cleanup.
+Successful validation follows the same single-hook sequence above unchanged.
+
 When future cleanup resources are registered in the same container, the cleanup
 utility releases them in last-in, first-out order. When future services are
 registered, lifecycle shutdown traverses the already-resolved dependency order
@@ -243,8 +248,10 @@ was saved.
 | Source hook scan | Pass; exactly one server hook and no client hook |
 | Shutdown cancellation scan | Pass; the shutdown runner does not call `task.cancel()` |
 
-Each independent build contains the six current ModuleScripts: `PlaceRoles`,
-`EnvironmentContext`, `Log`, `ServiceLifecycle`, `Cleanup`, and `Shutdown`.
+At the Packet 03.4 verification snapshot, each independent build contained six
+ModuleScripts: `PlaceRoles`, `EnvironmentContext`, `Log`, `ServiceLifecycle`,
+`Cleanup`, and `Shutdown`. Packet 04.1 later added `Ids` and `Result` without
+changing this shutdown evidence.
 
 | Build | Declared role | ModuleScripts | Server Scripts | Client LocalScripts | Role-source structure |
 | --- | --- | ---: | ---: | ---: | --- |
@@ -318,5 +325,7 @@ the server hook has a bounded cooperative wait; timeout does not poison cleanup
 state; and repeated Studio Play-Stop sessions return cleanly to Edit mode without
 warnings, errors, or leaked bootstrap connections.
 
-Phase 04 has not begun. Shared gameplay types, content schemas, and their
-validators remain outside this packet.
+Phase 04 added pure shared configuration contracts. Packet 04.5 now gates the
+valid startup path before shutdown registration, while preserving the one-hook
+shutdown behavior recorded here. Current bootstrap evidence is in
+`docs/CONFIGURATION_VALIDATION.md`.

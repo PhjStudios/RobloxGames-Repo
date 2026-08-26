@@ -1,7 +1,7 @@
 local EnvironmentContext = require(script.Parent.EnvironmentContext)
 
 export type Severity = "DEBUG" | "INFO" | "WARN" | "ERROR"
-export type Subsystem = "bootstrap" | "place-role" | "lifecycle" | "cleanup" | "shutdown"
+export type Subsystem = "bootstrap" | "configuration" | "place-role" | "lifecycle" | "cleanup" | "shutdown"
 export type FieldValue = string | number | boolean
 export type SafeFieldName =
 	"budgetSeconds"
@@ -9,11 +9,14 @@ export type SafeFieldName =
 	| "cleanupTaskCount"
 	| "code"
 	| "closeReason"
+	| "configurationFamilyCount"
 	| "container"
+	| "issueCount"
 	| "lifecycleState"
 	| "service"
 	| "serviceCount"
 	| "state"
+	| "validationPath"
 export type Fields = { [SafeFieldName]: FieldValue }
 
 export type ErrorCode =
@@ -50,6 +53,7 @@ local VALID_SEVERITIES: { [string]: boolean } = table.freeze({
 local VALID_SUBSYSTEMS: { [string]: boolean } = table.freeze({
 	bootstrap = true,
 	cleanup = true,
+	configuration = true,
 	lifecycle = true,
 	["place-role"] = true,
 	shutdown = true,
@@ -74,11 +78,14 @@ local SAFE_FIELDS: { [string]: boolean } = table.freeze({
 	cleanupTaskCount = true,
 	closeReason = true,
 	code = true,
+	configurationFamilyCount = true,
 	container = true,
+	issueCount = true,
 	lifecycleState = true,
 	service = true,
 	serviceCount = true,
 	state = true,
+	validationPath = true,
 })
 
 local SENSITIVE_FIELD_TOKENS = table.freeze({
@@ -93,6 +100,77 @@ local SENSITIVE_FIELD_TOKENS = table.freeze({
 })
 
 local LOGGER_REGISTRY = setmetatable({}, { __mode = "k" }) :: { [any]: boolean }
+
+local function isSafeValidationPath(value: string): boolean
+	if #value < 1 or #value > 512 then
+		return false
+	end
+
+	local length = #value
+	local index = 1
+
+	local function consumeIdentifier(): boolean
+		local firstByte = string.byte(value, index)
+		local startsWithLetter = (firstByte >= string.byte("A") and firstByte <= string.byte("Z"))
+			or (firstByte >= string.byte("a") and firstByte <= string.byte("z"))
+		if not startsWithLetter then
+			return false
+		end
+
+		index += 1
+		while index <= length do
+			local byte = string.byte(value, index)
+			local isAlphaNumeric = (byte >= string.byte("A") and byte <= string.byte("Z"))
+				or (byte >= string.byte("a") and byte <= string.byte("z"))
+				or (byte >= string.byte("0") and byte <= string.byte("9"))
+			if not isAlphaNumeric and byte ~= string.byte("_") then
+				break
+			end
+			index += 1
+		end
+		return true
+	end
+
+	if not consumeIdentifier() then
+		return false
+	end
+
+	while index <= length do
+		local byte = string.byte(value, index)
+		if byte == string.byte(".") then
+			index += 1
+			if index > length or not consumeIdentifier() then
+				return false
+			end
+		elseif byte == string.byte("[") then
+			index += 1
+			if index > length then
+				return false
+			end
+
+			local firstDigit = string.byte(value, index)
+			if firstDigit < string.byte("1") or firstDigit > string.byte("9") then
+				return false
+			end
+			index += 1
+			while index <= length do
+				local digit = string.byte(value, index)
+				if digit < string.byte("0") or digit > string.byte("9") then
+					break
+				end
+				index += 1
+			end
+			if index > length or string.byte(value, index) ~= string.byte("]") then
+				return false
+			end
+			index += 1
+		else
+			return false
+		end
+	end
+
+	return true
+end
 
 local function requireLogger(value: unknown)
 	if type(value) ~= "table" or LOGGER_REGISTRY[value] ~= true then
@@ -130,7 +208,11 @@ end
 local function validateFieldValue(logger: LoggerData, fieldName: string, fieldValue: unknown): FieldValue
 	local valueType = type(fieldValue)
 	if valueType == "string" then
-		if string.match(fieldValue :: string, VALID_STRING_FIELD_PATTERN) == nil then
+		local stringValue = fieldValue :: string
+		local isValidString = if fieldName == "validationPath"
+			then isSafeValidationPath(stringValue)
+			else string.match(stringValue, VALID_STRING_FIELD_PATTERN) ~= nil
+		if not isValidString then
 			fail(
 				logger,
 				"INVALID_FIELD_VALUE",

@@ -117,9 +117,11 @@ container's local logger.
 
 ## Bootstrap integration
 
-After place-role validation and lifecycle startup, each common bootstrap creates
-a `bootstrap` cleanup container using its own server or client logger. The
-environment context distinguishes the otherwise identical container labels.
+After place-role and Packet 04.5 whole-configuration validation, each common
+bootstrap starts its lifecycle and creates a `bootstrap` cleanup container using
+its own server or client logger. The environment context distinguishes the
+otherwise identical container labels. Invalid configuration exits before the
+lifecycle or cleanup container exists, so there is no partial owner to unwind.
 
 Each container owns one real callback that shuts down its existing lifecycle
 runner if that runner is still `Started`. The Studio-only ready record therefore
@@ -212,4 +214,6 @@ save, or publish operation occurred.
 6. Do not save or publish merely to run this regression.
 
 Phase 03 is complete. Packet 03.4 evidence is in
-`docs/GRACEFUL_SHUTDOWN.md`; Phase 04 has not begun.
+`docs/GRACEFUL_SHUTDOWN.md`. Packet 04.5 now gates construction before cleanup
+ownership without changing this cleanup behavior; current evidence is in
+`docs/CONFIGURATION_VALIDATION.md`.

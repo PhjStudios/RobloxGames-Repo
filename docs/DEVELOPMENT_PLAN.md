@@ -26,10 +26,13 @@ only change through an explicit architecture decision recorded here.
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
 - Gameplay state: minimal Rojo scaffold with harmless Studio-only client and
   server bootstraps; temporary example behavior has been removed.
-- Current implementation phase: Phase 03 complete; Phase 04 has not begun.
+- Current implementation phase: Phase 04 complete; its separate exit-gate audit
+  passed on 2026-08-26.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
-  02.2, 02.3, 02.4, 03.1, 03.2, 03.3, and 03.4 on 2026-08-25.
-- Next packet: 04.1, shared ID and result types. It has not begun.
+  02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
+  Packets 04.3, 04.4, and 04.5 completed on 2026-08-26.
+- Next checkpoint: Packet 05.1. Phase 05 has not begun and remains unauthorized
+  by the completed Phase 04 goal.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -463,12 +466,17 @@ up without leaked connections in repeated Studio sessions. Evidence:
 
 ### Packet 04.1 — Shared ID and result types
 
+**Status:** Complete — 2026-08-25. Evidence: `docs/IDS_AND_RESULTS.md`.
+
 - Define branded/string ID conventions for towers, enemies, maps, waves, banners,
   units, queues, matches, and transactions.
 - Define success/failure result shapes for expected failures.
 - Avoid using arbitrary Instances as persistent or network identifiers.
 
 ### Packet 04.2 — Tower and enemy schema
+
+**Status:** Complete — 2026-08-25. Evidence:
+`docs/TOWER_ENEMY_SCHEMAS.md`.
 
 - Define required and optional fields.
 - Separate immutable content data from runtime state.
@@ -478,12 +486,18 @@ up without leaked connections in repeated Studio sessions. Evidence:
 
 ### Packet 04.3 — Map, difficulty, and wave schema
 
+**Status:** Complete — 2026-08-26. Evidence:
+`docs/MAP_DIFFICULTY_WAVE_SCHEMAS.md`.
+
 - Define lanes, wave groups, spawn timings, wave deadlines, boss markers, base
   configuration, difficulty modifiers, and reward metadata.
 - Support authored finite modes and generated Endless inputs.
 - Validate all cross-references.
 
 ### Packet 04.4 — Economy, banner, and settings schema
+
+**Status:** Complete — 2026-08-26. Evidence:
+`docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md`.
 
 - Define Battle Cash rules, Gold rewards, sell rate, banner outcomes, pity rules,
   and default settings.
@@ -492,13 +506,19 @@ up without leaked connections in repeated Studio sessions. Evidence:
 
 ### Packet 04.5 — Configuration validator report
 
+**Status:** Complete — 2026-08-26. Evidence:
+`docs/CONFIGURATION_VALIDATION.md`.
+
 - Add a validator that checks all loaded definitions together.
 - Produce actionable paths such as `Waves.Easy.10.Groups.2.enemyId`.
 - Fail development boot on invalid core configuration.
 - Make production failure safe and observable.
 
-**Exit gate:** Empty or fixture definitions validate, invalid fixtures fail for the
-correct reasons, and no gameplay service requires an untyped configuration table.
+**Exit gate:** Passed — 2026-08-26. Empty and synthetic fixture definitions
+validated, invalid fixtures failed for the correct stable codes and exact paths,
+and no gameplay service requires an untyped configuration table. The fresh
+combined-state audit, including 376 assertions in each place and three final
+Play/Stop cycles per place, is recorded in `docs/PHASE_04_EXIT_AUDIT.md`.
 
 ## Phase 05 — Automated test and continuous-integration foundation
 
@@ -531,7 +551,8 @@ Studio play.
 - Create `docs/TEST_MATRIX.md`.
 - Separate automated, Studio solo, multi-client, published-client, device, and
   destructive-production tests.
-- Record which tests are unavailable before a match place is created.
+- Record currently unavailable or deferred tests and the exact environment,
+  authorization, device, or production-safety prerequisite for each one.
 
 **Exit gate:** A deliberately broken definition or lint error fails CI, while the
 clean project passes locally and in GitHub.

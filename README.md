@@ -8,7 +8,8 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order.
+order. Phase 04 is complete; Packet 05.1 is the next roadmap checkpoint and has
+not started.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -24,6 +25,12 @@ order.
 - [Typed cleanup utility and ownership contract](docs/CLEANUP.md)
 - [Structured logging and environment-context contract](docs/LOGGING.md)
 - [Graceful server shutdown contract](docs/GRACEFUL_SHUTDOWN.md)
+- [Shared ID and expected-result contracts](docs/IDS_AND_RESULTS.md)
+- [Tower, enemy, and symbolic-asset schemas](docs/TOWER_ENEMY_SCHEMAS.md)
+- [Map, difficulty, and wave schemas](docs/MAP_DIFFICULTY_WAVE_SCHEMAS.md)
+- [Economy, banner, and default-settings schemas](docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md)
+- [Whole-configuration validation and bootstrap gate](docs/CONFIGURATION_VALIDATION.md)
+- [Phase 04 exit-gate audit](docs/PHASE_04_EXIT_AUDIT.md)
 - [Project instructions](AGENTS.md)
 
 ## Source of truth
@@ -58,8 +65,9 @@ separate shared, lobby-only, match-only, server, and client responsibilities:
     tests/
     docs/
 
-The lobby and match will ultimately be separate places in the same Roblox
-experience, with separate Rojo project files and shared source modules.
+The Lobby and Match are separate places in the same Roblox experience. Separate
+role-isolated Rojo projects synchronize them while both consume the shared
+source modules.
 
 ## Initial setup
 

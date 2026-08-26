@@ -152,12 +152,19 @@ Additional assertions passed:
   or duplicated runtime PlaceId. Packet 02.3 later added only their role
   attributes.
 
-Current Packet 03.4 builds contain the five shared ModuleScripts `PlaceRoles`,
-`ServiceLifecycle`, `EnvironmentContext`, `Log`, and `Cleanup`, plus the
-server-only common `Shutdown` ModuleScript. Each build therefore contains six
-ModuleScripts, one Script, and one LocalScript. The Default build contains both
-empty role folders, the Lobby build contains no match folder, and the Match
-build contains no lobby folder. Source-layer isolation remains unchanged.
+Current Packet 04.5 builds contain 29 shared ModuleScripts: `PlaceRoles`,
+`ServiceLifecycle`, `EnvironmentContext`, `Log`, `Cleanup`, `Ids`, `Result`,
+`Validation`, `ConfigTypes`, `AssetSchema`, `Assets`, `BannerSchema`, `Banners`,
+`ConfigurationValidator`, `DefaultSettings`, `Difficulties`, `DifficultySchema`, `Economy`,
+`EconomySchema`, `Enemies`, `EnemySchema`, `MapSchema`, `Maps`,
+`SchemaPrimitives`, `SettingsSchema`, `TowerSchema`, `Towers`, `WaveSchema`, and
+`Waves`. The server-only common `Shutdown` module brings each build to 30 ModuleScripts,
+alongside one Script and one LocalScript. The Default build contains both empty
+role folders, the Lobby build contains no match folder, and the Match build
+contains no lobby folder. Source-layer isolation remains unchanged. Packet 04.4
+schema evidence is recorded in `docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md`; current
+whole-catalog and bootstrap evidence is recorded in
+`docs/CONFIGURATION_VALIDATION.md`.
 
 The inspected ignored build artifacts were removed. They can be recreated with
 the commands above.

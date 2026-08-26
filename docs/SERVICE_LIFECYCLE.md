@@ -120,10 +120,12 @@ passed into them.
 
 ## Bootstrap integration
 
-The common server and client bootstraps still validate the centralized place
-role before creating a lifecycle runner. Each resolves one environment context,
-creates one local logger, passes it to the runner, initializes it, and starts it
-with zero registered services. Their Studio-only ready record includes:
+The common server and client bootstraps validate the centralized place role and,
+as of Packet 04.5, the complete nine-family configuration before creating a
+lifecycle runner. Each resolves one environment context, creates one local
+logger, calls the shared `ConfigurationValidator.validateLoaded()` gate, passes
+the logger to the runner only after success, initializes it, and starts it with
+zero registered services. Their Studio-only ready record includes:
 
 ```text
 [lifecycleState=Started][serviceCount=0]
@@ -135,6 +137,10 @@ introduced. Packet 03.2 subsequently registered each runner's existing
 03.4 now invokes the server container through the one ordered `BindToClose`
 path. The lifecycle runner therefore shuts down in reverse dependency order
 before the server hook completes. The client still has no process-shutdown hook.
+
+Invalid configuration raises a structured error before `ServiceLifecycle.new`,
+so no partially validated configuration can reach a service and no runner needs
+rollback. The valid path and every lifecycle state contract remain unchanged.
 
 ## Focused automated validation
 
@@ -215,4 +221,7 @@ remain preserved by policy.
 6. Do not save or publish either place merely to perform this test.
 
 Phase 03 is complete. Packet 03.4 evidence is in
-`docs/GRACEFUL_SHUTDOWN.md`; Phase 04 has not begun.
+`docs/GRACEFUL_SHUTDOWN.md`. Phase 04 added pure content contracts, and Packet
+04.5 placed their centralized gate before runner construction without changing
+this lifecycle behavior. Current evidence is in
+`docs/CONFIGURATION_VALIDATION.md`.

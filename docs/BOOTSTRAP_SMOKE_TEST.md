@@ -59,7 +59,7 @@ mapped as `ReplicatedStorage.Shared`. Packet 02.3 later added the typed
 `PlaceRoles` module and integrated it into both bootstraps; the removed example
 behavior did not return.
 
-### Current bootstrap behavior after Packet 03.4
+### Current bootstrap behavior after Packet 04.5
 
 Both common bootstraps now obtain `ReplicatedStorage` and `RunService`, validate
 the shared place-role configuration, and resolve the project's declared role
@@ -70,12 +70,17 @@ runner with zero services. Packet 03.2 then creates a cleanup container and
 registers the runner's existing shutdown operation as its one task. Packet 03.3
 now creates one immutable environment context and context-bound logger per
 bootstrap. Place-role failures use the provisional `Unresolved` role; a valid
-role produces a resolved logger shared by lifecycle and cleanup. A valid Studio
-boot remains harmless and emits one ready record through that logger. See
+role produces a resolved logger. Packet 04.5 then validates all nine Phase 04
+configuration families through the same shared entry point on client and
+server. An invalid graph raises a structured, production-visible error before
+the lifecycle, cleanup owner, or server close hook exists. A valid Studio boot
+emits one configuration-success record, then follows the established harmless
+zero-service ready path. See
 `docs/PLACE_ROLES.md`, `docs/SERVICE_LIFECYCLE.md`, `docs/CLEANUP.md`, and
 `docs/LOGGING.md` for those contracts. Packet 03.4 additionally binds the server
 bootstrap's cleanup container to the single ordered close hook described in
-`docs/GRACEFUL_SHUTDOWN.md`.
+`docs/GRACEFUL_SHUTDOWN.md`. Packet 04.5's report, privacy, and current Studio
+evidence are in `docs/CONFIGURATION_VALIDATION.md`.
 
 ## Bootstrap log contract
 
@@ -151,6 +156,7 @@ Use this procedure for Packet 01.3 regression checks:
    - Both common `Main` bootstraps contain shared place-role validation and
      zero-service lifecycle startup.
    - `ReplicatedStorage.Shared.config.PlaceRoles` exists.
+   - `ReplicatedStorage.Shared.config.ConfigurationValidator` exists.
    - `ReplicatedStorage.Shared.lifecycle.ServiceLifecycle` exists.
    - `ReplicatedStorage.Shared.logging.EnvironmentContext` exists.
    - `ReplicatedStorage.Shared.logging.Log` exists.
@@ -159,10 +165,13 @@ Use this procedure for Packet 01.3 regression checks:
    - `ReplicatedStorage.Shared.Example` does not exist.
 5. Open Output and clear old messages if verifying manually.
 6. Start a local Play test.
-7. Confirm Output contains one server record and one client record:
+7. Confirm Output first contains one configuration-success record for server
+   and client, followed by one ready record for each context:
 
    ```text
+   [ATD][INFO][context=server][role=Development][placeId=100561454756026][environment=studio][subsystem=configuration][event=validated][configurationFamilyCount=9] Core configuration validated
    [ATD][INFO][context=server][role=Development][placeId=100561454756026][environment=studio][subsystem=bootstrap][event=ready][cleanupState=Active][cleanupTaskCount=1][lifecycleState=Started][serviceCount=0] Server bootstrap ready
+   [ATD][INFO][context=client][role=Development][placeId=100561454756026][environment=studio][subsystem=configuration][event=validated][configurationFamilyCount=9] Core configuration validated
    [ATD][INFO][context=client][role=Development][placeId=100561454756026][environment=studio][subsystem=bootstrap][event=ready][cleanupState=Active][cleanupTaskCount=1][lifecycleState=Started][serviceCount=0] Client bootstrap ready
    ```
 

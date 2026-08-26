@@ -23,14 +23,39 @@ place-isolated mappings recorded in `docs/ROJO_PROJECTS.md`.
 src/
   shared/
     config/
+      AssetSchema.luau
+      Assets.luau
+      BannerSchema.luau
+      Banners.luau
+      ConfigurationValidator.luau
+      DefaultSettings.luau
+      Difficulties.luau
+      DifficultySchema.luau
+      Economy.luau
+      EconomySchema.luau
+      Enemies.luau
+      EnemySchema.luau
+      MapSchema.luau
+      Maps.luau
       PlaceRoles.luau
+      SchemaPrimitives.luau
+      SettingsSchema.luau
+      TowerSchema.luau
+      Towers.luau
+      WaveSchema.luau
+      Waves.luau
     lifecycle/
       ServiceLifecycle.luau
     logging/
       EnvironmentContext.luau
       Log.luau
+    types/
+      ConfigTypes.luau
     util/
       Cleanup.luau
+      Ids.luau
+      Result.luau
+      Validation.luau
   server/
     common/
       bootstrap/
@@ -60,7 +85,21 @@ execution contexts and both place roles. Packet 02.3 added the typed place-role
 configuration described in `docs/PLACE_ROLES.md`. Packet 03.1 added the typed
 service lifecycle contract described in `docs/SERVICE_LIFECYCLE.md`. Packet 03.2
 added the ownership utility described in `docs/CLEANUP.md`. Packet 03.3 added
-the context-bound diagnostic contract described in `docs/LOGGING.md`.
+the context-bound diagnostic contract described in `docs/LOGGING.md`. Packet
+03.4 added the server-only shutdown runner described in
+`docs/GRACEFUL_SHUTDOWN.md`. Packet 04.1 added the pure shared ID and Result
+contracts described in `docs/IDS_AND_RESULTS.md`. Packet 04.2 added the pure
+tower, enemy, symbolic-asset, and validation contracts described in
+`docs/TOWER_ENEMY_SCHEMAS.md`; at Packet 04.2 completion, none was required by a
+bootstrap.
+Packet 04.3 added the pure map, difficulty, and wave contracts described in
+`docs/MAP_DIFFICULTY_WAVE_SCHEMAS.md`. Packet 04.4 added the economy, banner,
+and default-settings contracts described in
+`docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md`. Packet 04.5 added the one typed,
+deterministic whole-configuration boundary described in
+`docs/CONFIGURATION_VALIDATION.md` and integrated it into both common
+bootstraps before lifecycle startup. It adds no place-specific or gameplay
+service.
 
 ## Bootstrap move manifest
 
@@ -155,15 +194,18 @@ place's services.
 | `client/lobby` | `shared`, `client/common`, `client/lobby` | `client/match`, all server layers |
 | `client/match` | `shared`, `client/common`, `client/match` | `client/lobby`, all server layers |
 
-The current common client and server bootstraps require only
-`ReplicatedStorage.Shared.config.PlaceRoles` and
+The current common client and server bootstraps require
+`ReplicatedStorage.Shared.config.PlaceRoles`,
+`ReplicatedStorage.Shared.config.ConfigurationValidator`, and
 `ReplicatedStorage.Shared.logging.EnvironmentContext`,
 `ReplicatedStorage.Shared.logging.Log`,
 `ReplicatedStorage.Shared.lifecycle.ServiceLifecycle`, and
 `ReplicatedStorage.Shared.util.Cleanup`. All imports follow the allowed
 common-to-shared dependency direction. Lifecycle and cleanup receive the same
 genuine context-bound logger created by each bootstrap. No cross-role import
-exists.
+exists. Both bootstraps resolve their place role, validate the same nine-family
+configuration graph, and only then create the lifecycle runner and cleanup
+owner. Invalid configuration therefore starts no dependent service.
 
 The common server bootstrap also requires its server-only sibling
 `Shutdown.luau`. That module is mapped into every server build but is not shared

@@ -120,8 +120,10 @@ The following checks passed with the pinned toolchain:
 | Lobby Rojo build | Pass; `Lobby` attribute and no match source layer |
 | Match Rojo build | Pass; `Match` attribute and no lobby source layer |
 
-Every build contains exactly one `ModuleScript`, one server `Script`, and one
-client `LocalScript`. Generated `.rbxlx` artifacts were inspected and removed.
+At the Packet 02.3 verification snapshot, every build contained exactly one
+`ModuleScript`, one server `Script`, and one client `LocalScript`. Later packets
+added shared and server-only modules without changing the place-role contract.
+Generated `.rbxlx` artifacts were inspected and removed.
 
 ## Current Studio state after Packet 02.4
 

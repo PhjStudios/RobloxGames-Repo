@@ -141,6 +141,7 @@ calls accept only these subsystems:
 | Subsystem | Current owner |
 | --- | --- |
 | `bootstrap` | Common client/server startup readiness |
+| `configuration` | Whole-catalog validation success and fail-closed rejection |
 | `place-role` | Configuration and place-pairing rejection |
 | `lifecycle` | Service registration, ordering, stage, and callback failure |
 | `cleanup` | Cleanup construction, ownership, state, and aggregate failure |
@@ -165,18 +166,24 @@ The complete Packet 03.3 custom-field allowlist is:
 | `cleanupTaskCount` | Number of registered cleanup tasks |
 | `closeReason` | Engine-authored `Enum.CloseReason.Name` token |
 | `code` | Stable configuration, lifecycle, cleanup, or logging error code |
+| `configurationFamilyCount` | Fixed number of loaded core configuration families |
 | `container` | Static cleanup-owner label |
+| `issueCount` | Number of root validation issues in a frozen report |
 | `lifecycleState` | Typed lifecycle state |
 | `service` | Static service label or `<runner>` |
 | `serviceCount` | Number of registered lifecycle services |
 | `state` | Typed state attached to an error |
+| `validationPath` | First canonical configuration path; never an offending value |
 
 Fields must be a dictionary or `nil`. Names must follow the event-label pattern.
-Values are limited to booleans, finite numbers, or strings made only from the
-logger's safe token characters. Tables, instances, functions, threads, NaN,
-infinity, whitespace, brackets, equals signs, and control characters are not
-valid field values. Unknown fields are rejected, and custom field order never
-depends on Lua table iteration order.
+Values are limited to booleans, finite numbers, or reviewed safe strings.
+Ordinary string fields use the logger's safe token characters. The sole
+bracket-bearing field, `validationPath`, instead requires the exact canonical
+`Identifier(.Identifier|[positive-integer])*` grammar and a 512-byte limit.
+Tables, instances, functions, threads, NaN, infinity, whitespace, equals signs,
+control characters, and malformed path brackets are not valid field values.
+Unknown fields are rejected, and custom field order never depends on Lua table
+iteration order.
 
 Field names containing normalized sensitive tokens such as `profile`,
 `accesscode`, `teleportcode`, `teleportdata`, `purchase`, `receipt`, `payment`,
@@ -251,9 +258,15 @@ The common server and client bootstraps now follow the same sequence:
 3. Validate centralized role configuration and resolve the declared place role.
 4. Fail through the provisional logger if either role check is rejected.
 5. Derive a resolved context and logger.
-6. Create the zero-service lifecycle runner and `bootstrap` cleanup container
+6. Validate all nine configuration families through the shared
+   `ConfigurationValidator.validateLoaded()` entry point.
+7. On validation failure, raise a production-visible static error containing
+   only first code, issue count, and canonical path; create no lifecycle,
+   cleanup, or shutdown resource.
+8. On success, emit a Studio-only `configuration/validated` record, then create
+   the zero-service lifecycle runner and `bootstrap` cleanup container
    with that same logger.
-7. Emit one Studio-only `ready` record containing resolved context, lifecycle
+9. Emit one Studio-only `ready` record containing resolved context, lifecycle
    state/count, and cleanup state/count.
 
 The cleanup container still owns one callback that can shut down a started
@@ -302,9 +315,11 @@ runner.
 | `rojo build match.project.json` | Pass |
 | Packet 03.3 forbidden-scope source scan | Pass at that checkpoint; no shutdown hook, remote, DataStore, teleport, purchase, or gameplay system added |
 
-Every build contains the five expected shared modules (`PlaceRoles`,
-`EnvironmentContext`, `Log`, `ServiceLifecycle`, and `Cleanup`) plus Packet
-03.4's server-only common `Shutdown` module.
+At the Packet 03.4 follow-up verification snapshot, every build contained the
+five then-current shared modules (`PlaceRoles`, `EnvironmentContext`, `Log`,
+`ServiceLifecycle`, and `Cleanup`) plus Packet 03.4's server-only common
+`Shutdown` module. Packet 04.1 later added `Ids` and `Result`; the table below is
+the historical logging-packet build snapshot.
 
 | Build | Declared role | ModuleScripts | Server Scripts | Client LocalScripts | Role-source structure |
 | --- | --- | ---: | ---: | ---: | --- |
@@ -336,8 +351,8 @@ saved or published.
 ## Manual regression procedure
 
 1. Serve `lobby.project.json` and connect it only to the Lobby place.
-2. Confirm `ATDPlaceRole = Lobby`, the five shared modules exist, and no match
-   folder contains executable source.
+2. Confirm `ATDPlaceRole = Lobby`, the current shared modules listed in
+   `docs/SOURCE_LAYOUT.md` exist, and no match folder contains executable source.
 3. Clear Output and start Play.
 4. Expect exactly one server and one client `[ATD][INFO]` bootstrap `ready`
    record. Confirm role `Lobby`, PlaceId `100561454756026`, environment `studio`,
@@ -363,4 +378,8 @@ signal, automatic cleanup trigger, or retry/timeout policy.
 
 Packet 03.4 has since completed while preserving this contract. Its server-only
 hook and cooperative deadline are recorded in `docs/GRACEFUL_SHUTDOWN.md`.
-Phase 04 has not begun.
+Phase 04 subsequently added pure schema contracts. Packet 04.5 is the first
+Phase 04 packet to extend the public vocabulary, narrowly adding the
+`configuration` subsystem and three fields documented above. Its source-load,
+report, privacy, bootstrap, and Studio evidence is recorded in
+`docs/CONFIGURATION_VALIDATION.md`.
