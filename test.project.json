@@ -1,0 +1,66 @@
+{
+  "name": "Ant Tower Defense - Automated Tests",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+
+      "Shared": {
+        "$path": "src/shared"
+      }
+    },
+
+    "ServerStorage": {
+      "$className": "ServerStorage",
+
+      "AutomatedTests": {
+        "$className": "Folder",
+
+        "Specs": {
+          "$path": "tests/specs"
+        },
+
+        "Fixtures": {
+          "$path": "tests/fixtures"
+        },
+
+        "Support": {
+          "$path": "tests/support"
+        }
+      },
+
+      "NegativeControls": {
+        "$className": "Folder",
+
+        "Dependencies": {
+          "$path": "tests/negative/dependencies"
+        },
+
+        "Assertion": {
+          "$path": "tests/negative/assertion"
+        },
+
+        "ModuleLoad": {
+          "$path": "tests/negative/module-load"
+        },
+
+        "MalformedDiscovery": {
+          "$path": "tests/negative/malformed-discovery"
+        },
+
+        "MalformedRoot": {
+          "$className": "Model",
+
+          "Specs": {
+            "$path": "tests/negative/malformed-root"
+          }
+        },
+
+        "ZeroDiscovery": {
+          "$className": "Folder"
+        }
+      }
+    }
+  }
+}

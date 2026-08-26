@@ -73,6 +73,11 @@ src/
       .gitkeep
     match/
       .gitkeep
+tests/
+  fixtures/
+  negative/
+  specs/
+  support/
 ```
 
 The remaining `.gitkeep` files preserve the four empty place-specific
@@ -277,3 +282,17 @@ used.
 Packet 02.2 added isolated Rojo project definitions without weakening these
 dependency rules. Packet 02.3 added centralized place identity checks and no
 cross-role import. Packet 02.4 owns isolated Studio connections.
+
+## Automated-test boundary
+
+Packet 05.1 added repository-owned Luau under `tests/`. It is not production
+source and may depend on `src/shared` only through the exact ModuleScripts in
+the isolated Rojo test build. Production code must never import a test module.
+Fixtures and intentional negative controls stay under test-only directories;
+lasting authored catalogs under `src/shared/config` remain empty or policy-only.
+
+`test.project.json` maps no `src/server` or `src/client` directory and creates no
+runnable Script or LocalScript. Conversely, Default, Lobby, and Match map no
+test directory. `lune run tests/verify-builds.luau` enforces both directions
+across the complete generated DataModels, including an exact positive
+path/class/source map for all 32 current production Lua containers.

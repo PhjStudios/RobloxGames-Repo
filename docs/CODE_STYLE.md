@@ -38,6 +38,9 @@ Use these commands from the repository root:
 
 - `stylua src` formats authoritative Luau source.
 - `stylua --check src` verifies formatting without writing files.
+- `stylua src tests` and `stylua --check --verify src tests` apply the same
+  policy to the repository-owned Phase 05 test harness, specs, fixtures, and
+  controls. `--verify` also rejects formatter output that does not parse.
 
 Format files touched by the active packet. Do not use a formatting packet as a
 reason to rewrite unrelated user work. If formatting an existing file creates a
@@ -57,7 +60,8 @@ No custom rule suppression, directory exclusion, or warning downgrade is needed
 for the current scaffold. This is intentional:
 
 - New warnings and errors must be reviewed instead of globally hidden.
-- Normal verification uses `selene src` without `--allow-warnings`.
+- Normal Phase 05 verification uses `selene src tests` without
+  `--allow-warnings`.
 - A narrow suppression may be added later only when the code is valid, the rule
   cannot model it accurately, and the reason is documented beside the smallest
   practical scope.
@@ -66,7 +70,8 @@ for the current scaffold. This is intentional:
 - Selene complements server-side validation and tests; it does not prove network
   security or runtime correctness.
 
-Run `selene validate-config` after editing `selene.toml`, then run `selene src`.
+Run `selene validate-config` after editing `selene.toml`, then run
+`selene src tests`.
 A passing baseline reports 0 errors, 0 warnings, and 0 parse errors.
 
 ## Tracked source-of-truth files
@@ -95,7 +100,7 @@ untracked:
 | --- | --- | --- |
 | `/build.rbxl` and `/build.rbxlx` | `rojo build` | Local verification output; regenerate when needed. |
 | Other root `*.rbxl` or `*.rbxlx` files | Explicit Rojo build commands | Local build output unless a later architecture decision names a narrow exception. |
-| `/build/` | Future multi-place build commands | Local/generated build directory. |
+| `/build/` | Multi-place builds and the headless test coordinator | Local/generated build directory; the runner removes its exact temporary test build. |
 | `/sourcemap*.json` | Rojo or the VS Code Luau-LSP integration | Editor/analyzer aid regenerated from Rojo projects. |
 | `/Packages/`, `/ServerPackages/`, `/DevPackages/` | Future package installation | Installed dependencies; track manifests and lockfiles instead. |
 | `*.log` and `/logs/` | Local diagnostics | Runtime or tool output; summarize useful evidence in documentation instead. |
@@ -115,11 +120,12 @@ exception. It must never be confused with the Studio/Team Create source of truth
 
 For a normal implementation packet:
 
-1. Format only changed Luau with `stylua`.
-2. Run `stylua --check src`.
-3. Run `selene src`.
-4. Run focused automated tests when available.
-5. Build every affected Rojo project to an ignored output path.
+1. Format only changed Luau with `stylua src tests` when both roots exist.
+2. Run `stylua --check --verify src tests`.
+3. Run `selene src tests`.
+4. Run `lune run tests/run.luau`.
+5. Run `lune run tests/verify-builds.luau` to build and structurally inspect
+   Default, Lobby, Match, and Test.
 6. Inspect `git status` and the diff to ensure generated files, secrets, and
    unrelated changes are absent.
 7. Report any required Studio testing separately; never publish without explicit

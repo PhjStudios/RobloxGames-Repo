@@ -8,8 +8,10 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phase 04 is complete; Packet 05.1 is the next roadmap checkpoint and has
-not started.
+order. Phase 04 and Packets 05.1-05.2 are complete. The isolated runner now
+executes 76 deterministic pure-contract cases across eight suites. Packet 05.3,
+GitHub continuous integration, is in progress and has not yet completed its
+required genuine negative and clean runs.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -31,6 +33,8 @@ not started.
 - [Economy, banner, and default-settings schemas](docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md)
 - [Whole-configuration validation and bootstrap gate](docs/CONFIGURATION_VALIDATION.md)
 - [Phase 04 exit-gate audit](docs/PHASE_04_EXIT_AUDIT.md)
+- [Automated test-runner decision and contract](docs/TEST_RUNNER.md)
+- [Continuous-integration design and evidence](docs/CONTINUOUS_INTEGRATION.md)
 - [Project instructions](AGENTS.md)
 
 ## Source of truth
@@ -63,6 +67,10 @@ separate shared, lobby-only, match-only, server, and client responsibilities:
         lobby/
         match/
     tests/
+      fixtures/
+      negative/
+      specs/
+      support/
     docs/
 
 The Lobby and Match are separate places in the same Roblox experience. Separate
@@ -86,15 +94,22 @@ source modules.
 - Start combined Studio synchronization: `rojo serve`
 - Start lobby-only synchronization: `rojo serve lobby.project.json`
 - Start match-only synchronization: `rojo serve match.project.json`
-- Format code: `stylua src`
-- Check formatting: `stylua --check src`
-- Lint code: `selene src`
+- Format source and tests: `stylua src tests`
+- Check formatting: `stylua --check --verify src tests`
+- Lint source and tests: `selene src tests`
+- Run deterministic headless tests: `lune run tests/run.luau`
+- Build and inspect all production/test projects: `lune run tests/verify-builds.luau`
 - Build the combined project: `rojo build default.project.json -o build.rbxlx`
 - Build the lobby project: `rojo build lobby.project.json -o lobby.rbxlx`
 - Build the match project: `rojo build match.project.json -o match.rbxlx`
+- Build the isolated test project: `rojo build test.project.json -o test.rbxlx`
 
 Every implementation packet must format and lint changed Luau code, build its
 applicable Rojo project, and describe any required Roblox Studio testing.
+
+`test.project.json` is build-only and has no place binding. Test specs,
+fixtures, support modules, negative controls, and Lune never appear in Default,
+Lobby, or Match builds; the structural verifier enforces this boundary.
 
 The default project intentionally contains all source layers for combined
 development inspection. Use the lobby or match project for role-isolated Studio

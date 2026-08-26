@@ -1,0 +1,135 @@
+name: Phase 05 Verification
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  verification:
+    name: Windows verification
+    runs-on: windows-2025
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rokit toolchain
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+
+          $rokitVersion = "1.2.0"
+          $expectedHash = "f9ba1704014ff67d51e8005f605955c7c26d2429a5312a9419dc477fc310e96d"
+          $archiveName = "rokit-$rokitVersion-windows-x86_64.zip"
+          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
+          $rokitRoot = Join-Path $env:RUNNER_TEMP "atd-rokit-root"
+          $rokitBin = Join-Path $rokitRoot "bin"
+          $rokitExe = Join-Path $rokitBin "rokit.exe"
+          $downloadUrl = "https://github.com/rojo-rbx/rokit/releases/download/v$rokitVersion/$archiveName"
+
+          if ((Test-Path -LiteralPath $archivePath) -or (Test-Path -LiteralPath $rokitRoot)) {
+              throw "Pinned Rokit bootstrap paths unexpectedly already exist."
+          }
+
+          Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath
+
+          $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -cne $expectedHash) {
+              throw "Pinned Rokit archive checksum verification failed."
+          }
+
+          New-Item -ItemType Directory -Path $rokitBin | Out-Null
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $rokitBin
+
+          $archiveEntries = @(Get-ChildItem -LiteralPath $rokitBin -Force)
+          if (
+              $archiveEntries.Count -ne 1
+              -or $archiveEntries[0].PSIsContainer
+              -or $archiveEntries[0].Name -cne "rokit.exe"
+          ) {
+              throw "Pinned Rokit archive layout verification failed."
+          }
+
+          $env:ROKIT_ROOT = $rokitRoot
+          $env:Path = "$rokitBin;$env:Path"
+          "ROKIT_ROOT=$rokitRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $rokitBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          & $rokitExe install --no-trust-check
+          if ($LASTEXITCODE -ne 0) {
+              throw "Rokit failed to install the repository-pinned toolchain."
+          }
+
+          Remove-Item -LiteralPath $archivePath
+
+      - name: Verify pinned tool versions
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expectedVersions = [ordered]@{
+              "rokit"  = "rokit 1.2.0"
+              "rojo"   = "Rojo 7.7.0"
+              "stylua" = "stylua 2.5.2"
+              "selene" = "selene 0.31.0"
+              "lune"   = "lune 0.10.5"
+          }
+
+          foreach ($entry in $expectedVersions.GetEnumerator()) {
+              $output = & $entry.Key --version
+              $exitCode = $LASTEXITCODE
+              $actual = ($output | Out-String).Trim()
+              if ($exitCode -ne 0 -or $actual -cne $entry.Value) {
+                  throw "Pinned version verification failed for $($entry.Key)."
+              }
+              Write-Output "$($entry.Key)=$actual"
+          }
+
+      - name: Check Luau formatting
+        run: stylua --check --verify src tests
+
+      - name: Validate Selene configuration
+        run: selene validate-config
+
+      - name: Lint Luau
+        run: selene src tests
+
+      - name: Run deterministic unit tests
+        run: lune run tests/run.luau
+
+      - name: Build and inspect all Rojo projects
+        run: lune run tests/verify-builds.luau
+
+      - name: Confirm generated outputs are absent
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (Test-Path -LiteralPath "build") {
+              throw "Generated build directory remained after verification."
+          }
+
+          git diff --quiet --no-ext-diff -- .
+          if ($LASTEXITCODE -ne 0) {
+              throw "Verification modified a tracked repository file."
+          }
+
+          git diff --cached --quiet --no-ext-diff -- .
+          if ($LASTEXITCODE -ne 0) {
+              throw "Verification staged a tracked repository change."
+          }
+
+          $untracked = @(git ls-files --others --exclude-standard)
+          if ($LASTEXITCODE -ne 0) {
+              throw "Unable to inspect untracked repository files."
+          }
+          if ($untracked.Count -ne 0) {
+              throw "Verification left an unexpected untracked repository file."
+          }

@@ -26,13 +26,15 @@ only change through an explicit architecture decision recorded here.
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
 - Gameplay state: minimal Rojo scaffold with harmless Studio-only client and
   server bootstraps; temporary example behavior has been removed.
-- Current implementation phase: Phase 04 complete; its separate exit-gate audit
-  passed on 2026-08-26.
+- Current implementation phase: Phase 05 in progress; Phase 04's separate
+  exit-gate audit passed on 2026-08-26.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
-  Packets 04.3, 04.4, and 04.5 completed on 2026-08-26.
-- Next checkpoint: Packet 05.1. Phase 05 has not begun and remains unauthorized
-  by the completed Phase 04 goal.
+  Packets 04.3, 04.4, 04.5, 05.1, and 05.2 completed on 2026-08-26.
+- Next checkpoint: Packet 05.3. The 76-case deterministic contract suite and
+  its exact production-build exclusion checks are complete. The CI workflow is
+  locally implemented, but genuine GitHub negative and clean runs are not yet
+  verified.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -527,6 +529,8 @@ Studio play.
 
 ### Packet 05.1 — Test-runner decision and setup
 
+**Status:** Complete — 2026-08-26. Evidence: `docs/TEST_RUNNER.md`.
+
 - Evaluate a lightweight Luau/Roblox-compatible test runner.
 - Record the dependency decision before adding third-party code.
 - Add `test.project.json` or an equivalent isolated test environment.
@@ -534,12 +538,28 @@ Studio play.
 
 ### Packet 05.2 — Initial unit-test suite
 
+**Status:** Complete — 2026-08-26. Evidence: `docs/TEST_RUNNER.md`.
+
 - Test cleanup behavior.
 - Test definition validation.
 - Test ID and result utilities.
 - Add deterministic fixtures for towers, enemies, maps, and waves.
 
+The canonical suite contains 76 ordered cases across eight suites. It covers
+Cleanup ownership and failure isolation; all current ID, Result, and Validation
+contracts; every Phase 04 schema and whole-configuration dependency boundary;
+test-only finite and Endless fixtures; exact error codes, paths, related paths,
+issue order, and blocked-family order; lasting empty/policy configuration;
+authentication, freezing, privacy, malformed roots, and source-load containment.
+Three consecutive runs produced byte-identical output. No production source or
+lasting catalog changed, and an independent adversarial review found no
+unresolved P0, P1, or P2 issue.
+
 ### Packet 05.3 — GitHub continuous integration
+
+**Status:** In progress — 2026-08-26. The least-privilege workflow and pinned
+bootstrap are locally verified; genuine GitHub evidence remains required.
+Evidence: `docs/CONTINUOUS_INTEGRATION.md`.
 
 - Add a workflow that installs pinned tools.
 - Run formatting checks, Selene, tests, and Rojo builds.

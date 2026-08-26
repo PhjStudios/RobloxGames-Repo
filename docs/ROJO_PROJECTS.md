@@ -6,7 +6,8 @@ This document records the multi-project Rojo structure and verification evidence
 for Packet 02.2 of `docs/DEVELOPMENT_PLAN.md`. It distinguishes the combined
 development project from the role-isolated lobby and match projects without
 assigning PlaceIds. Packet 02.3 subsequently added the centralized runtime role
-configuration recorded in `docs/PLACE_ROLES.md`.
+configuration recorded in `docs/PLACE_ROLES.md`; Packet 05.1 added one isolated,
+build-only automated-test project.
 
 ## Packet status
 
@@ -31,8 +32,12 @@ they still do not duplicate runtime PlaceIds.
 | `default.project.json` | Combined convenience project and documented `rojo serve` default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | Existing development `servePlaceIds`; current role is `Development` |
 | `lobby.project.json` | Role-isolated lobby source | `common`, `lobby` | `common`, `lobby` | No ID binding; current role is `Lobby` |
 | `match.project.json` | Role-isolated match source | `common`, `match` | `common`, `match` | No ID binding; current role is `Match` |
+| `test.project.json` | Headless pure-contract test DataModel | None | None | Build-only; no role or `servePlaceIds` |
 
-All projects map `src/shared` to `ReplicatedStorage.Shared`.
+All four projects map `src/shared` to `ReplicatedStorage.Shared`. Only the test
+project additionally maps `tests/specs`, `tests/fixtures`, `tests/support`, and
+isolated negative controls under `ServerStorage`. It maps neither `src/server`
+nor `src/client`.
 
 The role projects intentionally omit `servePlaceIds`, raw PlaceIds, universe
 IDs, and conditional role selection. Their only identity declaration is the
@@ -114,6 +119,9 @@ Studio-authored content in Rojo folders or using Roblox Script Sync.
 - Lobby source only: `rojo serve lobby.project.json`
 - Match source only: `rojo serve match.project.json`
 
+`test.project.json` is never served or connected to a Roblox place. It has no
+`servePlaceIds` and exists only for deterministic local/CI builds.
+
 Only one Rojo project should be connected to a given Studio place at a time.
 Packet 02.4 owns the manual gate that connects the correct isolated project to
 each real place.
@@ -123,20 +131,23 @@ each real place.
 - Combined: `rojo build default.project.json -o default.rbxlx`
 - Lobby: `rojo build lobby.project.json -o lobby.rbxlx`
 - Match: `rojo build match.project.json -o match.rbxlx`
+- Isolated tests: `rojo build test.project.json -o test.rbxlx`
 
 Root `*.rbxl` and `*.rbxlx` outputs are ignored under `docs/CODE_STYLE.md`. Build
 artifacts are local verification products, not authoritative Studio content.
 
 ## Structural verification
 
-All three project JSON files parsed successfully and all three builds completed
-with Rojo 7.7.0.
+All four current project JSON files parsed successfully and all four builds
+completed with Rojo 7.7.0. The original Packet 02.2 evidence covered only the
+three production definitions; Packet 05.1 added the Test definition and check.
 
 | Build | Server layers | Client layers | Script count | LocalScript count |
 | --- | --- | --- | ---: | ---: |
 | Default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | 1 | 1 |
 | Lobby | `common`, `lobby` | `common`, `lobby` | 1 | 1 |
 | Match | `common`, `match` | `common`, `match` | 1 | 1 |
+| Test | None | None | 0 | 0 |
 
 Additional assertions passed:
 
@@ -144,9 +155,16 @@ Additional assertions passed:
 - Match JSON contains no server/client lobby source path.
 - Lobby build contains no match folder or source.
 - Match build contains no lobby folder or source.
+- Default, Lobby, and Match contain no test spec, fixture, support module,
+  negative control, runner entrypoint, or test-only dependency.
+- Every one of the 32 production Lua containers matches a fixed expected
+  DataModel path, class, authoritative `src/` file, and exact source content.
+- Test contains the same 29 shared ModuleScripts, no server/client source, and
+  no runnable Script or LocalScript.
 - All builds contain `ReplicatedStorage.Shared`.
 - `.gitkeep` files produce no Roblox instances.
-- Both structured common bootstrap records are present in every build.
+- Both structured common bootstrap records are present in every production
+  build; the Test build is intentionally bootstrap-free.
 - Each role project has 12 verified unknown-instance-preservation boundaries.
 - The new project files contain no `servePlaceIds`, known PlaceId, universe ID,
   or duplicated runtime PlaceId. Packet 02.3 later added only their role
@@ -167,7 +185,9 @@ whole-catalog and bootstrap evidence is recorded in
 `docs/CONFIGURATION_VALIDATION.md`.
 
 The inspected ignored build artifacts were removed. They can be recreated with
-the commands above.
+the commands above. `lune run tests/verify-builds.luau` rebuilds and checks all
+four definitions across the complete DataModel and removes only its exact
+generated outputs.
 
 ## Scope boundary and next gate
 

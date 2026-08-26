@@ -29,27 +29,35 @@ and every pinned executable reports the same version as its manifest entry.
 | Rojo | `rojo-rbx/rojo@7.7.0` | `7.7.0` | Filesystem-to-Studio project sync and place builds |
 | StyLua | `JohnnyMorganz/StyLua@2.5.2` | `2.5.2` | Luau formatting |
 | Selene | `Kampfkarren/selene@0.31.0` | `0.31.0` | Luau static linting with `std = "roblox"` |
+| Lune | `lune-org/lune@0.10.5` | `0.10.5` | Headless Luau test runtime and structural build inspection |
 
-Rokit resolves Rojo, StyLua, and Selene from its user-level binary directory.
+Rokit resolves Rojo, StyLua, Selene, and Lune from its user-level binary directory.
 The repository must continue to use the manifest-selected executables rather
 than unrelated global copies.
 
 ## Luau and Roblox Studio baseline
 
-The repository does not currently pin or expose a standalone `luau`,
-`luau-analyze`, `luau-lsp`, Lune, Darklua, Wally, or Luau test-runner executable.
-No version is invented for an absent tool, and Packet 01.1 does not add one.
+Packet 05.1 added Lune 0.10.5 as the repository's pinned headless Luau test
+runtime. The runner decision, license, embedded Luau 0.709 version, and update
+policy are recorded in `docs/TEST_RUNNER.md`. The repository still does not pin
+or expose a separate `luau`, `luau-analyze`, `luau-lsp`, Darklua, Wally, or
+third-party assertion framework. Packet 01.1 itself did not add any of these.
 
-Luau execution is currently provided by Roblox Studio and the Roblox runtime.
-The running Studio installation observed during verification reported product
+Roblox engine execution and integration remain provided by Roblox Studio and
+the Roblox runtime. The running Studio installation observed during verification reported product
 version `0.735.0.7351131` from installation directory
 `version-dcbeee682ce74ee0`. This is an observed local version, not a repository
-pin: Roblox updates Studio and its embedded Luau runtime independently. StyLua
-and Selene are the only repository-pinned Luau-processing tools at this stage.
+pin: Roblox updates Studio and its embedded Luau runtime independently. Lune,
+StyLua, and Selene are the repository-pinned Luau runtime/processing tools;
+Lune's headless scope remains limited as described below.
 
-If a later packet needs a standalone analyzer, language server, package manager,
-or test runner, it must add and pin that dependency explicitly instead of
-assuming it exists on contributor machines.
+If a later packet needs another standalone analyzer, language server, package
+manager, or test framework, it must add and pin that dependency explicitly
+instead of assuming it exists on contributor machines.
+
+Lune is not an engine replacement. The canonical `lune run tests/run.luau`
+command executes pure shared contracts from an isolated Rojo build; Roblox
+Studio remains authoritative for engine integration.
 
 ## Command verification
 
@@ -66,6 +74,8 @@ the minimal scaffold.
 | `stylua --check src` | Pass | Exit code 0. |
 | `selene src` | Pass | Exit code 0; 0 errors, 0 warnings, and 0 parse errors. |
 | `rojo build -o build.rbxlx` | Pass | Rojo built project `Ant Tower Defense`; Packet 01.2 subsequently classified this generated output as untracked. |
+| `lune run tests/run.luau` | Pass | Packet 05.2 discovered eight suites and 76 ordered cases. Three consecutive runs returned exit 0 with byte-identical output. |
+| `lune run tests/verify-builds.luau` | Pass | Packet 05.2 rebuilt Default, Lobby, Match, and Test, matched all 32 production Lua containers to their exact path, class, and authoritative source, and removed its exact ignored outputs. |
 
 The occupied default Rojo port is expected while a sync session is already
 running. When this occurs, inspect the listener before starting another server;
@@ -74,11 +84,11 @@ invocation bind the default port.
 
 ## Verified project inputs
 
-- `rokit.toml` pins Rojo, StyLua, and Selene.
+- `rokit.toml` pins Rojo, StyLua, Selene, and Lune.
 - `selene.toml` selects the Roblox standard library.
 - `default.project.json` was the sole Rojo project during Packet 01.1. Packet
-  02.2 later added `lobby.project.json` and `match.project.json`; all continue to
-  use the pinned Rojo toolchain.
+  02.2 later added `lobby.project.json` and `match.project.json`; Packet 05.1
+  added the build-only `test.project.json`. All use the pinned Rojo toolchain.
 - `build.rbxlx` was tracked during this verification but is a reproducible local
   artifact; Packet 01.2 removed it from source control under
   `docs/CODE_STYLE.md`.
@@ -90,15 +100,16 @@ invocation bind the default port.
 From the repository root:
 
 1. Run `rokit install`.
-2. Confirm `rokit --version`, `rojo --version`, `stylua --version`, and
-   `selene --version` against the table above.
-3. Run `stylua src` and verify that expected source changes, if any, are reviewed.
-4. Run `stylua --check src`.
-5. Run `selene src`.
-6. Run `rojo build -o build.rbxlx`.
-7. Run `rojo serve`; if port 34872 is already occupied, confirm it is an intended
+2. Confirm `rokit --version`, `rojo --version`, `stylua --version`,
+   `selene --version`, and `lune --version` against the table above.
+3. Run `stylua src tests` and review expected changes.
+4. Run `stylua --check --verify src tests`.
+5. Run `selene src tests`.
+6. Run `lune run tests/run.luau`.
+7. Run `lune run tests/verify-builds.luau`.
+8. Run `rojo serve`; if port 34872 is already occupied, confirm it is an intended
    Rojo session or use an explicitly chosen free port for a smoke check.
-8. Connect Roblox Studio through the Rojo plugin only when Studio testing is in
+9. Connect Roblox Studio through the Rojo plugin only when Studio testing is in
    the active packet's scope.
 
 Packet 01.1 required no manual place mutation or gameplay test in Studio. The

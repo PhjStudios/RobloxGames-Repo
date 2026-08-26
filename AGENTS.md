@@ -21,9 +21,11 @@ Roblox Luau project using Git, GitHub, Rojo, Team Create, Rokit, StyLua, and Sel
 
 - Install tools: `rokit install`
 - Development sync: `rojo serve`
-- Format code: `stylua src`
-- Check formatting: `stylua --check src`
-- Lint code: `selene src`
+- Format code and tests: `stylua src tests`
+- Check formatting: `stylua --check --verify src tests`
+- Lint code and tests: `selene src tests`
+- Run headless tests: `lune run tests/run.luau`
+- Verify all project builds: `lune run tests/verify-builds.luau`
 - Build project: `rojo build -o build.rbxlx`
 
 ## Safety
