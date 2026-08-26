@@ -198,6 +198,43 @@ ModuleScript has the exact
 test identity. That non-replicated structural gate cannot be satisfied by the
 normal `StarterPlayerScripts` production location, where the seam is `nil`.
 
+## Payload-validation architecture decision
+
+This Packet 06.2 decision was recorded on 2026-08-26 before payload-validator
+source changes. One shared, authenticated, frozen schema API will compose every
+future remote payload boundary. It reuses `Result`, `Validation.Issue`, and the
+existing typed `Ids` validators; it does not introduce a second result or issue
+shape and contains no gameplay schema.
+
+Every validation starts at the fixed public path `payload` and owns one traversal
+budget. Technical ceilings are depth 8, 512 visited nodes, 64 fields in one
+record, 128 array items, 1,024 bytes in one string, 128 enum values, and eight
+union branches. A trusted remote schema may choose a narrower bound but never a
+wider one. Limits are technical containment, not authorization or gameplay
+policy.
+
+Payload tables must be plain and metatable-free. Traversal uses `next`, `rawget`,
+and `rawlen`; it never uses attacker-controlled indexing, length, iteration, or
+string conversion. Cycles and repeated table references are rejected. Record
+fields are validated in canonical sorted name order, arrays in ascending index
+order, and union branches in authored order. A bounded union must have exactly
+one successful branch; zero matches and ambiguous multiple matches fail closed.
+All accepted table graphs are detached, owned, and deeply frozen.
+
+Strings and enumerations are exact and non-coercing. Numeric validators reject
+NaN and both infinities before integer/range checks. `Vector2`, `Vector3`, and
+all twelve `CFrame` components must be finite. Optional values accept only an
+actual `nil`. IDs delegate to their exact existing family validator and retain
+only its allowlisted cause code.
+
+An Instance validator without a policy rejects every Instance. An explicit
+trusted policy must bind a class, an allowed ancestor, and actual server
+execution context; exact class matching is the default, while any subclass rule
+must be explicit. The payload may never select the class, ancestor, context, or
+Instance path. Headless context injection, if needed for engine-adapter tests,
+must exist only behind the isolated non-replicated Test-project structure and
+must be absent from the production client API.
+
 ## Direction and dispatch rules
 
 A physical `RemoteEvent` is engine-bidirectional, so direction is enforced by
