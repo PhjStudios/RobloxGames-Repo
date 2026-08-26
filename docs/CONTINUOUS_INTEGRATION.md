@@ -166,7 +166,18 @@ passed every required step in
 That packet run is clean evidence for its exact commit but does not substitute
 for the fresh combined Gate A state.
 
-The local Phase 06/Gate A audit passes. Its audit-content commit and genuine
-clean workflow run are pending; Phase 06 and Gate A remain open until the
-ordinary completion-record commit cites that run. Phase 05's intentional
-negative-control commits are not recreated for Phase 06.
+The fresh Phase 06/Gate A audit passes. Audit-content commit
+`7ada807586164c8ab0c940c749393c243d4fe9e3` passed genuine clean
+`Repository Verification`
+[run 33022784985](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/33022784985),
+[job 98356927817](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/33022784985/job/98356927817),
+on a `push` event at the exact head SHA. Run attempt one reported success for setup,
+checkout, pinned Rokit installation and version verification, formatting,
+Selene configuration, lint, deterministic unit tests, all-project structural
+verification, and generated-output residue checks. The requested runner label
+was `windows-2025`, the public job record named runner
+`GitHub Actions 1000000023`, and the artifact API returned zero retained
+artifacts. The unauthenticated job-log archive endpoint returned HTTP 403, so
+this record does not infer an image version from the numeric API runner name.
+Phase 06 is complete and Gate A passed; Phase 05's intentional negative-control
+commits were not recreated for Phase 06.

@@ -357,6 +357,6 @@ callbacks.
 Automated evidence is in `docs/TEST_RUNNER.md` and CI evidence is in
 `docs/CONTINUOUS_INTEGRATION.md`. `docs/TEST_MATRIX.md` distinguishes headless
 coverage from historical, current, and deferred environment-specific gates.
-The fresh local Phase 06/Gate A configuration, build, and Studio checks pass in
-`docs/PHASE_06_EXIT_AUDIT.md`; current audit-content CI evidence and its
-completion record remain open.
+The fresh Phase 06/Gate A configuration, build, Studio, and clean workflow
+checks pass in `docs/PHASE_06_EXIT_AUDIT.md`. Phase 06 is complete and Gate A
+passed.

@@ -243,8 +243,9 @@ future regression runs.
 This satisfies the Phase 01 exit gate: client and server boot cleanly, formatting,
 linting, and build checks pass, and no temporary gameplay behavior remains.
 
-The fresh local Phase 06/Gate A audit subsequently repeated the current
+The fresh Phase 06/Gate A audit subsequently repeated the current
 three-cycle Lobby and Match bootstrap/lifecycle checks with the foundation-only
 network owner, then passed the exact two-client teardown regression. Current
-evidence is in `docs/PHASE_06_EXIT_AUDIT.md`; audit-content CI and its completion
-record remain open, and Phase 07 has not begun.
+evidence is in `docs/PHASE_06_EXIT_AUDIT.md`, including clean workflow run
+`33022784985`. Phase 06 is complete, Gate A passed, and Phase 07 is next but has
+not begun.

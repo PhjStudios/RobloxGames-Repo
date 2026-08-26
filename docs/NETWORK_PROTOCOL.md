@@ -10,7 +10,7 @@
 - Packet 06.3 status: complete — 2026-08-26
 - Packet 06.4 status: complete — 2026-08-26
 - Packet 06.5 status: complete — 2026-08-26
-- Fresh Phase 06/Gate A local audit: passed — 2026-08-26; clean CI pending
+- Phase 06 / Gate A status: complete / passed — 2026-08-26
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Production feature endpoints: none; the lasting authenticated registry is empty
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
@@ -21,9 +21,9 @@
 
 This is the authoritative Phase 06 network-boundary document. The decision
 section was recorded before implementation. The sections below also record the
-completed Packet 06.1–06.5 implementations and evidence. The fresh local exit
-audit now passes; Phase 06 and Gate A remain open until its current clean
-workflow evidence and completion record pass.
+completed Packet 06.1–06.5 implementations and evidence. The fresh exit audit
+and its exact clean workflow evidence pass; Phase 06 is complete and Gate A
+passed. Phase 07 is next and has not begun.
 
 ## Official Roblox behavior that shapes the design
 
@@ -685,9 +685,8 @@ runnable scripts. Tests and test-only fixtures remain absent from Default,
 Lobby, and Match; Lobby contains no Match source and Match contains no Lobby
 source. The targeted architecture/security review resolved every normal finding
 and finished with no unresolved P0, P1, P2, or P3 finding. Packet 06.1 is
-complete. Packets 06.2–06.5 and the fresh local exit audit have since passed;
-Phase 06 and Gate A remain open for current audit-content CI evidence and its
-completion record.
+complete. Packets 06.2–06.5, the fresh exit audit, and its clean workflow
+evidence have since passed; Phase 06 is complete and Gate A passed.
 
 ## Packet 06.2 completion evidence
 
@@ -755,8 +754,8 @@ The lasting production registry and frozen production rate-policy list are both
 empty, and no gameplay definition, punishment, persistence, analytics, external
 service, or Phase 07 source was added.
 
-Packet 06.3 is complete; Packet 06.4 has since completed. Phase 06 and Gate A
-remain open, and Phase 07/gameplay work has not begun.
+Packet 06.3 is complete; Packet 06.4 and the remainder of Phase 06 have since
+completed. Gate A passed, and Phase 07/gameplay work has not begun.
 
 ## Packet 06.4 completion evidence
 
@@ -795,9 +794,8 @@ production projects and Lobby/Match source isolation remains intact.
 The lasting production registry and production rate-policy list remain frozen
 and empty. No gameplay definition, generic bus, `RemoteFunction`, punishment,
 persistence, external service, Phase 07 source, place save, or publication was
-added. Packet 06.4 is complete; Packet 06.5 has since completed. The fresh local
-exit audit now passes; Phase 06 and Gate A remain open for current clean CI
-evidence and its completion record.
+added. Packet 06.4 is complete; Packet 06.5, the fresh exit audit, and its clean
+workflow evidence have since passed. Phase 06 is complete and Gate A passed.
 
 ## Packet 06.5 completion evidence
 
@@ -847,8 +845,8 @@ scripts were discarded by ending the local session, both production places
 were left in Edit mode, and no place was saved or published. Exact procedure
 and evidence are in `NETWORK_SECURITY_STUDIO_REGRESSION.md`; the mandatory
 future-remote gate is `REMOTE_SECURITY_CHECKLIST.md`. Packet 06.5 and the fresh
-local Phase 06/Gate A audit pass; current clean CI evidence and its completion
-record remain open.
+Phase 06/Gate A audit pass, including the exact clean workflow evidence. Phase
+06 is complete and Gate A passed.
 
 ## Fresh Phase 06/Gate A audit evidence
 
@@ -869,7 +867,8 @@ peer service, empty production topology, zero fixture residue, zero forbidden
 log matches, and zero error records. Both places returned to Edit mode without
 save or publication.
 
-Exact combined evidence is in `PHASE_06_EXIT_AUDIT.md`. Phase 06 and Gate A
-remain open only for that audit-content commit's clean GitHub workflow run and
-the ordinary completion record that cites it. No gameplay endpoint or Phase 07
-system is approved or implemented by this audit.
+Exact combined evidence is in `PHASE_06_EXIT_AUDIT.md`. Audit-content commit
+`7ada807586164c8ab0c940c749393c243d4fe9e3` passed genuine clean workflow run
+`33022784985` with zero retained artifacts. Phase 06 is complete, Gate A passed,
+and Phase 07 is next but has not begun. No gameplay endpoint or Phase 07 system
+is approved or implemented by this audit.

@@ -26,21 +26,19 @@ only change through an explicit architecture decision recorded here.
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
 - Gameplay state: minimal Rojo scaffold with harmless Studio-only client and
   server bootstraps; temporary example behavior has been removed.
-- Current implementation phase: Phase 05 complete; Phase 06 is active.
-  Phase 04's separate exit-gate audit also passed on 2026-08-26.
+- Current implementation phase: Phases 00–06 complete; Gate A passed on
+  2026-08-26. Phase 07 is next and has not begun.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
   Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, 06.3, 06.4,
   and 06.5 completed on 2026-08-26.
-- Current checkpoint: Packets 06.1–06.5 and the fresh local Phase 06/Gate A exit
-  audit pass. Three exact current-tree canonical runs are byte-identical at 200
-  cases across 16 suites, all four structural builds pass, and the unsaved
-  three-cycle Lobby, three-cycle Match, and exact current-source two-client
-  networking regressions pass. The audit-content GitHub workflow run and its
-  completion record remain. The lasting production registry and production
-  rate-policy list are empty. No gameplay remote or Phase 07 system has begun;
-  Phase 06 and Gate A remain open until the current clean workflow evidence
-  passes.
+- Current checkpoint: Phase 06 and Gate A are complete. Three exact current-tree
+  canonical runs are byte-identical at 200 cases across 16 suites, all four
+  structural builds pass, and the unsaved three-cycle Lobby, three-cycle Match,
+  and exact current-source two-client networking regressions pass. Audit-content
+  commit `7ada807586164c8ab0c940c749393c243d4fe9e3` passed the genuine clean
+  workflow in run `33022784985`. The lasting production registry and production
+  rate-policy list are empty. No gameplay remote or Phase 07 system has begun.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -647,8 +645,8 @@ are server-local and monotonic, player removal and lifecycle shutdown clear
 state, and global interval-limited aggregate warnings expose only fixed safe
 fields. The 17 dedicated limiter cases and complete 145-case, 12-suite run pass,
 as does the four-project structural verifier. Production definitions and
-policies remain empty. Packet 06.4 has since completed; Phase 06 and Gate A
-remain open.
+policies remain empty. Packet 06.4 and the remainder of Phase 06 have since
+completed; Gate A passed.
 
 - Implement per-player token buckets or bounded cooldowns.
 - Allow action-specific limits.
@@ -668,8 +666,8 @@ authorizer, and one protected handler before the network lifecycle can
 initialize. The complete 189-case, 15-suite run and all four structural builds
 pass after lifecycle/re-entry hardening, with no unresolved P0, P1, or P2 review
 finding. Production definitions and policies remain empty. Packet 06.5 and the
-fresh local exit audit have since passed; Phase 06 and Gate A remain open for
-current audit-content CI evidence and its completion record.
+fresh local exit audit have since passed; Phase 06 is complete and Gate A
+passed.
 
 - Give mutating requests client-generated request IDs within strict limits.
 - Return safe public error codes rather than raw server errors.
@@ -692,22 +690,20 @@ datatypes, explicit Instance policy, `StudioTestService:LeaveTest()`, real
 cleanup. Three plain Lobby and three plain Match cycles also passed. The
 mandatory future-remote checklist is recorded in
 `docs/REMOTE_SECURITY_CHECKLIST.md`; no production endpoint or gameplay source
-was added. The fresh local Phase 06/Gate A exit audit now passes; only its
-current clean workflow evidence and completion record remain open.
+was added. The fresh Phase 06/Gate A exit audit and its clean workflow evidence
+now pass.
 
 - Test malformed payloads, spam, unauthorized context, stale IDs, and unexpected
   instances.
 - Confirm rejected requests do not partially mutate state.
 - Document the checklist future remotes must satisfy.
 
-**Gate A exit:** Pending remote evidence. The fresh combined local audit passes:
-Phases 00–05 and Packets 06.1–06.5 are complete, both places build, definitions
-validate, three 200-case runs are byte-identical, the current Studio regressions
-pass, and the mandatory checklist/approval process exists and must be completed
-separately for each future remote. Gate A and Phase 06 remain open until the
-exact implementation/audit-content commit has a
-genuine clean workflow run and the ordinary completion record cites it. Exact
-evidence is in `docs/PHASE_06_EXIT_AUDIT.md`. Phase 07 has not begun.
+**Gate A exit:** Passed — 2026-08-26. Phases 00–06 are complete, both places
+build, definitions validate, three 200-case runs are byte-identical, the current
+Studio regressions pass, and the mandatory checklist/approval process exists and
+must be completed separately for each future remote. The exact audit-content
+commit passed the genuine clean workflow in run `33022784985`; evidence is in
+`docs/PHASE_06_EXIT_AUDIT.md`. Phase 07 is next and has not begun.
 
 # Milestone B — Graybox Match Vertical Slice
 

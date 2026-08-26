@@ -106,8 +106,9 @@ evidence on Windows x64:
   The existing dispatcher alone gained review-driven non-yielding callback and
   validation-metadata hardening. Phase 07 has not begun.
 
-This is Packet 06.5 evidence. The fresh local Phase 06/Gate A audit described
-below now passes; its genuine CI evidence and completion record remain open.
+This is Packet 06.5 evidence. The fresh Phase 06/Gate A audit and its genuine
+clean workflow evidence described below now pass; Phase 06 is complete and Gate
+A passed.
 
 ### Fresh Phase 06/Gate A verification
 
@@ -121,8 +122,10 @@ four-project structural verifier, and the exact current-source unsaved Studio
 regression. Each production build retained 40 ModuleScripts, one Script, and
 one LocalScript. Test retained 65 ModuleScripts—33 shared, six authenticated
 common networking copies, and an exact positive allowlist of 26 test-owned
-modules—with zero runnable script. Exact hashes and the pending workflow
-condition are recorded in `docs/PHASE_06_EXIT_AUDIT.md`.
+modules—with zero runnable script. Audit-content commit
+`7ada807586164c8ab0c940c749393c243d4fe9e3` passed `Repository Verification`
+run `33022784985` with zero retained artifacts. Exact hashes and workflow
+evidence are recorded in `docs/PHASE_06_EXIT_AUDIT.md`.
 
 The occupied default Rojo port is expected while a sync session is already
 running. When this occurs, inspect the listener before starting another server;

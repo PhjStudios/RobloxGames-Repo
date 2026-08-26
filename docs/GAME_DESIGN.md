@@ -16,9 +16,8 @@ production-data changes, or monetization.
 - Recorded: 2026-08-25
 - Packet: 00.2
 - Status: Accepted for core development
-- Current roadmap checkpoint: Packets 06.1–06.5 and the fresh local Phase 06/
-  Gate A audit pass; current audit-content CI evidence and its completion record
-  remain. Phase 07 is next only after that gate and has not begun.
+- Current roadmap checkpoint: Phases 00–06 are complete and Gate A passed on
+  2026-08-26. Phase 07 is next and has not begun.
 
 ## Product identity and game loop
 

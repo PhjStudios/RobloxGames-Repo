@@ -8,13 +8,12 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phases 04 and 05 are complete, Phase 06 is active, and Packets 06.1–06.5
-are complete. The fresh local Phase 06/Gate A audit passes: three byte-identical
-200-case runs, all four project structures, the unsaved Lobby/Match checks, and
-the exact current-source two-client Studio regression are green. The current
-audit-content GitHub workflow run and completion record are the only remaining
-gate. The lasting production endpoint registry and production rate-policy list
-remain empty; no gameplay remote or Phase 07 system has been added.
+order. Phases 00–06 are complete and Gate A passed on 2026-08-26. The fresh
+combined audit passed three byte-identical 200-case runs, all four project
+structures, the unsaved Lobby/Match checks, the exact current-source two-client
+Studio regression, and the genuine clean `Repository Verification` workflow.
+Phase 07 is next but has not begun. The lasting production endpoint registry
+and production rate-policy list remain empty; no gameplay remote was added.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)

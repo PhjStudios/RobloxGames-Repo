@@ -230,8 +230,8 @@ For Packet 06.5, `lobby.project.json` was connected only to Lobby and
 `match.project.json` only to Match, one at a time. Three unsaved cycles passed in
 each role, followed by the final two-client networking regression. Both places
 were left in Edit mode without saving or publishing. Packet 06.5 and the fresh
-local Phase 06/Gate A audit pass; current audit-content CI evidence and its
-completion record remain open, and Phase 07 has not begun.
+Phase 06/Gate A audit pass, including clean workflow run `33022784985`. Phase 06
+is complete, Gate A passed, and Phase 07 is next but has not begun.
 
 ## Scope boundary and next gate
 

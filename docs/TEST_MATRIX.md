@@ -7,9 +7,8 @@ Ant Tower Defense. Packet 05.4 created it on 2026-08-26. It separates checks
 that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
-Phase 05 and its fresh combined exit audit are complete. Packets 06.1–06.5 and
-the fresh local Gate A/Phase 06 audit pass; Phase 06 remains active while the
-audit-content GitHub run and completion record are open. Phase 07 has not begun.
+Phases 00–06 are complete and Gate A passed on 2026-08-26. Phase 07 is next and
+has not begun.
 
 The current repository has a fixed remote-registry/network-ownership foundation,
 strict shared payload validators, a server-authoritative token-bucket limiter,
@@ -174,10 +173,11 @@ linked historical document for the original Studio evidence.
   Lua source map, production runnable-entrypoint counts, place-role isolation,
   and absence of tests/test-only dependencies from production.
 - **Test category:** automated headless build and structural integration test.
-- **Current status:** `Passed` locally on 2026-08-26; current Phase 06 GitHub
-  Actions evidence is `Pending`. Phase 05 retains its own historical clean run.
-- **Environment:** current local Windows x64; the exact current Phase 06 state
-  must also pass the GitHub Actions Windows runner using pinned Rojo and Lune.
+- **Current status:** `Passed` locally and in GitHub Actions on 2026-08-26;
+  audit-content run `33022784985` passed. Phase 05 retains its own historical
+  clean run.
+- **Environment:** current local Windows x64 plus the GitHub Actions
+  `windows-2025` runner using pinned Rojo and Lune.
 - **Command or procedure:** run `lune run tests/verify-builds.luau`.
 - **Required players or devices:** zero.
 - **Authorization requirement:** none.
@@ -199,8 +199,8 @@ linked historical document for the original Studio evidence.
 - **Cleanup procedure:** the verifier removes its exact four outputs; confirm no
   generated place remains.
 - **Phase or prerequisite:** available now; mapping details are in
-  [Rojo Project Definitions](ROJO_PROJECTS.md). The local Phase 06/Gate A exit
-  audit passes; its current Actions pass remains pending.
+  [Rojo Project Definitions](ROJO_PROJECTS.md). The Phase 06/Gate A exit audit
+  and its exact current Actions evidence pass.
 
 ### H-06 — Formatting, linting, and genuine CI enforcement
 
@@ -208,8 +208,8 @@ linked historical document for the original Studio evidence.
   generated-output residue, least-privilege workflow, and unambiguous negative
   controls.
 - **Test category:** automated local quality gate and GitHub Actions CI.
-- **Current status:** `Passed` locally on 2026-08-26; current Phase 06 GitHub
-  Actions evidence is `Pending`. Phase 05's formatting, Selene-lint,
+- **Current status:** `Passed` locally and in GitHub Actions on 2026-08-26;
+  audit-content run `33022784985` passed. Phase 05's formatting, Selene-lint,
   broken-expectation, broken-definition, restoration, and final clean runs
   remain valid historical evidence for the workflow contract; those intentional
   failing commits are not recreated for Phase 06.
@@ -305,8 +305,8 @@ linked historical document for the original Studio evidence.
 - **Phase or prerequisite:** Packets 06.1–06.5 and the initial M-06 record are
   complete. Every future feature remote must still satisfy the
   [remote-security checklist](REMOTE_SECURITY_CHECKLIST.md) before it can ship.
-  The fresh local Phase 06/Gate A audit passes; its current Actions evidence and
-  completion record remain open.
+  The Phase 06/Gate A audit and current Actions evidence pass. Phase 06 is
+  complete and Gate A passed.
 
 ### H-09 — Request correlation, dispatch, and public errors
 
@@ -349,8 +349,8 @@ linked historical document for the original Studio evidence.
   place.
 - **Phase or prerequisite:** Packets 06.1–06.5 and the initial M-06 record are
   complete. Every future feature remote still requires its approved boundary
-  checklist. The fresh local Phase 06/Gate A audit passes; its current Actions
-  evidence and completion record remain open.
+  checklist. The Phase 06/Gate A audit and current Actions evidence pass. Phase
+  06 is complete and Gate A passed.
 
 ## Local Studio solo tests
 
@@ -730,8 +730,8 @@ linked historical document for the original Studio evidence.
   ending the session discards all runtime-only harness scripts. Both places
   return to Edit mode without save or publication.
 - **Phase or prerequisite:** Packets 06.1–06.5 complete the initial foundation
-  record and the fresh local exit audit passes. Phase 06/Gate A remains open
-  only for current clean Actions evidence and its completion record. This pass
+  record and the fresh exit audit passes. Phase 06 is complete and Gate A
+  passed. This pass
   does not cover or approve gameplay remotes, published-client behavior,
   adverse-network simulation, reconnect/teleport behavior, devices,
   persistence, or external services. Those rows remain deferred or unavailable,

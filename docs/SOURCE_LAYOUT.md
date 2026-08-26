@@ -368,8 +368,8 @@ production remote definitions and rate policies remain empty. Production
 remains at 40 ModuleScripts, one Script, and one LocalScript. The existing
 dispatcher now enforces synchronous non-yielding feature callbacks and reserves
 validation metadata to its own strict payload failure path. Packet 06.5 and the
-fresh local Phase 06/Gate A audit pass; current audit-content CI evidence and
-its completion record remain open, and Phase 07 has not begun.
+fresh Phase 06/Gate A audit pass, including clean workflow run `33022784985`.
+Phase 06 is complete, Gate A passed, and Phase 07 is next but has not begun.
 
 ## Roblox Studio verification
 

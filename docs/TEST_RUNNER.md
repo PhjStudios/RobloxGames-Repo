@@ -2,7 +2,7 @@
 
 ## Decision record
 
-- Status: Phase 05 and Packets 06.1–06.5 complete; fresh local Phase 06/Gate A audit passed, CI pending
+- Status: Phases 00–06 complete; Gate A passed — 2026-08-26
 - Research date: 2026-08-26
 - Selected runtime: Lune 0.10.5
 - Rokit tool identifier: `lune-org/lune@0.10.5`
@@ -393,9 +393,8 @@ changing the canonical command or its exit-code contract:
 
 This is focused source/test evidence only. Live Roblox remote delivery and
 shutdown remain subject to the authorized unsaved Studio regression. Packet
-06.1 is complete. Packets 06.2–06.5 and the fresh local exit audit have since
-passed; Phase 06 and Gate A remain open for current audit-content CI evidence
-and its completion record.
+06.1 is complete. Packets 06.2–06.5, the fresh exit audit, and its exact clean
+workflow evidence have since passed; Phase 06 is complete and Gate A passed.
 
 ## Packet 06.2 completion verification
 
@@ -530,9 +529,9 @@ without changing the canonical command or its exit-code contract:
   hardening; lasting remote definitions and policies remain empty, and Phase 07
   has not begun.
 
-Packet 06.5 is complete with this packet-level evidence. The fresh local exit
-audit described below now passes; Phase 06 and Gate A remain open for its
-genuine CI evidence and completion record.
+Packet 06.5 is complete with this packet-level evidence. The fresh exit audit
+and genuine CI evidence described below now pass; Phase 06 is complete and Gate
+A passed.
 
 ## Fresh Phase 06/Gate A runner evidence
 
@@ -562,5 +561,7 @@ regression with the server SHA-256
 and client SHA-256
 `8223e9e95dfb4caee94986da9f722917b68ec23ee5e7c7e1992d2173fc1ea290`.
 The full local runner, shipping, and Studio record is in
-`PHASE_06_EXIT_AUDIT.md`. Phase 06 and Gate A remain open only for the current
-audit-content workflow run and its completion record; Phase 07 has not begun.
+`PHASE_06_EXIT_AUDIT.md`. Audit-content commit
+`7ada807586164c8ab0c940c749393c243d4fe9e3` passed the genuine workflow in run
+`33022784985` with zero retained artifacts. Phase 06 is complete, Gate A passed,
+and Phase 07 is next but has not begun.
