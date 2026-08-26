@@ -8,6 +8,7 @@
 - Packet 06.1 status: complete — 2026-08-26
 - Packet 06.2 status: complete — 2026-08-26
 - Packet 06.3 status: complete — 2026-08-26
+- Packet 06.4 architecture decision: recorded — 2026-08-26; implementation pending
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Production feature endpoints: none; the lasting authenticated registry is empty
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
@@ -70,6 +71,7 @@ handlers remain server-only.
 - [`UnreliableRemoteEvent.OnClientEvent`](https://create.roblox.com/docs/reference/engine/classes/UnreliableRemoteEvent/OnClientEvent)
 - [Securing the client-server boundary](https://create.roblox.com/docs/scripting/security/client-server-boundary)
 - [Security tactics and server authority](https://create.roblox.com/docs/scripting/security/security-tactics)
+- [Defensive design](https://create.roblox.com/docs/scripting/security/defensive-design)
 - [Server-side detection and directional remotes](https://create.roblox.com/docs/scripting/security/server-side-detection)
 - [Replication and confidentiality](https://create.roblox.com/docs/scripting/security/access-control)
 - [Replication ordering](https://create.roblox.com/docs/scripting/attributes#replication-order)
@@ -336,6 +338,124 @@ cheap envelope checks and before authorization, payload validation, or handler
 execution. Invoking the limiter earlier would violate the recorded pipeline;
 invoking it from an optional feature handler would leave a bypass.
 
+## Request, correlation, and public-error architecture decision
+
+This Packet 06.4 decision was recorded on 2026-08-26 before request-protocol or
+dispatcher source changes. The implementation will use three narrow modules:
+shared pure `RequestProtocol`, server-only `ServerRequestDispatcher`, and
+client-only `ClientRequestTracker`. `NetworkRegistry` remains the only lifecycle
+service. The raw handler-binding seam will be removed so a client-to-server
+endpoint cannot bypass its authenticated schema, rate policy, authorization,
+correlation, protected handler, or response translation.
+
+A Request wire value is the exact plain record `{ requestId, payload }`. A
+client-to-server Event wire value is the exact plain record `{ payload }` and
+has no request ID. A successful response is exactly
+`{ requestId, state = "Success", payload }`; a rejected response is exactly
+`{ requestId, state = "Rejected", error }`. Endpoint, action, Player, UserId,
+permission, ownership, role, timestamp, target, service, handler, and path never
+appear in these envelopes. Top-level records are checked with raw traversal and
+without walking `payload`; metatables, missing or extra fields, multiple remote
+arguments, and wrong value types fail the cheap boundary.
+
+The internal request-ID type is authenticated and frozen; its wire form is a
+case-sensitive string from 8 through 48 ASCII bytes. The first byte is an ASCII
+letter or digit and later bytes may additionally use `_` or `-`, so the default
+client-generated GUID form is accepted without treating its entropy as a
+security property. Empty, short, oversized, non-ASCII, malformed, existing
+domain-ID objects, and counterfeit request IDs are rejected without coercion.
+Malformed envelopes or IDs receive no response and enter no ledger because the
+server has no trusted correlation target to echo; they contribute only to one
+bounded aggregate signal.
+
+The public rejection-code allowlist is exactly `RATE_LIMITED`,
+`NOT_AUTHORIZED`, `INVALID_PAYLOAD`, `DUPLICATE_REQUEST`, `STALE_REQUEST`,
+`UNAVAILABLE`, and `INTERNAL_ERROR`. There is no public message, cause, caught
+error, actual type, stack, or arbitrary metadata map. The sole optional metadata
+shape is exact `{ validationPath }` for `INVALID_PAYLOAD`; the path comes only
+from the validator's canonical developer-authored path, is revalidated, and is
+omitted if it exceeds 256 bytes. Public errors and server handler outcomes use
+local provenance and freezing; after RemoteEvent copying, the client revalidates
+the exact wire record rather than trusting provenance.
+
+Correlation state is scoped to the actual engine `Player` and then globally by
+request-ID string across every fixed request endpoint. Each connected Player is
+bounded to 32 in-flight IDs and the most recent 128 completed IDs in a fixed-size
+count-evicted ring. There is no client timestamp, TTL, unbounded queue, or
+payload retention. A new ID is reserved before authorization or handler work.
+Every terminal success or rejection, including an admitted rate-limit rejection,
+moves it to completed history before a response send. A repeated in-flight ID is
+a duplicate and is dropped without a second response, because a duplicate
+rejection could race and incorrectly terminate the original client pending
+request. A retained completed ID is stale and may receive `STALE_REQUEST` on the
+incoming endpoint's response leaf. The same ID on another endpoint is still a
+duplicate or stale replay. Once count eviction removes an ID, it is first-seen
+again; correlation never promises idempotency or exactly-once effects.
+
+The server contract APIs will be separate fixed request and event registrations.
+They accept only a captured canonical active registry definition, authenticated
+payload/response schemas with response presence matching the registry, one
+context-only authorizer, and one protected handler. The frozen server context
+contains only the engine `Player`, canonical definition identity, and resolved
+server role. The authorizer sees no raw or canonical client payload. A future
+operation whose authorization cannot be derived without a canonical payload may
+not bypass this order; it requires a separately reviewed post-validation,
+pre-handler guard before that endpoint can ship.
+
+The complete client-to-server Request pipeline is fixed as:
+
+1. a listener closure supplies the active canonical definition and engine
+   `Player` and verifies exactly one remote argument;
+2. cheap exact envelope and request-ID checks run without traversing payload;
+3. the server-authoritative per-Player/per-endpoint limiter consumes one token;
+4. the bounded per-Player correlation ledger classifies, caps, and reserves the
+   global request ID;
+5. protected authorization uses only server-derived context;
+6. the contract's strict payload schema produces a detached canonical value;
+7. the protected handler returns an authenticated success or public rejection;
+8. success output is validated by the fixed response schema, while every
+   failure is translated to the allowlist;
+9. the ledger records completion before any send; and
+10. a protected sender calls only `FireClient(originatingPlayer, envelope)` on
+    the response leaf captured during server-owned tree creation.
+
+Events use steps 1 through 3 and 5 through 7, with their exact event envelope and
+no ledger or response. A no-response Request still uses its envelope and ledger
+but never sends a response. A rate-limited delivery still reaches correlation
+classification, so a new syntactically valid ID can be completed as rejected and
+cannot later execute while retained. Pending duplicates consume a limiter token
+but never execute or race the original response.
+
+Every pre-handler rejection invokes zero feature mutation. Protected handler
+failure becomes only `INTERNAL_ERROR`; invalid/counterfeit outcomes and invalid
+success payloads do the same. A generic dispatcher cannot roll back arbitrary
+feature code that mutates and then throws, so every future stateful handler must
+perform all fallible work before its atomic commit and must prove that behavior
+with a mutation sentinel before registration approval.
+
+The client tracker registers only canonical response-required Request
+definitions and authenticated schemas. It holds at most 32 global Pending states
+and 128 recent terminal IDs, generates bounded IDs with collision checks, and
+exposes frozen `Pending`, `Success`, and `Rejected` records without UI. A
+response listener supplies its captured definition identity; an unknown or
+completed ID is stale, while a live ID arriving through another endpoint is
+mismatched. Malformed envelopes, public errors, or success payloads and
+mismatched/stale responses do not mutate the valid pending entry. Explicit
+cancel and whole-tracker clear operations bound lost-response state without a
+client timestamp.
+
+The dispatcher owns a second `PlayerRemoving` connection for correlation state;
+the limiter keeps its already reviewed independent connection. Parent ownership
+order is root, limiter child, dispatcher child, then endpoint listeners. LIFO
+shutdown therefore disconnects endpoint listeners, disconnects and clears the
+dispatcher, disconnects and clears the limiter, and destroys the exact root.
+Malformed, authorization, validation, handler, outcome, and response-send
+signals use one global O(1), saturating, interval-limited aggregate. It can expose
+only canonical endpoint or `<multiple>`, a static code, bounded count, and fixed
+window; never request ID, Player identity, payload, response, public metadata,
+or caught error. Reporter and observation-clock failures cannot change dispatch
+results or flood output.
+
 ## Direction and dispatch rules
 
 A physical `RemoteEvent` is engine-bidirectional, so direction is enforced by
@@ -349,34 +469,24 @@ path, module name, or arbitrary operation selector in an envelope. One physical
 endpoint maps to one reviewed contract and one handler binding. Duplicate
 binding is rejected.
 
-The complete client-to-server request pipeline is fixed as:
-
-1. fixed endpoint and direction selected by server binding;
-2. cheap exact envelope shape and request-ID syntax/size checks without walking
-   the payload;
-3. server-authoritative per-player/per-endpoint token bucket;
-4. authorization from the engine-supplied player and server-owned context;
-5. strict bounded payload validation and canonicalization;
-6. protected handler execution; and
-7. allowlisted response translation to the originating player only.
-
-No rejected request may invoke its feature mutation. Handler failures remain
-server-side and become one static public failure code. Raw errors, traces,
-payloads, rejected values, catalogs, private state, and secrets never enter a
-response or log.
+The detailed ten-step Request and seven-step Event pipelines are fixed by the
+Packet 06.4 decision above. No rejected pre-handler request may invoke feature
+mutation. Handler failures remain server-side and become one static public
+failure code. Raw errors, traces, payloads, rejected values, catalogs, private
+state, and secrets never enter a response or log.
 
 ## Correlation decision
 
-A client-generated request ID is a bounded typed correlation value only. It is
-not identity, authorization, ownership, freshness proof, transaction identity,
-or idempotency proof.
+A client-generated request ID is the bounded typed correlation value described
+above only. It is not identity, authorization, ownership, freshness proof,
+transaction identity, or idempotency proof.
 
-An in-flight repeated ID is a duplicate. A recently completed repeated ID is a
-stale replay while it remains in a bounded server ledger. A first-seen ID cannot
-be classified as stale from a client timestamp, so request envelopes contain no
-client time. Once bounded history expires, a server cannot infer earlier use;
-future value-granting systems must add their own authoritative idempotency
-records where required.
+An in-flight repeated ID is a silently dropped duplicate. A completed repeated
+ID is a stale replay while it remains in the fixed 128-entry server ring. A
+first-seen ID cannot be classified as stale from a client timestamp, so request
+envelopes contain no client time. Once count eviction removes history, a server
+cannot infer earlier use; future value-granting systems must add their own
+authoritative idempotency records where required.
 
 On the client, a response must match both a live pending request ID and its fixed
 endpoint. A response with no live pending entry is stale; one using the right ID
