@@ -170,7 +170,8 @@ Additional assertions passed:
   or duplicated runtime PlaceId. Packet 02.3 later added only their role
   attributes.
 
-Current Packet 04.5 builds contain 29 shared ModuleScripts: `PlaceRoles`,
+The current production source inventory, established at Packet 04.5, contains
+29 shared ModuleScripts: `PlaceRoles`,
 `ServiceLifecycle`, `EnvironmentContext`, `Log`, `Cleanup`, `Ids`, `Result`,
 `Validation`, `ConfigTypes`, `AssetSchema`, `Assets`, `BannerSchema`, `Banners`,
 `ConfigurationValidator`, `DefaultSettings`, `Difficulties`, `DifficultySchema`, `Economy`,
@@ -188,6 +189,10 @@ The inspected ignored build artifacts were removed. They can be recreated with
 the commands above. `lune run tests/verify-builds.luau` rebuilds and checks all
 four definitions across the complete DataModel and removes only its exact
 generated outputs.
+
+The structural verifier is the current headless production-shipping gate. Its
+status and the separate Studio/published test boundaries are indexed in
+`docs/TEST_MATRIX.md`.
 
 ## Scope boundary and next gate
 

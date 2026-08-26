@@ -28,7 +28,7 @@ adding profile persistence or gameplay behavior.
 
 ## Roblox shutdown constraints
 
-Roblox's official [`DataModel:BindToClose()` documentation](https://create.roblox.com/docs/reference/engine/classes/DataModel#BindToClose)
+Roblox's official [`DataModel:BindToClose()` documentation](https://create.roblox.com/docs/reference/engine/classes/DataModel.md#BindToClose)
 defines three constraints that shape this implementation:
 
 1. A bound callback may receive the engine's
@@ -197,6 +197,10 @@ in a shutdown result or formatted failure.
 
 ## Focused Studio Edit-mode validation
 
+These packet harnesses are historical Studio evidence, not committed Phase 05
+headless specs. The current coverage boundary is indexed in
+`docs/TEST_MATRIX.md`.
+
 The synchronized modules were exercised in Studio Edit mode without saving a
 place. The focused harness ran 15 cases: 10 shutdown-runner cases, 3 timeout-state
 cases, and 2 cleanup/lifecycle composition cases. All 15 passed.
@@ -262,6 +266,10 @@ changing this shutdown evidence.
 Generated build artifacts remained untracked and were removed after inspection.
 
 ## Final Lobby and Match Play-Stop evidence
+
+This is Studio solo evidence. Phase 05 changed no production source, so it did
+not rerun or relabel these historical cycles as current automation; see
+`docs/TEST_MATRIX.md`.
 
 The final synchronized code completed three consecutive Play-Stop cycles in each
 isolated Studio place, for six cycles total.

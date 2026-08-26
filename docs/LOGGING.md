@@ -299,9 +299,10 @@ ordering and state guards, cleanup LIFO ownership and idempotence, contextual
 structured failures, continued cleanup after a task failure, exact cached
 aggregate behavior, and suppression of arbitrary callback error reasons.
 
-These are focused packet harnesses, not a committed test framework. Packet 05
-still owns selection and repository integration of a persistent Luau test
-runner.
+These are focused packet harnesses, not a committed test framework. Phase 05
+later added a repository-owned runner, but the current 76 cases do not claim
+headless `Log` or `EnvironmentContext` coverage. The Studio evidence here and
+the deferred reusable-coverage boundary are indexed in `docs/TEST_MATRIX.md`.
 
 ## Toolchain and build verification
 

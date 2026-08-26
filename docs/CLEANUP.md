@@ -138,7 +138,7 @@ so adding placeholder controllers or fake resources would not be honest
 integration. Future controllers must own their real connections, Instances,
 callbacks, threads, and child containers through this utility when introduced.
 
-## Focused automated validation
+## Focused Studio Edit-mode validation
 
 Three read-only Studio Edit-mode harness groups cloned and required the current
 Rojo-synchronized module to avoid stale `require` cache entries. All 19 focused
@@ -159,8 +159,14 @@ cases passed:
 
 Temporary test Instances remained unparented or under an unparented temporary
 root and were destroyed before the harness returned. No Studio-authored content
-was created or saved. Packet 05 still owns selection and repository integration
-of a persistent Luau test runner.
+was created or saved. This is historical Studio evidence, not a committed test
+framework.
+
+Packet 05 subsequently added persistent headless coverage. The current Cleanup
+suite contains 14 deterministic cases covering ordering, ownership, supported
+task forms, idempotence, nesting/cycles, reentry, post-clean guards, cached
+failures, and sibling failure isolation. Run `lune run tests/run.luau`; the
+environment distinction and cleanup rules are indexed in `docs/TEST_MATRIX.md`.
 
 Packet 03.3 reran 10 focused cleanup cases through the logger-based constructor.
 Supported runtime types, LIFO/idempotence, state/nesting guards, failure

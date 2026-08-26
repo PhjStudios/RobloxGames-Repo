@@ -145,6 +145,10 @@ regenerated with the command above and is not authoritative content.
 
 ## Current Roblox Studio smoke-test procedure
 
+This is a Studio solo integration procedure, not part of the headless 76-case
+suite. Its current availability, authorization, evidence, and cleanup fields are
+indexed in `docs/TEST_MATRIX.md`.
+
 Use this procedure for Packet 01.3 regression checks:
 
 1. From the repository root, restart `rojo serve` if it was already running when

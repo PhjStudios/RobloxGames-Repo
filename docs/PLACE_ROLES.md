@@ -84,10 +84,12 @@ match gameplay service is started by this packet.
 
 ## Focused Packet 02.3 runtime validation
 
-The repository does not add a test runner early; test-runner selection remains
-Packet 05.1. For Packet 02.3, the pure resolver was exercised through the
-connected Studio Luau runtime against a temporary clone of the synchronized
-module. The clone was immediately destroyed and no place was saved.
+Packet 02.3 intentionally predated the repository test runner. At that packet's
+checkpoint, the pure resolver was exercised through the connected Studio Luau
+runtime against a temporary clone of the synchronized module. The clone was
+immediately destroyed and no place was saved. Phase 05 later added the isolated
+runner, but the current 76-case headless suite does not claim new place-role
+resolver coverage; current test status is indexed in `docs/TEST_MATRIX.md`.
 
 All 10 cases passed:
 

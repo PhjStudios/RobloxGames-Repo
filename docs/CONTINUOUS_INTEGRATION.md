@@ -17,6 +17,9 @@ workflow was added. This final record also contains the genuine GitHub Actions
 negative controls and clean runs required by Packet 05.3; local inspection or a
 simulated command run was not used as a substitute.
 
+This workflow is the automated-CI row in `docs/TEST_MATRIX.md`; it does not claim
+Studio, multi-client, published-client, device, or production-sensitive coverage.
+
 ## Dependency and action decision
 
 The workflow uses one action and no cache or artifact action:
@@ -131,3 +134,10 @@ runs 2, 6, and 10. At the restoration evidence checkpoint, the local branch
 matched its remote with no tracked or untracked residue and only the
 pre-existing ignored `sourcemap.json`. Packet 05.3 therefore satisfies its
 genuine negative-control and clean-run gate.
+
+The subsequent evidence-documentation commit
+`8de8d49c4e21bd136edfc9bb087f305f86654089` also passed every required step in
+[run 11](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32973295687)
+([job 98191841968](https://github.com/PhjStudios/RobloxGames-Repo/actions/runs/32973295687/job/98191841968))
+and retained no artifacts. This did not add a new control or broaden workflow
+authority.

@@ -398,22 +398,25 @@ unchanged.
 
 ## Regression procedure
 
-1. Format changed Luau, run both whole-source StyLua checks, and run Selene.
-2. Build Default, Lobby, and Match independently into exact ignored outputs.
-3. Recheck the current 30/1/1 instance counts, shared schema presence, and role
-   isolation, then remove only those outputs.
-4. In each correctly connected Studio place, clone `ReplicatedStorage.Shared`
-   into a temporary Edit-mode harness to avoid stale `require` caches.
-5. Validate the dependency graph in order and rerun empty, exact-default, valid,
-   invalid, hostile, boundary, immutability, serialization, and strict-consumer
-   cases.
-6. Destroy the harness and confirm lasting catalogs are still empty.
-7. Run an isolated Play/Stop cycle in Lobby and Match and verify the established
-   role, startup, cleanup, and shutdown terminal records.
-8. Leave both places in Edit mode. Do not save or publish merely to test.
+1. Run `stylua src tests`, then `stylua --check --verify src tests`.
+2. Run `selene validate-config`, then `selene src tests`.
+3. Run `lune run tests/run.luau`. Confirm all 76 ordered cases pass, including
+   Map, Difficulty, finite Wave, and Endless empty/default/valid/invalid,
+   hostile, boundary, immutability, and reference coverage.
+4. Run `lune run tests/verify-builds.luau`. Confirm all four builds pass, each
+   production build retains 30 ModuleScripts, one Script, and one LocalScript,
+   Lobby/Match remain isolated, and no test code ships in production.
+5. Use a temporary reviewed Studio harness only for an engine-parity case that
+   the headless suite cannot represent; remove the exact harness afterward.
+6. If bootstrap or engine-integration behavior changed, run isolated Play-Stop
+   checks in each affected place and verify the established role, startup,
+   cleanup, and shutdown terminal records.
+7. Leave both places in Edit mode. Remove exact generated builds and temporary
+   harnesses only. Do not save or publish merely to test.
 
-A persistent runner, test project, CI workflow, and `docs/TEST_MATRIX.md` remain
-Phase 05 work. Packet 04.5 composes these schemas through the whole-catalog
-report and bootstrap gate documented in `docs/CONFIGURATION_VALIDATION.md`;
-Phase 04 passed its fresh exit audit in `docs/PHASE_04_EXIT_AUDIT.md`. Packet
-05.1 is next and has not begun.
+Phase 05 subsequently added the isolated runner/test project, deterministic
+finite and Endless fixtures, headless schema coverage, and least-privilege CI.
+Current evidence is in `docs/TEST_RUNNER.md`; test environments and deferred
+runtime gates are in `docs/TEST_MATRIX.md`. Packet 04.5 remains the original
+whole-catalog/bootstrap boundary in `docs/CONFIGURATION_VALIDATION.md`, and the
+historical Phase 04 audit remains in `docs/PHASE_04_EXIT_AUDIT.md`.

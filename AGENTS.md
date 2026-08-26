@@ -23,6 +23,7 @@ Roblox Luau project using Git, GitHub, Rojo, Team Create, Rokit, StyLua, and Sel
 - Development sync: `rojo serve`
 - Format code and tests: `stylua src tests`
 - Check formatting: `stylua --check --verify src tests`
+- Validate lint configuration: `selene validate-config`
 - Lint code and tests: `selene src tests`
 - Run headless tests: `lune run tests/run.luau`
 - Verify all project builds: `lune run tests/verify-builds.luau`
@@ -37,6 +38,6 @@ Roblox Luau project using Git, GitHub, Rojo, Team Create, Rokit, StyLua, and Sel
 
 ## Before finishing a change
 
-- Format and lint changed code.
-- Build the Rojo project.
+- Format and lint changed code and tests.
+- Run the canonical headless suite and all-project structural verifier.
 - Summarize changed files and required Roblox Studio testing.

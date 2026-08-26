@@ -374,21 +374,25 @@ inspection. Current combined-state counts are recorded in
 
 After changing these contracts:
 
-1. Format the changed Luau and run both whole-source StyLua checks and Selene.
-2. Build Default, Lobby, and Match to separate ignored outputs.
-3. Confirm all schema, type, catalog, ID, Result, and validation modules exist in
-   every build and recheck Lobby/Match role isolation.
-4. In each synchronized place, clone `ReplicatedStorage.Shared` into a temporary
-   Edit-mode harness to avoid stale `require` caches.
-5. Validate Assets once, pass the canonical manifest to Towers and Enemies, and
-   re-run valid, invalid, boundary, immutability, hostile-input, serialization,
-   and exact-path fixtures.
-6. Destroy the harness and build outputs.
-7. If any bootstrap/integration code changed, run isolated Play-Stop regression
-   checks and verify the established lifecycle and cleanup terminal states.
-8. Leave both places in Edit mode. Do not save or publish merely to test.
+1. Run `stylua src tests`, then `stylua --check --verify src tests`.
+2. Run `selene validate-config`, then `selene src tests`.
+3. Run `lune run tests/run.luau`. Confirm all 76 ordered cases pass, including
+   Tower, Enemy, and Asset valid/invalid, boundary, hostile-input, exact-path,
+   immutability, and cross-reference coverage.
+4. Run `lune run tests/verify-builds.luau`. Confirm all four builds pass, the
+   schema/type/catalog modules retain their exact production paths, Lobby/Match
+   remain isolated, and no test code ships in Default, Lobby, or Match.
+5. Use a temporary reviewed Studio harness only for an engine-parity case that
+   the headless suite cannot represent; remove the exact harness afterward.
+6. If bootstrap or engine-integration behavior changed, run isolated Play-Stop
+   checks in each affected place and verify the established lifecycle and cleanup
+   terminal states.
+7. Leave both places in Edit mode. Remove exact generated builds and temporary
+   harnesses only. Do not save or publish merely to test.
 
-Persistent test fixtures and a formal runner remain Phase 05 work. Packet 04.5
-owns the completed whole-catalog report and bootstrap gate documented in
-`docs/CONFIGURATION_VALIDATION.md`; Phase 04 passed its fresh exit audit in
-`docs/PHASE_04_EXIT_AUDIT.md`. Packet 05.1 is next and has not begun.
+Phase 05 subsequently added deterministic test-only fixtures and headless schema
+coverage without populating lasting catalogs. Current commands and evidence are
+in `docs/TEST_RUNNER.md`, and environment-specific status is in
+`docs/TEST_MATRIX.md`. Packet 04.5 remains the original whole-catalog/bootstrap
+gate documented in `docs/CONFIGURATION_VALIDATION.md`; the historical Phase 04
+audit remains in `docs/PHASE_04_EXIT_AUDIT.md`.

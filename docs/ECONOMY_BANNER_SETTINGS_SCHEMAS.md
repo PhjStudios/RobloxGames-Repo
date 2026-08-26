@@ -318,7 +318,7 @@ Phase 20 must compose these inputs as follows:
 - low detail and effect suppression remove cosmetic work only, never
   authoritative or gameplay-critical cues.
 
-References: [Roblox GuiService API](https://create.roblox.com/docs/reference/engine/classes/GuiService)
+References: [Roblox GuiService API](https://create.roblox.com/docs/reference/engine/classes/GuiService.md)
 and [PreferredTextSize enum](https://create.roblox.com/docs/reference/engine/enums/PreferredTextSize).
 
 ## Validation, errors, and canonical values
@@ -443,25 +443,27 @@ builds were removed after inspection; the pre-existing ignored
 
 ## Regression procedure
 
-1. Format changed Luau, run both whole-source StyLua checks, and run Selene.
-2. Build Default, Lobby, and Match independently into exact ignored outputs.
-3. Recheck the current 30/1/1 instance counts, all six Packet 04.4 modules, and
-   role isolation, then remove only those outputs.
-4. In each correctly connected Studio place, clone `ReplicatedStorage.Shared`
-   into a temporary Edit-mode harness so all dependencies share fresh identity
-   markers.
-5. Validate Assets, Towers, Enemies, Difficulties, Economy, Banners, and default
-   settings in dependency order.
-6. Rerun lasting-empty, lasting-policy, valid, invalid, tolerance, boundary,
-   hostile, privacy, immutability, serialization, and strict-consumer cases.
-7. Destroy every temporary clone and confirm lasting balance/content catalogs
-   remain empty.
-8. Run an isolated Play/Stop cycle in Lobby and Match and verify the established
-   role, startup, cleanup, and shutdown records.
-9. Leave both places in Edit mode. Do not save or publish merely to test.
+1. Run `stylua src tests`, then `stylua --check --verify src tests`.
+2. Run `selene validate-config`, then `selene src tests`.
+3. Run `lune run tests/run.luau`. Confirm all 76 ordered cases pass, including
+   Economy, Banner, and Settings lasting-policy, valid/invalid, tolerance,
+   boundary, hostile, privacy, immutability, version, and
+   dependency-reference coverage.
+4. Run `lune run tests/verify-builds.luau`. Confirm all four builds pass, each
+   production build retains 30 ModuleScripts, one Script, and one LocalScript,
+   Lobby/Match remain isolated, and no test code ships in production.
+5. Use a temporary reviewed Studio harness only for an engine-parity case that
+   the headless suite cannot represent; remove the exact harness afterward.
+6. If bootstrap or engine-integration behavior changed, run isolated Play-Stop
+   checks in each affected place and verify the established role, startup,
+   cleanup, and shutdown records.
+7. Leave both places in Edit mode. Remove exact generated builds and temporary
+   harnesses only. Do not save or publish merely to test.
 
-A persistent test runner, test project, CI workflow, and
-`docs/TEST_MATRIX.md` remain Phase 05 work. Packet 04.5 owns the completed
-deterministic whole-catalog report and minimum shared bootstrap gate documented
-in `docs/CONFIGURATION_VALIDATION.md`; Phase 04 passed its fresh exit audit in
-`docs/PHASE_04_EXIT_AUDIT.md`. Packet 05.1 is next and has not begun.
+Phase 05 subsequently added the isolated runner/test project, deterministic
+fixtures, schema/privacy/boundary coverage, and least-privilege CI. Current
+evidence is in `docs/TEST_RUNNER.md`; test environments and production-sensitive
+boundaries are in `docs/TEST_MATRIX.md`. Packet 04.5 remains the original
+deterministic whole-catalog/bootstrap gate in
+`docs/CONFIGURATION_VALIDATION.md`, and the historical Phase 04 audit remains in
+`docs/PHASE_04_EXIT_AUDIT.md`.

@@ -145,7 +145,7 @@ The documentation audit confirmed that every Packet 04 evidence document is
 linked and source-aligned. Its stale current-count and next-checkpoint findings
 were reconciled when this exit result was recorded.
 
-## Scope boundary and next checkpoint
+## Historical scope boundary and next checkpoint at recording
 
 Phase 04 is complete. This audit did not add `tests/`, `test.project.json`, a
 test dependency, `.github/workflows`, or `docs/TEST_MATRIX.md`; those remain
@@ -155,3 +155,17 @@ or production content.
 
 Packet 05.1 is the next roadmap checkpoint, but it was not begun or authorized
 by this Phase 04 goal.
+
+## Subsequent Phase 05 evidence
+
+The statements above remain the truthful Phase 04 audit snapshot. Phase 05 later
+added `tests/`, `test.project.json`, the pinned Lune runner, the least-privilege
+GitHub workflow, and the test matrix without changing production `src/` or
+lasting catalogs. The current 76-case/eight-suite evidence is in
+`docs/TEST_RUNNER.md`, genuine CI evidence is in
+`docs/CONTINUOUS_INTEGRATION.md`, and current versus historical/deferred test
+status is in `docs/TEST_MATRIX.md`.
+
+The Phase 05 headless suite covers all Phase 04 schema/configuration contracts.
+It does not convert the Phase 03 lifecycle, logging, or shutdown Studio harnesses
+into current repository-owned headless coverage.

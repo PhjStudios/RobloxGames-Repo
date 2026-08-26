@@ -1,5 +1,8 @@
 # Studio Multi-Place Gate
 
+Current headless versus Studio role/source-isolation coverage and all deferred
+environment gates are indexed in `docs/TEST_MATRIX.md`.
+
 ## Purpose
 
 This document records the implementation and live Studio evidence for Packet

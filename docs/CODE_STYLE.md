@@ -60,7 +60,7 @@ No custom rule suppression, directory exclusion, or warning downgrade is needed
 for the current scaffold. This is intentional:
 
 - New warnings and errors must be reviewed instead of globally hidden.
-- Normal Phase 05 verification uses `selene src tests` without
+- Normal repository verification uses `selene src tests` without
   `--allow-warnings`.
 - A narrow suppression may be added later only when the code is valid, the rule
   cannot model it accurately, and the reason is documented beside the smallest
@@ -122,15 +122,21 @@ For a normal implementation packet:
 
 1. Format only changed Luau with `stylua src tests` when both roots exist.
 2. Run `stylua --check --verify src tests`.
-3. Run `selene src tests`.
-4. Run `lune run tests/run.luau`.
-5. Run `lune run tests/verify-builds.luau` to build and structurally inspect
-   Default, Lobby, Match, and Test.
-6. Inspect `git status` and the diff to ensure generated files, secrets, and
-   unrelated changes are absent.
-7. Report any required Studio testing separately; never publish without explicit
-   approval.
+3. Run `selene validate-config`.
+4. Run `selene src tests`.
+5. Run `lune run tests/run.luau`.
+6. Run `lune run tests/verify-builds.luau` to build and structurally inspect
+    Default, Lobby, Match, and Test.
+7. Inspect `git status` and the diff to ensure generated files, secrets, and
+    unrelated changes are absent.
+8. Run `git diff --check`.
+9. Report any required Studio testing separately; never publish without explicit
+    approval.
 
 Packet 01.2 validation also runs `selene validate-config` and verifies that a
 Rojo build succeeds before its generated output is removed from the working
 tree.
+
+The current test categories and their exact authorization/environment boundaries
+are in `docs/TEST_MATRIX.md`. The same mandatory local commands are enforced by
+the least-privilege workflow documented in `docs/CONTINUOUS_INTEGRATION.md`.

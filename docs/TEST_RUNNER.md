@@ -2,7 +2,8 @@
 
 ## Decision record
 
-- Status: Packets 05.1, 05.2, and 05.3 complete; Packet 05.4 is next
+- Status: Packets 05.1-05.4 complete; fresh Phase 05 exit audit is next and Phase
+  06 has not begun
 - Research date: 2026-08-26
 - Selected runtime: Lune 0.10.5
 - Rokit tool identifier: `lune-org/lune@0.10.5`
@@ -16,6 +17,11 @@ for Phase 05. The assertion library, discovery logic, Roblox ModuleScript
 adapter, fixtures, and structural build checks are small, project-owned Luau
 modules rather than another package graph.
 
+The runner's current coverage is only the automated-headless portion of
+`docs/TEST_MATRIX.md`. Studio integration, multi-client, published-client,
+device/accessibility, and destructive tests keep their separate status and must
+not be inferred from a passing headless run.
+
 ## Selection criteria
 
 The chosen approach must run strict Luau deterministically on headless Windows
@@ -27,7 +33,7 @@ of Default, Lobby, and Match builds.
 Lune 0.10.5 meets those requirements with one pinned executable. Its official
 release embeds Luau 0.709 and supplies filesystem, process, Luau compilation,
 and Roblox DataModel libraries. The project-owned adapter builds
-`test.project.json`, deserialize that exact Rojo output, and execute ModuleScript
+`test.project.json`, deserializes that exact Rojo output, and executes ModuleScript
 `Source` with a restricted environment that provides Roblox-style `script` and
 Instance-based `require`. The adapter will not attempt to run the full game or
 pretend to reproduce Roblox engine behavior.

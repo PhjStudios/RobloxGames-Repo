@@ -19,7 +19,8 @@ service, or persistence system consumes them.
 - Source type mode: `--!strict`
 - Configuration schemas or catalogs added: none
 - Gameplay, networking, runtime entities, or persistence added: none
-- General test runner or external dependency added: none
+- General test runner or external dependency added by Packet 04.1: none; Phase
+  05 later added the isolated Lune runner
 - Studio-authored content changed: no
 - External services enabled: no
 - Place saved or published: no
@@ -226,11 +227,11 @@ A separate transient `--!strict` consumer imported the generic and every ID
 alias, exercised success/failure branch narrowing and
 `Result.Failure<Ids.IdError>`, then parsed, required, and executed successfully
 in both places. This verifies Studio accepts and runs the typed module boundary.
-The current toolchain has no standalone Luau analyzer, and the Studio bridge
-does not expose the editor's built-in diagnostic list, so this evidence does not
-claim a programmatic Script Analysis diagnostic count. Selecting persistent
-automated type-analysis and test tooling remains a Phase 05 decision; Packet
-04.1 did not add a package to manufacture that evidence.
+The Packet 04.1 toolchain had no standalone Luau analyzer, and the Studio bridge
+did not expose the editor's built-in diagnostic list, so this evidence does not
+claim a programmatic Script Analysis diagnostic count. Packet 04.1 did not add a
+package to manufacture that evidence. Phase 05 later selected Lune for runtime
+tests; it still does not claim standalone static type-analysis coverage.
 
 Every temporary ModuleScript, cloned folder, Instance, and connection was
 destroyed or disconnected. Neither place was saved.
@@ -279,21 +280,25 @@ removed afterward. Current combined-state counts are recorded in
 
 After changing `Ids` or `Result`:
 
-1. Run both whole-source StyLua checks and `selene src`.
-2. Build the default, Lobby, and Match projects to distinct ignored outputs.
-3. Confirm both modules exist under `ReplicatedStorage.Shared.util` in all three
-   builds and recheck Lobby/Match source isolation.
-4. In a temporary Edit-mode harness, require clones of the synchronized modules.
-5. Re-run valid, boundary, malformed, cross-family, privacy, and immutability
-   fixtures in both places.
-6. Destroy the harness and exact build outputs.
-7. If bootstrap or integration code has changed, run isolated Play-Stop checks
-   and confirm lifecycle and cleanup reach their established terminal states.
-8. Leave both places in Edit mode. Do not save or publish merely to test.
+1. Run `stylua src tests`, then `stylua --check --verify src tests`.
+2. Run `selene validate-config`, then `selene src tests`.
+3. Run `lune run tests/run.luau`. Confirm all 76 ordered cases pass, including
+   every ID family, malformed and cross-family use, boundaries, privacy,
+   immutability, and both Result branches.
+4. Run `lune run tests/verify-builds.luau`. Confirm all four builds pass, both
+   modules retain their exact production source paths, Lobby/Match remain
+   isolated, and no test code ships in Default, Lobby, or Match.
+5. Use a temporary reviewed Studio harness only for an engine-parity case that
+   the headless suite cannot represent; remove the exact harness afterward.
+6. If bootstrap or engine-integration behavior changed, run isolated Play-Stop
+   checks in each affected place and confirm the established lifecycle and
+   cleanup terminal states.
+7. Leave both places in Edit mode. Remove exact generated builds and temporary
+   harnesses only. Do not save or publish merely to test.
 
-Persistent automated fixtures and a formal test runner remain Packet 05.2 and
-05.1 work. Packets 04.2 through 04.4 now consume these contracts for content,
-economy, banner, and settings schemas. Packet 04.5 composes them through the
-boundary recorded in `docs/CONFIGURATION_VALIDATION.md`; Phase 04 passed its
-fresh exit audit in `docs/PHASE_04_EXIT_AUDIT.md`. Packet 05.1 is next and has
-not begun.
+Phase 05 subsequently added persistent fixtures and headless coverage for all ten
+ID families, Result branches, malformed/cross-family use, boundaries, freezing,
+and privacy. Run `lune run tests/run.luau`; the current evidence is in
+`docs/TEST_RUNNER.md` and the environment status is in `docs/TEST_MATRIX.md`.
+Packets 04.2 through 04.5 remain the original schema and bootstrap consumers, and
+the historical Phase 04 audit remains in `docs/PHASE_04_EXIT_AUDIT.md`.

@@ -22,7 +22,8 @@ synthetic, temporary, and destroyed after validation.
 - Bootstrap consumers: common client and common server only
 - Loaded configuration families: 9
 - Registered gameplay services: 0
-- Test runner, test project, or CI added: none; those remain Phase 05 work
+- Test runner, test project, or CI added by Packet 04.5: none; Phase 05 later
+  added them without changing this production bootstrap
 - Studio-authored content changed: no
 - External services enabled: no
 - Place saved or published: no
@@ -316,27 +317,27 @@ callbacks.
 
 ## Regression procedure
 
-1. Run `stylua --check src`, `stylua --check --verify src`, and `selene src`.
-2. Build Default, Lobby, and Match to three distinct ignored outputs.
-3. Confirm all builds contain `ConfigurationValidator`, 30 ModuleScripts, one
-   Script, and one LocalScript; recheck role isolation.
-4. In a fresh clone of the synchronized shared tree, call `validateLoaded()` and
-   confirm the lasting empty configuration succeeds.
-5. Run one representative valid synthetic graph and the invalid cases listed
-   above. Assert exact code, path, issue order, and blocked-family order.
-6. Test source-load failure only in a temporary cloned ModuleScript and destroy
-   it afterward. Never break the lasting authored source to force this case.
-7. Confirm production failure logging contains only static message, first code,
-   issue count, and canonical path, then confirm the dependent-start sentinel
-   remains false.
-8. Connect `lobby.project.json` only to Lobby and `match.project.json` only to
-   Match.
-9. In each place, complete three consecutive Play/Stop cycles. Confirm
+1. Run `stylua src tests`, then `stylua --check --verify src tests`,
+   `selene validate-config`, and `selene src tests`.
+2. Run `lune run tests/run.luau`. Confirm all 76 ordered cases pass, including
+   lasting-empty and policy-only configuration, representative graphs, invalid
+   references/boundaries, exact code/path/order, privacy, malformed roots, and
+   source-load containment.
+3. Run `lune run tests/verify-builds.luau`. Confirm all four builds, 30
+   ModuleScripts plus one Script and one LocalScript in each production build,
+   role isolation, exact source identity, and no test code in production.
+4. If production bootstrap or engine-integration behavior changed, connect
+   `lobby.project.json` only to Lobby and `match.project.json` only to Match.
+5. In each affected place, complete three consecutive Play/Stop cycles. Confirm
    configuration success precedes ready on server and client; lifecycle reaches
    `Started`; cleanup is `Active`; server Stop reaches `Shutdown`/`Cleaned`; and
    there are no unexplained warnings or errors.
-10. Leave both sessions in Edit mode. Remove only the exact temporary harnesses
-    and builds. Do not save or publish merely to test.
+6. Use a temporary reviewed Studio harness only for an engine-parity case that
+   the headless suite cannot represent. Never break lasting authored source to
+   force a source-load failure.
+7. Leave both sessions in Edit mode. Remove only exact temporary harnesses and
+   builds. Do not save or publish merely to test.
 
-Persistent fixtures, a formal test runner, `test.project.json`, CI, and
-`docs/TEST_MATRIX.md` remain Phase 05 work.
+Phase 05 automated evidence is in `docs/TEST_RUNNER.md` and CI evidence is in
+`docs/CONTINUOUS_INTEGRATION.md`. `docs/TEST_MATRIX.md` distinguishes this
+headless coverage from historical Studio evidence and deferred runtime gates.

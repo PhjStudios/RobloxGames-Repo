@@ -8,11 +8,12 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phase 04 and Packets 05.1-05.3 are complete. The isolated runner executes
+order. Phase 04 and Packets 05.1-05.4 are complete. The isolated runner executes
 76 deterministic pure-contract cases across eight suites, and the
 least-privilege GitHub workflow has genuine formatting, Selene-lint,
 broken-expectation, broken-definition, restoration, and clean-run evidence.
-Packet 05.4, the test matrix and documentation reconciliation, is next.
+The fresh combined Phase 05 exit audit is the next gate, and Phase 06 has not
+begun.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -36,6 +37,8 @@ Packet 05.4, the test matrix and documentation reconciliation, is next.
 - [Phase 04 exit-gate audit](docs/PHASE_04_EXIT_AUDIT.md)
 - [Automated test-runner decision and contract](docs/TEST_RUNNER.md)
 - [Continuous-integration design and evidence](docs/CONTINUOUS_INTEGRATION.md)
+- [Current automated, Studio, device, published, and destructive test matrix](docs/TEST_MATRIX.md)
+- [Phase 05 combined exit-gate audit (in progress)](docs/PHASE_05_EXIT_AUDIT.md)
 - [Project instructions](AGENTS.md)
 
 ## Source of truth
@@ -97,6 +100,7 @@ source modules.
 - Start match-only synchronization: `rojo serve match.project.json`
 - Format source and tests: `stylua src tests`
 - Check formatting: `stylua --check --verify src tests`
+- Validate Selene configuration: `selene validate-config`
 - Lint source and tests: `selene src tests`
 - Run deterministic headless tests: `lune run tests/run.luau`
 - Build and inspect all production/test projects: `lune run tests/verify-builds.luau`

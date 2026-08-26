@@ -55,8 +55,10 @@ ownership details.
 - Confirmed as the universe root/start place: no; private dashboard verification
   is still required
 
-The repository currently treats this as its only served place. Its Rojo project
-name is `Ant Tower Defense`.
+This is the only PlaceId allowlisted by `servePlaceIds`, which exists only in the
+combined development project. The isolated Lobby and Match project definitions
+intentionally contain no place allowlist and are connected one at a time. The
+combined Rojo project name is `Ant Tower Defense`.
 
 ### Universe/experience ID
 
@@ -343,14 +345,16 @@ Sync must never be used on Rojo-managed folders.
 - Complete — the correct isolated project was connected to each place.
 - Complete — both places passed client/server boot and source-isolation checks.
 
-### Needed before Phase 03
+### Needed before persistence and published-service testing
 
 - Create a separate private test experience under the same owner.
 - Create Test Lobby and Test Match places.
 - Record their universe and PlaceIds without credentials.
 
-The separate test universe remains required before persistence and destructive
-backend testing, but it does not block the code-only Phase 03 lifecycle work.
+The separate test universe remains unavailable. It is required before Phase 19
+persistence/destructive backend testing and before the Phase 26 published-client
+teleport gate, but none of the completed Phases 03-05 required that private
+Roblox environment.
 
 ### Needed before Phase 07's graybox map gate
 
@@ -369,9 +373,10 @@ backend testing, but it does not block the code-only Phase 03 lifecycle work.
 
 ## Current limitations and unresolved items
 
-- Exact Roblox owner group name/ID is not locally or publicly available.
-- Production root/start-place status cannot be verified without authenticated
-  Creator Dashboard access.
+- The user confirmed PHJGAMES, Group ID `35420107`, as owner. That ownership was
+  not independently derivable from the original local scaffold alone.
+- Production root/start-place status remains dependent on authenticated Creator
+  Dashboard evidence rather than public metadata alone.
 - The correct Match place still has a default-generated display name.
 - An unused standalone PHJGAMES experience/place was created during the manual
   workflow and awaits separate cleanup approval.
@@ -390,6 +395,9 @@ Complete on 2026-08-25. All locally discoverable facts and recommended
 strategies are recorded, and the user confirmed the exact Roblox owner as
 PHJGAMES, Group ID `35420107`.
 
-The still-uncreated Match place and separate test environment are recorded
-requirements, not invented identifiers. Their real IDs must be added here when
-the approved Studio setup work occurs before the Phase 02 multi-place gate.
+At the Packet 00.3 snapshot, the Match place and separate test environment were
+still uncreated requirements. Packet 02.4 subsequently created and verified the
+Match place at PlaceId `136401514513678` inside the production experience. The
+separate private test universe remains uncreated and must receive real verified
+identifiers only through later explicitly approved setup work. Current test
+availability and authorization boundaries are indexed in `docs/TEST_MATRIX.md`.

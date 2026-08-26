@@ -296,3 +296,7 @@ runnable Script or LocalScript. Conversely, Default, Lobby, and Match map no
 test directory. `lune run tests/verify-builds.luau` enforces both directions
 across the complete generated DataModels, including an exact positive
 path/class/source map for all 32 current production Lua containers.
+
+This headless boundary and every environment-specific follow-up are indexed in
+`docs/TEST_MATRIX.md`; passing it does not substitute for a deferred Studio,
+multi-client, published-client, or device gate.

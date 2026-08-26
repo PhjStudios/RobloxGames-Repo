@@ -59,10 +59,15 @@ Lune is not an engine replacement. The canonical `lune run tests/run.luau`
 command executes pure shared contracts from an isolated Rojo build; Roblox
 Studio remains authoritative for engine integration.
 
+The current command/environment boundary and deferred Studio, device, published,
+and destructive tests are indexed in `docs/TEST_MATRIX.md`. GitHub execution and
+supply-chain policy are recorded in `docs/CONTINUOUS_INTEGRATION.md`.
+
 ## Command verification
 
-All commands documented in `README.md` and `AGENTS.md` were exercised against
-the minimal scaffold.
+The source-only rows below preserve the Packet 01.1 scaffold evidence. The Lune
+rows record later Phase 05 evidence; current canonical commands are the
+reproduction checklist, not the historical source-only spellings.
 
 | Command | Result | Evidence and notes |
 | --- | --- | --- |
@@ -104,13 +109,14 @@ From the repository root:
    `selene --version`, and `lune --version` against the table above.
 3. Run `stylua src tests` and review expected changes.
 4. Run `stylua --check --verify src tests`.
-5. Run `selene src tests`.
-6. Run `lune run tests/run.luau`.
-7. Run `lune run tests/verify-builds.luau`.
-8. Run `rojo serve`; if port 34872 is already occupied, confirm it is an intended
-   Rojo session or use an explicitly chosen free port for a smoke check.
-9. Connect Roblox Studio through the Rojo plugin only when Studio testing is in
-   the active packet's scope.
+5. Run `selene validate-config`.
+6. Run `selene src tests`.
+7. Run `lune run tests/run.luau`.
+8. Run `lune run tests/verify-builds.luau`.
+9. Run `rojo serve`; if port 34872 is already occupied, confirm it is an intended
+    Rojo session or use an explicitly chosen free port for a smoke check.
+10. Connect Roblox Studio through the Rojo plugin only when Studio testing is in
+    the active packet's scope.
 
 Packet 01.1 required no manual place mutation or gameplay test in Studio. The
 existing Rojo-to-Studio connection was observed but not used to edit or publish

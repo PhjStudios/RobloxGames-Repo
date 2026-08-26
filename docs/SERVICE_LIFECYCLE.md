@@ -142,7 +142,7 @@ Invalid configuration raises a structured error before `ServiceLifecycle.new`,
 so no partially validated configuration can reach a service and no runner needs
 rollback. The valid path and every lifecycle state contract remain unchanged.
 
-## Focused automated validation
+## Focused Studio Edit-mode validation
 
 A read-only Studio Edit-mode harness required the Rojo-synchronized module and
 executed assertions against fresh runners. All 17 cases passed:
@@ -160,9 +160,13 @@ executed assertions against fresh runners. All 17 cases passed:
 
 Every rejection assertion checked relevant structured fields rather than merely
 checking that some error occurred. This was executed against the synchronized
-Lobby copy of the real module, not a rewritten test double. Packet 05 will own
-selection and repository integration of a persistent Luau test runner, so this
-packet did not pull that framework forward.
+Lobby copy of the real module, not a rewritten test double. Packet 03.1 did not
+pull a persistent framework forward.
+
+Phase 05 subsequently added a repository-owned runner, but its current 76 cases
+do not include `ServiceLifecycle`. The evidence in this section remains
+historical Studio validation; reusable headless lifecycle coverage is deferred
+until a dedicated regression packet. See `docs/TEST_MATRIX.md`.
 
 Packet 03.3 reran 12 focused lifecycle cases through the migrated logger-based
 constructor. Dependency order, registration/state rejection, and all three

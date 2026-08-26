@@ -30,11 +30,12 @@ only change through an explicit architecture decision recorded here.
   exit-gate audit passed on 2026-08-26.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
-  Packets 04.3, 04.4, 04.5, 05.1, 05.2, and 05.3 completed on 2026-08-26.
-- Next checkpoint: Packet 05.4. The 76-case deterministic contract suite,
-  exact production-build exclusion checks, and genuine GitHub formatting,
-  Selene-lint, broken-expectation, broken-definition, restoration, and clean-run
-  evidence are complete.
+  Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, and 05.4 completed on
+  2026-08-26.
+- Current checkpoint: the fresh combined Phase 05 exit audit. The 76-case
+  deterministic contract suite, exact production-build exclusion checks, and genuine GitHub
+  formatting, Selene-lint, broken-expectation, broken-definition, restoration,
+  and clean-run evidence are complete. Phase 06 has not begun.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -262,14 +263,18 @@ Every prompt that completes a work packet should follow this sequence:
 4. State any safe assumptions before implementation.
 5. Implement only the packet's bounded scope.
 6. Add or update focused tests and validators where applicable.
-7. Run formatting on changed Luau.
-8. Run `stylua --check src`.
-9. Run `selene src`.
-10. Build every affected Rojo project.
-11. Run available automated tests.
-12. Inspect the diff for accidental scope growth.
-13. Report changed files, test results, and exact Studio testing required.
-14. Update roadmap status only when the packet's completion evidence exists.
+7. Format changed Luau with `stylua src tests` when both roots exist.
+8. Run `stylua --check --verify src tests`.
+9. Run `selene validate-config` and `selene src tests`.
+10. Run `lune run tests/run.luau`; zero discovery and every failure are fatal.
+11. Run `lune run tests/verify-builds.luau` to build and structurally inspect
+    Default, Lobby, Match, and Test, including production test exclusion and
+    place-role isolation.
+12. Inspect status and the complete diff for accidental scope growth, secrets,
+    and generated-output residue; remove only exact generated outputs.
+13. Run `git diff --check`.
+14. Report changed files, test results, and exact Studio testing required.
+15. Update roadmap status only when the packet's completion evidence exists.
 
 If Studio work is required, code completion and Studio verification are separate
 checkpoints. A phase is not marked complete simply because its code compiles.
@@ -569,15 +574,26 @@ run are recorded in `docs/CONTINUOUS_INTEGRATION.md`.
 
 ### Packet 05.4 — Test documentation
 
+**Status:** Complete — 2026-08-26. The authoritative current/deferred test
+inventory is `docs/TEST_MATRIX.md`. Its 37 records cover all six required
+categories with explicit environment, procedure, players/devices, authorization,
+external-service/publication, risk, evidence, cleanup, and prerequisite fields.
+Formatting, linting, the 76-case suite, four-project verifier, local-link audit,
+and independent documentation/security reviews passed with no unresolved P0,
+P1, or P2 finding.
+
 - Create `docs/TEST_MATRIX.md`.
 - Separate automated, Studio solo, multi-client, published-client, device, and
   destructive-production tests.
 - Record currently unavailable or deferred tests and the exact environment,
   authorization, device, or production-safety prerequisite for each one.
 
-**Exit gate:** Deliberate formatting, Selene-lint, broken-expectation, and
-broken-definition controls fail through their intended paths, while the clean
-project passes locally and in GitHub.
+**Exit gate:** In progress. Deliberate formatting, Selene-lint,
+broken-expectation, and broken-definition controls fail through their intended
+paths, while the restored project passes locally and at the last pushed
+executable-state GitHub checkpoint. The fresh combined local audit is recorded
+in `docs/PHASE_05_EXIT_AUDIT.md`; a genuine clean run of the final intended
+documentation/audit commit is still required before this gate is marked passed.
 
 ## Phase 06 — Network protocol and remote-security foundation
 
@@ -2337,11 +2353,14 @@ A code packet is done only when:
 - Its bounded requirements are implemented.
 - Public interfaces are typed and documented where their behavior is not obvious.
 - Expected failures return safe, actionable outcomes.
-- Relevant automated tests pass.
+- Relevant automated tests pass, and zero discovered tests is a failure.
 - Changed Luau is formatted.
-- `stylua --check src` passes.
-- `selene src` passes.
-- Every affected Rojo project builds.
+- `stylua --check --verify src tests` passes.
+- `selene validate-config` and `selene src tests` pass.
+- `lune run tests/run.luau` passes.
+- `lune run tests/verify-builds.luau` proves all four projects build, tests do
+  not ship in production, and Lobby/Match role isolation still holds.
+- Exact generated outputs are removed and no unexpected residue remains.
 - The diff contains no unrelated change.
 - Required manual Studio steps are listed.
 - No new warning/error is left unexplained.
@@ -2360,7 +2379,10 @@ A Studio content packet is done only when:
 
 ## Required recurring test scenarios
 
-The test matrix should eventually include:
+The authoritative status, environments, procedures, prerequisites, and safety
+boundaries for these scenarios are in `docs/TEST_MATRIX.md`. The following are
+required recurring scenarios; most remain explicitly deferred until their
+enabling packets exist:
 
 - Solo, 2-player, 3-player, and 4-player.
 - Captain leaves before start.
