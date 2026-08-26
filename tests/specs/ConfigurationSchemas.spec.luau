@@ -90,6 +90,7 @@ return TestHarness.suite("configuration schemas valid fixtures", {
 	TestHarness.case("supports the public single-definition schema entrypoints", function(assertions)
 		local sources = Fixtures.validSources()
 		local canonical = validateDependencies(sources)
+		sources.towers[1].placementCost = -1
 
 		assertions.isTrue(TowerSchema.validateDefinition(sources.towers[1], canonical.assets).ok)
 		assertions.isTrue(EnemySchema.validateDefinition(sources.enemies[1], canonical.assets).ok)
