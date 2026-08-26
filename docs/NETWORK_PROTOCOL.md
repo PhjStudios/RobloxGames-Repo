@@ -7,6 +7,7 @@
 - Primary-source research accessed: 2026-08-26
 - Packet 06.1 status: complete — 2026-08-26
 - Packet 06.2 status: complete — 2026-08-26
+- Packet 06.3 architecture decision: recorded — 2026-08-26; implementation pending
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Production feature endpoints: none; the lasting authenticated registry is empty
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
@@ -82,6 +83,9 @@ handlers remain server-only.
 - [`CFrame` component contract](https://create.roblox.com/docs/reference/engine/datatypes/CFrame)
 - [`Instance` class and ancestry API](https://create.roblox.com/docs/reference/engine/classes/Instance)
 - [`RunService` execution-context API](https://create.roblox.com/docs/reference/engine/classes/RunService)
+- [`Players.PlayerRemoving`](https://create.roblox.com/docs/reference/engine/classes/Players#PlayerRemoving)
+- [Luau clock comparison](https://luau.org/news/2020-06-20-luau-recap-june-2020/#os-enhancements)
+- [`DataModel.BindToClose`](https://create.roblox.com/docs/reference/engine/classes/DataModel#BindToClose)
 
 ## Approved physical layout
 
@@ -264,6 +268,73 @@ server context; Studio Edit mode and clients fail closed. The payload may never
 select the class, ancestor, context, or Instance path. The headless engine seam
 is gated by the exact isolated non-replicated Test-project structure and is
 absent from the production client API.
+
+## Server rate-limiting architecture decision
+
+This Packet 06.3 decision was recorded on 2026-08-26 before rate-limiter source
+changes. The existing `NetworkRegistry` lifecycle service remains the sole
+production network owner. A server-only limiter module will be owned as a child
+of its existing `Cleanup` container; no second service, independent shutdown
+hook, shared/client limiter, punishment system, or analytics sink is added.
+
+One authenticated frozen policy is required for every definition whose fixed
+registry direction is `ClientToServer`, including definitions inactive in the
+current place role. Policies for unknown or `ServerToClient` definitions,
+duplicates, malformed tables, and missing inbound definitions fail construction.
+The canonical policy set follows registry order and filters an active role view
+without accepting a runtime action string. The lasting server-only production
+policy list remains empty while the production registry is empty. Future
+registration must add the definition and its explicit policy together.
+
+Each explicitly selected default policy starts with capacity 4, refill 2 tokens
+per second, and fixed cost 1. A missing policy never receives an implicit
+default. Custom capacity must be a safe integer from 1 through 100; refill must
+be finite from 0.01 through 100 tokens per second. These are technical ceilings,
+not recommendations to grant high throughput. Policy creation, sets, decisions,
+and diagnostic summaries are detached and frozen.
+
+Runtime state is one lazy token bucket per actual connected engine `Player`
+Instance and captured canonical registry-definition identity. The API accepts no
+payload, UserId, name, client timestamp, arbitrary action, or path. Unknown,
+inactive, wrong-direction, counterfeit, departing-player, unavailable-state,
+and invalid-clock decisions fail closed before allocating a bucket. State is
+bounded by connected Players multiplied by at most 128 fixed definitions.
+
+The injected clock has a server-local monotonic contract; production supplies
+`os.clock()` for the same high-precision duration behavior already used by fixed
+client lookup. One protected sample is taken per decision. It must be a finite,
+nonnegative number no earlier than the last accepted sample across the whole
+limiter. A thrown, wrong-type, non-finite, or backwards sample rejects without
+bucket, aggregate, or clock-state mutation, and a later valid sample can recover.
+Elapsed-time multiplication is avoided once the remaining capacity is known to
+be filled, so even a huge finite forward jump only saturates at capacity. There
+is no epsilon-based early allowance.
+
+The limiter owns a `PlayerRemoving` connection and removes every bucket for the
+exact departing Player identity; lifecycle cleanup remains the independent
+whole-state guarantee. The parent registers its remote root first, the limiter
+child second, and inbound listeners last. Existing LIFO cleanup therefore
+disconnects inbound listeners, disconnects `PlayerRemoving`, clears limiter and
+aggregate state, and destroys the owned tree in that order. Cleanup failure
+isolation remains the established `Cleanup` contract.
+
+Rate-limit rejections feed one global O(1) abuse aggregate, never a per-player or
+per-request log. The first rejection may emit one static warning; later warnings
+are globally limited to one per ten-second window across every endpoint. The
+pending count saturates at 4,096 and the endpoint is either one fixed canonical
+registry name or the static token `<multiple>`. The structured log adds only
+allowlisted finite `rateLimitRejectionCount` and `rateLimitWindowSeconds` fields
+beside the existing fixed endpoint and code. Reporter failure is contained and
+still advances the cadence, so it cannot change a decision or retry-flood output.
+No Player identity, request ID, payload, token balance, timestamp, caught error,
+or trace is retained or logged. Counts summarize delivered server events only;
+Roblox's approximate transport throttle is not forensic or security evidence.
+
+Packet 06.3 creates and tests the limiter but does not wrap the current raw test
+handlers. Packet 06.4 must make its dispatcher the sole limiter caller after
+cheap envelope checks and before authorization, payload validation, or handler
+execution. Invoking the limiter earlier would violate the recorded pipeline;
+invoking it from an optional feature handler would leave a bypass.
 
 ## Direction and dispatch rules
 
