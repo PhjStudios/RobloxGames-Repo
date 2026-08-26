@@ -69,12 +69,14 @@ name is `Ant Tower Defense`.
 
 ### Match PlaceId
 
-- Current configured Match PlaceId: none
+- Current configured Match PlaceId: `136401514513678`
+- Current display name: `fishytiger7's Place: 08252026_1`
+- Verified universe: `10757629094`
+- Verified owner: PHJGAMES, Group ID `35420107`
 - Matching Rojo project file: `match.project.json`; it declares the `Match` role
-  while `src/shared/config/PlaceRoles.luau` retains a safe unset sentinel until
-  a real Match place exists
-- Required status: must be created or identified before the Phase 02 Studio
-  multi-place gate
+  while `src/shared/config/PlaceRoles.luau` owns the runtime PlaceId
+- Live isolated Studio gate: passed in Packet 02.4; evidence:
+  `docs/MULTI_PLACE_GATE.md`
 
 The Match place must:
 
@@ -88,9 +90,23 @@ The Match place must:
 - Contain or load Studio-authored map assets.
 - Preserve unmapped Studio instances when connected through Rojo.
 
-No placeholder Match PlaceId should be invented. Until a real ID is known,
-the common bootstraps reject the Match role with `PLACE_ID_UNCONFIGURED` rather
-than silently starting or sending players somewhere else.
+The placeholder was replaced only after the real ID was verified from the Lobby
+place enumeration and authenticated Creator Dashboard. The common bootstraps now
+accept this exact pairing and reject other places.
+
+### Unused standalone place
+
+The manual creation workflow also produced a separate PHJGAMES experience:
+
+- Universe ID: `10761692127`
+- PlaceId: `113675721965291`
+- Display name: `Ant Tower Defense - Match`
+- Relationship to Ant Tower Defense: none; it is not in universe `10757629094`
+- Repository references: none
+
+Its appealing display name must not be treated as identity evidence. The runtime
+resolver correctly rejected this place with `PLACE_ID_MISMATCH`. Deleting or
+repurposing it requires separate approval.
 
 ## Ownership inventory
 
@@ -323,14 +339,18 @@ Sync must never be used on Rojo-managed folders.
 
 ### Needed before Phase 02's Studio gate
 
-- Confirm the exact Roblox owner group name and ID.
-- Create or identify a production Match place in universe `10757629094`.
+- Complete — owner, Lobby, and Match identities are verified.
+- Complete — the correct isolated project was connected to each place.
+- Complete — both places passed client/server boot and source-isolation checks.
+
+### Needed before Phase 03
+
 - Create a separate private test experience under the same owner.
 - Create Test Lobby and Test Match places.
 - Record their universe and PlaceIds without credentials.
-- Connect the appropriate Rojo project to each place after Phase 02 creates the
-  project files and centralized role validation. This is Packet 02.4's manual
-  gate.
+
+The separate test universe remains required before persistence and destructive
+backend testing, but it does not block the code-only Phase 03 lifecycle work.
 
 ### Needed before Phase 07's graybox map gate
 
@@ -352,9 +372,9 @@ Sync must never be used on Rojo-managed folders.
 - Exact Roblox owner group name/ID is not locally or publicly available.
 - Production root/start-place status cannot be verified without authenticated
   Creator Dashboard access.
-- Production Match place does not appear in repository configuration.
-- The Match role exists but its PlaceId is intentionally unset until Packet
-  02.4 creates or identifies that place.
+- The correct Match place still has a default-generated display name.
+- An unused standalone PHJGAMES experience/place was created during the manual
+  workflow and awaits separate cleanup approval.
 - Separate test universe and places do not appear in repository configuration.
 - Current enabled platform settings are not visible locally.
 - Current Studio API-access setting is not treated as verified because restricted

@@ -28,12 +28,12 @@ results, configuration validation, and a deterministic resolver.
 | --- | --- | --- |
 | `Development` | No independent production ID | Combined project in Studio, paired only with the known Lobby place |
 | `Lobby` | Known Lobby PlaceId | Lobby-isolated project |
-| `Match` | Unset | Match-isolated project after Packet 02.4 provides a real ID |
+| `Match` | Known Match PlaceId | Match-isolated project |
 
-The unset Match value is the non-numeric sentinel `false` inside the private
-configuration table. Public lookup converts it to `nil`. This is safer than `0`
-or a fabricated number because it cannot accidentally be supplied as a PlaceId
-to a Roblox API.
+Packet 02.3 initially represented Match with the non-numeric sentinel `false`
+inside the private configuration table. Public lookup converted it to `nil`.
+Packet 02.4 replaced only that sentinel after the real Match PlaceId was created
+and verified.
 
 The known Lobby PlaceId appears once in runtime Luau. Its other required project
 occurrence is the existing `servePlaceIds` allow-list in
@@ -49,7 +49,7 @@ Each Rojo definition supplies one `ReplicatedStorage` string attribute named
 | --- | --- | --- |
 | `default.project.json` | `Development` | Studio only, in the configured Lobby place |
 | `lobby.project.json` | `Lobby` | Actual PlaceId exactly matches the configured Lobby ID |
-| `match.project.json` | `Match` | Rejected until the real Match PlaceId is configured |
+| `match.project.json` | `Match` | Actual PlaceId exactly matches the configured Match ID |
 
 The projects declare roles, not duplicate IDs. The common client and server
 bootstraps read the same attribute and call the same shared resolver. The
@@ -63,7 +63,8 @@ resolution:
 
 - Development has no independent production PlaceId.
 - Lobby has one positive, finite integer PlaceId.
-- Match is either the unset sentinel or one positive, finite integer PlaceId.
+- Match is one positive, finite integer PlaceId. The validator still permits the
+  original unset sentinel so a future environment can fail closed during setup.
 
 `resolve(declaredRole, actualPlaceId, isStudio)` is pure and deterministic. It
 returns a tagged result and never reads Roblox services itself.
@@ -81,7 +82,7 @@ context, subsystem, event, and error code. Successful Studio boot records retain
 the existing structured format and now include the resolved role. No lobby or
 match gameplay service is started by this packet.
 
-## Focused runtime validation
+## Focused Packet 02.3 runtime validation
 
 The repository does not add a test runner early; test-runner selection remains
 Packet 05.1. For Packet 02.3, the pure resolver was exercised through the
@@ -101,8 +102,10 @@ All 10 cases passed:
 9. A missing role is rejected.
 10. An unknown role is rejected.
 
-Configuration validation passed, the configured Lobby ID matched the connected
-place, and public Match lookup returned `nil`.
+At the Packet 02.3 checkpoint, configuration validation passed, the configured
+Lobby ID matched the connected place, and public Match lookup returned `nil`.
+Packet 02.4 subsequently verified both configured IDs and both cross-place
+rejection directions; see `docs/MULTI_PLACE_GATE.md`.
 
 ## Build and static verification
 
@@ -120,15 +123,9 @@ The following checks passed with the pinned toolchain:
 Every build contains exactly one `ModuleScript`, one server `Script`, and one
 client `LocalScript`. Generated `.rbxlx` artifacts were inspected and removed.
 
-## Studio boundary and next gate
+## Current Studio state after Packet 02.4
 
-The already-connected Rojo server was started before the project attribute was
-added. Source hot-sync delivered the module and bootstrap revisions, while the
-new project-level attribute requires reconnecting the project definition. This
-packet deliberately did not reconnect isolated projects, author place content,
-save, or publish: those operations belong to Packet 02.4.
-
-Packet 02.4 must first create or identify the real Match place, replace only the
-unset Match entry in the shared configuration, then connect each isolated
-project to its correct place and verify successful and rejected boots. Until
-then, the Match project is intentionally non-bootable.
+Packet 02.4 created and configured the real Match place, connected both isolated
+projects, and passed Lobby and Match client/server Play tests. A deliberately
+wrong Match connection also failed closed with `PLACE_ID_MISMATCH`. Full evidence
+is recorded in `docs/MULTI_PLACE_GATE.md`.

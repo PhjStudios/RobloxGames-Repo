@@ -161,7 +161,7 @@ the commands above.
 
 ## Scope boundary and next gate
 
-Packet 02.2 does not create the Match place, connect a role project to a real
-place, run role-specific code, save Studio content, or publish. Structural build
-isolation is verified; real lobby-versus-match Studio isolation remains the
-Packet 02.4 manual gate after Packet 02.3 provides centralized identity checks.
+Packet 02.2 did not create the Match place, connect a role project to a real
+place, run role-specific code, save Studio content, or publish. Packet 02.4 has
+since passed the real Lobby-versus-Match Studio isolation gate; current evidence
+is recorded in `docs/MULTI_PLACE_GATE.md`.

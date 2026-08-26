@@ -49,7 +49,7 @@ local VALID_ROLES: { [string]: boolean } = table.freeze({
 local CONFIGURED_PLACE_IDS: { [string]: number | false } = table.freeze({
 	[DEVELOPMENT_ROLE] = false,
 	[LOBBY_ROLE] = 100561454756026,
-	[MATCH_ROLE] = false,
+	[MATCH_ROLE] = 136401514513678,
 })
 
 local PlaceRoles = {

@@ -26,12 +26,12 @@ only change through an explicit architecture decision recorded here.
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
 - Gameplay state: minimal Rojo scaffold with harmless Studio-only client and
   server bootstraps; temporary example behavior has been removed.
-- Current implementation phase: Phase 02.
+- Current implementation phase: Phase 03.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
-  02.2, and 02.3 on 2026-08-25.
-- Next packet: 02.4, Studio multi-place manual gate. It has not begun and
-  requires a real Match place decision.
-- Publishing state: no publishing is authorized by this document.
+  02.2, 02.3, and 02.4 on 2026-08-25.
+- Next packet: 03.1, bootstrap lifecycle contract. It has not begun.
+- Publishing state: the user authorized and completed the Packet 02.4 Match-place
+  creation; no additional publishing is authorized.
 
 ## Approved product foundation
 
@@ -394,12 +394,15 @@ large enough to make the split risky.
 
 ### Packet 02.4 — Studio multi-place manual gate
 
+**Status:** Complete — 2026-08-25. Evidence: `docs/MULTI_PLACE_GATE.md`.
+
 - Manually create or identify the match place in the same experience.
 - Connect the correct Rojo project to each place.
 - Confirm lobby-only code never runs in match and vice versa.
 - Publishing requires separate explicit approval.
 
-**Exit gate:** Both place projects build and boot with only their intended code.
+**Exit gate:** Passed — 2026-08-25. Both isolated place projects build and boot
+with common plus only their intended place layer; wrong pairing fails closed.
 
 ## Phase 03 — Bootstrap, service lifecycle, and cleanup
 
