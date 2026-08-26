@@ -549,6 +549,33 @@ Rate-limit and malformed-input signals are aggregated and interval-limited. The
 server does not log every request or every rejection, and Phase 06 adds no ban,
 punishment, persistence, analytics delivery, or external sink.
 
+## Packet 06.5 adversarial-test and Studio-fixture decision
+
+This decision was recorded on 2026-08-26 before Packet 06.5 test or harness
+source was added. Packet 06.5 changes no production endpoint or networking
+architecture. One deterministic `NetworkSecurity.spec.luau` suite will reuse the
+existing test-only registry definitions and compose the real registry owner,
+limiter, dispatcher, protocol, payload validation, fixed client lookup, and
+client tracker through captured test adapters. It will consolidate hostile
+payloads, forged authority fields, replay/spam, topology misuse, failure
+translation, disconnect/cleanup, privacy, and mutation-sentinel behavior while
+the existing focused suites remain the exhaustive boundary evidence.
+
+Actual `RemoteEvent` transport, engine-supplied originating `Player`,
+`FireClient` recipient isolation, replication/marshalling, and live connection
+teardown are Roblox-engine behaviors rather than Lune claims. Reusable Studio
+harness source will therefore live only under unmapped `tests/studio/`. A manual
+unsaved regression may create the two exact temporary harness scripts in Studio
+and a distinct server-owned `ATDPhase06StudioFixture` root. It must never adopt,
+rename, remove, or second-initialize the production `ATDNetwork` root. The
+procedure must remove only those exact temporary instances, leave both places in
+Edit mode, and never save, publish, or enable an external service.
+
+The mandatory endpoint approval boundary will be the standalone
+`REMOTE_SECURITY_CHECKLIST.md`. It will replace the provisional procedure below
+once Packet 06.5 passes; no unexplained omission may permit a future production
+remote to ship.
+
 ## Future endpoint registration procedure
 
 Until the final Packet 06.5 checklist is recorded, no production feature remote
