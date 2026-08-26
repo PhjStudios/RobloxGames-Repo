@@ -16,8 +16,8 @@ production-data changes, or monetization.
 - Recorded: 2026-08-25
 - Packet: 00.2
 - Status: Accepted for core development
-- Current roadmap checkpoint: fresh Phase 05 exit audit; Packet 05.4 is complete
-  and Phase 06 has not begun
+- Current roadmap checkpoint: Phase 05 and its exit audit are complete; Packet
+  06.1 is next but has not begun
 
 ## Product identity and game loop
 

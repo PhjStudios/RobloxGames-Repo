@@ -26,16 +26,17 @@ only change through an explicit architecture decision recorded here.
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
 - Gameplay state: minimal Rojo scaffold with harmless Studio-only client and
   server bootstraps; temporary example behavior has been removed.
-- Current implementation phase: Phase 05 in progress; Phase 04's separate
-  exit-gate audit passed on 2026-08-26.
+- Current implementation phase: Phase 05 complete; Phase 06 has not begun.
+  Phase 04's separate exit-gate audit also passed on 2026-08-26.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
   Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, and 05.4 completed on
   2026-08-26.
-- Current checkpoint: the fresh combined Phase 05 exit audit. The 76-case
-  deterministic contract suite, exact production-build exclusion checks, and genuine GitHub
-  formatting, Selene-lint, broken-expectation, broken-definition, restoration,
-  and clean-run evidence are complete. Phase 06 has not begun.
+- Current checkpoint: Packet 06.1 is next but not begun. The Phase 05 combined
+  exit audit passed with the 76-case deterministic contract suite, exact
+  production-build exclusion checks, and genuine GitHub formatting,
+  Selene-lint, broken-expectation, broken-definition, restoration, and final
+  documentation/audit-state clean-run evidence.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -588,12 +589,13 @@ P1, or P2 finding.
 - Record currently unavailable or deferred tests and the exact environment,
   authorization, device, or production-safety prerequisite for each one.
 
-**Exit gate:** In progress. Deliberate formatting, Selene-lint,
-broken-expectation, and broken-definition controls fail through their intended
-paths, while the restored project passes locally and at the last pushed
-executable-state GitHub checkpoint. The fresh combined local audit is recorded
-in `docs/PHASE_05_EXIT_AUDIT.md`; a genuine clean run of the final intended
-documentation/audit commit is still required before this gate is marked passed.
+**Exit gate:** Passed — 2026-08-26. Deliberate formatting, Selene-lint,
+broken-expectation, and broken-definition controls failed through their intended
+paths; the restored project passed every local combined-state gate and three
+byte-identical consecutive test runs; production builds contain no test code;
+and the final Packet 05.4/documentation/audit commit passed the genuine
+least-privilege GitHub workflow with zero retained artifacts. Exact evidence is
+recorded in `docs/PHASE_05_EXIT_AUDIT.md`. Packet 06.1 is next but not begun.
 
 ## Phase 06 — Network protocol and remote-security foundation
 

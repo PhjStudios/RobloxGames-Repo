@@ -8,12 +8,11 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phase 04 and Packets 05.1-05.4 are complete. The isolated runner executes
-76 deterministic pure-contract cases across eight suites, and the
-least-privilege GitHub workflow has genuine formatting, Selene-lint,
-broken-expectation, broken-definition, restoration, and clean-run evidence.
-The fresh combined Phase 05 exit audit is the next gate, and Phase 06 has not
-begun.
+order. Phases 04 and 05 are complete. The isolated runner executes 76
+deterministic pure-contract cases across eight suites, and the least-privilege
+GitHub workflow has genuine formatting, Selene-lint, broken-expectation,
+broken-definition, restoration, and final combined-state clean-run evidence.
+Packet 06.1 is next but has not begun.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -38,7 +37,7 @@ begun.
 - [Automated test-runner decision and contract](docs/TEST_RUNNER.md)
 - [Continuous-integration design and evidence](docs/CONTINUOUS_INTEGRATION.md)
 - [Current automated, Studio, device, published, and destructive test matrix](docs/TEST_MATRIX.md)
-- [Phase 05 combined exit-gate audit (in progress)](docs/PHASE_05_EXIT_AUDIT.md)
+- [Phase 05 combined exit-gate audit](docs/PHASE_05_EXIT_AUDIT.md)
 - [Project instructions](AGENTS.md)
 
 ## Source of truth

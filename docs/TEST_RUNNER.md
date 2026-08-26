@@ -2,8 +2,7 @@
 
 ## Decision record
 
-- Status: Packets 05.1-05.4 complete; fresh Phase 05 exit audit is next and Phase
-  06 has not begun
+- Status: Phase 05 complete; Packet 06.1 is next but has not begun
 - Research date: 2026-08-26
 - Selected runtime: Lune 0.10.5
 - Rokit tool identifier: `lune-org/lune@0.10.5`

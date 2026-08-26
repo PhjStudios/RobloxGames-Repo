@@ -7,8 +7,8 @@ Ant Tower Defense. Packet 05.4 created it on 2026-08-26. It separates checks
 that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
-Packet 05.4 is complete. The fresh combined Phase 05 exit audit is the next
-checkpoint; Phase 06 has not begun.
+Phase 05 and its fresh combined exit audit are complete. Packet 06.1 is next but
+has not begun.
 
 The current repository has no gameplay, networking, persistence, UI, or
 external-service implementation. A separate private test universe has not been
