@@ -4,10 +4,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local RemoteRegistry = require(ReplicatedStorage.Shared.network.RemoteRegistry)
+local PayloadValidation = require(ReplicatedStorage.Shared.network.PayloadValidation)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
 local Cleanup = require(ReplicatedStorage.Shared.util.Cleanup)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
 local ServerRateLimiter = require(script.Parent.ServerRateLimiter)
+local ServerRequestDispatcher = require(script.Parent.ServerRequestDispatcher)
 
 export type NetworkState =
 	"Registering"
@@ -18,17 +20,25 @@ export type NetworkState =
 	| "ShuttingDown"
 	| "Shutdown"
 	| "Failed"
-export type Handler = (player: Player, ...unknown) -> ()
-export type ConnectAdapter = (remote: RemoteEvent, handler: Handler) -> RBXScriptConnection
+export type Listener = (player: Player, ...unknown) -> ()
+export type ConnectAdapter = (remote: RemoteEvent, listener: Listener) -> RBXScriptConnection
+export type Authorizer = ServerRequestDispatcher.Authorizer
+export type Handler = ServerRequestDispatcher.Handler
+export type HandlerOutcome = ServerRequestDispatcher.HandlerOutcome
 export type LimiterDependencies = {
 	players: Instance?,
 	clock: ServerRateLimiter.Clock?,
 	connectPlayerRemoving: ServerRateLimiter.ConnectPlayerRemoving?,
 	reporter: ServerRateLimiter.Reporter?,
 }
+export type DispatcherDependencies = ServerRequestDispatcher.Dependencies
 
-type HandlerMap = { [string]: Handler }
-type RemoteMap = { [string]: RemoteEvent }
+type ContractMap = { [string]: ServerRequestDispatcher.Contract }
+type EndpointRemotes = {
+	inbound: RemoteEvent?,
+	response: RemoteEvent?,
+}
+type RemoteMap = { [string]: EndpointRemotes }
 type ResolvedLimiterDependencies = {
 	players: Instance,
 	clock: ServerRateLimiter.Clock,
@@ -44,12 +54,14 @@ type ServerData = {
 	connectAdapter: ConnectAdapter,
 	ratePolicySet: ServerRateLimiter.PolicySet,
 	limiterDependencies: ResolvedLimiterDependencies,
+	dispatcherDependencies: DispatcherDependencies?,
 	activeDefinitions: { RemoteRegistry.Definition },
 	activeDefinitionsByName: { [string]: RemoteRegistry.Definition },
-	handlers: HandlerMap,
+	contracts: ContractMap,
 	state: NetworkState,
 	cleanup: Cleanup.Container?,
 	rateLimiter: ServerRateLimiter.Limiter?,
+	dispatcher: ServerRequestDispatcher.Dispatcher?,
 	root: Folder?,
 	serviceDefinition: ServiceLifecycle.ServiceDefinition?,
 }
@@ -72,8 +84,8 @@ local LIMITER_DEPENDENCY_FIELDS: { [string]: boolean } = table.freeze({
 	reporter = true,
 })
 
-local function defaultConnect(remote: RemoteEvent, handler: Handler): RBXScriptConnection
-	return remote.OnServerEvent:Connect(handler)
+local function defaultConnect(remote: RemoteEvent, listener: Listener): RBXScriptConnection
+	return remote.OnServerEvent:Connect(listener)
 end
 
 local function requireServer(value: unknown): ServerData
@@ -220,7 +232,7 @@ local function populateUnpublishedTree(root: Folder, definitions: { RemoteRegist
 	version.Name = RemoteRegistry.VERSION_NAME
 	version.Parent = root
 
-	local inboundRemotes: RemoteMap = {}
+	local endpointRemotes: RemoteMap = {}
 	for _, definition in definitions do
 		local endpoint = Instance.new("Folder")
 		endpoint.Name = definition.name
@@ -228,28 +240,31 @@ local function populateUnpublishedTree(root: Folder, definitions: { RemoteRegist
 
 		if definition.kind == "Request" then
 			local request = createRemote("Request", endpoint)
-			if definition.direction == "ClientToServer" then
-				inboundRemotes[definition.name] = request
-			end
-
+			local response: RemoteEvent? = nil
 			if definition.response == "Required" then
-				createRemote("Response", endpoint)
+				response = createRemote("Response", endpoint)
 			end
+			endpointRemotes[definition.name] = {
+				inbound = if definition.direction == "ClientToServer" then request else nil,
+				response = response,
+			}
 		else
 			local event = createRemote("Event", endpoint)
-			if definition.direction == "ClientToServer" then
-				inboundRemotes[definition.name] = event
-			end
+			endpointRemotes[definition.name] = {
+				inbound = if definition.direction == "ClientToServer" then event else nil,
+				response = nil,
+			}
 		end
 	end
 
-	return inboundRemotes
+	return endpointRemotes
 end
 
 local function rollback(server: ServerData): boolean
 	local cleanup = server.cleanup
 	if cleanup == nil then
 		server.rateLimiter = nil
+		server.dispatcher = nil
 		return true
 	end
 
@@ -257,6 +272,7 @@ local function rollback(server: ServerData): boolean
 		cleanup:cleanup()
 	end)
 	server.rateLimiter = nil
+	server.dispatcher = nil
 	if succeeded then
 		server.cleanup = nil
 		server.root = nil
@@ -357,14 +373,14 @@ end
 
 local function requireCompleteBindings(server: ServerData)
 	for _, definition in server.activeDefinitions do
-		if definition.direction == "ClientToServer" and server.handlers[definition.name] == nil then
+		if definition.direction == "ClientToServer" and server.contracts[definition.name] == nil then
 			server.state = "Failed"
 			fail(
 				server,
 				"initialization_rejected",
-				"MISSING_HANDLER",
+				"MISSING_CONTRACT",
 				definition.name,
-				"Every active client-to-server endpoint requires exactly one handler before initialization"
+				"Every active client-to-server endpoint requires exactly one secure contract before initialization"
 			)
 		end
 	end
@@ -473,12 +489,79 @@ local function initialize(server: ServerData)
 		)
 	end
 
+	local dispatcherCreated, dispatcherValue = pcall(
+		ServerRequestDispatcher.new,
+		server.logger,
+		server.registry,
+		server.role,
+		limiterDependencies.players,
+		rateLimiter,
+		server.dispatcherDependencies
+	)
+	if not dispatcherCreated then
+		rejectInitialization(
+			server,
+			"DISPATCHER_CREATION_FAILED",
+			UNKNOWN_ENDPOINT,
+			"The secure request dispatcher could not be created"
+		)
+	end
+
+	local dispatcher = dispatcherValue :: ServerRequestDispatcher.Dispatcher
+	server.dispatcher = dispatcher
 	for _, definition in server.activeDefinitions do
 		if definition.direction == "ClientToServer" then
-			local handler = server.handlers[definition.name] :: Handler
-			local remote = remoteMap[definition.name]
+			local registered = pcall(function()
+				dispatcher:registerContract(server.contracts[definition.name])
+			end)
+			if not registered then
+				rejectInitialization(
+					server,
+					"DISPATCHER_REGISTRATION_FAILED",
+					definition.name,
+					"The fixed endpoint contract could not be registered with the dispatcher"
+				)
+			end
+		end
+	end
+
+	local dispatcherInitialized, dispatcherCleanupValue = pcall(function()
+		return dispatcher:initialize()
+	end)
+	if not dispatcherInitialized then
+		rejectInitialization(
+			server,
+			"DISPATCHER_INITIALIZATION_FAILED",
+			UNKNOWN_ENDPOINT,
+			"The secure request dispatcher could not initialize its owned resources"
+		)
+	end
+
+	local dispatcherCleanup = dispatcherCleanupValue :: Cleanup.Container
+	local dispatcherOwned = pcall(function()
+		(server.cleanup :: Cleanup.Container):add(dispatcherCleanup)
+	end)
+	if not dispatcherOwned then
+		pcall(function()
+			dispatcherCleanup:cleanup()
+		end)
+		server.dispatcher = nil
+		rejectInitialization(
+			server,
+			"OWNERSHIP_FAILED",
+			UNKNOWN_ENDPOINT,
+			"The secure request dispatcher could not be registered for cleanup"
+		)
+	end
+
+	for _, definition in server.activeDefinitions do
+		if definition.direction == "ClientToServer" then
+			local contract = server.contracts[definition.name] :: ServerRequestDispatcher.Contract
+			local endpointRemotes = remoteMap[definition.name]
+			local remote = endpointRemotes.inbound :: RemoteEvent
+			local response = endpointRemotes.response
 			local connected, connection = pcall(server.connectAdapter, remote, function(player: Player, ...: unknown)
-				handler(player, ...)
+				dispatcher:dispatch(contract, response, player, ...)
 			end)
 			if not connected then
 				rejectInitialization(
@@ -545,6 +628,7 @@ local function start(server: ServerData)
 
 	server.state = "Starting"
 	local rateLimiter = server.rateLimiter
+	local dispatcher = server.dispatcher
 	if rateLimiter == nil then
 		local rollbackSucceeded = rollback(server)
 		server.state = "Failed"
@@ -563,6 +647,26 @@ local function start(server: ServerData)
 			"RATE_LIMITER_MISSING",
 			UNKNOWN_ENDPOINT,
 			"Network start requires its initialized server rate limiter"
+		)
+	end
+	if dispatcher == nil then
+		local rollbackSucceeded = rollback(server)
+		server.state = "Failed"
+		if not rollbackSucceeded then
+			fail(
+				server,
+				"start_rejected",
+				"ROLLBACK_FAILED",
+				UNKNOWN_ENDPOINT,
+				"Network start failed and owned resources could not be cleaned completely"
+			)
+		end
+		fail(
+			server,
+			"start_rejected",
+			"DISPATCHER_MISSING",
+			UNKNOWN_ENDPOINT,
+			"Network start requires its initialized secure request dispatcher"
 		)
 	end
 
@@ -587,6 +691,30 @@ local function start(server: ServerData)
 			"RATE_LIMITER_START_FAILED",
 			UNKNOWN_ENDPOINT,
 			"The server rate limiter could not enter its started state"
+		)
+	end
+
+	local dispatcherStarted = pcall(function()
+		dispatcher:start()
+	end)
+	if not dispatcherStarted then
+		local rollbackSucceeded = rollback(server)
+		server.state = "Failed"
+		if not rollbackSucceeded then
+			fail(
+				server,
+				"start_rejected",
+				"ROLLBACK_FAILED",
+				UNKNOWN_ENDPOINT,
+				"Network start failed and owned resources could not be cleaned completely"
+			)
+		end
+		fail(
+			server,
+			"start_rejected",
+			"DISPATCHER_START_FAILED",
+			UNKNOWN_ENDPOINT,
+			"The secure request dispatcher could not enter its started state"
 		)
 	end
 	server.state = "Started"
@@ -619,15 +747,18 @@ local function shutdown(server: ServerData)
 	server.state = "Shutdown"
 end
 
-function Server.registerHandler(self: Server, endpointName: unknown, handler: unknown)
-	local server = requireServer(self)
+local function requireBindableDefinition(
+	server: ServerData,
+	endpointName: unknown,
+	kind: "Request" | "Event"
+): RemoteRegistry.Definition
 	if server.state ~= "Registering" then
 		fail(
 			server,
 			"binding_rejected",
 			"INVALID_STATE",
 			endpointForLog(server, endpointName),
-			"Endpoint handlers may only be registered before lifecycle initialization"
+			"Endpoint contracts may only be registered before lifecycle initialization"
 		)
 	end
 
@@ -638,7 +769,7 @@ function Server.registerHandler(self: Server, endpointName: unknown, handler: un
 			"binding_rejected",
 			"UNKNOWN_ENDPOINT",
 			UNKNOWN_ENDPOINT,
-			"Endpoint handler registration requires one fixed registry name"
+			"Endpoint contract registration requires one fixed registry name"
 		)
 	end
 	if server.activeDefinitionsByName[definition.name] == nil then
@@ -656,23 +787,165 @@ function Server.registerHandler(self: Server, endpointName: unknown, handler: un
 			"binding_rejected",
 			"WRONG_DIRECTION",
 			definition.name,
-			"Server handlers may bind only active client-to-server endpoints"
+			"Server contracts may bind only active client-to-server endpoints"
 		)
 	end
-	if type(handler) ~= "function" then
-		fail(server, "binding_rejected", "INVALID_HANDLER", definition.name, "An endpoint handler must be a function")
-	end
-	if server.handlers[definition.name] ~= nil then
+	if definition.kind ~= kind then
 		fail(
 			server,
 			"binding_rejected",
-			"DUPLICATE_HANDLER",
+			"WRONG_KIND",
 			definition.name,
-			"An endpoint may have only one server handler"
+			"The endpoint semantic kind does not match the secure registration API"
+		)
+	end
+	if server.contracts[definition.name] ~= nil then
+		fail(
+			server,
+			"binding_rejected",
+			"DUPLICATE_CONTRACT",
+			definition.name,
+			"An endpoint may have only one secure server contract"
+		)
+	end
+	return definition
+end
+
+function Server.registerRequest(
+	self: Server,
+	endpointName: unknown,
+	payloadSchema: unknown,
+	responseSchema: unknown,
+	authorizer: unknown,
+	handler: unknown
+)
+	local server = requireServer(self)
+	local definition = requireBindableDefinition(server, endpointName, "Request")
+	if not PayloadValidation.isSchema(payloadSchema) then
+		fail(
+			server,
+			"binding_rejected",
+			"INVALID_PAYLOAD_SCHEMA",
+			definition.name,
+			"A request contract requires an authentic strict payload schema"
+		)
+	end
+	if definition.response == "Required" then
+		if not PayloadValidation.isSchema(responseSchema) then
+			fail(
+				server,
+				"binding_rejected",
+				"INVALID_RESPONSE_SCHEMA",
+				definition.name,
+				"A response-required contract requires an authentic strict response schema"
+			)
+		end
+	elseif responseSchema ~= nil then
+		fail(
+			server,
+			"binding_rejected",
+			"UNEXPECTED_RESPONSE_SCHEMA",
+			definition.name,
+			"A no-response contract cannot register a response schema"
+		)
+	end
+	if type(authorizer) ~= "function" then
+		fail(
+			server,
+			"binding_rejected",
+			"INVALID_AUTHORIZER",
+			definition.name,
+			"A request contract requires one context-only authorizer"
+		)
+	end
+	if type(handler) ~= "function" then
+		fail(
+			server,
+			"binding_rejected",
+			"INVALID_HANDLER",
+			definition.name,
+			"A request contract requires one protected handler"
 		)
 	end
 
-	server.handlers[definition.name] = handler :: Handler
+	local created, contractValue = pcall(
+		ServerRequestDispatcher.createRequestContract,
+		server.registry,
+		server.role,
+		definition,
+		payloadSchema,
+		responseSchema,
+		authorizer,
+		handler
+	)
+	if not created then
+		fail(
+			server,
+			"binding_rejected",
+			"INVALID_CONTRACT",
+			definition.name,
+			"The fixed request contract could not be authenticated"
+		)
+	end
+	server.contracts[definition.name] = contractValue :: ServerRequestDispatcher.RequestContract
+end
+
+function Server.registerEvent(
+	self: Server,
+	endpointName: unknown,
+	payloadSchema: unknown,
+	authorizer: unknown,
+	handler: unknown
+)
+	local server = requireServer(self)
+	local definition = requireBindableDefinition(server, endpointName, "Event")
+	if not PayloadValidation.isSchema(payloadSchema) then
+		fail(
+			server,
+			"binding_rejected",
+			"INVALID_PAYLOAD_SCHEMA",
+			definition.name,
+			"An event contract requires an authentic strict payload schema"
+		)
+	end
+	if type(authorizer) ~= "function" then
+		fail(
+			server,
+			"binding_rejected",
+			"INVALID_AUTHORIZER",
+			definition.name,
+			"An event contract requires one context-only authorizer"
+		)
+	end
+	if type(handler) ~= "function" then
+		fail(
+			server,
+			"binding_rejected",
+			"INVALID_HANDLER",
+			definition.name,
+			"An event contract requires one protected handler"
+		)
+	end
+
+	local created, contractValue = pcall(
+		ServerRequestDispatcher.createEventContract,
+		server.registry,
+		server.role,
+		definition,
+		payloadSchema,
+		authorizer,
+		handler
+	)
+	if not created then
+		fail(
+			server,
+			"binding_rejected",
+			"INVALID_CONTRACT",
+			definition.name,
+			"The fixed event contract could not be authenticated"
+		)
+	end
+	server.contracts[definition.name] = contractValue :: ServerRequestDispatcher.EventContract
 end
 
 function Server.getServiceDefinition(self: Server): ServiceLifecycle.ServiceDefinition
@@ -691,7 +964,8 @@ function ServerRemoteRegistry.new(
 	role: RemoteRegistry.RuntimePlaceRole,
 	ratePolicyBindings: unknown,
 	connectAdapter: ConnectAdapter?,
-	limiterDependencies: LimiterDependencies?
+	limiterDependencies: LimiterDependencies?,
+	dispatcherDependencies: DispatcherDependencies?
 ): Server
 	if not Log.isLogger(logger) then
 		error(
@@ -737,12 +1011,14 @@ function ServerRemoteRegistry.new(
 		connectAdapter = connectAdapter or defaultConnect,
 		ratePolicySet = policySetResult.value,
 		limiterDependencies = resolvedLimiterDependencies,
+		dispatcherDependencies = dispatcherDependencies,
 		activeDefinitions = activeDefinitions,
 		activeDefinitionsByName = activeDefinitionsByName,
-		handlers = {},
+		contracts = {},
 		state = "Registering",
 		cleanup = nil,
 		rateLimiter = nil,
+		dispatcher = nil,
 		root = nil,
 		serviceDefinition = nil,
 	}, Server) :: Server

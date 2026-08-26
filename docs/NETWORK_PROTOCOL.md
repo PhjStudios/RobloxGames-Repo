@@ -8,7 +8,7 @@
 - Packet 06.1 status: complete — 2026-08-26
 - Packet 06.2 status: complete — 2026-08-26
 - Packet 06.3 status: complete — 2026-08-26
-- Packet 06.4 architecture decision: recorded — 2026-08-26; implementation pending
+- Packet 06.4 status: complete — 2026-08-26
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Production feature endpoints: none; the lasting authenticated registry is empty
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
@@ -19,8 +19,8 @@
 
 This is the authoritative Phase 06 network-boundary document. The decision
 section was recorded before implementation. The sections below also record the
-completed Packet 06.1–06.3 implementations and evidence. Phase 06 and Gate A
-remain open until Packets 06.4–06.5 and the fresh exit audit pass.
+completed Packet 06.1–06.4 implementations and evidence. Phase 06 and Gate A
+remain open until Packet 06.5 and the fresh exit audit pass.
 
 ## Official Roblox behavior that shapes the design
 
@@ -328,12 +328,17 @@ registry name or the static token `<multiple>`. The structured log adds only
 allowlisted finite `rateLimitRejectionCount` and `rateLimitWindowSeconds` fields
 beside the existing fixed endpoint and code. Reporter failure is contained and
 still advances the cadence, so it cannot change a decision or retry-flood output.
-No Player identity, request ID, payload, token balance, timestamp, caught error,
-or trace is retained or logged. Counts summarize delivered server events only;
-Roblox's approximate transport throttle is not forensic or security evidence.
+The rate-limit aggregate retains or logs no Player identity, request ID, payload,
+client-supplied timestamp, caught error, or trace. Separate bounded limiter
+enforcement state keys buckets by actual `Player` and canonical definition
+identity and retains server-local token balances, refill times, cadence, and
+aggregate counts. `PlayerRemoving` removes that Player's keys, lifecycle cleanup
+clears all remaining state, and raw enforcement values are never logged. Counts
+summarize delivered server events only; Roblox's approximate transport throttle
+is not forensic or security evidence.
 
 Packet 06.3 creates and tests the limiter but does not wrap the current raw test
-handlers. Packet 06.4 must make its dispatcher the sole limiter caller after
+handlers. Packet 06.4 makes its dispatcher the sole limiter caller after
 cheap envelope checks and before authorization, payload validation, or handler
 execution. Invoking the limiter earlier would violate the recorded pipeline;
 invoking it from an optional feature handler would leave a bypass.
@@ -341,10 +346,10 @@ invoking it from an optional feature handler would leave a bypass.
 ## Request, correlation, and public-error architecture decision
 
 This Packet 06.4 decision was recorded on 2026-08-26 before request-protocol or
-dispatcher source changes. The implementation will use three narrow modules:
+dispatcher source changes. The implementation uses three narrow modules:
 shared pure `RequestProtocol`, server-only `ServerRequestDispatcher`, and
 client-only `ClientRequestTracker`. `NetworkRegistry` remains the only lifecycle
-service. The raw handler-binding seam will be removed so a client-to-server
+service. The raw handler-binding seam is removed so a client-to-server
 endpoint cannot bypass its authenticated schema, rate policy, authorization,
 correlation, protected handler, or response translation.
 
@@ -372,11 +377,14 @@ The public rejection-code allowlist is exactly `RATE_LIMITED`,
 `NOT_AUTHORIZED`, `INVALID_PAYLOAD`, `DUPLICATE_REQUEST`, `STALE_REQUEST`,
 `UNAVAILABLE`, and `INTERNAL_ERROR`. There is no public message, cause, caught
 error, actual type, stack, or arbitrary metadata map. The sole optional metadata
-shape is exact `{ validationPath }` for `INVALID_PAYLOAD`; the path comes only
-from the validator's canonical developer-authored path, is revalidated, and is
-omitted if it exceeds 256 bytes. Public errors and server handler outcomes use
-local provenance and freezing; after RemoteEvent copying, the client revalidates
-the exact wire record rather than trusting provenance.
+shape is exact `{ validationPath }` for `INVALID_PAYLOAD`. The production
+dispatcher supplies it only from strict payload-validator output. The shared
+constructor accepts the structural `Validation.Issue` type rather than proving
+the issue's provenance, so future server code must not synthesize metadata; it
+revalidates the canonical developer-authored path and omits paths over 256
+bytes. Public errors and server handler outcomes use local provenance and
+freezing; after RemoteEvent copying, the client revalidates the exact wire record
+rather than trusting provenance.
 
 Correlation state is scoped to the actual engine `Player` and then globally by
 request-ID string across every fixed request endpoint. Each connected Player is
@@ -393,7 +401,7 @@ no-response Request sends nothing. The same ID on another endpoint is still a
 duplicate or stale replay. Once count eviction removes an ID, it is first-seen
 again; correlation never promises idempotency or exactly-once effects.
 
-The server contract APIs will be separate fixed request and event registrations.
+The server contract APIs are separate fixed request and event registrations.
 They accept only a captured canonical active registry definition, authenticated
 payload/response schemas with response presence matching the registry, one
 context-only authorizer, and one protected handler. The frozen server context
@@ -402,12 +410,15 @@ server role. The authorizer sees no raw or canonical client payload. A future
 operation whose authorization cannot be derived without a canonical payload may
 not bypass this order; it requires a separately reviewed post-validation,
 pre-handler guard before that endpoint can ship.
+Every context-only authorizer must be side-effect-free. Its deny and throw paths
+must pass a zero-feature-mutation sentinel before registration approval.
 
 The complete client-to-server Request pipeline is fixed as:
 
 1. a listener closure supplies the active canonical definition and engine
-   `Player` and verifies exactly one remote argument;
-2. cheap exact envelope and request-ID checks run without traversing payload;
+   `Player`, then forwards the complete remote argument list;
+2. the dispatcher verifies exactly one argument and runs cheap exact envelope
+   and request-ID checks without traversing payload;
 3. the server-authoritative per-Player/per-endpoint limiter consumes one token;
 4. the bounded per-Player correlation ledger classifies, caps, and reserves the
    global request ID;
@@ -420,6 +431,9 @@ The complete client-to-server Request pipeline is fixed as:
 10. a protected sender calls only `FireClient(originatingPlayer, envelope)` on
     the response leaf captured during server-owned tree creation.
 
+After every external or protected boundary, the dispatcher rechecks lifecycle,
+ledger, and actual-Player liveness before continuing.
+
 Events use steps 1 through 3 and 5 through 7, with their exact event envelope and
 no ledger or response. A no-response Request still uses its envelope and ledger
 but never sends a response. A rate-limited delivery still reaches correlation
@@ -427,20 +441,26 @@ classification, so a new syntactically valid ID can be completed as rejected and
 cannot later execute while retained. Pending duplicates consume a limiter token
 but never execute or race the original response.
 
-Every pre-handler rejection invokes zero feature mutation. Protected handler
-failure becomes only `INTERNAL_ERROR`; invalid/counterfeit outcomes and invalid
-success payloads do the same. A generic dispatcher cannot roll back arbitrary
-feature code that mutates and then throws, so every future stateful handler must
-perform all fallible work before its atomic commit and must prove that behavior
-with a mutation sentinel before registration approval.
+The dispatcher never invokes the feature handler after a pre-handler rejection.
+Injected authorization code is itself capable of external mutation, so the
+side-effect-free authorizer contract and its deny/throw mutation sentinel are
+mandatory. Protected handler failure becomes only `INTERNAL_ERROR`;
+invalid/counterfeit outcomes and invalid success payloads do the same. A generic
+dispatcher cannot roll back arbitrary authorizer or handler code that mutates
+and then throws, so every future stateful handler must perform all fallible work
+before its atomic commit and must prove that behavior with a mutation sentinel
+before registration approval.
 
 The client tracker registers only canonical Request definitions and
 authenticated schemas. It generates and builds every Request envelope, including
-no-response Requests, but allocates Pending state and a response schema/listener
-only when the registry requires a response. It holds at most 32 global Pending
-states and 128 recent terminal IDs, generates bounded IDs with collision checks,
-and exposes frozen `Pending`, `Success`, and `Rejected` records without UI. A
-response listener supplies its captured definition identity; an unknown or
+no-response Requests, but allocates Pending state and registers a response
+schema/handling path only when the registry requires a response. It holds at
+most 32 global Pending states and 128 recent terminal IDs, generates bounded IDs
+with collision checks, and exposes frozen `Pending`, `Success`, and `Rejected`
+records without UI. The tracker does not connect a `RemoteEvent`; future
+fixed-endpoint client code
+must own that listener through Cleanup and supply its captured definition
+identity to the tracker. An unknown or
 completed ID is stale, while a live ID arriving through another endpoint is
 mismatched. Malformed envelopes, public errors, or success payloads and
 mismatched/stale responses do not mutate the valid pending entry. Explicit
@@ -499,13 +519,13 @@ valid request.
 ## Lifecycle and cleanup ownership
 
 One common server network service is registered before lifecycle initialization.
-It owns the server-created root, limiter child, Player-removal connection, and
-every endpoint-listener connection through nested `Cleanup` containers. The
-parent registers the root first, the limiter child second, and inbound listeners
-last. LIFO cleanup therefore disconnects endpoint listeners first, then the
-limiter child disconnects `PlayerRemoving` and clears bucket/aggregate state,
-then the parent destroys the remote tree. Packet 06.4 will extend the same owner
-with bounded correlation state.
+It owns the server-created root, limiter child, dispatcher child, two separate
+Player-removal connections, and every endpoint-listener connection through
+nested `Cleanup` containers. The parent registers the root first, limiter child
+second, dispatcher child third, and inbound listeners last. LIFO cleanup
+therefore disconnects endpoint listeners first, then the dispatcher disconnects
+`PlayerRemoving` and clears correlation/aggregate state, then the limiter does
+the same for bucket state, and finally the parent destroys the remote tree.
 
 Initialization preflights conflicts before publishing the tree and rolls back
 its own partial work if any step fails. Shutdown clears bounded per-player state,
@@ -514,8 +534,8 @@ reverse lifecycle and graceful-shutdown path. No independent `BindToClose` hook
 is added.
 
 The current common server ready record reports lifecycle `Started` with one
-registered service. The client lifecycle remains at zero services; the client
-lookup module is a fixed utility and is not a lifecycle owner.
+registered service. The client lifecycle remains at zero services; client lookup
+and request tracking are fixed utilities and are not lifecycle owners.
 
 ## Logging boundary
 
@@ -637,5 +657,45 @@ The lasting production registry and frozen production rate-policy list are both
 empty, and no gameplay definition, punishment, persistence, analytics, external
 service, or Phase 07 source was added.
 
-Packet 06.3 is complete. Packet 06.4 is next and has not begun; Phase 06 and
-Gate A remain open, and Phase 07/gameplay work has not begun.
+Packet 06.3 is complete; Packet 06.4 has since completed. Phase 06 and Gate A
+remain open, and Phase 07/gameplay work has not begun.
+
+## Packet 06.4 completion evidence
+
+`RequestProtocol.luau` implements the exact Request, Event, Success, and
+Rejected wire records, authenticated 8–48-byte request IDs, the fixed seven-code
+public error allowlist, validation-path-only bounded metadata, and frozen
+Pending/Success/Rejected states. Its cheap parsers use raw exact-record
+traversal without walking payloads. `ClientRequestTracker.luau` requires
+canonical registered Request definitions and authenticated request/response
+schemas, generates IDs with bounded collision retries, holds at most 32 global
+Pending records plus a 128-ID terminal ring, and rejects malformed, stale, or
+mismatched responses without changing the valid pending entry.
+
+`ServerRequestDispatcher.luau` is the sole post-envelope limiter caller. It
+uses one per-Player global request-ID ledger across endpoints, server-derived
+frozen context, context-only authorization, strict payload and response schemas,
+protected handler outcomes, allowlisted translation, and the response leaf and
+originating Player captured by `ServerRemoteRegistry`. Raw handler registration
+is gone; lifecycle initialization fails unless every active client-to-server
+definition has exactly one secure Request or Event contract. Valid requests in
+the initialized-but-not-started publication window cannot execute a handler,
+and state/ledger/player checks stop cleanup re-entry after limiter, reporter,
+authorization, validation, or handler calls.
+
+The canonical headless run discovers 15 suites and passes all 189 cases in
+deterministic path and declaration order. The three new focused suites contribute
+13 protocol, 12 client-tracker, and 19 dispatcher cases; the existing 12-case
+runtime suite now proves secure contract binding, exact captured response routing,
+place-role isolation, rollback, and listener → dispatcher → limiter → root LIFO
+cleanup. The four-project verifier reports 40 ModuleScripts, one Script, and one
+LocalScript in Default, Lobby, and Match. Test contains 33 shared modules,
+exactly six explicitly mapped common networking modules, 25 test-owned modules,
+and zero runnable scripts, for 64 ModuleScripts total. Tests remain absent from
+production projects and Lobby/Match source isolation remains intact.
+
+The lasting production registry and production rate-policy list remain frozen
+and empty. No gameplay definition, generic bus, `RemoteFunction`, punishment,
+persistence, external service, Phase 07 source, place save, or publication was
+added. Packet 06.4 is complete; Packet 06.5 is next and has not begun. Phase 06
+and Gate A remain open.

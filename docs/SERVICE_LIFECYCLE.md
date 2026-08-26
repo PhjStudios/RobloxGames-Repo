@@ -152,17 +152,30 @@ so no partially validated configuration can reach a service and no runner needs
 rollback. The valid path and every lifecycle state contract remain unchanged.
 
 The network service has no declared dependencies. Its lifecycle callbacks own a
-separate typed state machine: initialize creates and binds the fixed server-owned
-tree before parent-last publication, initializes the server limiter, and owns
-all of it through one parent cleanup container. The parent registers the remote
-root first, the limiter child second, and inbound listeners last. Reverse LIFO
-cleanup therefore disconnects listeners, disconnects the limiter's
-`PlayerRemoving` connection and clears its buckets/aggregate, then destroys the
-root. Start starts the limiter before the network owner reaches `Started` and
-changes no endpoint definition. Duplicate initialization, start, shutdown, or
-handler registration is rejected rather than creating duplicate resources. The
-existing reverse lifecycle and outer bootstrap cleanup remain the sole shutdown
-route; Packet 06.3 adds no service or independent close hook.
+separate typed state machine: initialization creates the fixed server-owned tree
+before parent-last publication, initializes the server limiter, initializes the
+secure request dispatcher, and then binds the captured endpoint listeners. The
+parent cleanup container registers the remote root first, the limiter child
+second, the dispatcher child third, and inbound listeners last. Reverse LIFO
+cleanup therefore disconnects endpoint listeners, cleans the dispatcher,
+cleans the limiter, and destroys the root in that exact order.
+
+The dispatcher and limiter each own a distinct `PlayerRemoving` connection. The
+dispatcher connection removes the departing Player's bounded pending/completed
+request-ID ledger and invalidates in-flight work; the limiter connection removes
+that Player's token buckets. Each child disconnects its own connection before
+clearing all remaining ledgers or buckets and aggregate state during whole-service
+shutdown. These children are not lifecycle services and add no independent
+close hook.
+
+Start starts the limiter and then the dispatcher before the network owner reaches
+`Started`; it changes no endpoint definition. Registration is split into
+`registerRequest` and `registerEvent`, and each call creates one authenticated
+schema/authorization/handler contract for an active fixed definition. The old
+raw-handler route is absent. Duplicate initialization, start, shutdown, or
+contract registration is rejected rather than creating duplicate resources.
+The existing reverse lifecycle and outer bootstrap cleanup remain the sole
+shutdown route.
 
 ## Focused Studio Edit-mode validation
 
@@ -185,12 +198,14 @@ checking that some error occurred. This was executed against the synchronized
 Lobby copy of the real module, not a rewritten test double. Packet 03.1 did not
 pull a persistent framework forward.
 
-Phase 05 subsequently added a repository-owned runner. Its current 145 cases do
-not include a dedicated general `ServiceLifecycle` suite; the Packet 06.1
-runtime suite instead exercises the frozen network service definition and its
-initialize/start/shutdown state adapter. The evidence in this section remains
-historical Studio validation; reusable general lifecycle coverage is deferred
-until a dedicated regression packet. See `docs/TEST_MATRIX.md`.
+Phase 05 subsequently added a repository-owned runner. It does not include a
+dedicated general `ServiceLifecycle` suite; the network-runtime suite instead
+exercises the frozen network service definition and its
+initialize/start/shutdown state adapter. Packet 06.4 extends that composition to
+the limiter, dispatcher, two `PlayerRemoving` owners, and fixed listener
+bindings. The evidence in this section remains historical Studio validation;
+reusable general lifecycle coverage is deferred until a dedicated regression
+packet. See `docs/TEST_MATRIX.md`.
 
 Packet 03.3 reran 12 focused lifecycle cases through the migrated logger-based
 constructor. Dependency order, registration/state rejection, and all three
@@ -220,10 +235,15 @@ cycles each ended in lifecycle state `Shutdown`.
 The three ignored verification builds were inspected and removed. Generated
 `.rbxlx` files remain untracked under `docs/CODE_STYLE.md`.
 
-## Isolated Studio verification
+## Historical isolated Studio verification
 
 Both already-open Studio places were synchronized through their correct Rojo
 projects and tested without editing, saving, or publishing them.
+
+This table records the then-current pre-network lifecycle. Phase 06 has since
+added one foundation-only `NetworkRegistry` server service while the client
+remains at zero services. The table is not current Phase 06 Studio evidence; the
+required unsaved networking regression remains pending.
 
 | Place | Role/PlaceId | Server result | Client result | Opposite-role executable source |
 | --- | --- | --- | --- | ---: |
@@ -252,10 +272,9 @@ remain preserved by policy.
 Phase 03 is complete. Packet 03.4 evidence is in
 `docs/GRACEFUL_SHUTDOWN.md`. Phase 04 added pure content contracts, and Packet
 04.5 placed their centralized gate before runner construction without changing
-this lifecycle behavior. Packets 06.1–06.3 add only the common server network
-service and its nested limiter ownership described in
-`docs/NETWORK_PROTOCOL.md`. The 12 runtime/lookup and 17 dedicated limiter cases
-pass within the complete 145-case suite. Packet 06.4 is next and has not begun;
-Phase 06 and Gate A remain open.
+this lifecycle behavior. Packets 06.1–06.4 add only the common server network
+service and its nested limiter/dispatcher ownership described in
+`docs/NETWORK_PROTOCOL.md`. Packet 06.5 and the fresh Phase 06/Gate A exit audit
+remain open.
 Configuration evidence remains in
 `docs/CONFIGURATION_VALIDATION.md`.

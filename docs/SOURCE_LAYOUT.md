@@ -53,6 +53,7 @@ src/
       PayloadValidation.luau
       ProductionRemotes.luau
       RemoteRegistry.luau
+      RequestProtocol.luau
     types/
       ConfigTypes.luau
     util/
@@ -69,6 +70,7 @@ src/
         ProductionRateLimits.luau
         ServerRemoteRegistry.luau
         ServerRateLimiter.luau
+        ServerRequestDispatcher.luau
     lobby/
       .gitkeep
     match/
@@ -79,6 +81,7 @@ src/
         Main.client.luau
       networking/
         ClientRemoteLookup.luau
+        ClientRequestTracker.luau
     lobby/
       .gitkeep
     match/
@@ -88,10 +91,13 @@ tests/
     NetworkFixtures.luau
   negative/
   specs/
+    ClientRequestTracker.spec.luau
     PayloadValidation.spec.luau
     RemoteRegistry.spec.luau
     RemoteRuntime.spec.luau
+    RequestProtocol.spec.luau
     ServerRateLimiter.spec.luau
+    ServerRequestDispatcher.spec.luau
   support/
 ```
 
@@ -140,6 +146,17 @@ Packet 06.3 added the server-only `networking/ProductionRateLimits.luau` and
 network owner, plus one test-only spec. It adds no lifecycle service or runnable
 entrypoint. The lasting production rate-policy list is frozen and empty because
 the lasting production registry is empty.
+
+Packet 06.4 adds the shared `network/RequestProtocol.luau`, server-common
+`networking/ServerRequestDispatcher.luau`, and client-common
+`networking/ClientRequestTracker.luau` modules. The server registry now accepts
+only fixed request or event contracts through distinct secure registration APIs;
+the former raw-handler binding surface is gone. The dispatcher owns validation,
+rate-limit use, server-derived authorization context, bounded correlation,
+protected handler outcomes, and origin-only response routing. The client tracker
+builds only registered fixed request envelopes and bounds pending and terminal
+correlation state. The client bootstrap does not import it, and no runnable
+entrypoint, gameplay contract, or production endpoint was added.
 
 ## Bootstrap move manifest
 
@@ -213,8 +230,9 @@ enforces:
 3. Lobby and match directories contain no runnable BaseScript.
 4. The common bootstraps validate the declared role, emit development
    diagnostics, and start no lobby or match service. The common server now
-   registers one foundation-only `NetworkRegistry` service; the client remains
-   at zero services.
+   registers one foundation-only `NetworkRegistry` service, whose internal
+   dispatcher and limiter remain owned children rather than additional lifecycle
+   services; the client remains at zero services.
 5. Any future lobby or match entrypoint must be tested through its isolated
    Packet 02.2 project, never through the combined project as evidence of role
    isolation.
@@ -252,11 +270,11 @@ owner. Invalid configuration therefore starts no dependent service.
 The common server bootstrap additionally requires
 `ReplicatedStorage.Shared.network.ProductionRemotes`, its server-common siblings
 `networking.ProductionRateLimits` and `networking.ServerRemoteRegistry`, and
-`Shutdown.luau`. `ServerRemoteRegistry` owns its sibling `ServerRateLimiter`
-dependency. The bootstrap creates and registers the one network service only
-after successful configuration validation. These server-only modules are mapped
-into every production server build but are not shared with clients and do not
-cross a place-role boundary.
+`Shutdown.luau`. `ServerRemoteRegistry` owns its sibling `ServerRateLimiter` and
+`ServerRequestDispatcher` dependencies. The bootstrap creates and registers the
+one network service only after successful configuration validation. These
+server-only modules are mapped into every production server build but are not
+shared with clients and do not cross a place-role boundary.
 
 `src/client/common/networking/ClientRemoteLookup.luau` depends only on shared
 place-role, production-registry, registry, and Result contracts. It is not
@@ -268,6 +286,21 @@ has the exact
 identity in the isolated Test build. Both runtime networking modules stay in
 their appropriate common layer, and the shared production definition graph
 stays safe for replication.
+
+`src/client/common/networking/ClientRequestTracker.luau` depends only on shared
+place-role, payload-validation, production-registry, registry, request-protocol,
+and Result contracts plus fixed Roblox services used for production construction
+and GUID generation. It neither selects a remote path nor sends a request. A
+future client owner must pair its returned definition/envelope with the fixed
+`ClientRemoteLookup` result and must call `clear()` during that owner's cleanup.
+The dependency-injected constructor is exposed only at the corresponding exact
+non-replicated Test-project identity.
+
+`src/shared/network/RequestProtocol.luau` depends only on shared
+`PayloadValidation`, `Result`, and `Validation` contracts. It defines the exact
+request, event, response, public-error, and correlation-state shapes without
+importing either runtime side. Both the server dispatcher and client tracker
+consume this one shared wire contract.
 
 `src/shared/network/PayloadValidation.luau` depends only on the lower-level
 shared `util/Ids`, `util/Result`, and `util/Validation` contracts. Its
@@ -294,24 +327,25 @@ headless seam is gated by the exact Test-project structure.
 The ignored smoke-build artifact was inspected and removed. It can be recreated
 with the build command above.
 
-### Packet 06.3 source-layout completion
+### Current Packet 06.4 source layout
 
-The current canonical headless run passes 145 of 145 cases across 12 suites,
-including 18 registry cases, 12 server-runtime/client-lookup cases, 22 strict
-payload-validation cases, and 17 dedicated limiter cases. The four-project
-verifier passes with 37 ModuleScripts, one Script, and one LocalScript in each
-production build. That is 39 exact production Lua source containers: 32 shared
-modules, the server-only `Shutdown`, `ProductionRateLimits`,
-`ServerRemoteRegistry`, and `ServerRateLimiter` modules, the client-only
-`ClientRemoteLookup` module, and the two common bootstraps.
+The four-project structural contract now expects 40 ModuleScripts, one Script,
+and one LocalScript in every production build. That is 42 exact production Lua
+source containers: 33 shared modules; the server-only `Shutdown`,
+`ProductionRateLimits`, `ServerRemoteRegistry`, `ServerRateLimiter`, and
+`ServerRequestDispatcher` modules; the client-only `ClientRemoteLookup` and
+`ClientRequestTracker` modules; and the two common bootstraps.
 
-The Test build's production source subset contains all 32 shared modules and
-exactly four common networking modules copied under test-only `ServerStorage`
-paths. Its other 22 ModuleScripts are test-owned specs, fixtures, support, or
-negative controls, so it has 58 ModuleScripts and zero runnable scripts. Lobby
-contains no Match source, Match contains no Lobby source, and lasting production
-remote definitions and rate policies remain empty. Packets 06.1–06.3 are
-complete; Packet 06.4 has not begun, and Phase 06 remains open.
+The Test build's production source subset contains all 33 shared modules and
+exactly six common networking modules copied under test-only `ServerStorage`
+paths. It maps four server modules (`ProductionRateLimits`,
+`ServerRemoteRegistry`, `ServerRateLimiter`, and `ServerRequestDispatcher`) and
+two client modules (`ClientRemoteLookup` and `ClientRequestTracker`). Test-owned
+specs, fixtures, support, and negative controls remain separate, and the build
+has zero runnable scripts. Lobby contains no Match source, Match contains no
+Lobby source, and lasting production remote definitions and rate policies
+remain empty. Packet 06.4 implementation is present; Packet 06.5 and the fresh
+Phase 06 exit audit remain open.
 
 ## Roblox Studio verification
 
@@ -366,12 +400,13 @@ cross-role import. Packet 02.4 owns isolated Studio connections.
 
 Packet 05.1 added repository-owned Luau under `tests/`. It is not production
 source and initially depended only on exact shared ModuleScripts in the isolated
-Rojo test build. Packets 06.1 and 06.3 narrowly add exact mappings of four common
-networking modules under `ServerStorage.AutomatedTests`: `ProductionRateLimits`,
-`ServerRemoteRegistry`, `ServerRateLimiter`, and `ClientRemoteLookup`. The Test
-project maps neither bootstrap, the shutdown hook, nor any whole server/client
-layer. Production code must never import a test module. Fixtures and intentional
-negative controls stay under test-only
+Rojo test build. Packets 06.1, 06.3, and 06.4 narrowly add exact mappings of six
+common networking modules under `ServerStorage.AutomatedTests`:
+`ProductionRateLimits`, `ServerRemoteRegistry`, `ServerRateLimiter`,
+`ServerRequestDispatcher`, `ClientRemoteLookup`, and `ClientRequestTracker`.
+The Test project maps neither bootstrap, the shutdown hook, nor any
+place-specific layer. Production code must never import a test module. Fixtures
+and intentional negative controls stay under test-only
 directories; lasting authored catalogs under `src/shared/config` and lasting
 remote definitions under `src/shared/network/ProductionRemotes.luau` remain
 empty or policy-only.
@@ -380,7 +415,7 @@ empty or policy-only.
 Default, Lobby, and Match map no test directory.
 `lune run tests/verify-builds.luau` enforces both directions across the complete
 generated DataModels, including an exact positive path/class/source map for all
-39 current production Lua containers and exact source identity for the four
+42 current production Lua containers and exact source identity for the six
 test-mapped networking modules.
 
 This headless boundary and every environment-specific follow-up are indexed in

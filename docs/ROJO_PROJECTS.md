@@ -36,11 +36,12 @@ they still do not duplicate runtime PlaceIds.
 
 All four projects map `src/shared` to `ReplicatedStorage.Shared`. Only the test
 project additionally maps `tests/specs`, `tests/fixtures`, `tests/support`, and
-isolated negative controls under `ServerStorage`. Packets 06.1 and 06.3 also map
-exactly four common networking modules beneath `ServerStorage.AutomatedTests`:
-`ProductionRateLimits`, `ServerRemoteRegistry`, `ServerRateLimiter`, and
-`ClientRemoteLookup`. Test still maps no bootstrap, shutdown module,
-place-specific layer, or runnable Script/LocalScript.
+isolated negative controls under `ServerStorage`. Packets 06.1, 06.3, and 06.4
+also map exactly six common networking modules beneath
+`ServerStorage.AutomatedTests`: `ProductionRateLimits`,
+`ServerRemoteRegistry`, `ServerRateLimiter`, `ServerRequestDispatcher`,
+`ClientRemoteLookup`, and `ClientRequestTracker`. Test still maps no bootstrap,
+shutdown module, place-specific layer, or runnable Script/LocalScript.
 
 The role projects intentionally omit `servePlaceIds`, raw PlaceIds, universe
 IDs, and conditional role selection. Their only identity declaration is the
@@ -144,15 +145,15 @@ artifacts are local verification products, not authoritative Studio content.
 All four current project JSON files parsed successfully and all four builds
 completed with Rojo 7.7.0. The original Packet 02.2 evidence covered only the
 three production definitions; Packet 05.1 added the Test definition and check,
-and Packets 06.1 and 06.3 added the four narrow networking module mappings
+and Packets 06.1, 06.3, and 06.4 added the six narrow networking module mappings
 described above.
 
 | Build | Server layers | Client layers | ModuleScripts | Scripts | LocalScripts |
 | --- | --- | --- | ---: | ---: | ---: |
-| Default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | 37 | 1 | 1 |
-| Lobby | `common`, `lobby` | `common`, `lobby` | 37 | 1 | 1 |
-| Match | `common`, `match` | `common`, `match` | 37 | 1 | 1 |
-| Test | No runnable layer; four selected networking modules under `ServerStorage` | Same | 58 | 0 | 0 |
+| Default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | 40 | 1 | 1 |
+| Lobby | `common`, `lobby` | `common`, `lobby` | 40 | 1 | 1 |
+| Match | `common`, `match` | `common`, `match` | 40 | 1 | 1 |
+| Test | No runnable layer; four selected server-networking modules under `ServerStorage` | No runnable layer; two selected client-networking modules under `ServerStorage` | See below | 0 | 0 |
 
 Additional assertions passed:
 
@@ -162,13 +163,14 @@ Additional assertions passed:
 - Match build contains no lobby folder or source.
 - Default, Lobby, and Match contain no test spec, fixture, support module,
   negative control, runner entrypoint, or test-only dependency.
-- Every one of the 39 production Lua containers matches a fixed expected
+- Every one of the 42 production Lua containers matches a fixed expected
   DataModel path, class, authoritative `src/` file, and exact source content.
-- Test contains the same 32 shared ModuleScripts plus exactly
-  `ProductionRateLimits`, `ServerRemoteRegistry`, `ServerRateLimiter`, and
-  `ClientRemoteLookup` under test-only `ServerStorage` paths, 22 test-owned
-  spec/fixture/support/negative-control ModuleScripts, and no runnable Script or
-  LocalScript.
+- Test contains the same 33 shared ModuleScripts plus exactly
+  `ProductionRateLimits`, `ServerRemoteRegistry`, `ServerRateLimiter`,
+  `ServerRequestDispatcher`, `ClientRemoteLookup`, and `ClientRequestTracker`
+  under test-only `ServerStorage` paths. Its test-owned
+  spec/fixture/support/negative-control ModuleScripts remain separate, and it has
+  no runnable Script or LocalScript.
 - All builds contain `ReplicatedStorage.Shared`.
 - `.gitkeep` files produce no Roblox instances.
 - Both structured common bootstrap records are present in every production
@@ -178,23 +180,25 @@ Additional assertions passed:
   or duplicated runtime PlaceId. Packet 02.3 later added only their role
   attributes.
 
-The current production source inventory contains 32 shared ModuleScripts:
+The current production source inventory contains 33 shared ModuleScripts:
 `PlaceRoles`,
 `ServiceLifecycle`, `EnvironmentContext`, `Log`, `Cleanup`, `Ids`, `Result`,
 `Validation`, `ConfigTypes`, `AssetSchema`, `Assets`, `BannerSchema`, `Banners`,
 `ConfigurationValidator`, `DefaultSettings`, `Difficulties`, `DifficultySchema`, `Economy`,
 `EconomySchema`, `Enemies`, `EnemySchema`, `MapSchema`, `Maps`,
 `SchemaPrimitives`, `SettingsSchema`, `TowerSchema`, `Towers`, `WaveSchema`, and
-`Waves`, plus `PayloadValidation`, `ProductionRemotes`, and `RemoteRegistry`.
+`Waves`, plus `PayloadValidation`, `ProductionRemotes`, `RemoteRegistry`, and
+`RequestProtocol`.
 The server-only common `Shutdown`, `ProductionRateLimits`,
-`ServerRemoteRegistry`, and `ServerRateLimiter` modules and client-only common
-`ClientRemoteLookup` module bring each production build to 37 ModuleScripts,
-alongside one Script and one LocalScript. The Default build contains both empty
-role folders, the Lobby build contains no match folder, and the Match build
-contains no lobby folder. Source-layer isolation remains unchanged. Packet 04.4
-schema evidence is recorded in `docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md`; current
-whole-catalog evidence is in `docs/CONFIGURATION_VALIDATION.md`, and the network
-layout is in `docs/NETWORK_PROTOCOL.md`.
+`ServerRemoteRegistry`, `ServerRateLimiter`, and `ServerRequestDispatcher`
+modules and client-only common `ClientRemoteLookup` and `ClientRequestTracker`
+modules bring each production build to 40 ModuleScripts, alongside one Script
+and one LocalScript. The Default build contains both empty role folders, the
+Lobby build contains no match folder, and the Match build contains no lobby
+folder. Source-layer isolation remains unchanged. Packet 04.4 schema evidence
+is recorded in `docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md`; current whole-catalog
+evidence is in `docs/CONFIGURATION_VALIDATION.md`, and the network layout is in
+`docs/NETWORK_PROTOCOL.md`.
 
 The inspected ignored build artifacts were removed. They can be recreated with
 the commands above. `lune run tests/verify-builds.luau` rebuilds and checks all
@@ -205,13 +209,12 @@ The structural verifier is the current headless production-shipping gate. Its
 status and the separate Studio/published test boundaries are indexed in
 `docs/TEST_MATRIX.md`.
 
-At Packet 06.3 completion, the canonical runner passes 145 of 145 cases across
-12 suites, including 17 dedicated limiter cases, and the four-project verifier
-passes the exact current counts above. The Test-only networking mappings remain
-source-identical copies used by the headless adapter; they do not alter
+Packet 06.4 adds only the shared request protocol, the server dispatcher, the
+client tracker, their focused specs, and narrow Test mappings reflected above.
+The Test-only networking copies remain source-identical and do not alter
 production mappings or make the test project suitable for serving. The lasting
-production registry and frozen policy list remain empty. Packets 06.1–06.3 are
-complete; Packet 06.4 has not begun, while Phase 06 and Gate A remain open.
+production registry and frozen policy list remain empty. Packet 06.5 and the
+fresh Phase 06/Gate A exit audit remain open.
 
 ## Scope boundary and next gate
 

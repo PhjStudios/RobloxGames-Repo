@@ -144,11 +144,20 @@ Roblox server close
 The current bootstrap cleanup container owns one task: shut down its lifecycle
 runner if that runner is still `Started`. The lifecycle runner owns one
 foundation service, `NetworkRegistry`, and still owns zero gameplay services.
-That service's nested cleanup disconnects inbound listeners, disconnects its
-rate limiter's `PlayerRemoving` listener, clears limiter state, and destroys the
-server-owned remote tree. Ordinary Play-Stop completion then transitions the
-lifecycle runner from `Started` to `Shutdown` and the bootstrap container to
-`Cleaned`.
+That service's nested cleanup disconnects inbound endpoint listeners, cleans its
+request dispatcher, cleans its rate limiter, and destroys the server-owned
+remote tree in that exact LIFO order. Dispatcher cleanup first disconnects its
+own `PlayerRemoving` listener and then invalidates and clears bounded
+pending/completed correlation ledgers and protocol aggregates. Limiter cleanup
+independently disconnects its second `PlayerRemoving` listener before clearing
+Player buckets and rate-limit aggregate state. Ordinary Play-Stop completion
+then transitions the lifecycle runner from `Started` to `Shutdown` and the
+bootstrap container to `Cleaned`.
+
+The dispatcher and limiter remain children of `NetworkRegistry`, not additional
+lifecycle services. Secure request/event registration replaces raw handler
+binding, and neither child registers `BindToClose`; the one common server hook
+continues to own the whole route.
 
 Packet 04.5 now validates the complete core configuration before constructing
 the lifecycle runner, cleanup container, or this `BindToClose` hook. Rejected
@@ -270,9 +279,12 @@ Generated build artifacts remained untracked and were removed after inspection.
 
 ## Final Lobby and Match Play-Stop evidence
 
-This is Studio solo evidence. Phase 05 changed no production source, so it did
-not rerun or relabel these historical cycles as current automation; see
-`docs/TEST_MATRIX.md`.
+This is historical Studio solo evidence. Phase 05 changed no production source,
+so it did not rerun these cycles. Phase 06 has since added the server-owned
+network tree, limiter, dispatcher, and connection cleanup beneath one
+`NetworkRegistry` service. These pre-network cycles therefore do not prove the
+current networking shutdown path; the required unsaved Phase 06 regression is
+pending. See `docs/TEST_MATRIX.md`.
 
 The final synchronized code completed three consecutive Play-Stop cycles in each
 isolated Studio place, for six cycles total.
@@ -302,7 +314,8 @@ code:
    there is no executable match source.
 3. Clear Output and enter Play.
 4. Confirm the server and client ready records report role `Lobby`, lifecycle
-   `Started`, cleanup `Active`, one cleanup task, and zero registered services.
+   `Started`, cleanup `Active`, and one cleanup task. The server has the one
+   foundation-only `NetworkRegistry` service; the client has zero services.
 5. Stop Play.
 6. Confirm one server `started` record reports budget `10` and a safe close
    reason.

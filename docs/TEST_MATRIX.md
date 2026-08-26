@@ -8,11 +8,12 @@ that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
 Phase 05 and its fresh combined exit audit are complete. Phase 06 is active;
-Packets 06.1–06.3 are complete, and Packet 06.4 is next but has not begun.
+Packets 06.1–06.4 are complete, and Packet 06.5 is next but has not begun.
 
 The current repository has a fixed remote-registry/network-ownership foundation,
-strict shared payload validators, and a server-authoritative token-bucket
-limiter with an empty lasting production endpoint registry and rate-policy list.
+strict shared payload validators, a server-authoritative token-bucket limiter,
+and bounded asynchronous request/correlation/error contracts with an empty
+lasting production endpoint registry and rate-policy list.
 It still has no gameplay, persistence, UI, or external-service implementation.
 A separate private test universe has not been created or configured. Future
 tests are therefore marked `Deferred`, `Unavailable`, or `Prohibited`; they are
@@ -75,7 +76,7 @@ linked historical document for the original Studio evidence.
 - **External service or publication requirement:** none.
 - **Destructive-data risk:** none; the runner uses only deterministic fixtures
   and an exact ignored build path that it removes.
-- **Expected evidence:** 12 suites and 145 tests pass in stable path and
+- **Expected evidence:** 15 suites and 189 tests pass in stable path and
   declaration order; zero discovery, module-load, malformed-root/discovery, and
   runner-crash controls return their documented nonzero exit classes; output
   contains stable suite, case, assertion, code, and path context without private
@@ -83,7 +84,7 @@ linked historical document for the original Studio evidence.
 - **Cleanup procedure:** confirm the runner removed its exact temporary test
   place and that `git status --short --ignored` shows no new residue.
 - **Phase or prerequisite:** available now; Packet 05.1 established the runner,
-  Packet 05.2 established the initial contract suite, and Packets 06.1–06.3
+  Packet 05.2 established the initial contract suite, and Packets 06.1–06.4
   added the current networking suites.
 
 ### H-02 — Cleanup contract
@@ -92,7 +93,7 @@ linked historical document for the original Studio evidence.
   idempotence, nesting/cycles, post-clean guards, cached failures, and sibling
   failure isolation.
 - **Test category:** automated headless unit test.
-- **Current status:** `Passed` as part of the 145-test suite on 2026-08-26.
+- **Current status:** `Passed` as part of the 189-test suite on 2026-08-26.
 - **Environment:** isolated Rojo test DataModel under Lune.
 - **Command or procedure:** run `lune run tests/run.luau`; inspect the ordered
   `cleanup contract` suite in the result.
@@ -114,7 +115,7 @@ linked historical document for the original Studio evidence.
   cross-family rejection, immutable Result envelopes, validation issue paths,
   related paths, codes, causes, path formatting, and freezing.
 - **Test category:** automated headless unit test.
-- **Current status:** `Passed` as part of the 145-test suite on 2026-08-26.
+- **Current status:** `Passed` as part of the 189-test suite on 2026-08-26.
 - **Environment:** isolated Rojo test DataModel under Lune.
 - **Command or procedure:** run `lune run tests/run.luau`; inspect the ordered ID,
   Result, and Validation suites.
@@ -137,7 +138,7 @@ linked historical document for the original Studio evidence.
   lasting empty/policy configuration.
 - **Test category:** automated headless unit/integration test with test-only
   deterministic fixtures.
-- **Current status:** `Passed` as part of the 145-test suite on 2026-08-26.
+- **Current status:** `Passed` as part of the 189-test suite on 2026-08-26.
 - **Environment:** isolated Rojo test DataModel under Lune; fixtures under
   `tests/fixtures` only.
 - **Command or procedure:** run `lune run tests/run.luau`; inspect schema and
@@ -175,10 +176,10 @@ linked historical document for the original Studio evidence.
 - **External service or publication requirement:** none.
 - **Destructive-data risk:** none; generated builds are ignored and exact-path
   temporary outputs are removed.
-- **Expected evidence:** Default, Lobby, and Match each contain exactly 37
-  ModuleScripts, one Script, and one LocalScript; Test contains 32 shared
-  ModuleScripts, exactly four test-mapped common networking modules, 22
-  test-owned ModuleScripts, and no runnable script, for 58 ModuleScripts total;
+- **Expected evidence:** Default, Lobby, and Match each contain exactly 40
+  ModuleScripts, one Script, and one LocalScript; Test contains 33 shared
+  ModuleScripts, exactly six test-mapped common networking modules, 25
+  test-owned ModuleScripts, and no runnable script, for 64 ModuleScripts total;
   Lobby contains no Match
   source, Match contains no Lobby source, and production contains no test source
   or marker.
@@ -282,6 +283,42 @@ linked historical document for the original Studio evidence.
 - **Phase or prerequisite:** Packets 06.1–06.3 complete. Packet 06.5 must
   complete M-06 before a feature remote can ship.
 
+### H-09 — Request correlation, dispatch, and public errors
+
+- **System or contract:** bounded asynchronous request/event/response envelopes,
+  client correlation state, server-derived authorization context, fixed dispatch
+  order, replay classification, safe error translation, and origin-only response
+  routing.
+- **Test category:** automated headless protocol/security unit and integration
+  test with deterministic test-only contracts and mutation sentinels.
+- **Current status:** `Passed` for Packet 06.4 on Windows x64 on 2026-08-26; the
+  complete Phase 06 adversarial and Studio record remains M-06.
+- **Environment:** isolated Rojo Test DataModel under Lune; the exact production
+  protocol, client tracker, dispatcher, registry, limiter, and validator modules
+  are exercised with fixed test-only registry definitions.
+- **Command or procedure:** run `lune run tests/run.luau`; inspect
+  `RequestProtocol.spec`, `ClientRequestTracker.spec`,
+  `ServerRequestDispatcher.spec`, and `RemoteRuntime.spec`.
+- **Required players or devices:** zero.
+- **Authorization requirement:** none for local non-publishing execution.
+- **External service or publication requirement:** none.
+- **Destructive-data risk:** none; Players, remotes, payloads, senders, clocks,
+  reporters, and mutation sentinels are test-owned.
+- **Expected evidence:** all 13 protocol, 12 client-tracker, 19 dispatcher, and
+  12 integrated runtime cases pass. The set covers malformed and oversized IDs,
+  exact envelope keys, hostile tables, fixed endpoint/schema matching,
+  Pending/Success/Rejected states, the 32-Pending and 128-terminal bounds,
+  duplicate/stale/cross-endpoint behavior, rate-before-authorization ordering,
+  protected handlers and response validation, origin-only sending,
+  Player-removal and shutdown re-entry, public-error privacy, aggregate log
+  bounds, and zero handler mutation after authorization-time removal or cleanup.
+- **Cleanup procedure:** destroy test-owned Players and remotes, clear owned
+  correlation/ledger state, and confirm the runner removed its exact generated
+  place.
+- **Phase or prerequisite:** Packet 06.4 complete. Packet 06.5 must complete
+  M-06 and the unsaved Studio networking regression before a feature remote can
+  ship.
+
 ## Local Studio solo tests
 
 ### S-00 — Place-role resolver and incorrect-pairing rejection
@@ -343,11 +380,14 @@ linked historical document for the original Studio evidence.
 ### S-02 — Isolated Lobby bootstrap and shutdown regression
 
 - **System or contract:** Lobby place identity, common-plus-lobby source
-  isolation, configuration validation, zero-service lifecycle, Cleanup ownership,
+  isolation, configuration validation, one foundation-only server network
+  service with zero gameplay services, zero client services, Cleanup ownership,
   logging, and bounded server shutdown.
 - **Test category:** local Studio solo regression.
-- **Current status:** `Available; last passed after Packet 04.5`, with the Phase
-  03 three-cycle Play-Stop evidence still applicable. Not rerun in Phase 05.
+- **Current status:** `Available; last passed after Packet 04.5`. The Phase 03
+  three-cycle Play-Stop evidence remains historical for its then-current
+  zero-service build; it was not rerun after Phase 06 added the network service.
+  The current Phase 06 unsaved networking regression remains pending.
 - **Environment:** Roblox Studio Lobby place `100561454756026` with only
   `lobby.project.json` connected.
 - **Command or procedure:** follow the Lobby half of
@@ -359,8 +399,10 @@ linked historical document for the original Studio evidence.
 - **External service or publication requirement:** none.
 - **Destructive-data risk:** none.
 - **Expected evidence:** role `Lobby`, correct PlaceId, nine validated families,
-  one common Script and LocalScript, no Match source, ready state, and clean
-  bounded shutdown for three consecutive cycles when running the full regression.
+  one common Script and LocalScript, no Match source, server ready with one
+  `NetworkRegistry` service and zero gameplay services, client ready with zero
+  services, and clean bounded shutdown for three consecutive cycles when running
+  the full regression.
 - **Cleanup procedure:** stop Play, return to Edit mode, do not save/publish, and
   stop the Lobby Rojo server before connecting another project.
 - **Phase or prerequisite:** available now.
@@ -368,11 +410,14 @@ linked historical document for the original Studio evidence.
 ### S-03 — Isolated Match bootstrap and shutdown regression
 
 - **System or contract:** Match place identity, common-plus-match source
-  isolation, configuration validation, zero-service lifecycle, Cleanup ownership,
+  isolation, configuration validation, one foundation-only server network
+  service with zero gameplay services, zero client services, Cleanup ownership,
   logging, and bounded server shutdown.
 - **Test category:** local Studio solo regression.
-- **Current status:** `Available; last passed after Packet 04.5`, with the Phase
-  03 three-cycle Play-Stop evidence still applicable. Not rerun in Phase 05.
+- **Current status:** `Available; last passed after Packet 04.5`. The Phase 03
+  three-cycle Play-Stop evidence remains historical for its then-current
+  zero-service build; it was not rerun after Phase 06 added the network service.
+  The current Phase 06 unsaved networking regression remains pending.
 - **Environment:** Roblox Studio Match place `136401514513678` with only
   `match.project.json` connected.
 - **Command or procedure:** follow the Match half of
@@ -383,8 +428,10 @@ linked historical document for the original Studio evidence.
 - **External service or publication requirement:** none.
 - **Destructive-data risk:** none.
 - **Expected evidence:** role `Match`, correct PlaceId, nine validated families,
-  one common Script and LocalScript, no Lobby source, ready state, and clean
-  bounded shutdown for three consecutive cycles when running the full regression.
+  one common Script and LocalScript, no Lobby source, server ready with one
+  `NetworkRegistry` service and zero gameplay services, client ready with zero
+  services, and clean bounded shutdown for three consecutive cycles when running
+  the full regression.
 - **Cleanup procedure:** stop Play, return to Edit mode, do not save/publish, and
   stop the Match Rojo server when finished.
 - **Phase or prerequisite:** available now.
@@ -609,12 +656,13 @@ linked historical document for the original Studio evidence.
   containment.
 - **Test category:** automated protocol tests plus Studio multi-client security
   regression.
-- **Current status:** `Deferred` for the complete record. Packets 06.1–06.3's
+- **Current status:** `Deferred` for the complete record. Packets 06.1–06.4's
   headless fixed-registry, ownership, role-isolation, conflict, cleanup, bounded
-  lookup, strict payload, Instance-policy, rate-policy, token-bucket, aggregate-
-  logging, and privacy subset passes; envelope, authorization, replay, full
-  dispatch abuse, and Studio multi-client coverage remain deferred.
-- **Environment:** current isolated Lune DataModel for the Packets 06.1–06.3
+  lookup/correlation, strict payload, Instance-policy, rate-policy, token-bucket,
+  envelope, authorization, replay, fixed dispatch, public-error, aggregate-
+  logging, and privacy subset passes; the consolidated Packet 06.5 attack set
+  and Studio multi-client coverage remain deferred.
+- **Environment:** current isolated Lune DataModel for the Packets 06.1–06.4
   subset; future Studio Server & Clients with an adversarial client harness.
 - **Command or procedure:** run `lune run tests/run.luau` for the current subset.
   Packet 06.5 must define and run the complete stable attack set before any
@@ -630,12 +678,15 @@ linked historical document for the original Studio evidence.
   nested, cyclic, hostile-metatable, non-finite, and unexpected-Instance payloads
   fail closed with stable privacy-safe paths. It also proves deterministic
   bursts/refills, independent Player/endpoint buckets, invalid-clock recovery,
-  bounded cleanup, and interval-limited privacy-safe abuse aggregates. The
-  completed record must additionally prove cross-player authorization, replay,
-  and dispatcher-level throttling fail closed while valid peers remain usable.
+  bounded cleanup, fixed-envelope/correlation behavior, protected dispatch and
+  safe public translation, origin-only responses, and interval-limited
+  privacy-safe abuse aggregates. The completed record must consolidate
+  cross-player authorization, forged identity/ownership, arbitrary-path and
+  wrong-direction attempts, zero-partial-mutation behavior, disconnect cleanup,
+  and lifecycle re-entry while valid peers remain usable.
 - **Cleanup procedure:** stop adversarial clients, destroy test-owned remotes, and
   retain no raw payload logs.
-- **Phase or prerequisite:** Packets 06.1–06.3 subsets complete; Packet 06.5
+- **Phase or prerequisite:** Packets 06.1–06.4 subsets complete; Packet 06.5
   completes the initial record, expanded by Phase 38.
 
 ## Published-client and private-version tests

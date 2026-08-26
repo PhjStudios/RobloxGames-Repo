@@ -15,6 +15,8 @@ export type SafeFieldName =
 	| "issueCount"
 	| "lifecycleState"
 	| "networkState"
+	| "protocolRejectionCount"
+	| "protocolWindowSeconds"
 	| "rateLimitRejectionCount"
 	| "rateLimitWindowSeconds"
 	| "service"
@@ -89,6 +91,8 @@ local SAFE_FIELDS: { [string]: boolean } = table.freeze({
 	issueCount = true,
 	lifecycleState = true,
 	networkState = true,
+	protocolRejectionCount = true,
+	protocolWindowSeconds = true,
 	rateLimitRejectionCount = true,
 	rateLimitWindowSeconds = true,
 	service = true,

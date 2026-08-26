@@ -161,6 +161,11 @@ local EXPECTED_PRODUCTION_SOURCES: { ProductionSourceDefinition } = table.freeze
 		sourcePath = "src/shared/network/RemoteRegistry.luau",
 	},
 	{
+		dataModelPath = "ReplicatedStorage.Shared.network.RequestProtocol",
+		className = "ModuleScript",
+		sourcePath = "src/shared/network/RequestProtocol.luau",
+	},
+	{
 		dataModelPath = "ReplicatedStorage.Shared.types.ConfigTypes",
 		className = "ModuleScript",
 		sourcePath = "src/shared/types/ConfigTypes.luau",
@@ -211,6 +216,11 @@ local EXPECTED_PRODUCTION_SOURCES: { ProductionSourceDefinition } = table.freeze
 		sourcePath = "src/server/common/networking/ServerRateLimiter.luau",
 	},
 	{
+		dataModelPath = "ServerScriptService.Server.common.networking.ServerRequestDispatcher",
+		className = "ModuleScript",
+		sourcePath = "src/server/common/networking/ServerRequestDispatcher.luau",
+	},
+	{
 		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.common.bootstrap.Main",
 		className = "LocalScript",
 		sourcePath = "src/client/common/bootstrap/Main.client.luau",
@@ -219,6 +229,11 @@ local EXPECTED_PRODUCTION_SOURCES: { ProductionSourceDefinition } = table.freeze
 		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.common.networking.ClientRemoteLookup",
 		className = "ModuleScript",
 		sourcePath = "src/client/common/networking/ClientRemoteLookup.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.common.networking.ClientRequestTracker",
+		className = "ModuleScript",
+		sourcePath = "src/client/common/networking/ClientRequestTracker.luau",
 	},
 })
 
@@ -432,7 +447,7 @@ end
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
 	currentStage = `verify_counts_{definition.name}`
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 37 or scripts ~= 1 or localScripts ~= 1 then
+	if modules ~= 40 or scripts ~= 1 or localScripts ~= 1 then
 		emit("FAIL", definition.name, `PRODUCTION_CLASS_COUNTS_{modules}_{scripts}_{localScripts}`)
 		return false
 	end
@@ -472,7 +487,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			end
 		end
 	end
-	if sharedModules ~= 32 then
+	if sharedModules ~= 33 then
 		emit("FAIL", definition.name, "SHARED_MODULE_COUNT")
 		return false
 	end
@@ -512,6 +527,10 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 					moduleName = "ServerRateLimiter",
 					sourcePath = "src/server/common/networking/ServerRateLimiter.luau",
 				},
+				{
+					moduleName = "ServerRequestDispatcher",
+					sourcePath = "src/server/common/networking/ServerRequestDispatcher.luau",
+				},
 			},
 		},
 		{
@@ -520,6 +539,10 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 				{
 					moduleName = "ClientRemoteLookup",
 					sourcePath = "src/client/common/networking/ClientRemoteLookup.luau",
+				},
+				{
+					moduleName = "ClientRequestTracker",
+					sourcePath = "src/client/common/networking/ClientRequestTracker.luau",
 				},
 			},
 		},
@@ -557,7 +580,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 		end
 	end
 
-	emit("PASS", definition.name, `SHARED_MODULES_{sharedModules}_NETWORKING_MODULES_4_RUNNABLE_SCRIPTS_0`)
+	emit("PASS", definition.name, `SHARED_MODULES_{sharedModules}_NETWORKING_MODULES_6_RUNNABLE_SCRIPTS_0`)
 	return true
 end
 

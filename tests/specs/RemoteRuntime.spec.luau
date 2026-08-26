@@ -5,11 +5,13 @@ local RobloxAdapter = require(script.Parent.Parent.Support.RobloxAdapter)
 local NetworkFixtures = require(script.Parent.Parent.Fixtures.NetworkFixtures)
 local ServerRemoteRegistry = require(script.Parent.Parent.ProductionServerNetworking.ServerRemoteRegistry)
 local ServerRateLimiter = require(script.Parent.Parent.ProductionServerNetworking.ServerRateLimiter)
+local ServerRequestDispatcher = require(script.Parent.Parent.ProductionServerNetworking.ServerRequestDispatcher)
 local ClientRemoteLookup = require(script.Parent.Parent.ProductionClientNetworking.ClientRemoteLookup)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage.Shared
 local RemoteRegistry = require(Shared.network.RemoteRegistry)
+local PayloadValidation = require(Shared.network.PayloadValidation)
 local EnvironmentContext = require(Shared.logging.EnvironmentContext)
 local Log = require(Shared.logging.Log)
 
@@ -51,6 +53,12 @@ end
 
 local FULL_RATE_BINDINGS = defaultRateBindings(FULL_REGISTRY)
 local EMPTY_RATE_BINDINGS = defaultRateBindings(EMPTY_REGISTRY)
+local REQUEST_SCHEMA = PayloadValidation.schema(PayloadValidation.record({
+	marker = PayloadValidation.string(64, 1),
+}))
+local RESPONSE_SCHEMA = PayloadValidation.schema(PayloadValidation.record({
+	accepted = PayloadValidation.boolean(),
+}))
 local TEST_LIMITER_DEPENDENCIES: ServerRemoteRegistry.LimiterDependencies = table.freeze({
 	clock = function(): number
 		return 0
@@ -59,6 +67,49 @@ local TEST_LIMITER_DEPENDENCIES: ServerRemoteRegistry.LimiterDependencies = tabl
 		return RobloxAdapter.createConnection(function() end) :: any
 	end,
 })
+local TEST_DISPATCHER_DEPENDENCIES: ServerRemoteRegistry.DispatcherDependencies = table.freeze({
+	clock = function(): number
+		return 0
+	end,
+	connectPlayerRemoving = function(_callback: ServerRequestDispatcher.PlayerRemovingHandler): RBXScriptConnection
+		return RobloxAdapter.createConnection(function() end) :: any
+	end,
+	sender = function(_remote: RemoteEvent, _player: Player, _envelope: ServerRequestDispatcher.ResponseEnvelope) end,
+})
+
+local function countingChildDependencies()
+	local counts = {
+		limiter = 0,
+		dispatcher = 0,
+	}
+	local limiterDependencies: ServerRemoteRegistry.LimiterDependencies = {
+		clock = function(): number
+			return 0
+		end,
+		connectPlayerRemoving = function(_callback: ServerRateLimiter.PlayerRemovingHandler): RBXScriptConnection
+			return RobloxAdapter.createConnection(function()
+				counts.limiter += 1
+			end) :: any
+		end,
+	}
+	local dispatcherDependencies: ServerRemoteRegistry.DispatcherDependencies = {
+		clock = function(): number
+			return 0
+		end,
+		connectPlayerRemoving = function(_callback: ServerRequestDispatcher.PlayerRemovingHandler): RBXScriptConnection
+			return RobloxAdapter.createConnection(function()
+				counts.dispatcher += 1
+			end) :: any
+		end,
+		sender = function(
+			_remote: RemoteEvent,
+			_player: Player,
+			_envelope: ServerRequestDispatcher.ResponseEnvelope
+		)
+		end,
+	}
+	return limiterDependencies, dispatcherDependencies, counts
+end
 
 local function loggerFor(role: RuntimePlaceRole): Log.Logger
 	return Log.new(EnvironmentContext.new("server", role, 0, false))
@@ -95,19 +146,37 @@ local function child(assertions: Assertions, parent: Instance, name: string, cla
 end
 
 local function bindActiveHandlers(server: Server, role: RuntimePlaceRole, callback: ServerRemoteRegistry.Handler?)
-	local selectedHandler: ServerRemoteRegistry.Handler = callback or function(_player: Player) end
 	for _, definition in FULL_REGISTRY:listForRole(role) do
 		if definition.direction == "ClientToServer" then
-			server:registerHandler(definition.name, selectedHandler)
+			local selectedHandler: ServerRemoteRegistry.Handler = callback
+				or function(_context, _payload)
+					return ServerRequestDispatcher.success(
+						if definition.response == "Required" then { accepted = true } else nil
+					)
+				end
+			local function authorize(_context: ServerRequestDispatcher.ServerContext): boolean
+				return true
+			end
+			if definition.kind == "Request" then
+				server:registerRequest(
+					definition.name,
+					REQUEST_SCHEMA,
+					if definition.response == "Required" then RESPONSE_SCHEMA else nil,
+					authorize,
+					selectedHandler
+				)
+			else
+				server:registerEvent(definition.name, REQUEST_SCHEMA, authorize, selectedHandler)
+			end
 		end
 	end
 end
 
 local function fakeConnector(
 	disconnectCallback: ((RemoteEvent) -> ())?,
-	connectCallback: ((RemoteEvent, ServerRemoteRegistry.Handler) -> ())?
+	connectCallback: ((RemoteEvent, ServerRemoteRegistry.Listener) -> ())?
 ): ServerRemoteRegistry.ConnectAdapter
-	return function(remote: RemoteEvent, handler: ServerRemoteRegistry.Handler): RBXScriptConnection
+	return function(remote: RemoteEvent, handler: ServerRemoteRegistry.Listener): RBXScriptConnection
 		if connectCallback ~= nil then
 			connectCallback(remote, handler)
 		end
@@ -157,9 +226,12 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			local cleanupOrder = {}
 			local publishedDuringConnect = false
 			local rootMissingDuringDisconnect = false
-			local callbacks: { [string]: ServerRemoteRegistry.Handler } = {}
+			local callbacks: { [string]: ServerRemoteRegistry.Listener } = {}
 			local handledCount = 0
 			local handledPlayer: Player? = nil
+			local sentRemote: RemoteEvent? = nil
+			local sentPlayer: Player? = nil
+			local sentEnvelope: ServerRequestDispatcher.ResponseEnvelope? = nil
 
 			local server = ServerRemoteRegistry.new(
 				loggerFor("Match"),
@@ -189,17 +261,44 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 						_callback: ServerRateLimiter.PlayerRemovingHandler
 					): RBXScriptConnection
 						return RobloxAdapter.createConnection(function()
-							table.insert(cleanupOrder, "PlayerRemoving")
+							table.insert(cleanupOrder, "LimiterPlayerRemoving")
 							if ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME) == nil then
 								rootMissingDuringDisconnect = true
 							end
 						end) :: any
 					end,
+				},
+				{
+					clock = function(): number
+						return 0
+					end,
+					connectPlayerRemoving = function(
+						_callback: ServerRequestDispatcher.PlayerRemovingHandler
+					): RBXScriptConnection
+						return RobloxAdapter.createConnection(function()
+							table.insert(cleanupOrder, "DispatcherPlayerRemoving")
+							if ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME) == nil then
+								rootMissingDuringDisconnect = true
+							end
+						end) :: any
+					end,
+					sender = function(
+						remote: RemoteEvent,
+						player: Player,
+						envelope: ServerRequestDispatcher.ResponseEnvelope
+					)
+						sentRemote = remote
+						sentPlayer = player
+						sentEnvelope = envelope
+					end,
 				}
 			)
-			bindActiveHandlers(server, "Match", function(player: Player)
+			bindActiveHandlers(server, "Match", function(context: ServerRequestDispatcher.ServerContext, _payload)
 				handledCount += 1
-				handledPlayer = player
+				handledPlayer = context.player
+				return ServerRequestDispatcher.success(
+					if context.definition.response == "Required" then { accepted = true } else nil
+				)
 			end)
 
 			local service = server:getServiceDefinition()
@@ -231,21 +330,39 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			child(assertions, response, "Request", "RemoteEvent")
 			child(assertions, response, "Response", "RemoteEvent")
 
-			local player = Instance.new("Player")
-			local clientEventCallback = callbacks.TestClientEvent
-			clientEventCallback(player, PRIVATE_SENTINEL)
-			assertions.equal(handledCount, 1)
-			assertions.equal(handledPlayer, player)
-			player:Destroy()
-
 			start(server)
 			assertions.equal(server:getState(), "Started")
+			local player = Instance.new("Player")
+			player.Parent = game:GetService("Players")
+			local clientEventCallback = callbacks.TestClientEvent
+			clientEventCallback(player, { payload = { marker = PRIVATE_SENTINEL } })
+			assertions.equal(handledCount, 1)
+			assertions.equal(handledPlayer, player)
+
+			local responseCallback = callbacks.TestResponseRequest
+			responseCallback(player, {
+				requestId = "runtime001",
+				payload = { marker = "fixed" },
+			})
+			assertions.equal(handledCount, 2)
+			assertions.equal(sentPlayer, player)
+			assertions.equal(sentRemote, response:FindFirstChild("Response"))
+			assertions.isNotNil(sentEnvelope)
+			if sentEnvelope ~= nil then
+				assertions.equal(sentEnvelope.requestId, "runtime001")
+				assertions.equal(sentEnvelope.state, "Success")
+				assertions.isTrue(table.isfrozen(sentEnvelope))
+				if sentEnvelope.state == "Success" then
+					assertions.equal((sentEnvelope.payload :: any).accepted, true)
+				end
+			end
+			player:Destroy()
 			shutdown(server)
 			assertions.equal(server:getState(), "Shutdown")
 			assertions.equal(#disconnectedNames, 3)
 			assertions.equal(
 				table.concat(cleanupOrder, ","),
-				"Remote:TestResponseRequest,Remote:TestNoResponseRequest,Remote:TestClientEvent,PlayerRemoving"
+				"Remote:TestResponseRequest,Remote:TestNoResponseRequest,Remote:TestClientEvent,DispatcherPlayerRemoving,LimiterPlayerRemoving"
 			)
 			assertions.isFalse(rootMissingDuringDisconnect)
 			assertNoPublishedRoot(assertions)
@@ -268,7 +385,8 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 				role,
 				FULL_RATE_BINDINGS,
 				fakeConnector(nil, nil),
-				TEST_LIMITER_DEPENDENCIES
+				TEST_LIMITER_DEPENDENCIES,
+				TEST_DISPATCHER_DEPENDENCIES
 			)
 			bindActiveHandlers(server, role)
 			initialize(server)
@@ -311,43 +429,68 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 				"Lobby",
 				FULL_RATE_BINDINGS,
 				fakeConnector(nil, nil),
-				TEST_LIMITER_DEPENDENCIES
+				TEST_LIMITER_DEPENDENCIES,
+				TEST_DISPATCHER_DEPENDENCIES
 			)
+			local function authorize(_context: ServerRequestDispatcher.ServerContext): boolean
+				return true
+			end
+			local function handleResponse(_context: ServerRequestDispatcher.ServerContext, _payload)
+				return ServerRequestDispatcher.success({ accepted = true })
+			end
 
 			local unknown = captureError(assertions, function()
-				server:registerHandler(PRIVATE_SENTINEL .. "/arbitrary/path", function(_player: Player) end)
+				server:registerRequest(
+					PRIVATE_SENTINEL .. "/arbitrary/path",
+					REQUEST_SCHEMA,
+					RESPONSE_SCHEMA,
+					authorize,
+					handleResponse
+				)
 			end)
 			assertCode(assertions, unknown, "UNKNOWN_ENDPOINT")
 			assertions.contains(unknown, "[endpoint=<unknown>]")
 			assertions.isNil(string.find(unknown, PRIVATE_SENTINEL, 1, true))
 
 			local inactive = captureError(assertions, function()
-				server:registerHandler("TestClientEvent", function(_player: Player) end)
+				server:registerEvent("TestClientEvent", REQUEST_SCHEMA, authorize, handleResponse)
 			end)
 			assertCode(assertions, inactive, "INACTIVE_ENDPOINT")
 			assertions.contains(inactive, "[endpoint=TestClientEvent]")
 
 			local wrongDirection = captureError(assertions, function()
-				server:registerHandler("TestServerEvent", function(_player: Player) end)
+				server:registerEvent("TestServerEvent", REQUEST_SCHEMA, authorize, handleResponse)
 			end)
 			assertCode(assertions, wrongDirection, "WRONG_DIRECTION")
 
 			local invalidHandler = captureError(assertions, function()
-				server:registerHandler("TestResponseRequest", { private = PRIVATE_SENTINEL } :: any)
+				server:registerRequest(
+					"TestResponseRequest",
+					REQUEST_SCHEMA,
+					RESPONSE_SCHEMA,
+					authorize,
+					{ private = PRIVATE_SENTINEL } :: any
+				)
 			end)
 			assertCode(assertions, invalidHandler, "INVALID_HANDLER")
 			assertions.isNil(string.find(invalidHandler, PRIVATE_SENTINEL, 1, true))
 
-			server:registerHandler("TestResponseRequest", function(_player: Player) end)
+			server:registerRequest("TestResponseRequest", REQUEST_SCHEMA, RESPONSE_SCHEMA, authorize, handleResponse)
 			local duplicate = captureError(assertions, function()
-				server:registerHandler("TestResponseRequest", function(_player: Player) end)
+				server:registerRequest(
+					"TestResponseRequest",
+					REQUEST_SCHEMA,
+					RESPONSE_SCHEMA,
+					authorize,
+					handleResponse
+				)
 			end)
-			assertCode(assertions, duplicate, "DUPLICATE_HANDLER")
+			assertCode(assertions, duplicate, "DUPLICATE_CONTRACT")
 			assertNoPublishedRoot(assertions)
 		end
 	),
 
-	TestHarness.case("fails closed on missing handlers and rolls back a partial listener bind", function(assertions)
+	TestHarness.case("fails closed on missing contracts and rolls back a partial listener bind", function(assertions)
 		assertNoPublishedRoot(assertions)
 		local missingServer = ServerRemoteRegistry.new(
 			loggerFor("Match"),
@@ -356,25 +499,28 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			"Match",
 			FULL_RATE_BINDINGS,
 			fakeConnector(nil, nil),
-			TEST_LIMITER_DEPENDENCIES
+			TEST_LIMITER_DEPENDENCIES,
+			TEST_DISPATCHER_DEPENDENCIES
 		)
 		local missing = captureError(assertions, function()
 			initialize(missingServer)
 		end)
-		assertCode(assertions, missing, "MISSING_HANDLER")
+		assertCode(assertions, missing, "MISSING_CONTRACT")
 		assertions.contains(missing, "[endpoint=TestClientEvent]")
 		assertions.equal(missingServer:getState(), "Failed")
 		assertNoPublishedRoot(assertions)
 
 		local connectionAttempts = 0
 		local disconnectCount = 0
+		local rollbackLimiterDependencies, rollbackDispatcherDependencies, rollbackChildDisconnects =
+			countingChildDependencies()
 		local rollbackServer = ServerRemoteRegistry.new(
 			loggerFor("Match"),
 			FULL_REGISTRY,
 			ReplicatedStorage,
 			"Match",
 			FULL_RATE_BINDINGS,
-			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Handler): RBXScriptConnection
+			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Listener): RBXScriptConnection
 				connectionAttempts += 1
 				if connectionAttempts == 2 then
 					error(PRIVATE_SENTINEL, 0)
@@ -383,7 +529,8 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 					disconnectCount += 1
 				end) :: any
 			end,
-			TEST_LIMITER_DEPENDENCIES
+			rollbackLimiterDependencies,
+			rollbackDispatcherDependencies
 		)
 		bindActiveHandlers(rollbackServer, "Match")
 		local connectionFailure = captureError(assertions, function()
@@ -393,26 +540,88 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		assertions.isNil(string.find(connectionFailure, PRIVATE_SENTINEL, 1, true))
 		assertions.equal(connectionAttempts, 2)
 		assertions.equal(disconnectCount, 1)
+		assertions.equal(rollbackChildDisconnects.dispatcher, 1)
+		assertions.equal(rollbackChildDisconnects.limiter, 1)
 		assertions.equal(rollbackServer:getState(), "Failed")
 		assertNoPublishedRoot(assertions)
 
+		local invalidLimiterDependencies, invalidDispatcherDependencies, invalidChildDisconnects =
+			countingChildDependencies()
 		local invalidConnectionServer = ServerRemoteRegistry.new(
 			loggerFor("Match"),
 			FULL_REGISTRY,
 			ReplicatedStorage,
 			"Match",
 			FULL_RATE_BINDINGS,
-			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Handler): RBXScriptConnection
+			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Listener): RBXScriptConnection
 				return { Disconnect = function() end } :: any
 			end,
-			TEST_LIMITER_DEPENDENCIES
+			invalidLimiterDependencies,
+			invalidDispatcherDependencies
 		)
 		bindActiveHandlers(invalidConnectionServer, "Match")
 		local invalidConnection = captureError(assertions, function()
 			initialize(invalidConnectionServer)
 		end)
 		assertCode(assertions, invalidConnection, "INVALID_CONNECTION")
+		assertions.equal(invalidChildDisconnects.dispatcher, 1)
+		assertions.equal(invalidChildDisconnects.limiter, 1)
 		assertions.equal(invalidConnectionServer:getState(), "Failed")
+		assertNoPublishedRoot(assertions)
+
+		local dispatcherFailureLimiterDisconnects = 0
+		local dispatcherFailureAttempts = 0
+		local endpointConnectionAttempts = 0
+		local dispatcherFailureServer = ServerRemoteRegistry.new(
+			loggerFor("Match"),
+			FULL_REGISTRY,
+			ReplicatedStorage,
+			"Match",
+			FULL_RATE_BINDINGS,
+			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Listener): RBXScriptConnection
+				endpointConnectionAttempts += 1
+				return RobloxAdapter.createConnection(function() end) :: any
+			end,
+			{
+				clock = function(): number
+					return 0
+				end,
+				connectPlayerRemoving = function(
+					_callback: ServerRateLimiter.PlayerRemovingHandler
+				): RBXScriptConnection
+					return RobloxAdapter.createConnection(function()
+						dispatcherFailureLimiterDisconnects += 1
+					end) :: any
+				end,
+			},
+			{
+				clock = function(): number
+					return 0
+				end,
+				connectPlayerRemoving = function(
+					_callback: ServerRequestDispatcher.PlayerRemovingHandler
+				): RBXScriptConnection
+					dispatcherFailureAttempts += 1
+					error(PRIVATE_SENTINEL, 0)
+				end,
+				sender = function(
+					_remote: RemoteEvent,
+					_player: Player,
+					_envelope: ServerRequestDispatcher.ResponseEnvelope
+				)
+				end,
+			}
+		)
+		bindActiveHandlers(dispatcherFailureServer, "Match")
+		local dispatcherFailure = captureError(assertions, function()
+			initialize(dispatcherFailureServer)
+		end)
+		assertCode(assertions, dispatcherFailure, "DISPATCHER_INITIALIZATION_FAILED")
+		assertions.isNil(string.find(dispatcherFailure, PRIVATE_SENTINEL, 1, true))
+		assertions.equal(dispatcherFailureLimiterDisconnects, 1)
+		assertions.equal(dispatcherFailureAttempts, 1)
+		assertions.equal(endpointConnectionAttempts, 0)
+		assertions.equal(dispatcherFailureServer:getState(), "Failed")
 		assertNoPublishedRoot(assertions)
 	end),
 
@@ -428,7 +637,8 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			"Lobby",
 			EMPTY_RATE_BINDINGS,
 			nil,
-			TEST_LIMITER_DEPENDENCIES
+			TEST_LIMITER_DEPENDENCIES,
+			TEST_DISPATCHER_DEPENDENCIES
 		)
 		local folderConflict = captureError(assertions, function()
 			initialize(folderServer)
@@ -447,7 +657,8 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			"Lobby",
 			EMPTY_RATE_BINDINGS,
 			nil,
-			TEST_LIMITER_DEPENDENCIES
+			TEST_LIMITER_DEPENDENCIES,
+			TEST_DISPATCHER_DEPENDENCIES
 		)
 		local classConflict = captureError(assertions, function()
 			initialize(modelServer)
@@ -467,7 +678,8 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			"Match",
 			FULL_RATE_BINDINGS,
 			fakeConnector(nil, nil),
-			TEST_LIMITER_DEPENDENCIES
+			TEST_LIMITER_DEPENDENCIES,
+			TEST_DISPATCHER_DEPENDENCIES
 		)
 		bindActiveHandlers(winner, "Match")
 
@@ -479,7 +691,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			ReplicatedStorage,
 			"Match",
 			FULL_RATE_BINDINGS,
-			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Handler): RBXScriptConnection
+			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Listener): RBXScriptConnection
 				if not reentered then
 					reentered = true
 					initialize(winner)
@@ -488,7 +700,8 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 					loserDisconnectCount += 1
 				end) :: any
 			end,
-			TEST_LIMITER_DEPENDENCIES
+			TEST_LIMITER_DEPENDENCIES,
+			TEST_DISPATCHER_DEPENDENCIES
 		)
 		bindActiveHandlers(loser, "Match")
 
@@ -508,7 +721,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		assertNoPublishedRoot(assertions)
 	end),
 
-	TestHarness.case("rejects lifecycle and handler re-entry without duplicating ownership", function(assertions)
+	TestHarness.case("rejects lifecycle and contract re-entry without duplicating ownership", function(assertions)
 		assertNoPublishedRoot(assertions)
 		local server = ServerRemoteRegistry.new(
 			loggerFor("Development"),
@@ -517,7 +730,8 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			"Development",
 			EMPTY_RATE_BINDINGS,
 			nil,
-			TEST_LIMITER_DEPENDENCIES
+			TEST_LIMITER_DEPENDENCIES,
+			TEST_DISPATCHER_DEPENDENCIES
 		)
 		initialize(server)
 		local root = ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME)
@@ -528,7 +742,7 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		end)
 		assertCode(assertions, initializeAgain, "INVALID_STATE")
 		local lateBinding = captureError(assertions, function()
-			server:registerHandler("Anything", function(_player: Player) end)
+			server:registerRequest("Anything", nil, nil, nil, nil)
 		end)
 		assertCode(assertions, lateBinding, "INVALID_STATE")
 		assertions.equal(ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME), root)
@@ -555,7 +769,8 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			"Match",
 			FULL_RATE_BINDINGS,
 			fakeConnector(nil, nil),
-			TEST_LIMITER_DEPENDENCIES
+			TEST_LIMITER_DEPENDENCIES,
+			TEST_DISPATCHER_DEPENDENCIES
 		)
 		bindActiveHandlers(server, "Match")
 		initialize(server)
@@ -605,7 +820,8 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			"Match",
 			FULL_RATE_BINDINGS,
 			fakeConnector(nil, nil),
-			TEST_LIMITER_DEPENDENCIES
+			TEST_LIMITER_DEPENDENCIES,
+			TEST_DISPATCHER_DEPENDENCIES
 		)
 		bindActiveHandlers(server, "Match")
 		initialize(server)

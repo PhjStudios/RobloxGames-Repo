@@ -30,10 +30,10 @@ only change through an explicit architecture decision recorded here.
   Phase 04's separate exit-gate audit also passed on 2026-08-26.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
-  Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, and 06.3
-  completed on 2026-08-26.
-- Current checkpoint: Packet 06.3 is complete; Packet 06.4 is next but not
-  begun. The current deterministic suite passes 145 cases across 12 suites, all
+  Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, 06.3, and
+  06.4 completed on 2026-08-26.
+- Current checkpoint: Packet 06.4 is complete; Packet 06.5 is next but not
+  begun. The current deterministic suite passes 189 cases across 15 suites, all
   four structural builds pass, and the lasting production registry and
   production rate-policy list remain empty. No gameplay remote or Phase 07
   system has begun. Phase 06 and Gate A remain open.
@@ -643,8 +643,8 @@ are server-local and monotonic, player removal and lifecycle shutdown clear
 state, and global interval-limited aggregate warnings expose only fixed safe
 fields. The 17 dedicated limiter cases and complete 145-case, 12-suite run pass,
 as does the four-project structural verifier. Production definitions and
-policies remain empty. Packet 06.4 is next and has not begun; Phase 06 and Gate
-A remain open.
+policies remain empty. Packet 06.4 has since completed; Phase 06 and Gate A
+remain open.
 
 - Implement per-player token buckets or bounded cooldowns.
 - Allow action-specific limits.
@@ -652,6 +652,19 @@ A remain open.
 - Log aggregate abuse signals without flooding output.
 
 ### Packet 06.4 — Request correlation and error contract
+
+**Status:** Complete — 2026-08-26. The exact asynchronous Request, Event,
+Success, and Rejected envelopes; authenticated bounded request IDs; seven-code
+public-error allowlist; global per-Player correlation ledger; context-only
+authorization; strict response translation; origin-only routing; and bounded
+client Pending/terminal tracker are implemented. The raw server handler seam is
+removed: separate request/event registrations require canonical active
+definitions, authenticated schemas, one rate policy, one context-only
+authorizer, and one protected handler before the network lifecycle can
+initialize. The complete 189-case, 15-suite run and all four structural builds
+pass after lifecycle/re-entry hardening, with no unresolved P0, P1, or P2 review
+finding. Production definitions and policies remain empty. Packet 06.5 is next
+and has not begun; Phase 06 and Gate A remain open.
 
 - Give mutating requests client-generated request IDs within strict limits.
 - Return safe public error codes rather than raw server errors.

@@ -142,18 +142,38 @@ and future controllers must own their real connections, Instances, callbacks,
 threads, and child containers through this utility when introduced.
 
 Packet 06.1's `NetworkRegistry` lifecycle service creates one internal
-`network-registry` cleanup container during initialization. It registers the
-unparented `ATDNetwork` root before building descendants, then registers each
-inbound listener connection. The reverse sweep therefore disconnects every
-listener before destroying the exact root. Initialization failures roll back
-only those owned resources; pre-existing conflicting Instances are diagnosed
-and preserved. A cleanup failure is contained as a static network error, and no
-arbitrary callback or rejected endpoint value is retained or logged.
+`network-registry` cleanup container during initialization. Packet 06.4 preserves
+that owner while making its complete registration order explicit: the
+unparented `ATDNetwork` root first, the rate-limiter child second, the request
+dispatcher child third, and captured inbound listener connections last. The
+reverse sweep is therefore listener connections, dispatcher, limiter, then the
+exact root.
+
+The dispatcher child owns a state-clearing callback followed by its own
+`PlayerRemoving` connection, so its reverse sweep first disconnects that
+connection and then invalidates and releases all bounded pending/completed
+request-ID ledgers, registered contracts, protocol aggregates, and failure
+counters. The limiter child independently disconnects its own `PlayerRemoving`
+connection before clearing all Player buckets and limiter aggregate state. A
+departing Player triggers both narrowly scoped callbacks: dispatcher correlation
+and limiter state are released independently, without trusting a client identity.
+
+Initialization failures roll back only those owned resources; pre-existing
+conflicting Instances are diagnosed and preserved. A cleanup failure is
+contained as a static network error, and no arbitrary callback, request ID,
+payload, or rejected endpoint value is retained or logged.
 
 The outer server `bootstrap` container still owns exactly one callback: lifecycle
 shutdown. That reverse lifecycle call reaches the network service's internal
 container through the existing graceful-shutdown path, so no duplicate root,
 connection owner, or `BindToClose` hook is introduced.
+
+`ClientRequestTracker` is not a lifecycle service and the empty production
+registry has no current client consumer. Its explicit `clear()` operation drops
+all pending and recent terminal correlation state. Every future client owner
+must register that call in its own `Cleanup` container together with the fixed
+response listener it owns; clearing correlation does not cancel or authorize a
+server request.
 
 ## Focused Studio Edit-mode validation
 
@@ -185,13 +205,13 @@ task forms, idempotence, nesting/cycles, reentry, post-clean guards, cached
 failures, and sibling failure isolation. Run `lune run tests/run.luau`; the
 environment distinction and cleanup rules are indexed in `docs/TEST_MATRIX.md`.
 
-The current 145-case run also includes 12 network-runtime and 17 rate-limiter
-cases. They prove listener-before-limiter-before-root LIFO cleanup, rollback
-after partial listener or limiter initialization, preservation of pre-existing
-root conflicts, duplicate-owner/re-entry rejection, exact Player-removal state
-release, whole-limiter shutdown clearing, and removal of the exact published
-root. Packets 06.1–06.3 are complete; Packet 06.4 has not begun, and Phase 06
-remains open.
+The current network-runtime, rate-limiter, dispatcher, and client-tracker suites
+exercise listener-before-dispatcher-before-limiter-before-root LIFO cleanup,
+rollback after partial initialization, preservation of pre-existing root
+conflicts, duplicate-owner/re-entry rejection, both exact Player-removal state
+releases, whole-child shutdown clearing, explicit client correlation clearing,
+and removal of the exact published root. Packet 06.5 and the fresh Phase 06 exit
+audit remain open.
 
 Packet 03.3 reran 10 focused cleanup cases through the logger-based constructor.
 Supported runtime types, LIFO/idempotence, state/nesting guards, failure
@@ -220,10 +240,15 @@ to finish later instead of being canceled and poisoning the container state.
 The ignored verification builds were inspected and removed. Generated place
 files remain untracked under `docs/CODE_STYLE.md`.
 
-## Isolated Studio verification
+## Historical isolated Studio verification
 
 Both isolated places synchronized the shared utility and booted without an
 application warning or error:
+
+This table records the then-current pre-network lifecycle. Phase 06 has since
+added one foundation-only `NetworkRegistry` server service and its nested remote,
+limiter, dispatcher, connection, and state ownership while the client remains at
+zero services. The required current unsaved networking regression is pending.
 
 | Place | Role/PlaceId | Lifecycle | Cleanup | Opposite-role executable source |
 | --- | --- | --- | --- | ---: |
