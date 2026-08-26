@@ -26,10 +26,10 @@ only change through an explicit architecture decision recorded here.
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
 - Gameplay state: minimal Rojo scaffold with harmless Studio-only client and
   server bootstraps; temporary example behavior has been removed.
-- Current implementation phase: Phase 03.
+- Current implementation phase: Phase 03 complete; Phase 04 has not begun.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
-  02.2, 02.3, 02.4, 03.1, and 03.2 on 2026-08-25.
-- Next packet: 03.3, logging and environment context. It has not begun.
+  02.2, 02.3, 02.4, 03.1, 03.2, 03.3, and 03.4 on 2026-08-25.
+- Next packet: 04.1, shared ID and result types. It has not begun.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -155,6 +155,11 @@ should not be created merely to imitate this diagram.
           Maps.luau
           Towers.luau
           Waves.luau
+        lifecycle/
+          ServiceLifecycle.luau
+        logging/
+          EnvironmentContext.luau
+          Log.luau
         network/
           Protocol.luau
           RemoteNames.luau
@@ -430,6 +435,8 @@ and connection cleanup.
 
 ### Packet 03.3 — Logging and environment context
 
+**Status:** Complete — 2026-08-25. Evidence: `docs/LOGGING.md`.
+
 - Add consistent log categories and development-only verbosity.
 - Include place role and server/client context.
 - Never log profile contents, teleport access codes, or purchase details.
@@ -437,13 +444,18 @@ and connection cleanup.
 
 ### Packet 03.4 — Graceful shutdown skeleton
 
+**Status:** Complete — 2026-08-25. Evidence:
+`docs/GRACEFUL_SHUTDOWN.md`.
+
 - Add server shutdown hooks.
 - Define time-bounded cleanup order.
 - Do not add profile saving until ProfileService exists.
 - Confirm shutdown does not hang Studio tests.
 
-**Exit gate:** Services start deterministically and clean up without leaked
-connections in repeated Studio sessions.
+**Exit gate:** Passed — 2026-08-25. Services start deterministically and clean
+up without leaked connections in repeated Studio sessions. Evidence:
+`docs/SERVICE_LIFECYCLE.md`, `docs/CLEANUP.md`, `docs/LOGGING.md`, and
+`docs/GRACEFUL_SHUTDOWN.md`.
 
 ## Phase 04 — Shared types, configuration schemas, and validation
 

@@ -16,7 +16,7 @@ production-data changes, or monetization.
 - Recorded: 2026-08-25
 - Packet: 00.2
 - Status: Accepted for core development
-- Next roadmap packet: 03.3, Logging and environment context
+- Next roadmap packet: 04.1, Shared ID and result types
 
 ## Product identity and game loop
 

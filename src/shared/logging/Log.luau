@@ -1,12 +1,14 @@
 local EnvironmentContext = require(script.Parent.EnvironmentContext)
 
 export type Severity = "DEBUG" | "INFO" | "WARN" | "ERROR"
-export type Subsystem = "bootstrap" | "place-role" | "lifecycle" | "cleanup"
+export type Subsystem = "bootstrap" | "place-role" | "lifecycle" | "cleanup" | "shutdown"
 export type FieldValue = string | number | boolean
 export type SafeFieldName =
-	"cleanupState"
+	"budgetSeconds"
+	| "cleanupState"
 	| "cleanupTaskCount"
 	| "code"
+	| "closeReason"
 	| "container"
 	| "lifecycleState"
 	| "service"
@@ -50,6 +52,7 @@ local VALID_SUBSYSTEMS: { [string]: boolean } = table.freeze({
 	cleanup = true,
 	lifecycle = true,
 	["place-role"] = true,
+	shutdown = true,
 })
 
 local VALID_LABEL_PATTERN = "^[A-Za-z][A-Za-z0-9_.-]*$"
@@ -66,8 +69,10 @@ local RESERVED_FIELDS: { [string]: boolean } = table.freeze({
 })
 
 local SAFE_FIELDS: { [string]: boolean } = table.freeze({
+	budgetSeconds = true,
 	cleanupState = true,
 	cleanupTaskCount = true,
+	closeReason = true,
 	code = true,
 	container = true,
 	lifecycleState = true,
@@ -170,11 +175,7 @@ function Logger.formatRecord(
 		fail(self, "INVALID_EVENT", `Event must match {VALID_LABEL_PATTERN}`)
 	end
 
-	if
-		type(message) ~= "string"
-		or message == ""
-		or string.find(message, "%c") ~= nil
-	then
+	if type(message) ~= "string" or message == "" or string.find(message, "%c") ~= nil then
 		fail(self, "INVALID_MESSAGE", "Message must be non-empty and contain no control characters")
 	end
 

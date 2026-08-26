@@ -26,12 +26,16 @@ src/
       PlaceRoles.luau
     lifecycle/
       ServiceLifecycle.luau
+    logging/
+      EnvironmentContext.luau
+      Log.luau
     util/
       Cleanup.luau
   server/
     common/
       bootstrap/
         Main.server.luau
+        Shutdown.luau
     lobby/
       .gitkeep
     match/
@@ -55,7 +59,8 @@ folders and does not create instances for the `.gitkeep` files themselves.
 execution contexts and both place roles. Packet 02.3 added the typed place-role
 configuration described in `docs/PLACE_ROLES.md`. Packet 03.1 added the typed
 service lifecycle contract described in `docs/SERVICE_LIFECYCLE.md`. Packet 03.2
-added the ownership utility described in `docs/CLEANUP.md`.
+added the ownership utility described in `docs/CLEANUP.md`. Packet 03.3 added
+the context-bound diagnostic contract described in `docs/LOGGING.md`.
 
 ## Bootstrap move manifest
 
@@ -152,9 +157,17 @@ place's services.
 
 The current common client and server bootstraps require only
 `ReplicatedStorage.Shared.config.PlaceRoles` and
-`ReplicatedStorage.Shared.lifecycle.ServiceLifecycle`, plus
+`ReplicatedStorage.Shared.logging.EnvironmentContext`,
+`ReplicatedStorage.Shared.logging.Log`,
+`ReplicatedStorage.Shared.lifecycle.ServiceLifecycle`, and
 `ReplicatedStorage.Shared.util.Cleanup`. All imports follow the allowed
-common-to-shared dependency direction. No cross-role import exists.
+common-to-shared dependency direction. Lifecycle and cleanup receive the same
+genuine context-bound logger created by each bootstrap. No cross-role import
+exists.
+
+The common server bootstrap also requires its server-only sibling
+`Shutdown.luau`. That module is mapped into every server build but is not shared
+with clients and does not cross a place-role boundary.
 
 ## Automated verification
 

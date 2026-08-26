@@ -22,8 +22,10 @@ automatic shutdown hook.
 
 ## Public contract
 
-`ServiceLifecycle.new(context)` creates an independent runner for either the
-`client` or `server` execution context. A runner exposes:
+`ServiceLifecycle.new(logger)` creates an independent runner. The argument must
+be a genuine context-bound logger from `src/shared/logging/Log.luau`; that
+logger supplies client/server, place-role, PlaceId, and Studio/production
+context without a second lifecycle-specific setting. A runner exposes:
 
 | Method | Valid state | Successful next state or result |
 | --- | --- | --- |
@@ -74,8 +76,9 @@ Registration is closed as soon as initialization begins. Repeating a stage,
 skipping a stage, registering late, requesting the order too early, or invoking
 shutdown before start is rejected. A lifecycle callback is protected with
 `pcall`; if it throws, the runner becomes `Failed` before the contextual error
-is raised. The runner never continues to later services after a callback
-failure.
+is raised. Arbitrary callback error text is discarded and replaced with a
+static summary so callback secrets cannot be reflected into Output. The runner
+never continues to later services after a callback failure.
 
 Packet 03.1 deliberately does not define rollback after partial initialization
 or startup. Cleanup ownership belongs to Packet 03.2, and process shutdown
@@ -86,17 +89,17 @@ hooks belong to Packet 03.4.
 Lifecycle rejections use this directly readable structure:
 
 ```text
-[ATD][ERROR][context=<client|server|unknown>][subsystem=lifecycle][event=<event>][code=<code>][service=<name-or-runner>][state=<state>] <message>
+[ATD][ERROR][context=<client|server|unknown>][role=<role>][placeId=<id>][environment=<environment>][subsystem=lifecycle][event=<event>][code=<code>][service=<name-or-runner>][state=<state>] <message>
 ```
 
-Every error identifies the execution context, lifecycle event, stable error
-code, affected service (or `<runner>`), and state. Construction with an invalid
-context uses `context=unknown` and `state=Uninitialized` because no runner exists
-yet.
+Every error identifies execution context, place role, PlaceId, runtime
+environment, lifecycle event, stable error code, affected service (or
+`<runner>`), and state. Construction with an invalid logger uses the canonical
+unknown-context fallback and `state=Uninitialized` because no runner exists yet.
 
 | Code | Rejection |
 | --- | --- |
-| `INVALID_CONTEXT` | Runner context is not `client` or `server` |
+| `INVALID_CONTEXT` | Constructor argument is not a genuine context-bound logger |
 | `INVALID_STATE` | Operation is unavailable in the current state |
 | `INVALID_SERVICE` | Service definition is not a table |
 | `INVALID_SERVICE_NAME` | Service or dependency name is invalid |
@@ -110,15 +113,17 @@ yet.
 | `START_FAILED` | A service start callback threw |
 | `SHUTDOWN_FAILED` | A service shutdown callback threw |
 
-These are development diagnostics, not the Packet 03.3 logging framework and
-not a recoverable gameplay-result API.
+These are development diagnostics emitted through Packet 03.3's local logger,
+not a recoverable gameplay-result API. Service names and messages remain
+developer-authored metadata; arbitrary player or service payloads must never be
+passed into them.
 
 ## Bootstrap integration
 
 The common server and client bootstraps still validate the centralized place
-role before creating a lifecycle runner. Each then creates its context-specific
-runner, initializes it, and starts it with zero registered services. Their
-existing Studio-only ready record now includes:
+role before creating a lifecycle runner. Each resolves one environment context,
+creates one local logger, passes it to the runner, initializes it, and starts it
+with zero registered services. Their Studio-only ready record includes:
 
 ```text
 [lifecycleState=Started][serviceCount=0]
@@ -126,9 +131,10 @@ existing Studio-only ready record now includes:
 
 The runner is local to its bootstrap. No global registry or service locator was
 introduced. Packet 03.2 subsequently registered each runner's existing
-`shutdown()` operation as a callback in its bootstrap cleanup container. Nothing
-invokes that container yet, and no `BindToClose`, event connection, task, or
-other shutdown hook was added; Packet 03.4 owns that integration.
+`shutdown()` operation as a callback in its bootstrap cleanup container. Packet
+03.4 now invokes the server container through the one ordered `BindToClose`
+path. The lifecycle runner therefore shuts down in reverse dependency order
+before the server hook completes. The client still has no process-shutdown hook.
 
 ## Focused automated validation
 
@@ -151,6 +157,18 @@ checking that some error occurred. This was executed against the synchronized
 Lobby copy of the real module, not a rewritten test double. Packet 05 will own
 selection and repository integration of a persistent Luau test runner, so this
 packet did not pull that framework forward.
+
+Packet 03.3 reran 12 focused lifecycle cases through the migrated logger-based
+constructor. Dependency order, registration/state rejection, and all three
+callback-failure stages passed. Every callback-failure record retained safe
+context, role, PlaceId, environment, service, and state fields while a deliberate
+secret sentinel thrown by the callback was absent.
+
+Packet 03.4 composed the runner with the real cleanup and bounded-shutdown
+contracts. It verified reverse dependency shutdown, exact LIFO ownership order,
+zero-service shutdown, repeated idempotent cleanup, and eventual state
+finalization after a cooperative timeout. Three final Lobby and Match Play–Stop
+cycles each ended in lifecycle state `Shutdown`.
 
 ## Toolchain and build verification
 
@@ -196,5 +214,5 @@ remain preserved by policy.
 5. Repeat with `match.project.json` and the Match place, expecting role `Match`.
 6. Do not save or publish either place merely to perform this test.
 
-Packet 03.2 is complete with evidence in `docs/CLEANUP.md`. Packet 03.3 is next
-and has not begun.
+Phase 03 is complete. Packet 03.4 evidence is in
+`docs/GRACEFUL_SHUTDOWN.md`; Phase 04 has not begun.

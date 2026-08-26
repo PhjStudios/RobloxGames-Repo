@@ -59,18 +59,23 @@ mapped as `ReplicatedStorage.Shared`. Packet 02.3 later added the typed
 `PlaceRoles` module and integrated it into both bootstraps; the removed example
 behavior did not return.
 
-### Current bootstrap behavior after Packet 03.2
+### Current bootstrap behavior after Packet 03.4
 
 Both common bootstraps now obtain `ReplicatedStorage` and `RunService`, validate
 the shared place-role configuration, and resolve the project's declared role
 against `game.PlaceId`. An invalid configuration or pairing produces a
 structured error and stops that bootstrap. After successful role validation,
 each bootstrap creates, initializes, and starts a context-specific lifecycle
-runner with zero services. Packet 03.2 then creates a context-labelled cleanup
-container and registers the runner's existing shutdown operation as its one
-task. A valid Studio boot remains harmless and emits one ready record. See
-`docs/PLACE_ROLES.md`, `docs/SERVICE_LIFECYCLE.md`, and `docs/CLEANUP.md` for the
-current contracts.
+runner with zero services. Packet 03.2 then creates a cleanup container and
+registers the runner's existing shutdown operation as its one task. Packet 03.3
+now creates one immutable environment context and context-bound logger per
+bootstrap. Place-role failures use the provisional `Unresolved` role; a valid
+role produces a resolved logger shared by lifecycle and cleanup. A valid Studio
+boot remains harmless and emits one ready record through that logger. See
+`docs/PLACE_ROLES.md`, `docs/SERVICE_LIFECYCLE.md`, `docs/CLEANUP.md`, and
+`docs/LOGGING.md` for those contracts. Packet 03.4 additionally binds the server
+bootstrap's cleanup container to the single ordered close hook described in
+`docs/GRACEFUL_SHUTDOWN.md`.
 
 ## Bootstrap log contract
 
@@ -101,7 +106,20 @@ Studio-only strings.
 
 Packet 03.2 extended those records with
 `[cleanupState=Active][cleanupTaskCount=1]`. It did not add a shutdown trigger;
-Packet 03.4 still owns that behavior.
+at that checkpoint, Packet 03.4 still owned that behavior.
+
+Packet 03.3 replaced the temporary direct strings with a local context-bound
+logger. The canonical base field order is now execution context, resolved role,
+PlaceId, runtime environment, subsystem, and event. Safe custom fields follow
+in alphabetical order. `DEBUG` and `INFO` are suppressed before formatting
+outside Studio; `WARN` always emits and `ERROR` raises exactly one formatted
+error. No global logger, player payload serializer, or gameplay service was
+introduced.
+
+Packet 03.4 leaves the ready records unchanged. On server close it emits a
+Studio-only `shutdown started` record, waits up to the validated cooperative
+budget, and then emits `shutdown completed` or a production-visible warning for
+failure/timeout. It adds no client close hook and no profile saving.
 
 ## Automated verification
 
@@ -134,15 +152,18 @@ Use this procedure for Packet 01.3 regression checks:
      zero-service lifecycle startup.
    - `ReplicatedStorage.Shared.config.PlaceRoles` exists.
    - `ReplicatedStorage.Shared.lifecycle.ServiceLifecycle` exists.
+   - `ReplicatedStorage.Shared.logging.EnvironmentContext` exists.
+   - `ReplicatedStorage.Shared.logging.Log` exists.
    - `ReplicatedStorage.Shared.util.Cleanup` exists.
+   - `ServerScriptService.Server.common.bootstrap.Shutdown` exists.
    - `ReplicatedStorage.Shared.Example` does not exist.
 5. Open Output and clear old messages if verifying manually.
 6. Start a local Play test.
 7. Confirm Output contains one server record and one client record:
 
    ```text
-   [ATD][INFO][context=server][subsystem=bootstrap][event=ready][role=Development][placeId=100561454756026][lifecycleState=Started][serviceCount=0][cleanupState=Active][cleanupTaskCount=1] Server bootstrap ready
-   [ATD][INFO][context=client][subsystem=bootstrap][event=ready][role=Development][placeId=100561454756026][lifecycleState=Started][serviceCount=0][cleanupState=Active][cleanupTaskCount=1] Client bootstrap ready
+   [ATD][INFO][context=server][role=Development][placeId=100561454756026][environment=studio][subsystem=bootstrap][event=ready][cleanupState=Active][cleanupTaskCount=1][lifecycleState=Started][serviceCount=0] Server bootstrap ready
+   [ATD][INFO][context=client][role=Development][placeId=100561454756026][environment=studio][subsystem=bootstrap][event=ready][cleanupState=Active][cleanupTaskCount=1][lifecycleState=Started][serviceCount=0] Client bootstrap ready
    ```
 
 8. Confirm there is no script error or warning from either bootstrap.
@@ -151,9 +172,16 @@ Use this procedure for Packet 01.3 regression checks:
    - `ReplicatedStorage.Shared.Example` does not exist.
    - The applicable client or server `Main` bootstrap exists.
 10. Stop the Play test.
-11. Confirm Studio returns to Edit mode and `Workspace.JumpingBricks` still does
+11. Before Output is cleared, expect the server records:
+
+    ```text
+    [ATD][INFO][context=server][role=Development][placeId=100561454756026][environment=studio][subsystem=shutdown][event=started][budgetSeconds=10][closeReason=DeveloperShutdown] Server shutdown started
+    [ATD][INFO][context=server][role=Development][placeId=100561454756026][environment=studio][subsystem=shutdown][event=completed][cleanupState=Cleaned][lifecycleState=Shutdown] Server shutdown completed
+    ```
+
+12. Confirm Studio returns to Edit mode and `Workspace.JumpingBricks` still does
     not exist.
-12. Do not save or publish merely to complete this smoke test.
+13. Do not save or publish merely to complete this smoke test.
 
 ## Historical Packet 01.3 Studio result
 

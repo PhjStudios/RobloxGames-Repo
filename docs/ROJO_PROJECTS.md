@@ -152,9 +152,12 @@ Additional assertions passed:
   or duplicated runtime PlaceId. Packet 02.3 later added only their role
   attributes.
 
-Current Packet 03.2 builds additionally contain the shared `PlaceRoles`,
-`ServiceLifecycle`, and `Cleanup` ModuleScripts in all three projects. The
-source-layer isolation above remains unchanged.
+Current Packet 03.4 builds contain the five shared ModuleScripts `PlaceRoles`,
+`ServiceLifecycle`, `EnvironmentContext`, `Log`, and `Cleanup`, plus the
+server-only common `Shutdown` ModuleScript. Each build therefore contains six
+ModuleScripts, one Script, and one LocalScript. The Default build contains both
+empty role folders, the Lobby build contains no match folder, and the Match
+build contains no lobby folder. Source-layer isolation remains unchanged.
 
 The inspected ignored build artifacts were removed. They can be recreated with
 the commands above.

@@ -21,10 +21,11 @@ logging framework, external shutdown trigger, gameplay system, or networking.
 
 ## Public contract
 
-`Cleanup.new(label)` creates a typed container in the `Active` state. Labels
-must start with an ASCII letter and may then contain letters, digits, `_`, `.`,
-or `-`. A label identifies the owner in direct development errors without
-introducing Packet 03.3's environment or logging context.
+`Cleanup.new(logger, label)` creates a typed container in the `Active` state.
+The logger must be a genuine Packet 03.3 context-bound logger. Labels must start
+with an ASCII letter and may then contain letters, digits, `_`, `.`, or `-`.
+The logger supplies execution, role, PlaceId, and runtime-environment context;
+the label identifies the owned container within that context.
 
 | Method | Behavior |
 | --- | --- |
@@ -60,9 +61,10 @@ container must still be `Active` when registered. If a child is independently
 cleaned after registration, the parent's later call is an idempotent no-op when
 the child succeeded, or reproduces the child's cached failure when it did not.
 
-Callbacks should perform bounded, non-yielding cleanup. Packet 03.4 owns the
-time budget for the overall server shutdown sequence; this utility does not
-invent per-callback deadlines.
+Callbacks must remain bounded and scheduler-cooperative. They may yield only for
+intentional asynchronous shutdown work governed by Packet 03.4's overall
+server budget; they must never busy-loop. This utility does not invent
+per-callback deadlines.
 
 ## State and failure behavior
 
@@ -78,6 +80,8 @@ Active -> Cleaning -> Cleaned
   current task's failure so the outer sweep can continue.
 - Every individual operation is protected with `pcall`.
 - One failing task never prevents later tasks from cleaning.
+- Arbitrary task failure text is discarded; only static index/kind/type
+  metadata appears in the aggregate error.
 - After the complete sweep, the container becomes `Cleaned` and releases all
   retained task references.
 - If any task failed, one aggregate error is raised after the sweep.
@@ -93,15 +97,17 @@ are harmless cleanup inputs.
 Direct errors use a stable, readable structure:
 
 ```text
-[ATD][ERROR][subsystem=cleanup][event=<event>][code=<code>][container=<label>][state=<state>] <message>
+[ATD][ERROR][context=<client|server>][role=<role>][placeId=<id>][environment=<environment>][subsystem=cleanup][event=<event>][code=<code>][container=<label>][state=<state>] <message>
 ```
 
 Aggregate task details also include registration index, classified kind, and
-runtime type. Packet 03.2 emits no per-task warnings, avoiding log flooding and
-leaving log policy to Packet 03.3.
+runtime type. Packet 03.2 emits no per-task warnings, avoiding log flooding.
+Packet 03.3 now formats the one direct or aggregate error through the
+container's local logger.
 
 | Code | Rejection |
 | --- | --- |
+| `INVALID_CONTEXT` | Constructor argument is not a genuine context-bound logger |
 | `INVALID_LABEL` | Container label is invalid |
 | `INVALID_STATE` | Add or cleanup re-entry is invalid in the current state |
 | `UNSUPPORTED_TASK` | Value is outside the supported task union |
@@ -112,10 +118,8 @@ leaving log policy to Packet 03.3.
 ## Bootstrap integration
 
 After place-role validation and lifecycle startup, each common bootstrap creates
-a context-labelled cleanup container:
-
-- `server.bootstrap`
-- `client.bootstrap`
+a `bootstrap` cleanup container using its own server or client logger. The
+environment context distinguishes the otherwise identical container labels.
 
 Each container owns one real callback that shuts down its existing lifecycle
 runner if that runner is still `Started`. The Studio-only ready record therefore
@@ -125,12 +129,12 @@ reports:
 [cleanupState=Active][cleanupTaskCount=1]
 ```
 
-Nothing invokes either container yet. No `BindToClose`, event connection,
-shutdown task, or save operation was added; Packet 03.4 owns the trigger. The
-current source tree contains no controllers, so adding placeholder controllers
-or fake resources would not be honest integration. Future controllers must own
-their real connections, Instances, callbacks, threads, and child containers
-through this utility when those controllers are introduced.
+Packet 03.4 now invokes the server container from the one ordered
+`BindToClose` path. The client container still has no process-close trigger.
+No save operation was added. The current source tree contains no controllers,
+so adding placeholder controllers or fake resources would not be honest
+integration. Future controllers must own their real connections, Instances,
+callbacks, threads, and child containers through this utility when introduced.
 
 ## Focused automated validation
 
@@ -155,6 +159,17 @@ Temporary test Instances remained unparented or under an unparented temporary
 root and were destroyed before the harness returned. No Studio-authored content
 was created or saved. Packet 05 still owns selection and repository integration
 of a persistent Luau test runner.
+
+Packet 03.3 reran 10 focused cleanup cases through the logger-based constructor.
+Supported runtime types, LIFO/idempotence, state/nesting guards, failure
+continuation, cached failure equality, and constructor authenticity passed. A
+deliberate secret sentinel thrown by a cleanup callback was absent from both the
+first aggregate error and its exact cached repeat.
+
+Packet 03.4 additionally verified cleanup inside the bounded server-shutdown
+runner. Normal and repeated cleanup reached `Cleaned`; failure still completed
+the sweep; a yielding task that crossed the private wait deadline was allowed
+to finish later instead of being canceled and poisoning the container state.
 
 ## Toolchain and build verification
 
@@ -196,4 +211,5 @@ save, or publish operation occurred.
    executable source.
 6. Do not save or publish merely to run this regression.
 
-Packet 03.3 is next and has not begun.
+Phase 03 is complete. Packet 03.4 evidence is in
+`docs/GRACEFUL_SHUTDOWN.md`; Phase 04 has not begun.

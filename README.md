@@ -22,6 +22,8 @@ order.
 - [Studio multi-place gate and live verification](docs/MULTI_PLACE_GATE.md)
 - [Typed common service lifecycle contract](docs/SERVICE_LIFECYCLE.md)
 - [Typed cleanup utility and ownership contract](docs/CLEANUP.md)
+- [Structured logging and environment-context contract](docs/LOGGING.md)
+- [Graceful server shutdown contract](docs/GRACEFUL_SHUTDOWN.md)
 - [Project instructions](AGENTS.md)
 
 ## Source of truth
@@ -41,6 +43,7 @@ separate shared, lobby-only, match-only, server, and client responsibilities:
       shared/
         config/
         lifecycle/
+        logging/
         network/
         types/
         util/
