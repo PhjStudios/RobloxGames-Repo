@@ -26,17 +26,17 @@ only change through an explicit architecture decision recorded here.
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
 - Gameplay state: minimal Rojo scaffold with harmless Studio-only client and
   server bootstraps; temporary example behavior has been removed.
-- Current implementation phase: Phase 05 complete; Phase 06 has not begun.
+- Current implementation phase: Phase 05 complete; Phase 06 is active.
   Phase 04's separate exit-gate audit also passed on 2026-08-26.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
-  Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, and 05.4 completed on
+  Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, and 06.1 completed on
   2026-08-26.
-- Current checkpoint: Packet 06.1 is next but not begun. The Phase 05 combined
-  exit audit passed with the 76-case deterministic contract suite, exact
-  production-build exclusion checks, and genuine GitHub formatting,
-  Selene-lint, broken-expectation, broken-definition, restoration, and final
-  documentation/audit-state clean-run evidence.
+- Current checkpoint: Packet 06.1 is complete; Packet 06.2 is next but not
+  begun. The current deterministic suite passes 106 cases across ten suites,
+  all four structural builds pass, the lasting production registry is empty,
+  and the targeted Packet 06.1 architecture/security review has no unresolved
+  P0, P1, or P2 finding. Phase 06 and Gate A remain open.
 - Publishing state: the user authorized and completed the Packet 02.4 Match-place
   creation; no additional publishing is authorized.
 
@@ -595,7 +595,8 @@ paths; the restored project passed every local combined-state gate and three
 byte-identical consecutive test runs; production builds contain no test code;
 and the final Packet 05.4/documentation/audit commit passed the genuine
 least-privilege GitHub workflow with zero retained artifacts. Exact evidence is
-recorded in `docs/PHASE_05_EXIT_AUDIT.md`. Packet 06.1 is next but not begun.
+recorded in `docs/PHASE_05_EXIT_AUDIT.md`. Phase 06 subsequently began with
+Packet 06.1.
 
 ## Phase 06 — Network protocol and remote-security foundation
 
@@ -604,12 +605,21 @@ proliferate.
 
 ### Packet 06.1 — Remote registry
 
+**Status:** Complete — 2026-08-26. The fixed typed registry, empty lasting
+production definitions, server-owned parent-last runtime, bounded production-
+anchored client lookup, lifecycle/Cleanup integration, role isolation, and
+test-only fixtures are implemented. The 106-case suite, four-project verifier,
+and targeted architecture/security review passed with no unresolved P0, P1, or
+P2 finding. Exact architecture and evidence are in `docs/NETWORK_PROTOCOL.md`.
+
 - Define remote names and direction in shared code.
 - Create remotes from one server-owned registry.
 - Prevent clients from choosing arbitrary remote or instance paths.
 - Separate request, event, and optional response semantics.
 
 ### Packet 06.2 — Payload validation
+
+**Status:** Not begun; this is the next packet.
 
 - Add reusable validators for strings, enums, IDs, arrays, vectors, CFrames, and
   finite numeric values.

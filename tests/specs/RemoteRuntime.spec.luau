@@ -1,0 +1,716 @@
+--!strict
+
+local TestHarness = require(script.Parent.Parent.Support.TestHarness)
+local RobloxAdapter = require(script.Parent.Parent.Support.RobloxAdapter)
+local NetworkFixtures = require(script.Parent.Parent.Fixtures.NetworkFixtures)
+local ServerRemoteRegistry = require(script.Parent.Parent.ProductionServerNetworking.ServerRemoteRegistry)
+local ClientRemoteLookup = require(script.Parent.Parent.ProductionClientNetworking.ClientRemoteLookup)
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage.Shared
+local RemoteRegistry = require(Shared.network.RemoteRegistry)
+local EnvironmentContext = require(Shared.logging.EnvironmentContext)
+local Log = require(Shared.logging.Log)
+
+local resolveForTests = ClientRemoteLookup.resolveForTests
+if resolveForTests == nil then
+	error("[ATD_TEST_FIXTURE][code=CLIENT_LOOKUP_TEST_RESOLVER_MISSING]", 0)
+end
+
+type Assertions = TestHarness.Assertions
+type RuntimePlaceRole = RemoteRegistry.RuntimePlaceRole
+type Registry = RemoteRegistry.Registry
+type Server = ServerRemoteRegistry.Server
+
+local PRIVATE_SENTINEL = "PRIVATE_NETWORK_SENTINEL_529d"
+
+local function makeRegistry(definitions: unknown): Registry
+	local result = RemoteRegistry.create(definitions)
+	if not result.ok then
+		error("[ATD_TEST_FIXTURE][code=REGISTRY_CREATION_FAILED]", 0)
+	end
+	return result.value
+end
+
+local FULL_REGISTRY = makeRegistry(NetworkFixtures.validDefinitions())
+local EMPTY_REGISTRY = makeRegistry({})
+
+local function loggerFor(role: RuntimePlaceRole): Log.Logger
+	return Log.new(EnvironmentContext.new("server", role, 0, false))
+end
+
+local function captureError(assertions: Assertions, callback: () -> ()): string
+	local succeeded, value = pcall(callback)
+	assertions.isFalse(succeeded)
+	assertions.equal(type(value), "string")
+	return if type(value) == "string" then value else ""
+end
+
+local function assertCode(assertions: Assertions, errorValue: string, code: string)
+	assertions.contains(errorValue, `[code={code}]`)
+end
+
+local function assertLookupCode(assertions: Assertions, result: ClientRemoteLookup.LookupResult, code: string)
+	assertions.isFalse(result.ok)
+	if not result.ok then
+		assertions.equal(result.error.code, code)
+		assertions.isTrue(table.isfrozen(result))
+		assertions.isTrue(table.isfrozen(result.error))
+	end
+end
+
+local function child(assertions: Assertions, parent: Instance, name: string, className: string): Instance
+	local instance = parent:FindFirstChild(name)
+	assertions.isNotNil(instance)
+	if instance == nil then
+		error("[ATD_TEST_FIXTURE][code=EXPECTED_CHILD_MISSING]", 0)
+	end
+	assertions.equal(instance.ClassName, className)
+	return instance
+end
+
+local function bindActiveHandlers(server: Server, role: RuntimePlaceRole, callback: ServerRemoteRegistry.Handler?)
+	local selectedHandler: ServerRemoteRegistry.Handler = callback or function(_player: Player) end
+	for _, definition in FULL_REGISTRY:listForRole(role) do
+		if definition.direction == "ClientToServer" then
+			server:registerHandler(definition.name, selectedHandler)
+		end
+	end
+end
+
+local function fakeConnector(
+	disconnectCallback: ((RemoteEvent) -> ())?,
+	connectCallback: ((RemoteEvent, ServerRemoteRegistry.Handler) -> ())?
+): ServerRemoteRegistry.ConnectAdapter
+	return function(remote: RemoteEvent, handler: ServerRemoteRegistry.Handler): RBXScriptConnection
+		if connectCallback ~= nil then
+			connectCallback(remote, handler)
+		end
+		return RobloxAdapter.createConnection(function()
+			if disconnectCallback ~= nil then
+				disconnectCallback(remote)
+			end
+		end) :: any
+	end
+end
+
+local function initialize(server: Server)
+	local lifecycle = server:getServiceDefinition()
+	if lifecycle.initialize == nil then
+		error("[ATD_TEST_FIXTURE][code=INITIALIZE_MISSING]", 0)
+	end
+	lifecycle.initialize()
+end
+
+local function start(server: Server)
+	local lifecycle = server:getServiceDefinition()
+	if lifecycle.start == nil then
+		error("[ATD_TEST_FIXTURE][code=START_MISSING]", 0)
+	end
+	lifecycle.start()
+end
+
+local function shutdown(server: Server)
+	local lifecycle = server:getServiceDefinition()
+	if lifecycle.shutdown == nil then
+		error("[ATD_TEST_FIXTURE][code=SHUTDOWN_MISSING]", 0)
+	end
+	lifecycle.shutdown()
+end
+
+local function assertNoPublishedRoot(assertions: Assertions)
+	assertions.isNil(ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME))
+end
+
+return TestHarness.suite("fixed remote runtime and client lookup", {
+	TestHarness.case(
+		"publishes the exact Match tree only after binding and disconnects before destruction",
+		function(assertions)
+			assertNoPublishedRoot(assertions)
+			local connectedNames = {}
+			local disconnectedNames = {}
+			local publishedDuringConnect = false
+			local rootMissingDuringDisconnect = false
+			local callbacks: { [string]: ServerRemoteRegistry.Handler } = {}
+			local handledCount = 0
+			local handledPlayer: Player? = nil
+
+			local server = ServerRemoteRegistry.new(
+				loggerFor("Match"),
+				FULL_REGISTRY,
+				ReplicatedStorage,
+				"Match",
+				fakeConnector(function(remote)
+					table.insert(disconnectedNames, remote.Parent.Name)
+					if ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME) == nil then
+						rootMissingDuringDisconnect = true
+					end
+				end, function(remote, handler)
+					table.insert(connectedNames, remote.Parent.Name)
+					callbacks[remote.Parent.Name] = handler
+					local root = remote.Parent.Parent.Parent
+					if root.Parent ~= nil or ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME) ~= nil then
+						publishedDuringConnect = true
+					end
+				end)
+			)
+			bindActiveHandlers(server, "Match", function(player: Player)
+				handledCount += 1
+				handledPlayer = player
+			end)
+
+			local service = server:getServiceDefinition()
+			assertions.equal(service.name, "NetworkRegistry")
+			assertions.isTrue(table.isfrozen(service))
+			assertions.equal(server:getServiceDefinition(), service)
+			initialize(server)
+			assertions.equal(server:getState(), "Initialized")
+			assertions.isFalse(publishedDuringConnect)
+			assertions.equal(
+				table.concat(connectedNames, ","),
+				"TestClientEvent,TestNoResponseRequest,TestResponseRequest"
+			)
+
+			local root = child(assertions, ReplicatedStorage, RemoteRegistry.ROOT_NAME, "Folder")
+			assertions.equal(#root:GetChildren(), 1)
+			local version = child(assertions, root, RemoteRegistry.VERSION_NAME, "Folder")
+			assertions.equal(#version:GetChildren(), 3)
+			assertions.isNil(version:FindFirstChild("TestServerEvent"))
+
+			local clientEvent = child(assertions, version, "TestClientEvent", "Folder")
+			assertions.equal(#clientEvent:GetChildren(), 1)
+			child(assertions, clientEvent, "Event", "RemoteEvent")
+			local noResponse = child(assertions, version, "TestNoResponseRequest", "Folder")
+			assertions.equal(#noResponse:GetChildren(), 1)
+			child(assertions, noResponse, "Request", "RemoteEvent")
+			local response = child(assertions, version, "TestResponseRequest", "Folder")
+			assertions.equal(#response:GetChildren(), 2)
+			child(assertions, response, "Request", "RemoteEvent")
+			child(assertions, response, "Response", "RemoteEvent")
+
+			local player = Instance.new("Player")
+			local clientEventCallback = callbacks.TestClientEvent
+			clientEventCallback(player, PRIVATE_SENTINEL)
+			assertions.equal(handledCount, 1)
+			assertions.equal(handledPlayer, player)
+			player:Destroy()
+
+			start(server)
+			assertions.equal(server:getState(), "Started")
+			shutdown(server)
+			assertions.equal(server:getState(), "Shutdown")
+			assertions.equal(#disconnectedNames, 3)
+			assertions.isFalse(rootMissingDuringDisconnect)
+			assertNoPublishedRoot(assertions)
+		end
+	),
+
+	TestHarness.case("keeps Lobby Match and Development endpoint sets isolated", function(assertions)
+		assertNoPublishedRoot(assertions)
+		local expectations = {
+			Lobby = "TestResponseRequest,TestServerEvent",
+			Match = "TestClientEvent,TestNoResponseRequest,TestResponseRequest",
+			Development = "TestClientEvent,TestNoResponseRequest,TestResponseRequest,TestServerEvent",
+		}
+
+		for _, role in { "Lobby", "Match", "Development" } :: { RuntimePlaceRole } do
+			local server = ServerRemoteRegistry.new(
+				loggerFor(role),
+				FULL_REGISTRY,
+				ReplicatedStorage,
+				role,
+				fakeConnector(nil, nil)
+			)
+			bindActiveHandlers(server, role)
+			initialize(server)
+
+			local root = child(assertions, ReplicatedStorage, RemoteRegistry.ROOT_NAME, "Folder")
+			local version = child(assertions, root, RemoteRegistry.VERSION_NAME, "Folder")
+			local names = {}
+			for _, endpoint in version:GetChildren() do
+				table.insert(names, endpoint.Name)
+			end
+			table.sort(names)
+			assertions.equal(table.concat(names, ","), expectations[role])
+
+			start(server)
+			shutdown(server)
+			assertNoPublishedRoot(assertions)
+		end
+	end),
+
+	TestHarness.case(
+		"rejects unknown inactive wrong-direction invalid and duplicate bindings privately",
+		function(assertions)
+			assertNoPublishedRoot(assertions)
+			local server = ServerRemoteRegistry.new(
+				loggerFor("Lobby"),
+				FULL_REGISTRY,
+				ReplicatedStorage,
+				"Lobby",
+				fakeConnector(nil, nil)
+			)
+
+			local unknown = captureError(assertions, function()
+				server:registerHandler(PRIVATE_SENTINEL .. "/arbitrary/path", function(_player: Player) end)
+			end)
+			assertCode(assertions, unknown, "UNKNOWN_ENDPOINT")
+			assertions.contains(unknown, "[endpoint=<unknown>]")
+			assertions.isNil(string.find(unknown, PRIVATE_SENTINEL, 1, true))
+
+			local inactive = captureError(assertions, function()
+				server:registerHandler("TestClientEvent", function(_player: Player) end)
+			end)
+			assertCode(assertions, inactive, "INACTIVE_ENDPOINT")
+			assertions.contains(inactive, "[endpoint=TestClientEvent]")
+
+			local wrongDirection = captureError(assertions, function()
+				server:registerHandler("TestServerEvent", function(_player: Player) end)
+			end)
+			assertCode(assertions, wrongDirection, "WRONG_DIRECTION")
+
+			local invalidHandler = captureError(assertions, function()
+				server:registerHandler("TestResponseRequest", { private = PRIVATE_SENTINEL } :: any)
+			end)
+			assertCode(assertions, invalidHandler, "INVALID_HANDLER")
+			assertions.isNil(string.find(invalidHandler, PRIVATE_SENTINEL, 1, true))
+
+			server:registerHandler("TestResponseRequest", function(_player: Player) end)
+			local duplicate = captureError(assertions, function()
+				server:registerHandler("TestResponseRequest", function(_player: Player) end)
+			end)
+			assertCode(assertions, duplicate, "DUPLICATE_HANDLER")
+			assertNoPublishedRoot(assertions)
+		end
+	),
+
+	TestHarness.case("fails closed on missing handlers and rolls back a partial listener bind", function(assertions)
+		assertNoPublishedRoot(assertions)
+		local missingServer = ServerRemoteRegistry.new(
+			loggerFor("Match"),
+			FULL_REGISTRY,
+			ReplicatedStorage,
+			"Match",
+			fakeConnector(nil, nil)
+		)
+		local missing = captureError(assertions, function()
+			initialize(missingServer)
+		end)
+		assertCode(assertions, missing, "MISSING_HANDLER")
+		assertions.contains(missing, "[endpoint=TestClientEvent]")
+		assertions.equal(missingServer:getState(), "Failed")
+		assertNoPublishedRoot(assertions)
+
+		local connectionAttempts = 0
+		local disconnectCount = 0
+		local rollbackServer = ServerRemoteRegistry.new(
+			loggerFor("Match"),
+			FULL_REGISTRY,
+			ReplicatedStorage,
+			"Match",
+			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Handler): RBXScriptConnection
+				connectionAttempts += 1
+				if connectionAttempts == 2 then
+					error(PRIVATE_SENTINEL, 0)
+				end
+				return RobloxAdapter.createConnection(function()
+					disconnectCount += 1
+				end) :: any
+			end
+		)
+		bindActiveHandlers(rollbackServer, "Match")
+		local connectionFailure = captureError(assertions, function()
+			initialize(rollbackServer)
+		end)
+		assertCode(assertions, connectionFailure, "CONNECTION_FAILED")
+		assertions.isNil(string.find(connectionFailure, PRIVATE_SENTINEL, 1, true))
+		assertions.equal(connectionAttempts, 2)
+		assertions.equal(disconnectCount, 1)
+		assertions.equal(rollbackServer:getState(), "Failed")
+		assertNoPublishedRoot(assertions)
+
+		local invalidConnectionServer = ServerRemoteRegistry.new(
+			loggerFor("Match"),
+			FULL_REGISTRY,
+			ReplicatedStorage,
+			"Match",
+			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Handler): RBXScriptConnection
+				return { Disconnect = function() end } :: any
+			end
+		)
+		bindActiveHandlers(invalidConnectionServer, "Match")
+		local invalidConnection = captureError(assertions, function()
+			initialize(invalidConnectionServer)
+		end)
+		assertCode(assertions, invalidConnection, "INVALID_CONNECTION")
+		assertions.equal(invalidConnectionServer:getState(), "Failed")
+		assertNoPublishedRoot(assertions)
+	end),
+
+	TestHarness.case("preserves pre-existing root conflicts and distinguishes their classes", function(assertions)
+		assertNoPublishedRoot(assertions)
+		local existingFolder = Instance.new("Folder")
+		existingFolder.Name = RemoteRegistry.ROOT_NAME
+		existingFolder.Parent = ReplicatedStorage
+		local folderServer = ServerRemoteRegistry.new(loggerFor("Lobby"), EMPTY_REGISTRY, ReplicatedStorage, "Lobby")
+		local folderConflict = captureError(assertions, function()
+			initialize(folderServer)
+		end)
+		assertCode(assertions, folderConflict, "ROOT_CONFLICT")
+		assertions.equal(existingFolder.Parent, ReplicatedStorage)
+		existingFolder:Destroy()
+
+		local existingModel = Instance.new("Model")
+		existingModel.Name = RemoteRegistry.ROOT_NAME
+		existingModel.Parent = ReplicatedStorage
+		local modelServer = ServerRemoteRegistry.new(loggerFor("Lobby"), EMPTY_REGISTRY, ReplicatedStorage, "Lobby")
+		local classConflict = captureError(assertions, function()
+			initialize(modelServer)
+		end)
+		assertCode(assertions, classConflict, "ROOT_WRONG_CLASS")
+		assertions.equal(existingModel.Parent, ReplicatedStorage)
+		existingModel:Destroy()
+		assertNoPublishedRoot(assertions)
+	end),
+
+	TestHarness.case("allows only one owner when listener binding re-enters initialization", function(assertions)
+		assertNoPublishedRoot(assertions)
+		local winner = ServerRemoteRegistry.new(
+			loggerFor("Match"),
+			FULL_REGISTRY,
+			ReplicatedStorage,
+			"Match",
+			fakeConnector(nil, nil)
+		)
+		bindActiveHandlers(winner, "Match")
+
+		local reentered = false
+		local loserDisconnectCount = 0
+		local loser = ServerRemoteRegistry.new(
+			loggerFor("Match"),
+			FULL_REGISTRY,
+			ReplicatedStorage,
+			"Match",
+			function(_remote: RemoteEvent, _handler: ServerRemoteRegistry.Handler): RBXScriptConnection
+				if not reentered then
+					reentered = true
+					initialize(winner)
+				end
+				return RobloxAdapter.createConnection(function()
+					loserDisconnectCount += 1
+				end) :: any
+			end
+		)
+		bindActiveHandlers(loser, "Match")
+
+		local rejection = captureError(assertions, function()
+			initialize(loser)
+		end)
+		assertCode(assertions, rejection, "ROOT_CONFLICT")
+		assertions.isTrue(reentered)
+		assertions.equal(winner:getState(), "Initialized")
+		assertions.equal(loser:getState(), "Failed")
+		assertions.equal(loserDisconnectCount, 3)
+		local ownedRoot = ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME)
+		assertions.isNotNil(ownedRoot)
+
+		start(winner)
+		shutdown(winner)
+		assertNoPublishedRoot(assertions)
+	end),
+
+	TestHarness.case("rejects lifecycle and handler re-entry without duplicating ownership", function(assertions)
+		assertNoPublishedRoot(assertions)
+		local server =
+			ServerRemoteRegistry.new(loggerFor("Development"), EMPTY_REGISTRY, ReplicatedStorage, "Development")
+		initialize(server)
+		local root = ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME)
+		assertions.isNotNil(root)
+
+		local initializeAgain = captureError(assertions, function()
+			initialize(server)
+		end)
+		assertCode(assertions, initializeAgain, "INVALID_STATE")
+		local lateBinding = captureError(assertions, function()
+			server:registerHandler("Anything", function(_player: Player) end)
+		end)
+		assertCode(assertions, lateBinding, "INVALID_STATE")
+		assertions.equal(ReplicatedStorage:FindFirstChild(RemoteRegistry.ROOT_NAME), root)
+
+		start(server)
+		local startAgain = captureError(assertions, function()
+			start(server)
+		end)
+		assertCode(assertions, startAgain, "INVALID_STATE")
+		shutdown(server)
+		local shutdownAgain = captureError(assertions, function()
+			shutdown(server)
+		end)
+		assertCode(assertions, shutdownAgain, "INVALID_STATE")
+		assertNoPublishedRoot(assertions)
+	end),
+
+	TestHarness.case("resolves only fixed active leaves through one decreasing total deadline", function(assertions)
+		assertNoPublishedRoot(assertions)
+		local server = ServerRemoteRegistry.new(
+			loggerFor("Match"),
+			FULL_REGISTRY,
+			ReplicatedStorage,
+			"Match",
+			fakeConnector(nil, nil)
+		)
+		bindActiveHandlers(server, "Match")
+		initialize(server)
+
+		local now = 10
+		local waits = {}
+		local remainingValues = {}
+		local result = resolveForTests(FULL_REGISTRY, ReplicatedStorage, "Match", "TestResponseRequest", 1, function()
+			return now
+		end, function(parent: Instance, childName: string, remaining: number): Instance?
+			table.insert(waits, `{parent.Name}/{childName}`)
+			table.insert(remainingValues, remaining)
+			now += 0.05
+			return parent:FindFirstChild(childName)
+		end)
+		assertions.isTrue(result.ok)
+		if result.ok then
+			assertions.equal(result.value.name, "TestResponseRequest")
+			assertions.isNotNil(result.value.request)
+			assertions.isNotNil(result.value.response)
+			assertions.isNil(result.value.event)
+			assertions.equal((result.value.request :: RemoteEvent).ClassName, "RemoteEvent")
+			assertions.equal((result.value.response :: RemoteEvent).ClassName, "RemoteEvent")
+			assertions.isTrue(table.isfrozen(result))
+			assertions.isTrue(table.isfrozen(result.value))
+		end
+		assertions.equal(
+			table.concat(waits, ","),
+			"ReplicatedStorage/ATDNetwork,ATDNetwork/v1,v1/TestResponseRequest,TestResponseRequest/Request,TestResponseRequest/Response"
+		)
+		assertions.equal(#remainingValues, 5)
+		for index = 2, #remainingValues do
+			assertions.isTrue(remainingValues[index] < remainingValues[index - 1])
+		end
+
+		start(server)
+		shutdown(server)
+		assertNoPublishedRoot(assertions)
+	end),
+
+	TestHarness.case("resolves event and no-response request leaves without fabricating siblings", function(assertions)
+		assertNoPublishedRoot(assertions)
+		local server = ServerRemoteRegistry.new(
+			loggerFor("Match"),
+			FULL_REGISTRY,
+			ReplicatedStorage,
+			"Match",
+			fakeConnector(nil, nil)
+		)
+		bindActiveHandlers(server, "Match")
+		initialize(server)
+
+		local cases = {
+			{ name = "TestClientEvent", expectedLeaf = "event" },
+			{ name = "TestNoResponseRequest", expectedLeaf = "request" },
+		}
+		for _, fixture in cases do
+			local result = resolveForTests(FULL_REGISTRY, ReplicatedStorage, "Match", fixture.name, 1, function()
+				return 0
+			end, function(parent: Instance, childName: string, _remaining: number): Instance?
+				return parent:FindFirstChild(childName)
+			end)
+			assertions.isTrue(result.ok)
+			if result.ok then
+				assertions.equal(result.value.name, fixture.name)
+				assertions.equal(result.value.event ~= nil, fixture.expectedLeaf == "event")
+				assertions.equal(result.value.request ~= nil, fixture.expectedLeaf == "request")
+				assertions.isNil(result.value.response)
+			end
+		end
+
+		start(server)
+		shutdown(server)
+		assertNoPublishedRoot(assertions)
+	end),
+
+	TestHarness.case("keeps dependency injection absent from a production-located module", function(assertions)
+		local sourceModule = script.Parent.Parent.ProductionClientNetworking.ClientRemoteLookup
+		local productionLocatedClone = sourceModule:Clone()
+		productionLocatedClone.Name = "ClientRemoteLookupProductionLocationProbe"
+		productionLocatedClone.Parent = ReplicatedStorage
+
+		local loaded = require(productionLocatedClone) :: any
+		assertions.equal(type(loaded.resolve), "function")
+		assertions.isNil(loaded.resolveForTests)
+		assertions.isTrue(table.isfrozen(loaded))
+		productionLocatedClone:Destroy()
+	end),
+
+	TestHarness.case(
+		"rejects arbitrary inactive malformed and counterfeit lookups without creating Instances",
+		function(assertions)
+			assertNoPublishedRoot(assertions)
+			local waitCount = 0
+			local function clock(): number
+				return 0
+			end
+			local function waitAdapter(_parent: Instance, _name: string, _remaining: number): Instance?
+				waitCount += 1
+				return nil
+			end
+
+			local unknown = resolveForTests(
+				FULL_REGISTRY,
+				ReplicatedStorage,
+				"Lobby",
+				PRIVATE_SENTINEL .. "/arbitrary/path",
+				1,
+				clock,
+				waitAdapter
+			)
+			assertLookupCode(assertions, unknown, "UNKNOWN_ENDPOINT")
+			if not unknown.ok then
+				assertions.isNil(string.find(unknown.error.message, PRIVATE_SENTINEL, 1, true))
+			end
+
+			local inactive =
+				resolveForTests(FULL_REGISTRY, ReplicatedStorage, "Lobby", "TestClientEvent", 1, clock, waitAdapter)
+			assertLookupCode(assertions, inactive, "INACTIVE_ENDPOINT")
+			local invalidTimeout =
+				resolveForTests(FULL_REGISTRY, ReplicatedStorage, "Lobby", "TestServerEvent", 6, clock, waitAdapter)
+			assertLookupCode(assertions, invalidTimeout, "INVALID_TIMEOUT")
+			local invalidParentInstance = Instance.new("Folder")
+			local invalidParent =
+				resolveForTests(FULL_REGISTRY, invalidParentInstance, "Lobby", "TestServerEvent", 1, clock, waitAdapter)
+			assertLookupCode(assertions, invalidParent, "INVALID_PARENT")
+			invalidParentInstance:Destroy()
+			local counterfeit =
+				resolveForTests({} :: any, ReplicatedStorage, "Lobby", "TestServerEvent", 1, clock, waitAdapter)
+			assertLookupCode(assertions, counterfeit, "INVALID_REGISTRY")
+			assertions.equal(waitCount, 0)
+
+			local invalidRole = resolveForTests(
+				FULL_REGISTRY,
+				ReplicatedStorage,
+				"Other" :: any,
+				"TestServerEvent",
+				1,
+				clock,
+				waitAdapter
+			)
+			assertLookupCode(assertions, invalidRole, "INVALID_ROLE")
+			local invalidClock =
+				resolveForTests(FULL_REGISTRY, ReplicatedStorage, "Lobby", "TestServerEvent", 1, {} :: any, waitAdapter)
+			assertLookupCode(assertions, invalidClock, "INVALID_CLOCK")
+			local invalidWait =
+				resolveForTests(FULL_REGISTRY, ReplicatedStorage, "Lobby", "TestServerEvent", 1, clock, {} :: any)
+			assertLookupCode(assertions, invalidWait, "INVALID_WAIT_ADAPTER")
+			assertions.equal(waitCount, 0)
+
+			local failedWait = resolveForTests(
+				FULL_REGISTRY,
+				ReplicatedStorage,
+				"Lobby",
+				"TestServerEvent",
+				1,
+				clock,
+				function(_parent: Instance, _name: string, _remaining: number): Instance?
+					error(PRIVATE_SENTINEL, 0)
+				end
+			)
+			assertLookupCode(assertions, failedWait, "LOOKUP_FAILED")
+			if not failedWait.ok then
+				assertions.isNil(string.find(failedWait.error.message, PRIVATE_SENTINEL, 1, true))
+			end
+
+			local unrelatedRoot = Instance.new("Folder")
+			unrelatedRoot.Name = RemoteRegistry.ROOT_NAME
+			local unrelated = resolveForTests(
+				FULL_REGISTRY,
+				ReplicatedStorage,
+				"Lobby",
+				"TestServerEvent",
+				1,
+				clock,
+				function(_parent: Instance, _name: string, _remaining: number): Instance?
+					return unrelatedRoot
+				end
+			)
+			assertLookupCode(assertions, unrelated, "UNEXPECTED_INSTANCE")
+			unrelatedRoot:Destroy()
+			assertNoPublishedRoot(assertions)
+		end
+	),
+
+	TestHarness.case("fails on wrong classes clock anomalies and elapsed total deadlines", function(assertions)
+		assertNoPublishedRoot(assertions)
+		local root = Instance.new("Folder")
+		root.Name = RemoteRegistry.ROOT_NAME
+		local version = Instance.new("Folder")
+		version.Name = RemoteRegistry.VERSION_NAME
+		version.Parent = root
+		local endpoint = Instance.new("Folder")
+		endpoint.Name = "TestResponseRequest"
+		endpoint.Parent = version
+		local wrongRequest = Instance.new("Folder")
+		wrongRequest.Name = "Request"
+		wrongRequest.Parent = endpoint
+		root.Parent = ReplicatedStorage
+
+		local wrongClass = resolveForTests(
+			FULL_REGISTRY,
+			ReplicatedStorage,
+			"Lobby",
+			"TestResponseRequest",
+			1,
+			function()
+				return 0
+			end,
+			function(parent: Instance, name: string, _remaining: number): Instance?
+				return parent:FindFirstChild(name)
+			end
+		)
+		assertLookupCode(assertions, wrongClass, "WRONG_CLASS")
+		if not wrongClass.ok then
+			assertions.equal(wrongClass.error.path, "ATDNetwork.v1.TestResponseRequest.Request")
+		end
+		assertions.isNil(endpoint:FindFirstChild("Response"))
+		root:Destroy()
+
+		local clockReads = 0
+		local backwards = resolveForTests(FULL_REGISTRY, ReplicatedStorage, "Lobby", "TestServerEvent", 1, function()
+			clockReads += 1
+			return if clockReads == 1 then 1 else 0
+		end, function(_parent: Instance, _name: string, _remaining: number): Instance?
+			error(PRIVATE_SENTINEL, 0)
+		end)
+		assertLookupCode(assertions, backwards, "CLOCK_ANOMALY")
+
+		local deadlineRoot = Instance.new("Folder")
+		deadlineRoot.Name = RemoteRegistry.ROOT_NAME
+		local deadlineVersion = Instance.new("Folder")
+		deadlineVersion.Name = RemoteRegistry.VERSION_NAME
+		deadlineVersion.Parent = deadlineRoot
+		deadlineRoot.Parent = ReplicatedStorage
+		local now = 0
+		local remainingValues = {}
+		local elapsed = resolveForTests(FULL_REGISTRY, ReplicatedStorage, "Lobby", "TestServerEvent", 1, function()
+			return now
+		end, function(parent: Instance, name: string, remaining: number): Instance?
+			table.insert(remainingValues, remaining)
+			if #remainingValues == 1 then
+				now = 0.6
+			else
+				now = 1.01
+			end
+			return parent:FindFirstChild(name)
+		end)
+		assertLookupCode(assertions, elapsed, "LOOKUP_TIMEOUT")
+		assertions.equal(#remainingValues, 2)
+		assertions.isTrue(remainingValues[2] < remainingValues[1])
+		assertions.isNil(deadlineVersion:FindFirstChild("TestServerEvent"))
+		deadlineRoot:Destroy()
+		assertNoPublishedRoot(assertions)
+	end),
+})

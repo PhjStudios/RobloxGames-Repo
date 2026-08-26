@@ -7,13 +7,15 @@ Ant Tower Defense. Packet 05.4 created it on 2026-08-26. It separates checks
 that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
-Phase 05 and its fresh combined exit audit are complete. Packet 06.1 is next but
-has not begun.
+Phase 05 and its fresh combined exit audit are complete. Phase 06 is active;
+Packet 06.1 is complete and Packet 06.2 is next but has not begun.
 
-The current repository has no gameplay, networking, persistence, UI, or
-external-service implementation. A separate private test universe has not been
-created or configured. Future tests are therefore marked `Deferred`,
-`Unavailable`, or `Prohibited`; they are never presented as passing evidence.
+The current repository has a fixed remote-registry/network-ownership foundation
+with an empty lasting production endpoint registry. It still has no gameplay,
+persistence, UI, or external-service implementation. A separate private test
+universe has not been created or configured. Future tests are therefore marked
+`Deferred`, `Unavailable`, or `Prohibited`; they are never presented as passing
+evidence.
 
 ## Status vocabulary
 
@@ -567,12 +569,15 @@ linked historical document for the original Studio evidence.
   containment.
 - **Test category:** automated protocol tests plus Studio multi-client security
   regression.
-- **Current status:** `Deferred`; Phase 06 networking has not begun and no remotes
-  exist.
-- **Environment:** future headless pure validator tests and Studio Server &
-  Clients with an adversarial client harness.
-- **Command or procedure:** none yet; Packet 06.5 must define stable attack cases
-  before any feature remote is accepted.
+- **Current status:** `Deferred` for the complete record. Packet 06.1's headless
+  fixed-registry, ownership, role-isolation, conflict, cleanup, and bounded lookup
+  subset passes; payload, limiter, envelope, authorization, replay, full abuse,
+  and Studio multi-client coverage remain deferred.
+- **Environment:** current isolated Lune DataModel for the Packet 06.1 subset;
+  future Studio Server & Clients with an adversarial client harness.
+- **Command or procedure:** run `lune run tests/run.luau` for the current subset.
+  Packet 06.5 must define and run the complete stable attack set before any
+  feature remote is accepted.
 - **Required players or devices:** zero for pure validators; at least two Studio
   clients for cross-player authorization and throttling isolation.
 - **Authorization requirement:** none for local contained tests; do not attack a
@@ -584,7 +589,8 @@ linked historical document for the original Studio evidence.
   requests fail closed with bounded stable errors while valid peers remain usable.
 - **Cleanup procedure:** stop adversarial clients, destroy test-owned remotes, and
   retain no raw payload logs.
-- **Phase or prerequisite:** Packet 06.5 initially, expanded by Phase 38.
+- **Phase or prerequisite:** Packet 06.1 subset complete; Packet 06.5 completes
+  the initial record, expanded by Phase 38.
 
 ## Published-client and private-version tests
 

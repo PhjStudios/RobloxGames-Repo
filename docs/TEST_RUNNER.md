@@ -2,7 +2,7 @@
 
 ## Decision record
 
-- Status: Phase 05 complete; Packet 06.1 is next but has not begun
+- Status: Phase 05 and Packet 06.1 complete; Packet 06.2 is next
 - Research date: 2026-08-26
 - Selected runtime: Lune 0.10.5
 - Rokit tool identifier: `lune-org/lune@0.10.5`
@@ -38,13 +38,17 @@ Instance-based `require`. The adapter will not attempt to run the full game or
 pretend to reproduce Roblox engine behavior.
 
 The principal compatibility risk is semantic drift between Lune's partial
-Roblox environment and the live engine. The suite therefore targets existing
-pure shared contracts. It excludes client/server bootstraps, shutdown hooks,
-services, signals, and other engine integration. Genuine Roblox `Instance`
-cleanup can be exercised through Lune's DataModel implementation; the
-`RBXScriptConnection` cleanup branch may use a narrowly registered test double
-whose `typeof` adapter delegates every unregistered value to the native
-function. Studio remains the authority for engine integration regressions.
+Roblox environment and the live engine. The suite primarily targets pure shared
+contracts. Packet 06.1 additionally maps only the two common networking runtime
+ModuleScripts into test-only `ServerStorage`, where an injected connection
+adapter exercises their deterministic ownership and lookup logic without
+claiming a full engine simulation. The project still excludes client/server
+bootstraps, shutdown hooks, live remote delivery, and other engine integration.
+Genuine Roblox `Instance` cleanup can be exercised through Lune's DataModel
+implementation; the `RBXScriptConnection` cleanup branch may use a narrowly
+registered test double whose `typeof` adapter delegates every unregistered value
+to the native function. Studio remains the authority for engine integration
+regressions.
 
 ## Candidates considered
 
@@ -153,8 +157,21 @@ tools.
 
 `test.project.json` is build-only and has no `servePlaceIds`. It maps the
 authoritative `src/shared` tree plus explicit `tests/` roots into an isolated
-DataModel. It maps no `src/server` or `src/client` path and contains no runnable
+DataModel. Packet 06.1 adds only
+`src/server/common/networking/ServerRemoteRegistry.luau` and
+`src/client/common/networking/ClientRemoteLookup.luau` beneath explicit
+`ServerStorage.AutomatedTests` roots. It maps no bootstrap, shutdown hook,
+place-specific source, or other server/client path and contains no runnable
 `Script` or `LocalScript`.
+
+The production client API accepts only endpoint name and total timeout; it
+internally selects `ProductionRemotes`, actual `ReplicatedStorage`, centralized
+place role, `os.clock()`, and bounded `WaitForChild()`. The dependency-injected
+resolver used by the runtime spec is attached only when the module's exact
+identity is
+`ServerStorage.AutomatedTests.ProductionClientNetworking.ClientRemoteLookup`.
+The production `StarterPlayerScripts` location fails this structural gate and
+exposes no injection seam.
 
 The coordinator:
 
@@ -234,6 +251,13 @@ class, authoritative `src/` file, and byte-for-byte source. Missing, unexpected,
 renamed, replaced, or altered source containers fail. Exact class counts, role
 isolation, test path/name checks, and test-only source markers remain additional
 defenses. Tests cannot ship merely because they exist in the repository.
+
+The two Packet 06.1 production runtime modules mapped into the Test build are
+explicit source-under-test, not test dependencies. The verifier requires each at
+one exact test-only `ServerStorage` path with source identical to its
+authoritative `src/` file. It also requires all three production builds to
+contain those modules only at their normal common client/server paths and to
+remain completely free of test modules and fixtures.
 
 ## Packet 05.1 verification evidence
 
@@ -322,3 +346,34 @@ production source, Studio-authored content, or either Roblox place.
   introduced.
 - Fresh independent coverage, quality, privacy, runner, and isolation reviews
   found no unresolved P0, P1, or P2 issue.
+
+## Packet 06.1 completion verification
+
+Packet 06.1 extends normal discovery without
+changing the canonical command or its exit-code contract:
+
+- Ten suites and all 106 cases passed in canonical path and declaration order.
+- `RemoteRegistry.spec.luau` contributes 18 cases for exact definition shape,
+  the 128-definition and 48-byte-name boundaries, canonical ordering and role
+  views, deep freezing and provenance, duplicate/conflicting identity,
+  unsupported combinations, hostile metatables, and privacy-safe failures.
+- `RemoteRuntime.spec.luau` contributes 12 cases for exact parent-last server
+  publication, role isolation, complete and unique handler binding, conflict
+  preservation, partial-bind rollback, duplicate-owner/re-entry rejection,
+  listener-before-root cleanup, every request/response/event leaf shape,
+  production dependency-seam exclusion, and bounded exact client lookup with no
+  creation.
+- Deterministic remote definitions come from `tests/fixtures/NetworkFixtures.luau`;
+  the lasting production registry remains empty and no gameplay catalog was
+  added.
+- `lune run tests/verify-builds.luau` passed with 34 ModuleScripts, one Script,
+  and one LocalScript in Default, Lobby, and Match. Test contained 31 shared
+  ModuleScripts, exactly the two explicitly mapped networking runtime modules,
+  19 test-owned ModuleScripts, and zero runnable scripts.
+- The verifier retained exact source identity, production test exclusion,
+  Lobby/Match source isolation, intended bootstrap counts, and exact generated
+  output removal.
+
+This is focused source/test evidence only. Live Roblox remote delivery and
+shutdown remain subject to the authorized unsaved Studio regression. Packet
+06.1 is complete; Phase 06 and Gate A remain open.

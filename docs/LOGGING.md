@@ -23,6 +23,12 @@ adding a global logger, gameplay service, network boundary, or shutdown hook.
 - External services enabled: no
 - Place saved or published: no
 
+Those fields record Packet 03.3 at completion. Packet 06.1 adds the common
+server network registry as an integrated consumer and
+narrowly extends the closed vocabulary with the `network` subsystem plus
+`endpoint` and `networkState`. It adds no remote log sink or client-authored log
+path.
+
 ## Architecture boundary
 
 `EnvironmentContext` creates validated runtime identity records. `Log` binds
@@ -125,7 +131,7 @@ The ordering rules are deterministic:
 For example, the Lobby server bootstrap emits:
 
 ```text
-[ATD][INFO][context=server][role=Lobby][placeId=100561454756026][environment=studio][subsystem=bootstrap][event=ready][cleanupState=Active][cleanupTaskCount=1][lifecycleState=Started][serviceCount=0] Server bootstrap ready
+[ATD][INFO][context=server][role=Lobby][placeId=100561454756026][environment=studio][subsystem=bootstrap][event=ready][cleanupState=Active][cleanupTaskCount=1][lifecycleState=Started][serviceCount=1] Server bootstrap ready
 ```
 
 An event must begin with an ASCII letter and may then contain ASCII letters,
@@ -135,8 +141,9 @@ one logical record on one Output line.
 
 ## Closed public vocabulary
 
-Packet 03.3 deliberately keeps public logging categories small. Public logger
-calls accept only these subsystems:
+Packet 03.3 introduced a deliberately small public vocabulary. The current
+public logger calls accept only these subsystems, including the two later narrow
+configuration and network extensions:
 
 | Subsystem | Current owner |
 | --- | --- |
@@ -145,6 +152,7 @@ calls accept only these subsystems:
 | `place-role` | Configuration and place-pairing rejection |
 | `lifecycle` | Service registration, ordering, stage, and callback failure |
 | `cleanup` | Cleanup construction, ownership, state, and aggregate failure |
+| `network` | Fixed endpoint ownership, binding, lifecycle state, and static rejection |
 | `shutdown` | Server close hook, private wait budget, and terminal outcome |
 
 `environment` and `log` are reserved internal diagnostic categories. The former
@@ -157,7 +165,7 @@ The logger owns these base names and rejects attempts to supply them as custom
 fields: `context`, `environment`, `event`, `placeId`, `role`, `severity`, and
 `subsystem`.
 
-The complete Packet 03.3 custom-field allowlist is:
+The current complete custom-field allowlist is:
 
 | Field | Intended safe value |
 | --- | --- |
@@ -165,11 +173,13 @@ The complete Packet 03.3 custom-field allowlist is:
 | `cleanupState` | Typed cleanup state |
 | `cleanupTaskCount` | Number of registered cleanup tasks |
 | `closeReason` | Engine-authored `Enum.CloseReason.Name` token |
-| `code` | Stable configuration, lifecycle, cleanup, or logging error code |
+| `code` | Stable configuration, lifecycle, cleanup, network, or logging error code |
 | `configurationFamilyCount` | Fixed number of loaded core configuration families |
 | `container` | Static cleanup-owner label |
+| `endpoint` | Canonical registry endpoint or static `<unknown>` placeholder |
 | `issueCount` | Number of root validation issues in a frozen report |
 | `lifecycleState` | Typed lifecycle state |
+| `networkState` | Typed network-owner lifecycle state or static construction state |
 | `service` | Static service label or `<runner>` |
 | `serviceCount` | Number of registered lifecycle services |
 | `state` | Typed state attached to an error |
@@ -249,6 +259,17 @@ deliberately discarded:
 Studio regression cases threw unique secret sentinels from both paths and
 confirmed that neither sentinel appeared in the resulting records.
 
+### Network construction and binding failures
+
+The server network owner emits only static developer-authored summaries with a
+stable `code`, typed `networkState`, and either an authenticated canonical
+registry name or `<unknown>` in `endpoint`. Unknown, malformed, arbitrary-path,
+or non-string endpoint inputs are never copied into a record. Connector errors,
+handler values, callback errors, payloads, request IDs, Players, UserIds, and
+Instance paths are discarded rather than stringified. Packet 06.1 emits no
+per-request records; later rate-limit and malformed-request signals must remain
+aggregated and interval-limited as required by `docs/NETWORK_PROTOCOL.md`.
+
 ## Bootstrap integration
 
 The common server and client bootstraps now follow the same sequence:
@@ -263,9 +284,11 @@ The common server and client bootstraps now follow the same sequence:
 7. On validation failure, raise a production-visible static error containing
    only first code, issue count, and canonical path; create no lifecycle,
    cleanup, or shutdown resource.
-8. On success, emit a Studio-only `configuration/validated` record, then create
-   the zero-service lifecycle runner and `bootstrap` cleanup container
-   with that same logger.
+8. On success, emit a Studio-only `configuration/validated` record. The client
+   creates an empty lifecycle runner; the server constructs the fixed network
+   owner and registers its `NetworkRegistry` service before lifecycle
+   initialization. Both create a `bootstrap` cleanup container with the same
+   logger.
 9. Emit one Studio-only `ready` record containing resolved context, lifecycle
    state/count, and cleanup state/count.
 
@@ -300,9 +323,11 @@ structured failures, continued cleanup after a task failure, exact cached
 aggregate behavior, and suppression of arbitrary callback error reasons.
 
 These are focused packet harnesses, not a committed test framework. Phase 05
-later added a repository-owned runner, but the current 76 cases do not claim
-headless `Log` or `EnvironmentContext` coverage. The Studio evidence here and
-the deferred reusable-coverage boundary are indexed in `docs/TEST_MATRIX.md`.
+later added a repository-owned runner. The current 106 cases have no dedicated
+full `Log` or `EnvironmentContext` suite, though the 12 Packet 06.1 runtime cases
+exercise genuine loggers and prove private endpoint and connector sentinels are
+absent from network failures. The Studio evidence here and the deferred reusable
+coverage boundary are indexed in `docs/TEST_MATRIX.md`.
 
 ## Toolchain and build verification
 
@@ -357,8 +382,9 @@ saved or published.
 3. Clear Output and start Play.
 4. Expect exactly one server and one client `[ATD][INFO]` bootstrap `ready`
    record. Confirm role `Lobby`, PlaceId `100561454756026`, environment `studio`,
-   lifecycle `Started` with `serviceCount=0`, and cleanup `Active` with
-   `cleanupTaskCount=1`.
+   lifecycle `Started`, and cleanup `Active` with `cleanupTaskCount=1`. The
+   server has `serviceCount=1` for `NetworkRegistry`; the client has
+   `serviceCount=0`.
 5. Confirm there is no application warning or error, then stop Play.
    Current Packet 03.4 behavior also emits one server `shutdown started` record
    and one `shutdown completed` record with cleanup `Cleaned` and lifecycle
@@ -384,3 +410,8 @@ Phase 04 packet to extend the public vocabulary, narrowly adding the
 `configuration` subsystem and three fields documented above. Its source-load,
 report, privacy, bootstrap, and Studio evidence is recorded in
 `docs/CONFIGURATION_VALIDATION.md`.
+
+Packet 06.1's source and 106-of-106 headless completion evidence make the
+narrow `network` vocabulary extension recorded above. It creates no gameplay
+endpoint. Packet 06.1 is complete; Phase 06 and Gate A remain open. Its
+architecture and privacy boundary are recorded in `docs/NETWORK_PROTOCOL.md`.

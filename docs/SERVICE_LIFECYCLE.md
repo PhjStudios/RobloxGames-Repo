@@ -20,6 +20,11 @@ automatic shutdown hook.
 - Studio-authored content changed: no
 - Place saved or published: no
 
+Those fields record Packet 03.1 at completion. Packet 06.1 registers one
+foundation-only `NetworkRegistry`
+service on the server after configuration validation; the client remains at
+zero registered services. No gameplay service has been added.
+
 ## Public contract
 
 `ServiceLifecycle.new(logger)` creates an independent runner. The argument must
@@ -120,15 +125,19 @@ passed into them.
 
 ## Bootstrap integration
 
-The common server and client bootstraps validate the centralized place role and,
-as of Packet 04.5, the complete nine-family configuration before creating a
-lifecycle runner. Each resolves one environment context, creates one local
-logger, calls the shared `ConfigurationValidator.validateLoaded()` gate, passes
-the logger to the runner only after success, initializes it, and starts it with
-zero registered services. Their Studio-only ready record includes:
+The common server and client bootstraps validate the centralized place role and
+the complete nine-family configuration before creating a lifecycle runner. Each
+resolves one environment context, creates one local logger, calls the shared
+`ConfigurationValidator.validateLoaded()` gate, and passes the logger to the
+runner only after success. The client initializes and starts its empty runner.
+The server first creates `ServerRemoteRegistry` from the empty authenticated
+production registry and registers its frozen `NetworkRegistry` service
+definition, then initializes and starts the runner. Their current Studio-only
+ready records therefore include:
 
 ```text
-[lifecycleState=Started][serviceCount=0]
+server: [lifecycleState=Started][serviceCount=1]
+client: [lifecycleState=Started][serviceCount=0]
 ```
 
 The runner is local to its bootstrap. No global registry or service locator was
@@ -141,6 +150,14 @@ before the server hook completes. The client still has no process-shutdown hook.
 Invalid configuration raises a structured error before `ServiceLifecycle.new`,
 so no partially validated configuration can reach a service and no runner needs
 rollback. The valid path and every lifecycle state contract remain unchanged.
+
+The network service has no declared dependencies. Its lifecycle callbacks own a
+separate typed state machine: initialize creates and binds the fixed server-owned
+tree before parent-last publication, start changes no endpoint definition, and
+shutdown cleans its exact listeners and root. Duplicate initialization, start,
+shutdown, or handler registration is rejected by the network owner rather than
+creating duplicate resources. The existing reverse lifecycle and outer
+bootstrap cleanup remain the sole shutdown route.
 
 ## Focused Studio Edit-mode validation
 
@@ -163,9 +180,11 @@ checking that some error occurred. This was executed against the synchronized
 Lobby copy of the real module, not a rewritten test double. Packet 03.1 did not
 pull a persistent framework forward.
 
-Phase 05 subsequently added a repository-owned runner, but its current 76 cases
-do not include `ServiceLifecycle`. The evidence in this section remains
-historical Studio validation; reusable headless lifecycle coverage is deferred
+Phase 05 subsequently added a repository-owned runner. Its current 106 cases do
+not include a dedicated general `ServiceLifecycle` suite; the Packet 06.1
+runtime suite instead exercises the frozen network service definition and its
+initialize/start/shutdown state adapter. The evidence in this section remains
+historical Studio validation; reusable general lifecycle coverage is deferred
 until a dedicated regression packet. See `docs/TEST_MATRIX.md`.
 
 Packet 03.3 reran 12 focused lifecycle cases through the migrated logger-based
@@ -218,8 +237,9 @@ remain preserved by policy.
 1. Serve `lobby.project.json` and connect only the Lobby place.
 2. Confirm `ATDPlaceRole = Lobby`, `ServiceLifecycle` exists, and the opposite
    role folders contain no executable source.
-3. Play and expect one server and one client ready record with role `Lobby`,
-   lifecycle state `Started`, and service count `0`.
+3. Play and expect one server and one client ready record with role `Lobby` and
+   lifecycle state `Started`. The server service count is `1` for
+   `NetworkRegistry`; the client service count remains `0`.
 4. Stop Play.
 5. Repeat with `match.project.json` and the Match place, expecting role `Match`.
 6. Do not save or publish either place merely to perform this test.
@@ -227,5 +247,8 @@ remain preserved by policy.
 Phase 03 is complete. Packet 03.4 evidence is in
 `docs/GRACEFUL_SHUTDOWN.md`. Phase 04 added pure content contracts, and Packet
 04.5 placed their centralized gate before runner construction without changing
-this lifecycle behavior. Current evidence is in
+this lifecycle behavior. Packet 06.1's source and 106-of-106 completion evidence
+add only the common server network service described in
+`docs/NETWORK_PROTOCOL.md`. Packet 06.1 is complete; Phase 06 remains open.
+Configuration evidence remains in
 `docs/CONFIGURATION_VALIDATION.md`.

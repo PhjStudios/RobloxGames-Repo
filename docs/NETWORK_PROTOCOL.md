@@ -5,17 +5,19 @@
 - Phase: 06 — Network Protocol and Remote-Security Foundation
 - Architecture decision recorded: 2026-08-26, before Phase 06 source changes
 - Primary-source research accessed: 2026-08-26
+- Packet 06.1 status: complete — 2026-08-26
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
-- Production feature endpoints: none at the decision checkpoint
+- Production feature endpoints: none; the lasting authenticated registry is empty
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
   decision
 - Generic remote bus, client-selected action, service, handler, or path: prohibited
 - Gameplay, persistence, external service, place save, or publication authorized:
   none
 
-This is the authoritative Phase 06 network-boundary document. Packet-level
-implementation details and evidence will be added here as the five packets are
-completed. The decision section is intentionally recorded before implementation.
+This is the authoritative Phase 06 network-boundary document. The decision
+section was recorded before implementation. The sections below also record the
+completed Packet 06.1 implementation and evidence. Phase 06 and Gate A remain
+open until Packets 06.2–06.5 and the fresh exit audit pass.
 
 ## Official Roblox behavior that shapes the design
 
@@ -92,11 +94,22 @@ active only for its declared Lobby and/or Match role. The combined Development
 project may expose the union for inspection, but Lobby creates no Match-only
 endpoint and Match creates no Lobby-only endpoint.
 
-The server constructs an unparented tree, binds only reviewed server listeners,
-and sets `Parent` last. Any pre-existing root, wrong class, duplicate endpoint,
-or conflicting semantic leaf fails closed without deleting or adopting the
-unowned object. Re-entry and a second owner are rejected rather than silently
-sharing mutable state.
+The canonical endpoint-name grammar is one through 48 bytes: the first byte is
+an uppercase ASCII letter, and every remaining byte is an ASCII letter or digit.
+Names are exact and case-sensitive after validation. `ATDNetwork`, `v1`,
+`Request`, `Response`, and `Event` are reserved case-insensitively. Slashes,
+dots, separators, whitespace, Unicode, empty names, and path fragments are not
+valid endpoint identities. A registry contains at most 128 definitions.
+
+The server creates an unparented root, immediately registers that exact root in
+its `Cleanup` container, constructs the version/endpoints/leaves beneath it,
+binds only reviewed server listeners, and sets the root's `Parent` last. It
+preflights the root before construction and checks again immediately before
+publication. Any pre-existing root, wrong class, duplicate owner, late
+publication race, or conflicting tree fails closed without deleting or adopting
+the unowned object. Failed initialization rolls back only the service's own
+listeners and unparented tree. Re-entry and a second owner are rejected rather
+than silently sharing mutable state.
 
 ## Registry contract
 
@@ -109,9 +122,20 @@ Every definition will declare exactly:
 - whether a request has a separate response endpoint; and
 - a nonempty fixed set of active place roles.
 
-The registry copies, canonicalizes, deeply freezes, and authenticates accepted
-definitions. Lookup returns only canonical definitions. Definition and registry
-order is deterministic and never depends on dictionary iteration.
+`RemoteRegistry.create()` accepts only a plain dense definition array and exact
+plain definition records. It reads tables without invoking `__index`, rejects
+metatables, copies caller input, canonicalizes role order as Lobby then Match,
+sorts definitions bytewise by endpoint name, and deeply freezes the definitions,
+role views, lookup dictionary, and registry. Private weak-key provenance
+registries authenticate both definitions and registry receivers, so a copied or
+metatable-shaped table is not accepted. Validation returns the existing frozen
+`Result` branches with stable public `code`, `path`, and static `message` fields;
+it never retains or echoes a rejected value.
+
+The read-only typed API is `get(name)`, `list()`, `listForRole(role)`, and
+`count()`. `Lobby` and `Match` views contain only definitions declared for that
+role; `Development` is the deterministic union. Lookup returns only canonical
+authenticated definitions, and no result order depends on dictionary iteration.
 
 The following combinations are invalid:
 
@@ -126,6 +150,53 @@ The following combinations are invalid:
 The lasting production registry remains empty until a later packet introduces a
 concrete feature remote. Phase 06 tests use deterministic test-only definitions;
 they never populate a gameplay catalog or production endpoint.
+
+## Server runtime ownership and binding
+
+`ServerRemoteRegistry.new()` accepts a genuine context-bound logger, an
+authenticated registry, the actual `ReplicatedStorage` service, and one resolved
+runtime role. It exposes one frozen lifecycle service definition named
+`NetworkRegistry`. The common server bootstrap constructs this owner only after
+place-role and whole-configuration validation, registers it before lifecycle
+initialization, and starts no gameplay service.
+
+Every active client-to-server definition must receive exactly one handler while
+the network owner is in `Registering`. Unknown names, inactive role definitions,
+server-to-client definitions, non-function handlers, late binding, and duplicate
+binding fail closed. Initialization refuses to publish if any active inbound
+definition is unbound. The production registry is empty, so Packet 06.1
+publishes only `ATDNetwork/v1` and binds no production request or event handler.
+
+The service-owned `Cleanup` container registers the root before connection
+objects. Its LIFO sweep therefore disconnects all listeners before destroying
+the replicated tree. The outer bootstrap cleanup owns lifecycle shutdown; the
+existing reverse lifecycle and one graceful-shutdown path consequently release
+the network owner without adding a second `BindToClose` hook.
+
+## Bounded client lookup
+
+The production `ClientRemoteLookup.resolve(endpointName, timeoutSeconds)` API is
+internally anchored to `ProductionRemotes`, the actual `ReplicatedStorage`
+service, and the role resolved from the centralized `PlaceRoles` contract. A
+production caller cannot supply or replace a registry, parent, role, clock, wait
+adapter, path, service, or handler. The lookup rejects an unknown or inactive
+endpoint before waiting. The caller supplies one finite positive total timeout
+of at most five seconds; every fixed segment consumes the decreasing remainder
+of that single deadline. The default clock is monotonic `os.clock()`, and
+non-finite, failed, or backwards clock reads fail closed.
+
+Lookup waits only for `ATDNetwork`, `v1`, the canonical endpoint folder, and the
+definition-required `Request`, optional `Response`, or `Event` leaf. Every
+returned value must have the expected direct parent, exact name, and exact
+`Folder` or `RemoteEvent` class. Lookup never calls `Instance.new`, reparents an
+Instance, performs recursive discovery, accepts a caller path, or creates a
+missing object. Its success and failure envelopes are frozen and privacy-safe.
+They reuse the established shared `Result` contract.
+The dependency-injected resolver is exposed only when this exact production
+ModuleScript has the exact
+`ServerStorage.AutomatedTests.ProductionClientNetworking.ClientRemoteLookup`
+test identity. That non-replicated structural gate cannot be satisfied by the
+normal `StarterPlayerScripts` production location, where the seam is `nil`.
 
 ## Direction and dispatch rules
 
@@ -176,17 +247,22 @@ valid request.
 
 ## Lifecycle and cleanup ownership
 
-One common server network service will be registered before lifecycle
-initialization. It owns the server-created root, every listener connection,
-rate-limit state, correlation history, and player-removal connection through one
-`Cleanup` container. The root is registered before connections so LIFO cleanup
-disconnects listeners before destroying Instances.
+One common server network service is registered before lifecycle initialization.
+Beginning with Packet 06.1, it owns the server-created root and every listener
+connection through one `Cleanup` container. Later Phase 06 packets will extend
+the same owner with rate-limit state, correlation history, and the
+player-removal connection. The root is registered before connections so LIFO
+cleanup disconnects listeners before destroying Instances.
 
 Initialization preflights conflicts before publishing the tree and rolls back
 its own partial work if any step fails. Shutdown clears bounded per-player state,
 disconnects listeners, and destroys the exact owned tree through the existing
 reverse lifecycle and graceful-shutdown path. No independent `BindToClose` hook
 is added.
+
+The current common server ready record reports lifecycle `Started` with one
+registered service. The client lifecycle remains at zero services; the client
+lookup module is a fixed utility and is not a lifecycle owner.
 
 ## Logging boundary
 
@@ -203,9 +279,43 @@ punishment, persistence, analytics delivery, or external sink.
 ## Future endpoint registration procedure
 
 Until the final Packet 06.5 checklist is recorded, no production feature remote
-may be added. At minimum, a future change must add one fixed registry definition,
-one strict payload schema, one explicit rate policy, one server-derived
-authorization function, one protected handler, public response behavior, and
-positive/boundary/adversarial tests. It must also prove place-role isolation,
-cleanup, privacy, zero partial mutation on rejection, and production-build test
-exclusion.
+may be added. A later approved feature change must:
+
+1. add exactly one fixed definition to `ProductionRemotes.luau`, using the
+   canonical name grammar and the narrowest Lobby/Match role set;
+2. select only an allowed direction, `ReliableRemoteEvent` transport, Request or
+   Event semantic, and explicit response behavior;
+3. add one strict bounded payload schema, one explicit rate policy, one
+   server-derived authorization function, one protected handler, and allowlisted
+   public response behavior;
+4. bind the server handler by its registry constant before lifecycle
+   initialization and expose only the definition-shaped client operation;
+5. add positive, boundary, adversarial, role-isolation, duplicate-binding,
+   cleanup, privacy, and zero-partial-mutation tests; and
+6. prove the test fixture remains test-only and all production project source
+   maps, role isolation, lifecycle ownership, and build exclusions still pass.
+
+The registry module, root/version names, client lookup, or runtime binder must
+not be bypassed by a second folder, generic action bus, client-selected path, or
+ad hoc remote creation.
+
+## Packet 06.1 completion evidence
+
+The current canonical headless run discovered ten suites and passed all 106
+cases. Of those, 18 cases cover registry structure, limits, canonical order,
+immutability, provenance, malformed/conflicting definitions, hostile
+metatables, and privacy; 12 cases cover parent-last publication, exact role
+trees, handler completeness and uniqueness, conflict preservation, re-entry,
+rollback, LIFO cleanup, every endpoint leaf shape, production seam exclusion,
+and bounded client lookup. The fixtures exist only under `tests/`.
+
+The four-project structural verifier currently reports 34 ModuleScripts, one
+Script, and one LocalScript in each production build. The Test build's production
+source subset contains 31 shared ModuleScripts plus exactly the two explicitly
+mapped production networking runtime modules; 19 additional ModuleScripts are
+test-owned specs, fixtures, support, or negative controls. Test contains zero
+runnable scripts. Tests and test-only fixtures remain absent from Default,
+Lobby, and Match; Lobby contains no Match source and Match contains no Lobby
+source. The targeted architecture/security review resolved every normal finding
+and finished with no unresolved P0, P1, P2, or P3 finding. Packet 06.1 is
+complete; Phase 06 and Gate A remain open.

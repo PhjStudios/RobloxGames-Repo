@@ -5,8 +5,10 @@ local PlaceRoles = require(ReplicatedStorage.Shared.config.PlaceRoles)
 local ConfigurationValidator = require(ReplicatedStorage.Shared.config.ConfigurationValidator)
 local EnvironmentContext = require(ReplicatedStorage.Shared.logging.EnvironmentContext)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
+local ProductionRemotes = require(ReplicatedStorage.Shared.network.ProductionRemotes)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
 local Cleanup = require(ReplicatedStorage.Shared.util.Cleanup)
+local ServerRemoteRegistry = require(script.Parent.Parent.networking.ServerRemoteRegistry)
 local Shutdown = require(script.Parent.Shutdown)
 
 local placeId = game.PlaceId
@@ -50,7 +52,9 @@ log:info("configuration", "validated", "Core configuration validated", {
 	configurationFamilyCount = ConfigurationValidator.FAMILY_COUNT,
 })
 
+local serverRemoteRegistry = ServerRemoteRegistry.new(log, ProductionRemotes, ReplicatedStorage, roleResult.role)
 local lifecycleRunner = ServiceLifecycle.new(log)
+lifecycleRunner:register(serverRemoteRegistry:getServiceDefinition())
 lifecycleRunner:initialize()
 lifecycleRunner:start()
 

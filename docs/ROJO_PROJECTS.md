@@ -32,12 +32,14 @@ they still do not duplicate runtime PlaceIds.
 | `default.project.json` | Combined convenience project and documented `rojo serve` default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | Existing development `servePlaceIds`; current role is `Development` |
 | `lobby.project.json` | Role-isolated lobby source | `common`, `lobby` | `common`, `lobby` | No ID binding; current role is `Lobby` |
 | `match.project.json` | Role-isolated match source | `common`, `match` | `common`, `match` | No ID binding; current role is `Match` |
-| `test.project.json` | Headless pure-contract test DataModel | None | None | Build-only; no role or `servePlaceIds` |
+| `test.project.json` | Headless contract/runtime-module test DataModel | No runnable layer; exact `common/networking` modules under `ServerStorage` | No runnable layer; exact `common/networking` modules under `ServerStorage` | Build-only; no role or `servePlaceIds` |
 
 All four projects map `src/shared` to `ReplicatedStorage.Shared`. Only the test
 project additionally maps `tests/specs`, `tests/fixtures`, `tests/support`, and
-isolated negative controls under `ServerStorage`. It maps neither `src/server`
-nor `src/client`.
+isolated negative controls under `ServerStorage`. Packet 06.1 also maps exactly
+`src/server/common/networking` and `src/client/common/networking` beneath
+`ServerStorage.AutomatedTests`; it still maps no bootstrap, shutdown module,
+place-specific layer, or runnable Script/LocalScript.
 
 The role projects intentionally omit `servePlaceIds`, raw PlaceIds, universe
 IDs, and conditional role selection. Their only identity declaration is the
@@ -140,14 +142,16 @@ artifacts are local verification products, not authoritative Studio content.
 
 All four current project JSON files parsed successfully and all four builds
 completed with Rojo 7.7.0. The original Packet 02.2 evidence covered only the
-three production definitions; Packet 05.1 added the Test definition and check.
+three production definitions; Packet 05.1 added the Test definition and check,
+and Packet 06.1 added the two narrow runtime
+module mappings described above.
 
-| Build | Server layers | Client layers | Script count | LocalScript count |
-| --- | --- | --- | ---: | ---: |
-| Default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | 1 | 1 |
-| Lobby | `common`, `lobby` | `common`, `lobby` | 1 | 1 |
-| Match | `common`, `match` | `common`, `match` | 1 | 1 |
-| Test | None | None | 0 | 0 |
+| Build | Server layers | Client layers | ModuleScripts | Scripts | LocalScripts |
+| --- | --- | --- | ---: | ---: | ---: |
+| Default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | 34 | 1 | 1 |
+| Lobby | `common`, `lobby` | `common`, `lobby` | 34 | 1 | 1 |
+| Match | `common`, `match` | `common`, `match` | 34 | 1 | 1 |
+| Test | No runnable layer; two selected runtime modules under `ServerStorage` | Same | 52 | 0 | 0 |
 
 Additional assertions passed:
 
@@ -157,10 +161,12 @@ Additional assertions passed:
 - Match build contains no lobby folder or source.
 - Default, Lobby, and Match contain no test spec, fixture, support module,
   negative control, runner entrypoint, or test-only dependency.
-- Every one of the 32 production Lua containers matches a fixed expected
+- Every one of the 36 production Lua containers matches a fixed expected
   DataModel path, class, authoritative `src/` file, and exact source content.
-- Test contains the same 29 shared ModuleScripts, no server/client source, and
-  no runnable Script or LocalScript.
+- Test contains the same 31 shared ModuleScripts plus exactly
+  `ServerRemoteRegistry` and `ClientRemoteLookup` under test-only
+  `ServerStorage` paths, 19 test-owned spec/fixture/support/negative-control
+  ModuleScripts, and no runnable Script or LocalScript.
 - All builds contain `ReplicatedStorage.Shared`.
 - `.gitkeep` files produce no Roblox instances.
 - Both structured common bootstrap records are present in every production
@@ -170,20 +176,22 @@ Additional assertions passed:
   or duplicated runtime PlaceId. Packet 02.3 later added only their role
   attributes.
 
-The current production source inventory, established at Packet 04.5, contains
-29 shared ModuleScripts: `PlaceRoles`,
+The current production source inventory contains 31 shared ModuleScripts:
+`PlaceRoles`,
 `ServiceLifecycle`, `EnvironmentContext`, `Log`, `Cleanup`, `Ids`, `Result`,
 `Validation`, `ConfigTypes`, `AssetSchema`, `Assets`, `BannerSchema`, `Banners`,
 `ConfigurationValidator`, `DefaultSettings`, `Difficulties`, `DifficultySchema`, `Economy`,
 `EconomySchema`, `Enemies`, `EnemySchema`, `MapSchema`, `Maps`,
 `SchemaPrimitives`, `SettingsSchema`, `TowerSchema`, `Towers`, `WaveSchema`, and
-`Waves`. The server-only common `Shutdown` module brings each build to 30 ModuleScripts,
+`Waves`, plus `ProductionRemotes` and `RemoteRegistry`. The server-only common
+`Shutdown` and `ServerRemoteRegistry` modules and client-only common
+`ClientRemoteLookup` module bring each production build to 34 ModuleScripts,
 alongside one Script and one LocalScript. The Default build contains both empty
 role folders, the Lobby build contains no match folder, and the Match build
 contains no lobby folder. Source-layer isolation remains unchanged. Packet 04.4
 schema evidence is recorded in `docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md`; current
-whole-catalog and bootstrap evidence is recorded in
-`docs/CONFIGURATION_VALIDATION.md`.
+whole-catalog evidence is in `docs/CONFIGURATION_VALIDATION.md`, and the network
+layout is in `docs/NETWORK_PROTOCOL.md`.
 
 The inspected ignored build artifacts were removed. They can be recreated with
 the commands above. `lune run tests/verify-builds.luau` rebuilds and checks all
@@ -193,6 +201,13 @@ generated outputs.
 The structural verifier is the current headless production-shipping gate. Its
 status and the separate Studio/published test boundaries are indexed in
 `docs/TEST_MATRIX.md`.
+
+At Packet 06.1 completion, the canonical runner passed 106
+of 106 cases across ten suites and the four-project verifier passed the exact
+counts above. The Test-only runtime mappings are source-identical copies used by
+the headless adapter; they do not alter production mappings or make the test
+project suitable for serving. Packet 06.1 is complete; Phase 06 and Gate A
+remain open.
 
 ## Scope boundary and next gate
 

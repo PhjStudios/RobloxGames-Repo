@@ -27,6 +27,14 @@
 
         "Support": {
           "$path": "tests/support"
+        },
+
+        "ProductionServerNetworking": {
+          "$path": "src/server/common/networking"
+        },
+
+        "ProductionClientNetworking": {
+          "$path": "src/client/common/networking"
         }
       },
 

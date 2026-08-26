@@ -19,6 +19,10 @@ logging framework, external shutdown trigger, gameplay system, or networking.
 - Studio-authored content changed: no
 - Place saved or published: no
 
+Those fields describe Packet 03.2 at completion. Packet 06.1 reuses this utility
+inside the common server network service; it does not add a second cleanup
+implementation.
+
 ## Public contract
 
 `Cleanup.new(logger, label)` creates a typed container in the `Active` state.
@@ -134,9 +138,22 @@ reports:
 Packet 03.4 now invokes the server container from the one ordered
 `BindToClose` path. The client container still has no process-close trigger.
 No save operation was added. The current source tree contains no controllers,
-so adding placeholder controllers or fake resources would not be honest
-integration. Future controllers must own their real connections, Instances,
-callbacks, threads, and child containers through this utility when introduced.
+and future controllers must own their real connections, Instances, callbacks,
+threads, and child containers through this utility when introduced.
+
+Packet 06.1's `NetworkRegistry` lifecycle service creates one internal
+`network-registry` cleanup container during initialization. It registers the
+unparented `ATDNetwork` root before building descendants, then registers each
+inbound listener connection. The reverse sweep therefore disconnects every
+listener before destroying the exact root. Initialization failures roll back
+only those owned resources; pre-existing conflicting Instances are diagnosed
+and preserved. A cleanup failure is contained as a static network error, and no
+arbitrary callback or rejected endpoint value is retained or logged.
+
+The outer server `bootstrap` container still owns exactly one callback: lifecycle
+shutdown. That reverse lifecycle call reaches the network service's internal
+container through the existing graceful-shutdown path, so no duplicate root,
+connection owner, or `BindToClose` hook is introduced.
 
 ## Focused Studio Edit-mode validation
 
@@ -167,6 +184,12 @@ suite contains 14 deterministic cases covering ordering, ownership, supported
 task forms, idempotence, nesting/cycles, reentry, post-clean guards, cached
 failures, and sibling failure isolation. Run `lune run tests/run.luau`; the
 environment distinction and cleanup rules are indexed in `docs/TEST_MATRIX.md`.
+
+The current 106-case run also includes 12 Packet 06.1 runtime cases. They prove
+listener-before-root destruction, rollback after a partial listener bind,
+preservation of pre-existing root conflicts, duplicate-owner/re-entry rejection,
+and shutdown removal of the exact published root. Packet 06.1 is complete;
+Phase 06 remains open.
 
 Packet 03.3 reran 10 focused cleanup cases through the logger-based constructor.
 Supported runtime types, LIFO/idempotence, state/nesting guards, failure
@@ -212,8 +235,9 @@ save, or publish operation occurred.
 
 1. Connect `lobby.project.json` only to the Lobby place.
 2. Confirm `ReplicatedStorage.Shared.util.Cleanup` exists.
-3. Play and expect server/client ready records with lifecycle `Started`, zero
-   services, cleanup `Active`, and one cleanup task.
+3. Play and expect server/client ready records with lifecycle `Started`, cleanup
+   `Active`, and one outer cleanup task. The server has one registered
+   `NetworkRegistry` service; the client has zero services.
 4. Confirm no match executable source and stop Play.
 5. Repeat through `match.project.json`, expecting role `Match` and no lobby
    executable source.
@@ -221,5 +245,7 @@ save, or publish operation occurred.
 
 Phase 03 is complete. Packet 03.4 evidence is in
 `docs/GRACEFUL_SHUTDOWN.md`. Packet 04.5 now gates construction before cleanup
-ownership without changing this cleanup behavior; current evidence is in
+ownership without changing this cleanup behavior. Packet 06.1's completed
+network ownership contract is described in `docs/NETWORK_PROTOCOL.md`; it reuses
+the same contract. Configuration evidence is in
 `docs/CONFIGURATION_VALIDATION.md`.

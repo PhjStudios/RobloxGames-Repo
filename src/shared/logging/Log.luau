@@ -1,7 +1,7 @@
 local EnvironmentContext = require(script.Parent.EnvironmentContext)
 
 export type Severity = "DEBUG" | "INFO" | "WARN" | "ERROR"
-export type Subsystem = "bootstrap" | "configuration" | "place-role" | "lifecycle" | "cleanup" | "shutdown"
+export type Subsystem = "bootstrap" | "configuration" | "place-role" | "lifecycle" | "cleanup" | "network" | "shutdown"
 export type FieldValue = string | number | boolean
 export type SafeFieldName =
 	"budgetSeconds"
@@ -11,8 +11,10 @@ export type SafeFieldName =
 	| "closeReason"
 	| "configurationFamilyCount"
 	| "container"
+	| "endpoint"
 	| "issueCount"
 	| "lifecycleState"
+	| "networkState"
 	| "service"
 	| "serviceCount"
 	| "state"
@@ -55,6 +57,7 @@ local VALID_SUBSYSTEMS: { [string]: boolean } = table.freeze({
 	cleanup = true,
 	configuration = true,
 	lifecycle = true,
+	network = true,
 	["place-role"] = true,
 	shutdown = true,
 })
@@ -80,8 +83,10 @@ local SAFE_FIELDS: { [string]: boolean } = table.freeze({
 	code = true,
 	configurationFamilyCount = true,
 	container = true,
+	endpoint = true,
 	issueCount = true,
 	lifecycleState = true,
+	networkState = true,
 	service = true,
 	serviceCount = true,
 	state = true,
