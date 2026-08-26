@@ -8,7 +8,7 @@ return TestHarness.suite("runner smoke", {
 	TestHarness.case("loads one harmless production Result module", function(assertions)
 		local result = Result.ok("smoke")
 		assertions.isTrue(result.ok)
-		assertions.equal(result.value, "intentional-mismatch")
+		assertions.equal(result.value, "smoke")
 		assertions.isTrue(table.isfrozen(result))
 	end),
 	TestHarness.case("keeps connection type adaptation identity scoped", function(assertions)
