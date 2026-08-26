@@ -3,6 +3,7 @@
 local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local RobloxAdapter = require(script.Parent.Parent.Support.RobloxAdapter)
 local Result = require(game:GetService("ReplicatedStorage").Shared.util.Result)
+local intentionalUnusedLintControl = true
 
 return TestHarness.suite("runner smoke", {
 	TestHarness.case("loads one harmless production Result module", function(assertions)
