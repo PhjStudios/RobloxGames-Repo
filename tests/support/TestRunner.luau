@@ -179,7 +179,7 @@ local function discover(root: Instance): ({ ModuleScript }?, string?, string?)
 	return modules, nil, nil
 end
 
-function TestRunner.run(dataModel: DataModel, selection: Selection): RunResult
+function TestRunner.run(dataModel: DataModel, selection: Selection, specName: string?): RunResult
 	local root = getRoot(dataModel, selection)
 	if root == nil then
 		record("FAIL", {
@@ -206,6 +206,30 @@ function TestRunner.run(dataModel: DataModel, selection: Selection): RunResult
 			path = discoveryPath :: string,
 		})
 		return { exitCode = 2, suiteCount = 0, testCount = 0, passedCount = 0, failedCount = 0 }
+	end
+	if specName ~= nil then
+		if
+			selection ~= "normal"
+			or #specName < 1
+			or #specName > 64
+			or string.match(specName, "^[A-Za-z][A-Za-z0-9]*$") == nil
+		then
+			record("FAIL", {
+				category = "discovery",
+				code = "INVALID_SPEC_FILTER",
+				path = safePath(root),
+			})
+			return { exitCode = 2, suiteCount = 0, testCount = 0, passedCount = 0, failedCount = 0 }
+		end
+
+		local expectedName = specName .. SPEC_SUFFIX
+		local filteredModules: { ModuleScript } = {}
+		for _, module in modules do
+			if module.Name == expectedName then
+				table.insert(filteredModules, module)
+			end
+		end
+		modules = filteredModules
 	end
 	if #modules == 0 then
 		record("FAIL", {

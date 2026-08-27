@@ -236,11 +236,33 @@ local EXPECTED_PRODUCTION_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/client/common/networking/ClientRequestTracker.luau",
 	},
 })
+local EXPECTED_MATCH_SERVER_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "ServerScriptService.Server.match.maps.MapContract",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/maps/MapContract.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.maps.MapLoader",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/maps/MapLoader.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.maps.MapValidator",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/maps/MapValidator.luau",
+	},
+})
 local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.ConfigurationFixtures",
 		className = "ModuleScript",
 		sourcePath = "tests/fixtures/ConfigurationFixtures.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.MapFixtures",
+		className = "ModuleScript",
+		sourcePath = "tests/fixtures/MapFixtures.luau",
 	},
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.NetworkFixtures",
@@ -286,6 +308,21 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.CoreContracts.spec",
 		className = "ModuleScript",
 		sourcePath = "tests/specs/CoreContracts.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.MapContract.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/MapContract.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.MapLoader.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/MapLoader.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.MapValidator.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/MapValidator.spec.luau",
 	},
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.NetworkSecurity.spec",
@@ -461,6 +498,7 @@ local function hasTestLeak(dataModel: DataModel): boolean
 			if
 				string.find(source, "ATD_TEST", 1, true) ~= nil
 				or string.find(source, "ATD_PHASE06_STUDIO", 1, true) ~= nil
+				or string.find(source, "ATD_PHASE07_STUDIO", 1, true) ~= nil
 				or string.find(source, "PRIVATE_MODULE_LOAD_VALUE", 1, true) ~= nil
 			then
 				return true
@@ -474,9 +512,23 @@ local function isLuaSourceContainer(instance: Instance): boolean
 	return instance.ClassName == "ModuleScript" or instance.ClassName == "Script" or instance.ClassName == "LocalScript"
 end
 
+local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): { SourceDefinition }
+	local expected: { SourceDefinition } = {}
+	for _, source in EXPECTED_PRODUCTION_SOURCES do
+		table.insert(expected, source)
+	end
+	if role ~= "Lobby" then
+		for _, source in EXPECTED_MATCH_SERVER_SOURCES do
+			table.insert(expected, source)
+		end
+	end
+	return expected
+end
+
 local function verifyProductionSources(dataModel: DataModel, definition: BuildDefinition): boolean
+	local expectedSources = expectedProductionSources(definition.role :: "Default" | "Lobby" | "Match")
 	local expectedByPath: { [string]: SourceDefinition } = {}
-	for _, expected in EXPECTED_PRODUCTION_SOURCES do
+	for _, expected in expectedSources do
 		if expectedByPath[expected.dataModelPath] ~= nil then
 			emit("FAIL", definition.name, "EXPECTED_SOURCE_PATH_DUPLICATE", expected.dataModelPath)
 			return false
@@ -516,7 +568,7 @@ local function verifyProductionSources(dataModel: DataModel, definition: BuildDe
 		table.insert(actualPaths, path)
 	end
 
-	if #actualPaths ~= #EXPECTED_PRODUCTION_SOURCES then
+	if #actualPaths ~= #expectedSources then
 		emit("FAIL", definition.name, `PRODUCTION_SOURCE_COUNT_{#actualPaths}`)
 		return false
 	end
@@ -527,7 +579,7 @@ local function verifyProductionSources(dataModel: DataModel, definition: BuildDe
 		end
 	end
 
-	for _, expected in EXPECTED_PRODUCTION_SOURCES do
+	for _, expected in expectedSources do
 		local actual = actualByPath[expected.dataModelPath]
 		if actual == nil then
 			emit("FAIL", definition.name, "PRODUCTION_SOURCE_MISSING", expected.dataModelPath)
@@ -593,7 +645,8 @@ local function verifyTestOwnedSources(
 	definition: BuildDefinition,
 	shared: Instance,
 	productionServerNetworking: Instance,
-	productionClientNetworking: Instance
+	productionClientNetworking: Instance,
+	productionServerMaps: Instance
 ): boolean
 	local expectedByPath: { [string]: SourceDefinition } = {}
 	for _, expected in EXPECTED_TEST_OWNED_SOURCES do
@@ -611,6 +664,7 @@ local function verifyTestOwnedSources(
 			and not hasAncestor(descendant, shared)
 			and not hasAncestor(descendant, productionServerNetworking)
 			and not hasAncestor(descendant, productionClientNetworking)
+			and not hasAncestor(descendant, productionServerMaps)
 		then
 			table.insert(actualSources, descendant :: ModuleScript)
 		end
@@ -672,7 +726,8 @@ end
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
 	currentStage = `verify_counts_{definition.name}`
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 40 or scripts ~= 1 or localScripts ~= 1 then
+	local expectedModules = if definition.role == "Lobby" then 40 else 43
+	if modules ~= expectedModules or scripts ~= 1 or localScripts ~= 1 then
 		emit("FAIL", definition.name, `PRODUCTION_CLASS_COUNTS_{modules}_{scripts}_{localScripts}`)
 		return false
 	end
@@ -697,7 +752,7 @@ end
 
 local function verifyTest(dataModel: DataModel, definition: BuildDefinition): boolean
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 65 then
+	if modules ~= 72 then
 		emit("FAIL", definition.name, `TEST_MODULE_COUNT_{modules}`)
 		return false
 	end
@@ -729,6 +784,9 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local productionClientNetworking = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionClientNetworking")
+	local productionServerMaps = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionServerMaps")
 	local starterPlayerScripts = dataModel:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
 	if
 		automatedTests == nil
@@ -809,13 +867,43 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 		end
 	end
 	local networkingModules = 6
+	if productionServerMaps == nil or productionServerMaps.ClassName ~= "Folder" then
+		emit("FAIL", definition.name, "TEST_MAP_CONTAINER_MISSING")
+		return false
+	end
+	local mapDescendants = collectDescendants(productionServerMaps)
+	if #mapDescendants ~= #EXPECTED_MATCH_SERVER_SOURCES then
+		emit("FAIL", definition.name, "TEST_MAP_SOURCE_COUNT")
+		return false
+	end
+	for _, expectedSourceDefinition in EXPECTED_MATCH_SERVER_SOURCES do
+		local moduleName = string.match(expectedSourceDefinition.dataModelPath, "([^.]+)$")
+		local module = if moduleName == nil then nil else productionServerMaps:FindFirstChild(moduleName)
+		if module == nil or module.ClassName ~= "ModuleScript" then
+			emit("FAIL", definition.name, "TEST_MAP_SOURCE_MISMATCH", productionServerMaps:GetFullName())
+			return false
+		end
+
+		if not fs.isFile(expectedSourceDefinition.sourcePath) then
+			emit("FAIL", definition.name, "TEST_MAP_AUTHORITATIVE_SOURCE_MISSING", module:GetFullName())
+			return false
+		end
+
+		local readSucceeded, expectedSource = pcall(fs.readFile, expectedSourceDefinition.sourcePath)
+		if not readSucceeded or (module :: ModuleScript).Source ~= expectedSource then
+			emit("FAIL", definition.name, "TEST_MAP_SOURCE_CONTENT_MISMATCH", module:GetFullName())
+			return false
+		end
+	end
+	local mapModules = #EXPECTED_MATCH_SERVER_SOURCES
 	if
 		not verifyTestOwnedSources(
 			dataModel,
 			definition,
 			shared :: Instance,
 			productionServerNetworking :: Instance,
-			productionClientNetworking :: Instance
+			productionClientNetworking :: Instance,
+			productionServerMaps :: Instance
 		)
 	then
 		return false
@@ -825,7 +913,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	emit(
 		"PASS",
 		definition.name,
-		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
+		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
 	)
 	return true
 end

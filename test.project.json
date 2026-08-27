@@ -35,6 +35,10 @@
 
         "ProductionClientNetworking": {
           "$path": "src/client/common/networking"
+        },
+
+        "ProductionServerMaps": {
+          "$path": "src/server/match/maps"
         }
       },
 

@@ -30,12 +30,21 @@ local function record(code: string, category: string, path: string)
 	print(`[ATD_TEST][FAIL][category={category}][code={code}][path={path}]`)
 end
 
-local function parseSelection(): (Selection?, boolean)
+local function parseSelection(): (Selection?, boolean, string?)
 	if #process.args == 0 then
-		return "normal", false
+		return "normal", false, nil
 	end
-	if #process.args ~= 2 or process.args[1] ~= "--control" then
-		return nil, false
+	if #process.args ~= 2 then
+		return nil, false, nil
+	end
+	if process.args[1] == "--spec" then
+		local specName = process.args[2]
+		if #specName < 1 or #specName > 64 or string.match(specName, "^[A-Za-z][A-Za-z0-9]*$") == nil then
+			return nil, false, nil
+		end
+		return "normal", false, specName
+	elseif process.args[1] ~= "--control" then
+		return nil, false, nil
 	end
 
 	local control = process.args[2]
@@ -46,12 +55,12 @@ local function parseSelection(): (Selection?, boolean)
 		or control == "malformed-root"
 		or control == "module-load"
 	then
-		return control :: Selection, false
+		return control :: Selection, false, nil
 	elseif control == "runner-crash" then
-		return "normal", true
+		return "normal", true, nil
 	end
 
-	return nil, false
+	return nil, false, nil
 end
 
 local function cleanupGeneratedOutput(): boolean
@@ -254,7 +263,7 @@ local function createModuleLoader(dataModel: DataModel): (ModuleScript) -> unkno
 end
 
 local function main(): number
-	local selection, simulateCrash = parseSelection()
+	local selection, simulateCrash, specName = parseSelection()
 	if selection == nil then
 		record("INVALID_ARGUMENTS", "runner", "tests/run.luau")
 		return EXIT_RUNNER_FAILURE
@@ -295,7 +304,7 @@ local function main(): number
 		return EXIT_RUNNER_FAILURE
 	end
 
-	local ran, result = pcall((testRunner :: any).run, game, selection)
+	local ran, result = pcall((testRunner :: any).run, game, selection, specName)
 	if
 		not ran
 		or type(result) ~= "table"
