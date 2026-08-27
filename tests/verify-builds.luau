@@ -499,6 +499,7 @@ local function hasTestLeak(dataModel: DataModel): boolean
 				string.find(source, "ATD_TEST", 1, true) ~= nil
 				or string.find(source, "ATD_PHASE06_STUDIO", 1, true) ~= nil
 				or string.find(source, "ATD_PHASE07_STUDIO", 1, true) ~= nil
+				or string.find(source, "ATD_PHASE07_AUTHORING", 1, true) ~= nil
 				or string.find(source, "PRIVATE_MODULE_LOAD_VALUE", 1, true) ~= nil
 			then
 				return true
