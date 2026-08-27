@@ -25,6 +25,8 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned Rokit toolchain
+        env:
+          ATD_ROKIT_GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
           $ProgressPreference = "SilentlyContinue"
@@ -66,9 +68,27 @@ jobs:
           "ROKIT_ROOT=$rokitRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           $rokitBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-          & $rokitExe install --no-trust-check
+          & $rokitExe authenticate github --token $env:ATD_ROKIT_GITHUB_TOKEN --skip-verify
           if ($LASTEXITCODE -ne 0) {
+              Remove-Item Env:ATD_ROKIT_GITHUB_TOKEN -ErrorAction SilentlyContinue
+              throw "Rokit failed to configure ephemeral GitHub authentication."
+          }
+
+          try {
+              & $rokitExe install --no-trust-check
+              $installExitCode = $LASTEXITCODE
+          }
+          finally {
+              & $rokitExe authenticate github --remove
+              $removeAuthExitCode = $LASTEXITCODE
+              Remove-Item Env:ATD_ROKIT_GITHUB_TOKEN -ErrorAction SilentlyContinue
+          }
+
+          if ($installExitCode -ne 0) {
               throw "Rokit failed to install the repository-pinned toolchain."
+          }
+          if ($removeAuthExitCode -ne 0) {
+              throw "Rokit failed to remove ephemeral GitHub authentication."
           }
 
           Remove-Item -LiteralPath $archivePath

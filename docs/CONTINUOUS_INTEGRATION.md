@@ -30,7 +30,7 @@ The workflow uses one action and no cache or artifact action:
 | `actions/checkout` | `3d3c42e5aac5ba805825da76410c181273ba90b1` (`v7.0.1`) | MIT | Checkout only; `persist-credentials: false`; update only after a separately reviewed full-SHA change. |
 | Rokit | `1.2.0`; tag commit `3b803035635c29c752f6ea1d2befc1473b96c51a` | MIT | Direct official Windows x64 release download; bootstrap is verified before execution. |
 | Rokit Windows archive | `rokit-1.2.0-windows-x86_64.zip`; SHA-256 `f9ba1704014ff67d51e8005f605955c7c26d2429a5312a9419dc477fc310e96d` | MIT | The official 3,638,436-byte archive contains only `rokit.exe`; any digest or layout mismatch fails. |
-| Project tools | Exact versions in `rokit.toml` | See each official tool | `rokit install --no-trust-check` installs Rojo 7.7.0, StyLua 2.5.2, Selene 0.31.0, and Lune 0.10.5 into the ephemeral runner directory. |
+| Project tools | Exact versions in `rokit.toml` | See each official tool | Rokit uses the job's built-in read-only token for release-asset requests, removes that authentication immediately after installation, and installs Rojo 7.7.0, StyLua 2.5.2, Selene 0.31.0, and Lune 0.10.5 into the ephemeral runner directory. |
 
 The checkout tag and Rokit tag were independently resolved from their official
 repositories. The Rokit digest was read from the official GitHub Releases API
@@ -52,6 +52,13 @@ another executable action and cache-poisoning boundary. GitHub-hosted job
 storage and the isolated Rokit root are ephemeral and are naturally discarded
 after the job.
 
+Rokit release discovery and tool downloads use GitHub's API. The workflow
+passes the job's automatically generated, read-only `github.token` to Rokit's
+documented authentication command to avoid the shared unauthenticated API
+limit, then removes both the Rokit authentication entry and the step environment
+variable before verification begins. No repository-configured secret or
+persistent credential is used.
+
 ## Official primary sources
 
 - [actions/checkout v7.0.1 release](https://github.com/actions/checkout/releases/tag/v7.0.1)
@@ -68,8 +75,10 @@ after the job.
 - [Rokit installation documentation](https://github.com/rojo-rbx/rokit/blob/v1.2.0/README.md)
 - [Rokit MIT license](https://github.com/rojo-rbx/rokit/blob/v1.2.0/LICENSE.txt)
 - [Rokit CI trust-check behavior](https://github.com/rojo-rbx/rokit/blob/v1.2.0/src/cli/install.rs)
+- [Rokit authentication command](https://github.com/rojo-rbx/rokit/blob/v1.2.0/src/cli/authenticate.rs)
 - [Rokit isolated-root behavior](https://github.com/rojo-rbx/rokit/blob/v1.2.0/lib/storage/home.rs)
 - [Official Rokit release metadata and asset digest](https://api.github.com/repos/rojo-rbx/rokit/releases/tags/v1.2.0)
+- [GitHub automatic workflow-token contract](https://docs.github.com/en/actions/concepts/security/github_token)
 
 ## Workflow contract
 
@@ -81,7 +90,9 @@ The workflow must:
 3. check out the event-selected commit without persisting Git credentials;
 4. download the exact Rokit archive, verify SHA-256 and archive layout before
    execution, and keep Rokit plus all installed tools under `runner.temp`;
-5. install only the versions pinned by `rokit.toml` and verify every reported
+5. authenticate Rokit's GitHub release requests only with the job's automatic
+   read-only token, remove that authentication immediately after installation,
+   install only the versions pinned by `rokit.toml`, and verify every reported
    version;
 6. run formatting, Selene configuration validation, Selene linting, the
    canonical tests, and the four-project structural verifier as distinct
@@ -91,8 +102,9 @@ The workflow must:
    generated-output residue;
 8. retain no place build, package output, cache, log bundle, or workflow
    artifact; and
-9. reference no repository secret, Roblox credential, cookie, API key,
-   publishing credential, release permission, or deployment command.
+9. reference no repository-configured secret, Roblox credential, cookie,
+   persistent API key, publishing credential, release permission, or deployment
+   command.
 
 The workflow must not use `continue-on-error` on a required check. Commands
 remain the same repository-owned commands used locally; CI does not maintain a
