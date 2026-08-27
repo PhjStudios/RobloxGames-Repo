@@ -26,21 +26,34 @@ only change through an explicit architecture decision recorded here.
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
 - Gameplay state: minimal Rojo scaffold with harmless Studio-only client and
   server bootstraps; temporary example behavior has been removed.
-- Current implementation phase: Phases 00–06 complete; Gate A passed on
-  2026-08-26. Phase 07 is next and has not begun.
+- Current implementation phase: Phases 00–07 complete; Gate A passed on
+  2026-08-26 and the Phase 07 exit gate passed on 2026-08-27. Phase 08 is next
+  but has not begun.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
   Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, 06.3, 06.4,
-  and 06.5 completed on 2026-08-26.
-- Current checkpoint: Phase 06 and Gate A are complete. Three exact current-tree
+  and 06.5 completed on 2026-08-26. Packets 07.1–07.4 and their Phase 07 exit
+  gate completed on 2026-08-27.
+- Current checkpoint: Phase 06 and Gate A are complete. Its three exact current-tree
   canonical runs are byte-identical at 200 cases across 16 suites, all four
   structural builds pass, and the unsaved three-cycle Lobby, three-cycle Match,
   and exact current-source two-client networking regressions pass. Audit-content
   commit `7ada807586164c8ab0c940c749393c243d4fe9e3` passed the genuine clean
-  workflow in run `33022784985`. The lasting production registry and production
-  rate-policy list are empty. No gameplay remote or Phase 07 system has begun.
-- Publishing state: the user authorized and completed the Packet 02.4 Match-place
-  creation; no additional publishing is authorized.
+  workflow in run `33022784985`. Phase 07 architecture, runtime/tests, and
+  authoring-tool commits are `345ca44`, `98e4df5`, and `0332277`. The single
+  consolidated Phase 07 review resolved all four material findings. The final
+  local gate passes 241 cases across 19 suites, all four structural builds,
+  formatting, lint, diff, scope, test-exclusion, and role-isolation checks. The
+  exact Match Studio gate and controlled 25-record graybox save also pass. The
+  lasting production registry, rate-policy list, and `Maps`, `Difficulties`,
+  and `Waves` source catalogs remain empty; the Studio-owned graybox is not a
+  source catalog entry. One exact-final-SHA Repository Verification run remains
+  a handoff requirement and is cited outside this tracked plan to avoid a
+  self-referential evidence commit.
+- Publishing state: the user authorized the Packet 02.4 Match-place creation and
+  one controlled Phase 07 Save To Cloud of the reviewed Match graybox. No
+  release, public-audience, settings, service, Lobby, or unrelated publication
+  was authorized.
 
 ## Approved product foundation
 
@@ -703,7 +716,8 @@ build, definitions validate, three 200-case runs are byte-identical, the current
 Studio regressions pass, and the mandatory checklist/approval process exists and
 must be completed separately for each future remote. The exact audit-content
 commit passed the genuine clean workflow in run `33022784985`; evidence is in
-`docs/PHASE_06_EXIT_AUDIT.md`. Phase 07 is next and has not begun.
+`docs/PHASE_06_EXIT_AUDIT.md`. Phase 07 subsequently began from that exact
+baseline; Gate A remains unchanged.
 
 # Milestone B — Graybox Match Vertical Slice
 
@@ -711,6 +725,17 @@ commit passed the genuine clean workflow in run `33022784985`; evidence is in
 
 **Objective:** Establish the Studio-authored map interface with one deliberately
 simple test battlefield.
+
+**Current status:** Complete on 2026-08-27. Packets 07.1–07.4 and the Phase 07
+exit gate pass. The reviewed primitive
+graybox is saved only under the exact Match-place trusted template root, and the
+runtime validation/load/query/unload/reload/cleanup regression passed. Commits
+`345ca44`, `98e4df5`, and `0332277` contain the architecture, executable
+implementation/tests, and unmapped authoring tooling. The consolidated review
+resolved all four material findings, and the complete local gate passes 241
+cases across 19 suites plus all four structural builds. Phase 08 is next but
+has not begun. Authoritative contract and Studio evidence are in
+`docs/MAP_RUNTIME_CONTRACT.md`.
 
 ### Packet 07.1 — Map tag and attribute contract
 
@@ -739,8 +764,10 @@ simple test battlefield.
 - Add camera anchor and match spawn locations.
 - Verify the map validator in Studio.
 
-**Exit gate:** The graybox map loads, validates, unloads, and contains no lasting
-Rojo-managed script edits in Studio.
+**Exit gate:** Passed on 2026-08-27. The graybox validates, loads, exposes
+deterministic read-only lane data, unloads/reloads/cleans, and contains no
+lasting Rojo-managed script edit. The consolidated review and complete local
+gate also pass. Phase 07 is complete; Phase 08 is next but has not begun.
 
 ## Phase 08 — Match lifecycle and initial ready check
 

@@ -8,12 +8,14 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phases 00–06 are complete and Gate A passed on 2026-08-26. The fresh
-combined audit passed three byte-identical 200-case runs, all four project
-structures, the unsaved Lobby/Match checks, the exact current-source two-client
-Studio regression, and the genuine clean `Repository Verification` workflow.
-Phase 07 is next but has not begun. The lasting production endpoint registry
-and production rate-policy list remain empty; no gameplay remote was added.
+order. Phases 00–07 are complete; Gate A passed on 2026-08-26 and the Phase 07
+exit gate passed on 2026-08-27. The map contract, deterministic
+validator/loader, 241-case local suite, all four structural builds, consolidated
+review, and Studio-owned Match graybox are complete. Phase 08 is next but has
+not begun. The lasting production endpoint registry, rate-policy list, and
+`Maps`, `Difficulties`, and `Waves` source catalogs remain empty. The final
+branch SHA must still receive the separately cited Repository Verification run
+before task handoff.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -32,6 +34,7 @@ and production rate-policy list remain empty; no gameplay remote was added.
 - [Shared ID and expected-result contracts](docs/IDS_AND_RESULTS.md)
 - [Tower, enemy, and symbolic-asset schemas](docs/TOWER_ENEMY_SCHEMAS.md)
 - [Map, difficulty, and wave schemas](docs/MAP_DIFFICULTY_WAVE_SCHEMAS.md)
+- [Studio map contract, validator, loader, and authoring procedure](docs/MAP_RUNTIME_CONTRACT.md)
 - [Economy, banner, and default-settings schemas](docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md)
 - [Whole-configuration validation and bootstrap gate](docs/CONFIGURATION_VALIDATION.md)
 - [Phase 04 exit-gate audit](docs/PHASE_04_EXIT_AUDIT.md)
@@ -120,8 +123,9 @@ applicable Rojo project, and describe any required Roblox Studio testing.
 `test.project.json` is build-only and has no place binding. Test specs,
 fixtures, support modules, negative controls, and Lune never appear in Default,
 Lobby, or Match builds; the structural verifier enforces this boundary.
-`tests/studio` contains manual, runtime-only regression harness source and is
-not mapped into any of the four projects.
+`tests/studio` contains three manual runtime-regression harness sources and one
+default-deny Edit-mode authoring command. None is mapped into any of the four
+projects.
 
 The default project intentionally contains all source layers for combined
 development inspection. Use the lobby or match project for role-isolated Studio

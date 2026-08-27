@@ -79,6 +79,15 @@ combined Rojo project name is `Ant Tower Defense`.
   while `src/shared/config/PlaceRoles.luau` owns the runtime PlaceId
 - Live isolated Studio gate: passed in Packet 02.4; evidence:
   `docs/MULTI_PLACE_GATE.md`
+- Phase 07 map gate identity reconfirmed: PlaceId `136401514513678`, GameId
+  `10757629094`, PHJGAMES Group `35420107`, and resolved role `Match`.
+- Controlled Phase 07 Save To Cloud: succeeded at `2026-08-27T02:11:31Z` under
+  the user's exact graybox authorization; it did not change visibility,
+  settings, services, Lobby, or unrelated assets.
+- Current Edit-mode map state: one exact 25-record
+  `ServerStorage.ATDMapTemplates` catalog tree (the catalog folder plus its only
+  `Map_phase07-graybox` subtree) and zero `Workspace.ATDRuntimeMap` roots.
+  Studio remains in Edit mode.
 
 The Match place must:
 
@@ -291,6 +300,10 @@ not created by Rojo-managed scripts.
 
 ### Match place and maps
 
+- Phase 07 currently owns one primitive graybox template under the fixed
+  `ServerStorage.ATDMapTemplates` folder. It contains one genuinely bent lane,
+  enemy spawn, ordered nodes, defender base, placement/no-placement regions,
+  bounds, camera anchor, player SpawnLocation, and primitive geometry.
 - Map terrain and environment geometry.
 - Ant nest/enemy spawn markers.
 - Ordered lane/path markers.
@@ -356,10 +369,13 @@ persistence/destructive backend testing and before the Phase 26 published-client
 teleport gate, but none of the completed Phases 03-05 required that private
 Roblox environment.
 
-### Needed before Phase 07's graybox map gate
+### Phase 07 graybox map gate
 
-- Author the test map markers, placement areas, base, enemy spawn, and camera
-  anchors in the Test Match place.
+- Complete in the existing restricted Match place under the specific user
+  authorization. The exact added-only inventory was 25 records; no unrelated
+  or Rojo-managed Instance changed, and no runtime clone remains.
+- This Studio-owned template is not a `Maps.luau` production catalog entry and
+  does not substitute for the still-unavailable separate private test universe.
 
 ### Needed before Phase 26 teleport testing
 

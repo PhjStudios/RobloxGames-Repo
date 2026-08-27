@@ -490,6 +490,38 @@ return TestHarness.suite("deterministic server map validator", {
 		end)
 	end),
 
+	TestHarness.case("accepts the exact map-wide node limit and rejects one more", function(assertions)
+		MapFixtures.withValidMap(function(fixture)
+			fixture.enemySpawn:Destroy()
+			for _, node in fixture.nodes do
+				node:Destroy()
+			end
+
+			for laneIndex = 1, 4 do
+				local laneId = `limit{laneIndex}`
+				local z = -20 + laneIndex * 8
+				MapFixtures.addEnemySpawn(fixture, laneId, Vector3.new(-50, 5, z))
+				for order = 1, 256 do
+					MapFixtures.addPathNode(fixture, laneId, order, Vector3.new(-50 + order * 0.3, 5, z))
+				end
+			end
+
+			local boundary = MapValidator.validate(fixture.root, MapFixtures.MAP_ID) :: any
+			assertions.isTrue(boundary.ok)
+			if not boundary.ok then
+				return
+			end
+			assertions.equal(#boundary.value.lanes, 4)
+			for _, lane in boundary.value.lanes do
+				assertions.equal(#lane.nodes, 256)
+			end
+
+			MapFixtures.addEnemySpawn(fixture, "overflow", Vector3.new(-50, 5, 20))
+			MapFixtures.addPathNode(fixture, "overflow", 1, Vector3.new(-49, 5, 20))
+			expectRejected(assertions, fixture, "OUT_OF_RANGE", "PathNodes")
+		end)
+	end),
+
 	TestHarness.case("produces identical issue order for opposite authored insertion order", function(assertions)
 		local left = MapFixtures.createValidMap()
 		local right = MapFixtures.createValidMap()
@@ -554,6 +586,34 @@ return TestHarness.suite("deterministic server map validator", {
 				}, "|")
 				assertions.isNil(string.find(rendered, privateName, 1, true))
 				assertions.isNil(string.find(rendered, privateValue, 1, true))
+			end
+		end)
+	end),
+
+	TestHarness.case("bounds long geometry names out of deterministic diagnostics", function(assertions)
+		MapFixtures.withValidMap(function(fixture)
+			local privateName = `PRIVATE_GEOMETRY_NAME_5d73_{string.rep("A", 160)}`
+			local floor = fixture.geometry:FindFirstChild("GrayboxFloor") :: BasePart
+			floor.Name = privateName
+			floor.Anchored = false
+
+			local first = MapValidator.validate(fixture.root, MapFixtures.MAP_ID) :: any
+			local second = MapValidator.validate(fixture.root, MapFixtures.MAP_ID) :: any
+			assertions.isFalse(first.ok)
+			assertions.isFalse(second.ok)
+			if first.ok or second.ok then
+				return
+			end
+			assertions.equal(issueSignature(first.error.issues), issueSignature(second.error.issues))
+			for _, issue in first.error.issues do
+				local rendered = table.concat({
+					tostring(issue.path),
+					tostring(issue.relatedPath),
+					tostring(issue.message),
+				}, "|")
+				assertions.isNil(string.find(rendered, privateName, 1, true))
+				assertions.isTrue(#tostring(issue.path) <= 512)
+				assertions.isTrue(#tostring(issue.relatedPath) <= 512)
 			end
 		end)
 	end),

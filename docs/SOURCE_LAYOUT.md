@@ -17,7 +17,7 @@ place-isolated mappings recorded in `docs/ROJO_PROJECTS.md`.
 - Studio-authored content changed: no
 - Place saved or published: no
 
-## Current Phase 06-relevant source tree excerpt
+## Current Phase 07-relevant source tree excerpt
 
 ```text
 src/
@@ -74,6 +74,10 @@ src/
     lobby/
       .gitkeep
     match/
+      maps/
+        MapContract.luau
+        MapLoader.luau
+        MapValidator.luau
       .gitkeep
   client/
     common/
@@ -88,10 +92,14 @@ src/
       .gitkeep
 tests/
   fixtures/
+    MapFixtures.luau
     NetworkFixtures.luau
   negative/
   specs/
     ClientRequestTracker.spec.luau
+    MapContract.spec.luau
+    MapLoader.spec.luau
+    MapValidator.spec.luau
     NetworkSecurity.spec.luau
     PayloadValidation.spec.luau
     RemoteRegistry.spec.luau
@@ -102,18 +110,19 @@ tests/
   studio/
     Phase06NetworkClient.client.luau
     Phase06NetworkServer.server.luau
+    Phase07MapAuthoring.command.luau
+    Phase07MapRegression.server.luau
   support/
 ```
 
-This excerpt shows every production source and the Phase 06 test areas relevant
-to the network boundary. It intentionally omits unrelated test fixtures,
-negative controls, older specs, support modules, and runner entrypoints; it is
-not a complete tracked-file inventory.
+This excerpt shows every production source and the Phase 06/07 test areas
+relevant to the network and map boundaries. It intentionally omits unrelated
+test fixtures, negative controls, older specs, support modules, and runner
+entrypoints; it is not a complete tracked-file inventory.
 
-The remaining `.gitkeep` files preserve the four empty place-specific
-architecture directories until packet-approved source replaces them. They are
-not Luau modules or runnable scripts. Rojo represents the directories as empty
-folders and does not create instances for the `.gitkeep` files themselves.
+The remaining `.gitkeep` files preserve the place-specific architecture
+directories. Server Match now also contains the Phase 07 `maps` modules. The
+markers are not Luau modules or runnable scripts and create no Roblox Instance.
 
 `src/shared` remains the location for code that is safe and useful across both
 execution contexts and both place roles. Packet 02.3 added the typed place-role
@@ -174,6 +183,12 @@ production `ServerRequestDispatcher` to close yielding authorizers/handlers and
 forbid handler-supplied validation metadata. The production file inventory,
 runnable entrypoints, empty lasting registry, and empty lasting rate-policy list
 are unchanged.
+
+Phase 07 adds exactly three server-only Match modules under `match/maps`:
+`MapContract`, `MapValidator`, and `MapLoader`. They are not imported by the
+bootstrap and add no runnable entrypoint or lifecycle service. Three focused
+specs and `MapFixtures` are mapped only into Test. Both Phase 07 Studio tools
+remain unmapped; the saved graybox is Studio-owned content outside `src/`.
 
 ## Bootstrap move manifest
 
@@ -344,32 +359,36 @@ headless seam is gated by the exact Test-project structure.
 The ignored smoke-build artifact was inspected and removed. It can be recreated
 with the build command above.
 
-### Current Packet 06.5 source layout
+### Current Phase 07 source layout
 
-The four-project structural contract now expects 40 ModuleScripts, one Script,
-and one LocalScript in every production build. That is 42 exact production Lua
-source containers: 33 shared modules; the server-only `Shutdown`,
-`ProductionRateLimits`, `ServerRemoteRegistry`, `ServerRateLimiter`, and
-`ServerRequestDispatcher` modules; the client-only `ClientRemoteLookup` and
-`ClientRequestTracker` modules; and the two common bootstraps.
+The structural contract now expects 43 ModuleScripts in Default and Match, 40
+in Lobby, and one Script plus one LocalScript in every production build. The
+common inventory remains 42 Lua source containers: 33 shared modules; the
+server-only `Shutdown`, `ProductionRateLimits`, `ServerRemoteRegistry`,
+`ServerRateLimiter`, and `ServerRequestDispatcher` modules; the client-only
+`ClientRemoteLookup` and `ClientRequestTracker` modules; and the two common
+bootstraps. Default and Match add the three server-only Match map modules.
 
 The Test build's production source subset contains all 33 shared modules and
 exactly six common networking modules copied under test-only `ServerStorage`
 paths. It maps four server modules (`ProductionRateLimits`,
 `ServerRemoteRegistry`, `ServerRateLimiter`, and `ServerRequestDispatcher`) and
-two client modules (`ClientRemoteLookup` and `ClientRequestTracker`). The full
-Test build now contains 65 ModuleScripts: those 33 shared modules, six mapped
-networking modules, and 26 test-owned modules. The verifier authenticates every
-one of those 26 test-owned modules by exact DataModel path, class,
-authoritative file, and byte-for-byte source; unlisted test source fails. Test
-has zero runnable scripts.
+two client modules (`ClientRemoteLookup` and `ClientRequestTracker`), plus the
+three production Match map modules. The full Test build now contains 72
+ModuleScripts: 33 shared, six networking, three map, and 30 test-owned modules.
+The verifier authenticates every test-owned module by exact DataModel path,
+class, authoritative file, and byte-for-byte source; unlisted test source fails.
+Test has zero runnable scripts.
 Lobby contains no Match source, Match contains no Lobby source, and lasting
-production remote definitions and rate policies remain empty. Production
-remains at 40 ModuleScripts, one Script, and one LocalScript. The existing
+production remote definitions and rate policies remain empty. Lobby remains at
+40 ModuleScripts; Default and Match contain 43, each with one Script and one
+LocalScript. The existing
 dispatcher now enforces synchronous non-yielding feature callbacks and reserves
 validation metadata to its own strict payload failure path. Packet 06.5 and the
 fresh Phase 06/Gate A audit pass, including clean workflow run `33022784985`.
-Phase 06 is complete, Gate A passed, and Phase 07 is next but has not begun.
+Phase 07 implementation, Studio authoring, consolidated review, 241-case local
+suite, and all four structural builds pass. Phase 07 is complete; Phase 08 is
+next but has not begun.
 
 ## Roblox Studio verification
 
@@ -449,16 +468,18 @@ and intentional negative controls stay under test-only
 directories; lasting authored catalogs under `src/shared/config` and lasting
 remote definitions under `src/shared/network/ProductionRemotes.luau` remain
 empty or policy-only. Packet 06.5 adds the integrated adversarial spec to the
-Test-only spec root; its two `tests/studio` manual harness sources remain mapped
-nowhere.
+Test-only spec root; its two `tests/studio` networking harness sources remain
+mapped nowhere. Phase 07 adds three production map modules, one fixture, three
+specs, one runtime map harness, and one default-deny Edit authoring command; the
+two Phase 07 Studio tools are also mapped nowhere.
 
 `test.project.json` creates no runnable Script or LocalScript. Conversely,
 Default, Lobby, and Match map no test directory.
 `lune run tests/verify-builds.luau` enforces both directions across the complete
-generated DataModels, including an exact positive path/class/source map for all
-42 current production Lua containers, exact source identity for the six
-test-mapped networking modules, and an exact positive path/class/source map for
-all 26 Test-owned ModuleScripts.
+generated DataModels, including exact positive path/class/source maps for all
+45 Default/Match and 42 Lobby production Lua containers, exact source identity
+for the six test-mapped networking modules and three production map modules,
+and an exact positive path/class/source map for all 30 Test-owned ModuleScripts.
 
 This headless boundary and every environment-specific follow-up are indexed in
 `docs/TEST_MATRIX.md`; passing it does not substitute for published-client,

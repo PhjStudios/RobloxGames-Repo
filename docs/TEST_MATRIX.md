@@ -7,8 +7,10 @@ Ant Tower Defense. Packet 05.4 created it on 2026-08-26. It separates checks
 that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
-Phases 00–06 are complete and Gate A passed on 2026-08-26. Phase 07 is next and
-has not begun.
+Phases 00–07 are complete. Gate A passed on 2026-08-26, and the Phase 07 exit
+gate passed on 2026-08-27 after the exact Match Studio authoring, consolidated
+review, 241-case local suite, and all four structural builds. Phase 08 is next
+but has not begun.
 
 The current repository has a fixed remote-registry/network-ownership foundation,
 strict shared payload validators, a server-authoritative token-bucket limiter,
@@ -50,9 +52,11 @@ linked historical document for the original Studio evidence.
 - Default, Lobby, and Match never map `tests/` or a test-only dependency.
   `lune run tests/verify-builds.luau` enforces exact source identity, role
   isolation, runnable-entrypoint counts, and test exclusion.
-- The two tracked `tests/studio` harness sources are mapped by no Rojo project.
-  They are injected only into runtime-only local Server & Clients DataModels by
-  the reviewed unsaved procedure and are discarded when the session ends.
+- All four tracked `tests/studio` tools are mapped by no Rojo project. The two
+  Phase 06 networking harnesses and the Phase 07 map-regression harness are
+  runtime-only and discarded when their local session ends. The fourth is the
+  default-deny Edit-mode Phase 07 authoring command used only under its exact
+  persistence authorization.
 - Production universe `10757629094` is not a routine persistence-test target.
   Keep Studio API access disabled there. The complete environment policy is in
   [Place and test-environment inventory](PLACE_INVENTORY.md).
@@ -173,9 +177,11 @@ linked historical document for the original Studio evidence.
   Lua source map, production runnable-entrypoint counts, place-role isolation,
   and absence of tests/test-only dependencies from production.
 - **Test category:** automated headless build and structural integration test.
-- **Current status:** `Passed` locally and in GitHub Actions on 2026-08-26;
-  audit-content run `33022784985` passed. Phase 05 retains its own historical
-  clean run.
+- **Current status:** Phase 06 baseline `Passed` locally and in GitHub Actions
+  on 2026-08-26 in audit-content run `33022784985`. The updated Phase 07
+  structural verifier also passes locally for all four projects. One
+  exact-final-SHA CI run is required and cited at task handoff rather than
+  committed here.
 - **Environment:** current local Windows x64 plus the GitHub Actions
   `windows-2025` runner using pinned Rojo and Lune.
 - **Command or procedure:** run `lune run tests/verify-builds.luau`.
@@ -185,15 +191,16 @@ linked historical document for the original Studio evidence.
   for the current exit evidence; no Roblox service or publication is required.
 - **Destructive-data risk:** none; generated builds are ignored and exact-path
   temporary outputs are removed.
-- **Expected evidence:** Default, Lobby, and Match each contain exactly 40
-  ModuleScripts, one Script, and one LocalScript; Test contains 33 shared
-  ModuleScripts, exactly six test-mapped common networking modules, 26
-  test-owned ModuleScripts, and no runnable script, for 65 ModuleScripts total;
+- **Expected evidence:** Default and Match each contain exactly 43
+  ModuleScripts, Lobby contains 40, and each has one Script and one LocalScript;
+  Test contains 33 shared ModuleScripts, six test-mapped common networking
+  modules, three production map modules, 30 test-owned ModuleScripts, and no
+  runnable script, for 72 ModuleScripts total;
   Lobby contains no Match
   source, Match contains no Lobby source, and production contains no test source
-  or marker. The two manual `tests/studio` harness sources are mapped nowhere
-  and occur in none of the four builds. Every one of the 26 Test-owned
-  ModuleScripts is independently matched to an exact DataModel path, class,
+  or marker. All four manual `tests/studio` harness sources are mapped nowhere
+  and occur in none of the four builds. Every Test-owned
+  ModuleScript is independently matched to an exact DataModel path, class,
   authoritative file, and byte-for-byte source; unlisted Test-owned source
   fails the verifier.
 - **Cleanup procedure:** the verifier removes its exact four outputs; confirm no
@@ -351,6 +358,29 @@ linked historical document for the original Studio evidence.
   complete. Every future feature remote still requires its approved boundary
   checklist. The Phase 06/Gate A audit and current Actions evidence pass. Phase
   06 is complete and Gate A passed.
+
+### H-10 — Phase 07 map contract, validator, and loader
+
+- **System or contract:** fixed map metadata, root-scoped deterministic
+  validation, trusted catalog selection, parent-last loader transactions,
+  detached lane queries, rollback, unload/reload, and cleanup.
+- **Test category:** automated headless unit/integration tests with synthetic
+  `MapFixtures` only.
+- **Current status:** `Passed`. All 41 focused cases across `MapContract.spec`,
+  `MapValidator.spec`, and `MapLoader.spec` pass, and the complete local suite
+  passes 241 cases across 19 suites.
+- **Environment:** isolated Rojo Test DataModel under Lune; exact production map
+  modules are mapped under Test-only `ServerStorage` paths.
+- **Command or procedure:** run `lune run tests/run.luau`; use `--spec
+  MapContract`, `--spec MapValidator`, or `--spec MapLoader` while iterating.
+- **Authorization/external/destructive risk:** none; fixtures are test-only and
+  no production catalog or external service is used.
+- **Expected evidence:** stable frozen diagnostics and snapshots, bounded
+  adversarial rejection, zero partial runtime state, mutation isolation, and
+  clean repeated load/unload/cleanup.
+- **Cleanup procedure:** fixture/loader cleanup plus the H-01 residue check.
+- **Phase or prerequisite:** Packets 07.1–07.3; authoritative contract is
+  [Map Runtime Contract](MAP_RUNTIME_CONTRACT.md).
 
 ## Local Studio solo tests
 
@@ -538,24 +568,30 @@ linked historical document for the original Studio evidence.
 
 - **System or contract:** map tags/attributes, lanes, path geometry, spawn/goal,
   placement zones, loader diagnostics, and Match-place integration.
-- **Test category:** future local Studio solo/editor test.
-- **Current status:** `Deferred`; no runtime map contract, loader, or graybox map
-  has been implemented.
-- **Environment:** future Match Studio place with reviewed Studio-authored
-  graybox content and `match.project.json`.
-- **Command or procedure:** none yet.
-- **Required players or devices:** one Studio editor; later one local player.
-- **Authorization requirement:** explicit approval is required before saving or
-  publishing Studio-authored map changes.
-- **External service or publication requirement:** no publication for local
-  validation; Studio-authored content is required.
+- **Test category:** local Studio Play regression plus controlled Edit-mode
+  authoring/persistence gate.
+- **Current status:** `Passed` on 2026-08-27 for implementation, Studio content,
+  consolidated review, and the complete local exit gate.
+- **Environment:** exact Match PlaceId `136401514513678`, GameId `10757629094`,
+  PHJGAMES Group `35420107`, role `Match`, with only `match.project.json`.
+- **Command or procedure:** follow the gate and evidence in
+  [Map Runtime Contract](MAP_RUNTIME_CONTRACT.md#studio-persistence-gate).
+- **Required players or devices:** one Studio editor and one local Play server.
+- **Authorization requirement:** the one reviewed graybox Save To Cloud was
+  explicitly authorized and succeeded at `2026-08-27T02:11:31Z`; no broader
+  publication/settings authorization exists.
+- **External service or publication requirement:** none beyond that completed
+  controlled save.
 - **Destructive-data risk:** moderate if mapped/unknown Studio instances are
   edited carelessly; preserve unmapped content.
-- **Expected evidence:** deterministic validator diagnostics and successful
-  graybox loader smoke test without modifying unrelated instances.
-- **Cleanup procedure:** remove only test-owned temporary instances; leave Edit
-  mode and save only when separately authorized.
-- **Phase or prerequisite:** Packets 07.1–07.4.
+- **Expected evidence:** the prior unsaved Play regression passed 169 checks.
+  The lasting transaction recorded `98 -> 123` inventory records, exactly 25
+  additions, zero removals/unrelated changes, one template, one five-point bent
+  lane, and zero retained runtime roots.
+- **Cleanup procedure:** loader cleanup removes the runtime clone. Studio remains
+  in Edit with only the exact 25-record trusted catalog lasting.
+- **Phase or prerequisite:** Packets 07.1–07.4 and the Phase 07 gate are
+  complete; Phase 08 has not begun.
 
 ## Studio Server & Clients and other multi-client tests
 

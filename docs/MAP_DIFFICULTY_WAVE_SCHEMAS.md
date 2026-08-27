@@ -4,9 +4,10 @@
 
 This document records the contracts, decisions, limits, and verification evidence
 for Packet 04.3 of `docs/DEVELOPMENT_PLAN.md`. The packet defines immutable map,
-difficulty, authored-wave, and generated-Endless input data before any runtime
-map loader, wave scheduler, enemy spawner, reward service, or Endless generator
-exists.
+difficulty, authored-wave, and generated-Endless input data. Phase 07 has since
+added the separate physical map contract, validator, and loader documented in
+`docs/MAP_RUNTIME_CONTRACT.md`; no wave scheduler, enemy spawner, reward
+service, or Endless generator exists.
 
 No production map, difficulty, enemy composition, wave list, boss roster, reward
 amount, or balance value was authored. `Difficulties.luau`, `Maps.luau`, and
@@ -87,6 +88,10 @@ ID, Instance, DataModel path, uploaded model, or proof that Studio content
 exists. Phase 07 owns physical map tags, marker attributes, model binding,
 route geometry, bounds, spawn points, placement zones, and the defender-base
 Instance.
+
+Phase 07's saved `ServerStorage.ATDMapTemplates.Map_phase07-graybox` is unmapped
+Studio-owned content selected only through the trusted server loader. It is not
+an entry in `Maps.luau` and does not weaken this schema boundary.
 
 Each lane currently contains only a symbolic `id`. Lane IDs are unique within
 one map and may be reused by another map. Nodes, waypoints, path length, spawn

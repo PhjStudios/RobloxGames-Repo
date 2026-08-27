@@ -175,6 +175,13 @@ must register that call in its own `Cleanup` container together with the fixed
 response listener it owns; clearing correlation does not cancel or authorize a
 server request.
 
+Phase 07's `MapLoader` creates a fresh `match-map-loader` Cleanup container for
+each load. It registers the detached clone immediately, publishes only after
+both validation passes and snapshot derivation, and destroys that exact clone
+on rollback, `unload()`, or terminal `cleanup()`. Idempotent unload/reload and
+cleanup leave no runtime root, template reference, cache, connection, or mutable
+query state; pre-existing conflicting roots are preserved.
+
 ## Focused Studio Edit-mode validation
 
 Three read-only Studio Edit-mode harness groups cloned and required the current
@@ -211,10 +218,12 @@ rollback after partial initialization, preservation of pre-existing root
 conflicts, duplicate-owner/re-entry rejection, both exact Player-removal state
 releases, whole-child shutdown clearing, explicit client correlation clearing,
 and removal of the exact published root. Packet 06.5 adds nine integrated
-adversarial cases over those real boundaries; the current canonical run passes
-all 200 cases across 16 suites. Packet 06.5 and the fresh Phase 06/Gate A audit
-pass, including clean workflow run `33022784985`. Phase 06 is complete and Gate
-A passed.
+adversarial cases over those real boundaries; the Phase 06 canonical run passed
+all 200 cases across 16 suites. Phase 07 adds focused loader rollback,
+unload/reload, and cleanup coverage; the current complete local run passes 241
+cases across 19 suites. Packet 06.5 and the fresh Phase 06/Gate A audit pass,
+including clean workflow run `33022784985`. Phase 07's cleanup gate is also
+complete.
 
 Packet 03.3 reran 10 focused cleanup cases through the logger-based constructor.
 Supported runtime types, LIFO/idempotence, state/nesting guards, failure

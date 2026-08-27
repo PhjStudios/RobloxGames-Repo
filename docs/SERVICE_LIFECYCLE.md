@@ -151,6 +151,12 @@ Invalid configuration raises a structured error before `ServiceLifecycle.new`,
 so no partially validated configuration can reach a service and no runner needs
 rollback. The valid path and every lifecycle state contract remain unchanged.
 
+Phase 07's server-only `MapLoader` is deliberately not a production lifecycle
+service and is not imported by bootstrap. A future trusted server owner must
+construct it explicitly and call its idempotent `unload()` or terminal
+`cleanup()` contract. Phase 08's match lifecycle has not begun, and the current
+bootstrap service counts are unchanged.
+
 The network service has no declared dependencies. Its lifecycle callbacks own a
 separate typed state machine: initialization creates the fixed server-owned tree
 before parent-last publication, initializes the server limiter, initializes the
@@ -205,10 +211,13 @@ initialize/start/shutdown state adapter. Packet 06.4 extends that composition to
 the limiter, dispatcher, two `PlayerRemoving` owners, and fixed listener
 bindings. Packet 06.5 adds nine integrated adversarial cases that exercise the
 same registry, limiter, dispatcher, protocol, client tracker, Player-removal,
-and whole-network cleanup boundaries. The current canonical run passes all 200
-cases across 16 suites. The evidence in this section remains historical Studio
-validation; reusable general lifecycle coverage is deferred until a dedicated
-regression packet. See `docs/TEST_MATRIX.md`.
+and whole-network cleanup boundaries. That Phase 06 canonical run passed all
+200 cases across 16 suites. Phase 07 adds separate focused map suites without
+changing this lifecycle contract; the current complete local run passes 241
+cases across 19 suites and the Phase 07 gate is complete. The evidence in this
+section remains historical Studio validation; reusable general lifecycle
+coverage is deferred until a dedicated regression packet. See
+`docs/TEST_MATRIX.md`.
 
 Packet 03.3 reran 12 focused lifecycle cases through the migrated logger-based
 constructor. Dependency order, registration/state rejection, and all three

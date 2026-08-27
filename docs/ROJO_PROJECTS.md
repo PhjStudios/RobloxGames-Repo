@@ -46,6 +46,13 @@ The tracked `tests/studio/Phase06NetworkServer.server.luau` and
 `tests/studio/Phase06NetworkClient.client.luau` manual harness sources are
 mapped by none of the four projects.
 
+Phase 07 additionally maps the exact production `MapContract`, `MapValidator`,
+and `MapLoader` modules beneath the Test-only
+`ServerStorage.AutomatedTests.ProductionServerMaps` folder. `MapFixtures` and
+the three map specs are Test-owned. `Phase07MapRegression.server.luau` and
+`Phase07MapAuthoring.command.luau` remain unmapped, as does the lasting
+Studio-owned `ServerStorage.ATDMapTemplates` content.
+
 The role projects intentionally omit `servePlaceIds`, raw PlaceIds, universe
 IDs, and conditional role selection. Their only identity declaration is the
 `ATDPlaceRole` string attribute. Packet 02.3 owns the single shared role
@@ -153,9 +160,9 @@ described above.
 
 | Build | Server layers | Client layers | ModuleScripts | Scripts | LocalScripts |
 | --- | --- | --- | ---: | ---: | ---: |
-| Default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | 40 | 1 | 1 |
+| Default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | 43 | 1 | 1 |
 | Lobby | `common`, `lobby` | `common`, `lobby` | 40 | 1 | 1 |
-| Match | `common`, `match` | `common`, `match` | 40 | 1 | 1 |
+| Match | `common`, `match` | `common`, `match` | 43 | 1 | 1 |
 | Test | No runnable layer; four selected server-networking modules under `ServerStorage` | No runnable layer; two selected client-networking modules under `ServerStorage` | See below | 0 | 0 |
 
 Additional assertions passed:
@@ -166,19 +173,21 @@ Additional assertions passed:
 - Match build contains no lobby folder or source.
 - Default, Lobby, and Match contain no test spec, fixture, support module,
   negative control, runner entrypoint, or test-only dependency.
-- Every one of the 42 production Lua containers matches a fixed expected
+- Every production Lua container matches a fixed expected
   DataModel path, class, authoritative `src/` file, and exact source content.
 - Test contains the same 33 shared ModuleScripts plus exactly
   `ProductionRateLimits`, `ServerRemoteRegistry`, `ServerRateLimiter`,
   `ServerRequestDispatcher`, `ClientRemoteLookup`, and `ClientRequestTracker`
-  under test-only `ServerStorage` paths. Its test-owned
-  spec/fixture/support/negative-control set contains 26 ModuleScripts, each
+  under test-only `ServerStorage` paths, plus the three production map modules.
+  Its test-owned spec/fixture/support/negative-control set contains 30
+  ModuleScripts, each
   authenticated against an exact DataModel path, class, authoritative test
   file, and byte-for-byte source. Unlisted Test-owned source fails the
-  verifier. The complete Test build therefore contains 65 ModuleScripts and no
+  verifier. The complete Test build therefore contains 72 ModuleScripts and no
   runnable Script or LocalScript.
-- The two tracked `tests/studio` manual harness sources occur in no generated
-  DataModel; they are absent even from the Test build.
+- All four tracked `tests/studio` tools occur in no generated DataModel: the
+  three runtime-regression harness sources and the default-deny Phase 07
+  Edit-mode authoring command are absent even from the Test build.
 - All builds contain `ReplicatedStorage.Shared`.
 - `.gitkeep` files produce no Roblox instances.
 - Both structured common bootstrap records are present in every production
@@ -200,11 +209,13 @@ The current production source inventory contains 33 shared ModuleScripts:
 The server-only common `Shutdown`, `ProductionRateLimits`,
 `ServerRemoteRegistry`, `ServerRateLimiter`, and `ServerRequestDispatcher`
 modules and client-only common `ClientRemoteLookup` and `ClientRequestTracker`
-modules bring each production build to 40 ModuleScripts, alongside one Script
-and one LocalScript. The Default build contains both empty role folders, the
-Lobby build contains no match folder, and the Match build contains no lobby
-folder. Source-layer isolation remains unchanged. Packet 04.4 schema evidence
-is recorded in `docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md`; current whole-catalog
+modules bring the common production inventory to 40 ModuleScripts. Default and
+Match add `MapContract`, `MapValidator`, and `MapLoader` for 43 ModuleScripts;
+each production build retains one Script and one LocalScript. The Default build
+contains both role folders, the Lobby build contains no match folder, and the
+Match build contains no lobby folder. Source-layer isolation remains unchanged.
+Packet 04.4 schema evidence is recorded in
+`docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md`; current whole-catalog
 evidence is in `docs/CONFIGURATION_VALIDATION.md`, and the network layout is in
 `docs/NETWORK_PROTOCOL.md`.
 
@@ -231,7 +242,9 @@ For Packet 06.5, `lobby.project.json` was connected only to Lobby and
 each role, followed by the final two-client networking regression. Both places
 were left in Edit mode without saving or publishing. Packet 06.5 and the fresh
 Phase 06/Gate A audit pass, including clean workflow run `33022784985`. Phase 06
-is complete, Gate A passed, and Phase 07 is next but has not begun.
+is complete and Gate A passed. Phase 07 implementation, exact Match Studio
+authoring, consolidated review, 241-case local suite, and all four structural
+builds pass. Phase 07 is complete; Phase 08 is next but has not begun.
 
 ## Scope boundary and next gate
 

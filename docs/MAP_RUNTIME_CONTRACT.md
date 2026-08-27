@@ -2,9 +2,10 @@
 
 ## Purpose and boundary
 
-This document is the authoritative Phase 07 decision for the Studio-authored
-map interface, deterministic validation, and graybox runtime loader. It records
-the decision before executable Phase 07 source is implemented.
+This document is the authoritative Phase 07 decision and evidence record for
+the Studio-authored map interface, deterministic validation, graybox runtime
+loader, and controlled Match authoring gate. The decision was recorded before
+executable Phase 07 source was implemented.
 
 Phase 07 owns only map metadata, validation, loading, immutable geometry
 queries, cleanup, and one primitive graybox battlefield. It does not start the
@@ -190,7 +191,7 @@ targets:
 | Catalog templates | 0–32 |
 | Selected-root descendants | 10–2,048 |
 | Traversal depth below selected root | 0–32 |
-| Immediate children of one visited Instance | 0–512 |
+| Immediate children of one visited Instance | 0–2,048 |
 | Tags on one Instance / across selected root | 0–8 / 0–4,096 |
 | Attributes on one Instance / across selected root | 0–16 / 0–8,192 |
 | Validator issues returned | 0–256 |
@@ -429,38 +430,45 @@ operations during transitional or `Failed` states return `INVALID_STATE`.
 ## Studio persistence gate
 
 The exact authorized place is the restricted Match place, PlaceId
-`136401514513678`, owned by Roblox group PHJGAMES (`CreatorId 35420107`). Only
-`match.project.json` may be connected during Packet 07.4.
+`136401514513678`, GameId `10757629094`, owned by Roblox group PHJGAMES
+(`CreatorId 35420107`) and resolving role `Match`. Only `match.project.json`
+may be connected during Packet 07.4.
 
-Team Create can save Edit-mode changes automatically, so "unsaved" verification
-must not begin by authoring lasting Edit-mode content. Before the persistent
-step, Studio must prove that save persistence is manual and controllable for the
-focused session. If Team Create auto-persistence is active or its state cannot
-be verified without changing experience settings, stop and ask; Phase 07 does
-not authorize changing that setting. The required order is:
+Team Create can synchronize a newly parented Edit-mode subtree immediately. For
+the completed Phase 07 gate, the user explicitly authorized that behavior only
+for the exact 25-record `ServerStorage.ATDMapTemplates` catalog tree and its one
+`Map_phase07-graybox` template. That exception did not authorize changing Team
+Create, experience settings, visibility, or any other content. The required
+transaction order was:
 
-1. confirm `game.PlaceId == 136401514513678`, group CreatorType and CreatorId,
-   the visible PHJGAMES owner, Edit mode, and the Match-only Rojo connection;
-2. capture a bounded before inventory and source hashes for the Rojo-managed
-   script containers;
-3. in Studio Test/Run mode, construct the Phase 07 fixture under the trusted
-   root, run validate/load/query/unload/reload/cleanup, and Stop so the candidate
-   is discarded;
-4. confirm the Edit-mode inventory and Rojo-managed sources are unchanged;
-5. construct the complete lasting subtree detached from the DataModel, validate
-   it read-only, and compare its canonical inventory to the proposed exact
-   after delta;
-6. only in the verified manually controlled session, publish the complete
-   detached subtree with one parent-last Edit-mode assignment, immediately
-   capture the actual after inventory, and verify the delta contains only
-   `ServerStorage.ATDMapTemplates.Map_phase07-graybox`, its contract children,
-   and the required SpawnLocation; if it differs, remove only the just-added
-   unsaved subtree and stop;
-7. validate the lasting content read-only, then use the user's one controlled
-   save/publish authorization for this exact place; and
-8. reopen/confirm the saved subtree, rerun the focused read-only/load cleanup
-   smoke check if persistence changed representation, disconnect/stop the Rojo
-   session, and leave Studio in Edit mode.
+1. confirm `game.PlaceId == 136401514513678`, `game.GameId == 10757629094`,
+   group CreatorType and CreatorId, the visible PHJGAMES owner, resolved role
+   `Match`, Edit mode, and the Match-only Rojo connection;
+2. verify both `ServerStorage.ATDMapTemplates` and
+   `Workspace.ATDRuntimeMap` are absent, then capture a bounded persistent-root
+   inventory including exact `LuaSourceContainer.Source` values;
+3. first complete the disposable Play regression for
+   validate/load/query/unload/reload/cleanup, Stop, and prove its exact temporary
+   catalog/runtime state was discarded without changing the Edit-mode inventory
+   or Rojo-managed sources;
+4. load the committed, default-deny authoring command and arm only its executing
+   in-memory copy with the one-time `EXPLICIT_TEAM_CREATE_PERSISTENCE` token;
+   the tracked file remains blocked and unchanged;
+5. construct the complete catalog detached from the DataModel, validate it
+   read-only, and compare its canonical inventory byte-for-byte with the frozen
+   25-record manifest;
+6. under the exact active-Team-Create authorization, parent that completed
+   catalog once, parent-last, accepting immediate synchronization only for this
+   exact tree; capture the post-parent inventory and require exactly 25
+   additions, zero removals, and zero unrelated changes;
+7. run the complete lasting validation/load/query/unload/reload/cleanup
+   regression, require zero retained runtime roots, and recheck the exact
+   persistent inventory; on any failure, destroy only the exact catalog Instance
+   created by this transaction and verify rollback before stopping; and
+8. confirm the reviewed catalog is lasting collaborative state. Use the one
+   controlled Save/Publish-to-Roblox action only if Studio still requires it,
+   avoid a redundant publish, recheck the saved content read-only, and leave
+   Studio in Edit mode.
 
 If identity, ownership, isolation, before/after inventory, collaborator state,
 or save scope is uncertain, do not make the Edit-mode change and do not save.
@@ -479,8 +487,9 @@ services, Lobby content, or unrelated assets to change.
    issues in canonical order.
 5. Exercise load, immutable queries, unload, reload, rollback, and cleanup with
    no partial `Workspace.ATDRuntimeMap` residue.
-6. Compare exact before/after inventories and Rojo source hashes. Obtain fresh
-   authorization for any persistent Studio edit or save not already covered.
+6. Compare exact before/after inventories and exact Rojo-managed Script.Source
+   values. Obtain fresh authorization for any persistent Studio edit, active
+   Team Create synchronization, or save not already covered.
 7. Add a production catalog/config binding only in the later roadmap packet
    that owns that content; Phase 07's graybox does not pre-authorize one.
 
@@ -489,8 +498,37 @@ services, Lobby content, or unrelated assets to change.
 - Architecture decision recorded: 2026-08-26, before Phase 07 source work.
 - Single targeted architecture review: completed 2026-08-26; all two P1 and
   four P2 material findings resolved in this record before source work.
-- Packet 07.1 implementation/tests: pending.
-- Packet 07.2 validator/tests: pending.
-- Packet 07.3 loader/tests: pending.
-- Packet 07.4 Match Studio gate and controlled persistence: pending.
-- Consolidated review and Phase 07 exit gate: pending.
+- Architecture commit: `345ca44`; contract, validator/loader, and focused-test
+  implementation commit: `98e4df5`; unmapped Studio regression/authoring-tool
+  commit: `0332277`.
+- Packets 07.1–07.3 implementation and focused headless tests: complete. The
+  production Match modules are `MapContract`, `MapValidator`, and `MapLoader`;
+  no automatic gameplay bootstrap or service was added.
+- Packet 07.4 unsaved Play regression: passed 169 checks against the production
+  validator and loader, then removed its exact temporary catalog/runtime state.
+- Packet 07.4 controlled Edit authoring transaction: passed in the exact Match
+  place. `PREVIEW` recorded `beforeRecords=98`, `expectedDeltaRecords=25`, and
+  `laneCount=1`; `DELTA` recorded `added=25`, `removed=0`,
+  `unrelatedChanged=0`, and `persistentRecords=123`; `PASS` recorded
+  `catalogCount=1`, `templateCount=1`, `runtimeCount=0`, `laneCount=1`,
+  `routePointCount=5`, and `deltaRecords=25`.
+- Explicit Save To Cloud completed successfully at `2026-08-27T02:11:31Z`.
+  Studio remains in Edit mode with the exact 25-record
+  `ServerStorage.ATDMapTemplates` catalog tree (the catalog folder plus its only
+  `Map_phase07-graybox` subtree) and no `Workspace.ATDRuntimeMap`. No unrelated
+  or Rojo-managed Instance changed.
+- The frozen production `Maps`, `Difficulties`, and `Waves` source catalogs
+  remain empty. The unmapped Studio template is trusted authored content, not a
+  production source-catalog definition.
+- The single consolidated Phase 07 review completed after Studio evidence. Its
+  two P1 and two P2 material findings were resolved: long Geometry names no
+  longer enter diagnostics; the active-Team-Create procedure matches the exact
+  authorization; the 1,024-node ceiling is executable; and current structural
+  documentation matches the generated projects.
+- The complete local gate passes formatting, lint, 241 tests across 19 suites,
+  all four structural builds, diff/scope checks, generated-output cleanup,
+  production-test exclusion, and Lobby/Match isolation. Phase 07 is complete as
+  of 2026-08-27; Phase 08 is next but has not begun.
+- Task handoff additionally requires one genuine Repository Verification run for
+  the exact final SHA. Its run ID is intentionally cited in the handoff rather
+  than copied into this tracked record by a self-referential commit.

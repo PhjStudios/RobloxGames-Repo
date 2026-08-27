@@ -26,7 +26,7 @@ export type Fixture = {
 
 MapFixtures.MAP_ID = "map:phase07-graybox"
 MapFixtures.LANE_ID = "main"
-MapFixtures.MAX_HELPER_CHILDREN = 512
+MapFixtures.MAX_HELPER_CHILDREN = 2_048
 
 MapFixtures.Tags = table.freeze({
 	MapRoot = "ATD_MapRoot_v1",

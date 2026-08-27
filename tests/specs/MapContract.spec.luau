@@ -98,6 +98,7 @@ return TestHarness.suite("map tag and attribute contract", {
 		local limits = MapContract.Limits
 		assertions.equal(limits.MAX_DESCENDANTS, 2_048)
 		assertions.equal(limits.MAX_DEPTH, 32)
+		assertions.equal(limits.MAX_CHILDREN, 2_048)
 		assertions.equal(limits.MAX_TAGS_PER_INSTANCE, 8)
 		assertions.equal(limits.MAX_ATTRIBUTES_PER_INSTANCE, 16)
 		assertions.equal(limits.MAX_ISSUES, 256)

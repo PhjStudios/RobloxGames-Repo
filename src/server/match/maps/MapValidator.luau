@@ -351,6 +351,14 @@ local function instanceNameIsSafe(value: string): boolean
 	return true
 end
 
+local function geometryPathSegment(node: InternalNode): string
+	local safeName = if instanceNameIsSafe(node.name)
+			and string.match(node.name, "^[A-Za-z][A-Za-z0-9_.-]*$") ~= nil
+		then node.name
+		else "<invalid>"
+	return `{safeName}<{node.className}>`
+end
+
 local function shallowSnapshot(
 	instance: Instance,
 	parent: InternalNode?,
@@ -1159,19 +1167,12 @@ local function validateGeometry(
 		end
 
 		for _, child in node.children do
-			local safeName = if string.match(child.name, "^[A-Za-z][A-Za-z0-9_.-]*$") ~= nil
-				then child.name
-				else "<invalid>"
-			local segment = `{safeName}<{child.className}>`
-			visit(child, pathWith(nodePath, segment))
+			visit(child, pathWith(nodePath, geometryPathSegment(child)))
 		end
 	end
 
 	for _, child in geometry.children do
-		local safeName = if string.match(child.name, "^[A-Za-z][A-Za-z0-9_.-]*$") ~= nil
-			then child.name
-			else "<invalid>"
-		visit(child, pathWith(path, `{safeName}<{child.className}>`))
+		visit(child, pathWith(path, geometryPathSegment(child)))
 	end
 	return parts
 end

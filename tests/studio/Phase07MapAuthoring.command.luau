@@ -1,11 +1,13 @@
 --!strict
 
--- COMMAND BAR / EDIT MODE ONLY. This file is intentionally unmapped.
+-- EDIT MODE ONLY. This file is intentionally unmapped.
 --
--- Do not execute this command while Team Create is active. The existing Phase
--- 07 authorization covers only a manually controlled Edit-mode session; active
--- Team Create requires explicit expanded authorization. This command never
--- saves, publishes, changes settings, or invokes external services.
+-- Do not execute without explicit transaction-scoped persistence authorization.
+-- This tracked source fails closed. If active Team Create is explicitly
+-- authorized for the exact catalog, load this committed source and arm only the
+-- executing in-memory copy after completing the identity and inventory preflight.
+-- Parenting may synchronize immediately in Team Create. This command itself
+-- never saves, publishes, changes settings, or invokes external services.
 -- Before execution, the operator must also confirm that Studio visibly names
 -- PHJGAMES as owner; the command independently verifies its fixed group ID.
 
@@ -33,10 +35,10 @@ local CATALOG_NAME = "ATDMapTemplates"
 local MAP_NAME = "Map_phase07-graybox"
 local RUNTIME_NAME = "ATDRuntimeMap"
 local ABORT_TOKEN = "[ATD_PHASE07_AUTHORING_ABORT]"
--- Fail closed. Change this only after the operator has established the manual,
--- non-Team-Create persistence session described above and reverified identity.
-local EXECUTION_AUTHORIZATION = "BLOCKED_TEAM_CREATE"
-local REQUIRED_EXECUTION_AUTHORIZATION = "VERIFIED_MANUAL_PERSISTENCE_SESSION"
+-- Fail closed. Do not change the tracked value; an explicitly authorized
+-- operator must arm only a reviewed in-memory copy for one exact transaction.
+local EXECUTION_AUTHORIZATION = "BLOCKED_NO_PERSISTENCE_AUTHORIZATION"
+local REQUIRED_EXECUTION_AUTHORIZATION = "IN_MEMORY_EXPLICIT_AUTHORIZATION_REQUIRED"
 local MAX_INVENTORY_INSTANCES = 50_000
 local MAX_INVENTORY_CHILDREN = 4_096
 local MAX_INVENTORY_DEPTH = 128
