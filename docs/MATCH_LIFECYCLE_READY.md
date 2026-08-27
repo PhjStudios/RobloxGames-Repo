@@ -5,8 +5,10 @@
 - Phase: 08 — Match Lifecycle and Initial Ready Check
 - Decision recorded: 2026-08-27, before executable Phase 08 source changes
 - Packets covered: 08.1–08.5
-- Implementation status: architecture/security review complete; executable work pending
-- Phase 09 status: not begun
+- Implementation status: complete on 2026-08-27; Packets 08.1–08.5, the exact
+  four-client Match Studio gate, consolidated review, and complete local exit
+  gate passed
+- Phase 09 status: next but not begun
 
 This is the authoritative Phase 08 lifecycle, roster, ready-protocol, minimal-UI,
 and four-client test decision. Phase 08 adds no enemies, waves, combat, towers,
@@ -405,6 +407,59 @@ used only for the authorized four-client/device controls MCP lacks. Every
 sub-session ends all clients/server. The final state must be Edit mode with the
 original persistent inventory and no `Workspace.ATDRuntimeMap`.
 
+## Studio execution evidence — 2026-08-27
+
+The gate selected only the connected Match Studio instance and verified all of
+its identity fields before synchronization or Play: PlaceId
+`136401514513678`, GameId `10757629094`, CreatorType `Group`, CreatorId
+`35420107`, official Roblox group API name `PHJGAMES`, resolved
+`ATDPlaceRole = Match`, and Edit mode. Only `match.project.json` synchronized
+the authorized mapped branch source. No manual Script.Source edit, Script Sync,
+Save, or publish occurred.
+
+Fresh four-client Server & Clients sub-sessions produced the following exact
+server and client evidence:
+
+1. Zero Ready actions reached `Closing` at revision `7`; the MatchId, state,
+   revision, and participant snapshots were identical on all four clients.
+2. One Ready action followed by the mixed timeout reached `PreWave` at revision
+   `9`; every client showed one `Active` ready participant and three `Returned`
+   unready placeholders in the same order.
+3. The all-ready session activated keyboard `R` on Players 1 and 4, virtual
+   `ButtonA` on Player 2, and the touch-translated Ready button on Player 3.
+   Player 3 used iPhone 17 Pro device emulation with `TouchEnabled` and a
+   `750x361` viewport. All four clients reached `PreWave` at revision `11` with
+   four `Active`, ready participants and identical snapshots.
+4. The protocol session first returned a successful snapshot at revision `7`,
+   then returned privacy-safe `STALE_REQUEST` and `DUPLICATE_REQUEST`
+   rejections for their respective Ready submissions without an extra
+   transition.
+5. In the early-disconnect session, three participants became ready and Player
+   2/UserId `-2` became `Disconnected`. Active-threshold recalculation caused an
+   immediate `PreWave` at revision `11`, consistently across the server and
+   surviving clients.
+6. The same-UserId reconnect/returned-placeholder fallback was repeated while
+   a fresh four-client Server & Clients session remained live. Direct MCP probes
+   confirmed four registered client DataModels, each seeing four players in the
+   exact Match place. A runtime-only Edit execution then required the exact
+   production roster module into isolated state and passed `43` assertions for
+   ReadyCheck reactivation, readiness reset, stale-removal epochs, post-check
+   Spectator admission, sticky `Returned` placeholders, active-voter exclusion,
+   and idempotent cleanup. It never touched the production match and was cleaned
+   before End Session.
+
+Every Server & Clients sub-session was ended before the next one. The final
+Edit-mode probe counted `54` ModuleScripts, one Script, and one LocalScript at
+the bounded persistent roots. It confirmed the exact
+`ServerScriptService.Server.common.bootstrap.Main`,
+`ServerScriptService.Server.common.bootstrap.ServerBootstrap`,
+`StarterPlayer.StarterPlayerScripts.Client.common.bootstrap.Main`, and
+`StarterPlayer.StarterPlayerScripts.Client.common.bootstrap.ClientBootstrap`
+paths and found `24` descendants under the map catalog. It found no
+`Workspace.ATDRuntimeMap`, `ReplicatedStorage.ATDNetwork`, Ready GUI,
+`AutomatedTests`, or `TestRunner`. Device emulation was reset to default, no
+server or simulated-client window remained, and Studio was left in Edit mode.
+
 ## Review and completion record
 
 The single focused architecture/security review completed on 2026-08-27 before
@@ -414,12 +469,21 @@ outbound emission has exact burst, sustained, lifetime, recipient, queue, and
 cleanup bounds; MapLoader failure is surfaced; clock/timer anomalies fail
 closed; manifests enforce one exact bootstrap; reconnect has a mandatory live or
 runtime-harness path; and correlation-ID privacy wording matches the wire
-contract. No overlapping review round was started. After implementation and
-Studio evidence, one
-consolidated independent review covers architecture, source, networking,
-cleanup, tests, UI, Studio safety, and affected documentation.
+contract. No overlapping review round was started.
 
-Phase 08 may be marked complete only after Packets 08.1–08.5, the complete local
-gate, final scope/isolation checks, exact-place Studio evidence, final branch
-push, and exact-SHA Repository Verification all pass. Phase 09 remains next and
-unbegun.
+The one consolidated independent final review then covered architecture,
+source, networking security, cleanup, tests, UI, Studio safety, and affected
+documentation. It found no P0/P1 defect and three P2 findings, all resolved:
+inactive `R`/`ButtonA` input now returns `Pass` unless a Ready action actually
+starts; the reconnect fallback was repeated during a fresh live four-client
+session with `43` passing assertions; and the lifecycle document now records
+transactional initialize/start unwind and all-service shutdown behavior.
+
+The complete local exit gate passes formatting, lint, `347` tests across `28`
+suites, all four structural builds, diff, scope, generated-output,
+production-test-exclusion, exact remote/rate-catalog, and Lobby/Match isolation
+checks. Studio ended in Edit mode with the bounded persistent inventory intact
+and no runtime residue. Phase 08 is complete on 2026-08-27; Phase 09 is next but
+unbegun. The final exact-SHA Repository Verification run is cited at task
+handoff rather than copied into this tracked record by a self-referential
+evidence commit.

@@ -81,6 +81,11 @@ combined Rojo project name is `Ant Tower Defense`.
   `docs/MULTI_PLACE_GATE.md`
 - Phase 07 map gate identity reconfirmed: PlaceId `136401514513678`, GameId
   `10757629094`, PHJGAMES Group `35420107`, and resolved role `Match`.
+- Phase 08 four-client gate identity reconfirmed on 2026-08-27: PlaceId
+  `136401514513678`, GameId `10757629094`, CreatorType `Group`, CreatorId
+  `35420107`, official Roblox group API name `PHJGAMES`, and resolved
+  `ATDPlaceRole = Match`. Exact lifecycle/Ready evidence is in
+  `docs/MATCH_LIFECYCLE_READY.md#studio-execution-evidence--2026-08-27`.
 - Controlled Phase 07 Save To Cloud: succeeded at `2026-08-27T02:11:31Z` under
   the user's exact graybox authorization; it did not change visibility,
   settings, services, Lobby, or unrelated assets.
@@ -88,6 +93,12 @@ combined Rojo project name is `Ant Tower Defense`.
   `ServerStorage.ATDMapTemplates` catalog tree (the catalog folder plus its only
   `Map_phase07-graybox` subtree) and zero `Workspace.ATDRuntimeMap` roots.
   Studio remains in Edit mode.
+- The final Phase 08 Edit-mode probe counted `54` ModuleScripts, one Script, one
+  LocalScript, and `24` descendants below the map-catalog root. It confirmed the
+  exact server/client common `Main` and `ServerBootstrap`/`ClientBootstrap`
+  paths and found no runtime map, `ATDNetwork`, Ready GUI, `AutomatedTests`, or
+  `TestRunner`. Device emulation was reset, no Server & Clients window remained,
+  and no Save or publish occurred.
 
 The Match place must:
 

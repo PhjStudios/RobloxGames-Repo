@@ -21,7 +21,11 @@ logging framework, external shutdown trigger, gameplay system, or networking.
 
 Those fields describe Packet 03.2 at completion. Packet 06.1 reuses this utility
 inside the common server network service; it does not add a second cleanup
-implementation.
+implementation. Phase 08 now applies the same one-owner/idempotent rules to the
+Match lifecycle, roster, deadline, snapshot broadcaster, MapLoader, request
+tracker, input bindings, and ready GUI. Phase 08 and its Studio,
+consolidated-review, and complete-local-gate evidence passed on 2026-08-27.
+Phase 09 is next but has not begun.
 
 ## Public contract
 
@@ -136,10 +140,11 @@ reports:
 ```
 
 Packet 03.4 now invokes the server container from the one ordered
-`BindToClose` path. The client container still has no process-close trigger.
-No save operation was added. The current source tree contains no controllers,
-and future controllers must own their real connections, Instances, callbacks,
-threads, and child containers through this utility when introduced.
+`BindToClose` path. The Match client entrypoint additionally connects the exact
+LocalScript's `Destroying` signal to its bootstrap cleanup. No save operation
+was added. Phase 08's `MatchReadyController` now owns and releases its real
+remote/render/GUI connections, request state, input binding, view model, and
+ScreenGui through its idempotent lifecycle shutdown.
 
 Packet 06.1's `NetworkRegistry` lifecycle service creates one internal
 `network-registry` cleanup container during initialization. Packet 06.4 preserves
@@ -168,12 +173,12 @@ shutdown. That reverse lifecycle call reaches the network service's internal
 container through the existing graceful-shutdown path, so no duplicate root,
 connection owner, or `BindToClose` hook is introduced.
 
-`ClientRequestTracker` is not a lifecycle service and the empty production
-registry has no current client consumer. Its explicit `clear()` operation drops
-all pending and recent terminal correlation state. Every future client owner
-must register that call in its own `Cleanup` container together with the fixed
-response listener it owns; clearing correlation does not cancel or authorize a
-server request.
+`ClientRequestTracker` is not a lifecycle service. Its explicit `clear()`
+operation drops all pending and recent terminal correlation state. The Phase 08
+Match ready controller owns both fixed response listeners and the outbound-event
+listener, cancels its authentic live Pending values where possible, and calls
+`clear()` during shutdown. Clearing client correlation never cancels or
+authorizes a server request.
 
 Phase 07's `MapLoader` creates a fresh `match-map-loader` Cleanup container for
 each load. It registers the detached clone immediately, publishes only after
@@ -181,6 +186,48 @@ both validation passes and snapshot derivation, and destroys that exact clone
 on rollback, `unload()`, or terminal `cleanup()`. Idempotent unload/reload and
 cleanup leave no runtime root, template reference, cache, connection, or mutable
 query state; pre-existing conflicting roots are preserved.
+
+## Phase 08 Match ownership and release order
+
+The Match server lifecycle registers child ownership in dependency order:
+MapLoader cleanup, state-machine cleanup, roster cleanup, PlayerAdded and
+PlayerRemoving connections, snapshot-broadcaster cleanup, then ready-coordinator
+cleanup. Reverse cleanup therefore:
+
+1. invalidates and cancels the authoritative Ready timer and prevents any later
+   callback from rescheduling or publishing;
+2. cancels the broadcaster's one flush handle and clears its one coalesced
+   snapshot slot and counters;
+3. disconnects both Player listeners;
+4. clears roster records, UserId epochs, weak live-connection keys, and detached
+   snapshot state;
+5. cleans the terminal state-machine snapshot; and
+6. invokes the owned MapLoader's terminal cleanup and removes only the exact
+   `Workspace.ATDRuntimeMap` that it published.
+
+The service sets callbacks unavailable before this sweep. Shutdown first moves
+any nonterminal match through `Closing`, and a MapLoader cleanup failure is
+converted to one static failure so lifecycle shutdown cannot report success
+while an owned runtime root may remain. Repeated shutdown and child cleanup are
+idempotent; pre-existing or unrelated Studio instances are never adopted or
+deleted.
+
+The Match client controller uses the corresponding reverse dependency order:
+unbind the scoped context action; disconnect Activated, RenderStepped, event,
+and response listeners; cancel owned Get/Ready Pending states and clear the
+tracker; clear the view model and locked snapshot identity; then destroy the
+exact `ATDMatchReadyGui`. The Match LocalScript's `Destroying` connection is
+owned by the outer client bootstrap cleanup and is disconnected before reverse
+lifecycle shutdown. Every callback checks the controller's live state, so a
+captured post-clean test callback cannot send, render, recover, or mutate.
+
+The deterministic Phase 08 suites cover timer invalidation, early callbacks,
+roster and snapshot mutation isolation, state-exit Pending cancellation,
+listener/input/GUI release, repeated cleanup, and no post-clean callbacks. The
+four-client Studio gate also ended every server/client session with no runtime
+map or ready UI residue and returned Studio to Edit mode. The consolidated
+review and complete local exit gate pass; Phase 08 is complete and Phase 09 is
+next but has not begun.
 
 ## Focused Studio Edit-mode validation
 

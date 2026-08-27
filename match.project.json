@@ -92,13 +92,43 @@
           "$ignoreUnknownInstances": true,
 
           "common": {
-            "$path": "src/client/common",
-            "$ignoreUnknownInstances": true
+            "$className": "Folder",
+            "$ignoreUnknownInstances": true,
+
+            "bootstrap": {
+              "$className": "Folder",
+              "$ignoreUnknownInstances": true,
+
+              "Main": {
+                "$path": "src/client/match/bootstrap/Main.client.luau"
+              },
+
+              "ClientBootstrap": {
+                "$path": "src/client/common/bootstrap/ClientBootstrap.luau"
+              }
+            },
+
+            "networking": {
+              "$path": "src/client/common/networking",
+              "$ignoreUnknownInstances": true
+            }
           },
 
           "match": {
-            "$path": "src/client/match",
-            "$ignoreUnknownInstances": true
+            "$className": "Folder",
+            "$ignoreUnknownInstances": true,
+
+            "MatchReadyController": {
+              "$path": "src/client/match/MatchReadyController.luau"
+            },
+
+            "MatchReadyView": {
+              "$path": "src/client/match/MatchReadyView.luau"
+            },
+
+            "MatchReadyViewModel": {
+              "$path": "src/client/match/MatchReadyViewModel.luau"
+            }
           }
         }
       }

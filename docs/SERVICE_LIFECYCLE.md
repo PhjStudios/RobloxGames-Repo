@@ -22,8 +22,11 @@ automatic shutdown hook.
 
 Those fields record Packet 03.1 at completion. Packet 06.1 registers one
 foundation-only `NetworkRegistry`
-service on the server after configuration validation; the client remains at
-zero registered services. No gameplay service has been added.
+service on the server after configuration validation. Phase 08 now adds the
+Match-only `MatchLifecycle` server service and `MatchReadyController` client
+service described below. Phase 08 and its Studio, consolidated-review, and
+complete-local-gate evidence passed on 2026-08-27. Phase 09 is next but has not
+begun.
 
 ## Public contract
 
@@ -82,12 +85,25 @@ skipping a stage, registering late, requesting the order too early, or invoking
 shutdown before start is rejected. A lifecycle callback is protected with
 `pcall`; if it throws, the runner becomes `Failed` before the contextual error
 is raised. Arbitrary callback error text is discarded and replaced with a
-static summary so callback secrets cannot be reflected into Output. The runner
-never continues to later services after a callback failure.
+static summary so callback secrets cannot be reflected into Output.
 
-Packet 03.1 deliberately does not define rollback after partial initialization
-or startup. Cleanup ownership belongs to Packet 03.2, and process shutdown
-hooks belong to Packet 03.4.
+Packet 03.1 originally did not define rollback after partial initialization or
+startup. Phase 08 hardens the current runner with a transactional unwind:
+
+- initialization stops forward traversal at the first failure, then invokes
+  `shutdown` in reverse order from the failing service through every service
+  already reached;
+- startup stops forward traversal at the first failure, then invokes `shutdown`
+  for every initialized service in reverse resolved order; and
+- explicit shutdown always attempts every service in reverse resolved order,
+  even if one or more shutdown callbacks fail.
+
+The runner remains `Failed` after any of these failure paths. Initialize/start
+report the service whose forward callback failed; explicit shutdown reports the
+first service that failed in reverse traversal. Unwind callback errors never
+replace that primary static diagnostic, and no arbitrary callback error text is
+reflected. Cleanup ownership still belongs to Packet 03.2, while process
+shutdown hooks belong to Packet 03.4.
 
 ## Structured development errors
 
@@ -125,37 +141,38 @@ passed into them.
 
 ## Bootstrap integration
 
-The common server and client bootstraps validate the centralized place role and
-the complete nine-family configuration before creating a lifecycle runner. Each
-resolves one environment context, creates one local logger, calls the shared
-`ConfigurationValidator.validateLoaded()` gate, and passes the logger to the
-runner only after success. The client initializes and starts its empty runner.
-The server first creates `ServerRemoteRegistry` from the empty authenticated
-production registry and frozen empty production rate-policy list, registers its
-frozen `NetworkRegistry` service definition, then initializes and starts the
-runner. Their current Studio-only ready records therefore include:
+The common server and client bootstrap owners validate the centralized place
+role and the complete nine-family configuration before creating a lifecycle
+runner. Each resolves one environment context, creates one local logger, calls
+the shared `ConfigurationValidator.validateLoaded()` gate, and passes the
+logger to the runner only after success. At the historical Phase 06 checkpoint
+the client initialized an empty runner and the server registered only
+`NetworkRegistry`. The current Phase 08 Match composition extends those
+validated owners without bypassing them:
 
 ```text
-server: [lifecycleState=Started][serviceCount=1]
-client: [lifecycleState=Started][serviceCount=0]
+Lobby server/client: [serviceCount=1]/[serviceCount=0]
+Match server/client: [serviceCount=2]/[serviceCount=1]
 ```
 
-The runner is local to its bootstrap. No global registry or service locator was
+The runner remains local to its bootstrap. No global registry or service locator was
 introduced. Packet 03.2 subsequently registered each runner's existing
 `shutdown()` operation as a callback in its bootstrap cleanup container. Packet
 03.4 now invokes the server container through the one ordered `BindToClose`
 path. The lifecycle runner therefore shuts down in reverse dependency order
-before the server hook completes. The client still has no process-shutdown hook.
+before the server hook completes. The Match client composition also connects
+its exact LocalScript's `Destroying` signal to client bootstrap cleanup; Lobby
+retains the common historical behavior.
 
 Invalid configuration raises a structured error before `ServiceLifecycle.new`,
 so no partially validated configuration can reach a service and no runner needs
 rollback. The valid path and every lifecycle state contract remain unchanged.
 
-Phase 07's server-only `MapLoader` is deliberately not a production lifecycle
-service and is not imported by bootstrap. A future trusted server owner must
-construct it explicitly and call its idempotent `unload()` or terminal
-`cleanup()` contract. Phase 08's match lifecycle has not begun, and the current
-bootstrap service counts are unchanged.
+Phase 07's server-only `MapLoader` remains a child resource rather than a
+separate lifecycle service. Phase 08 `MatchLifecycle` constructs it for the
+fixed server-selected `map:phase07-graybox`, owns it through Loading, fails
+closed through `Closing` on load failure, and invokes its terminal `cleanup()`
+during Match shutdown.
 
 The network service has no declared dependencies. Its lifecycle callbacks own a
 separate typed state machine: initialization creates the fixed server-owned tree
@@ -182,6 +199,52 @@ raw-handler route is absent. Duplicate initialization, start, shutdown, or
 contract registration is rejected rather than creating duplicate resources.
 The existing reverse lifecycle and outer bootstrap cleanup remain the sole
 shutdown route.
+
+## Phase 08 Match composition (current)
+
+`src/server/common/bootstrap/ServerBootstrap.luau` performs role and complete
+configuration validation, constructs `NetworkRegistry`, and exposes a bounded
+configuration callback while the runner is still Registering. The Match server
+entrypoint uses that callback to register the two authenticated requests and one
+outbound snapshot sender, then registers `MatchLifecycle` with the exact
+dependency `{ "NetworkRegistry" }`. The resolved server order is therefore:
+
+```text
+initialize/start: NetworkRegistry -> MatchLifecycle
+shutdown:         MatchLifecycle -> NetworkRegistry
+```
+
+`MatchLifecycle` owns one immutable MatchId; the strict `Loading`,
+`ReadyCheck`, `PreWave`, `WaveActive`, `Results`, and `Closing` state machine;
+revisioned frozen snapshots; a roster keyed by validated UserId; Player-added
+and Player-removing connections; the fixed Phase 07 MapLoader; the ready
+coordinator; and the bounded snapshot broadcaster. Player Instances are used
+only as live authenticated connection keys and are absent from detached roster
+queries and snapshots. Disconnect immediately recomputes the current Active
+threshold without replacing match identity.
+
+Loading selects only `map:phase07-graybox`. Successful loading enters the
+server-owned ReadyCheck with one exact 45-second absolute deadline. The clock,
+scheduler, and cancellation operations are injected in tests, so no headless
+case waits in real time. All current Active participants ready progresses to
+`PreWave`; mixed timeout marks unready Active records `Returned` before
+progression; zero-ready timeout enters terminal `Closing`. Phase 08 never
+invokes `PreWave -> WaveActive` and starts no wave or combat behavior.
+
+`src/client/common/bootstrap/ClientBootstrap.luau` applies the same role and
+configuration gates. The Match client entrypoint then registers exactly one
+`MatchReadyController` service. That service owns the fixed remote lookups,
+request tracker, first-snapshot MatchId lock, revision filtering, presentation
+clock projection, `MatchReadyViewModel`, and the one `MatchReadyView`. It binds
+`TextButton.Activated`, keyboard `R`, and gamepad `ButtonA`; the context action
+creates no touch button. Its service shutdown unbinds input, disconnects render,
+GUI, and remote listeners, clears Pending correlation and view-model state, and
+destroys the exact ScreenGui. The entrypoint's `script.Destroying` connection
+triggers the same idempotent client bootstrap cleanup.
+
+Packets 08.1–08.5, the four-client Studio gate, consolidated final review, and
+complete local exit gate passed. Phase 08 is complete; Phase 09 is next but has
+not begun.
 
 ## Focused Studio Edit-mode validation
 

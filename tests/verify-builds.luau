@@ -236,6 +236,11 @@ local EXPECTED_PRODUCTION_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/client/common/bootstrap/Main.client.luau",
 	},
 	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.common.bootstrap.ClientBootstrap",
+		className = "ModuleScript",
+		sourcePath = "src/client/common/bootstrap/ClientBootstrap.luau",
+	},
+	{
 		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.common.networking.ClientRemoteLookup",
 		className = "ModuleScript",
 		sourcePath = "src/client/common/networking/ClientRemoteLookup.luau",
@@ -292,6 +297,23 @@ local EXPECTED_MATCH_READY_SOURCES: { SourceDefinition } = table.freeze({
 		dataModelPath = "ServerScriptService.Server.match.ready.SnapshotBroadcaster",
 		className = "ModuleScript",
 		sourcePath = "src/server/match/ready/SnapshotBroadcaster.luau",
+	},
+})
+local EXPECTED_MATCH_CLIENT_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.MatchReadyController",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/MatchReadyController.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.MatchReadyView",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/MatchReadyView.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.MatchReadyViewModel",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/MatchReadyViewModel.luau",
 	},
 })
 local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
@@ -374,6 +396,21 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.MatchProtocol.spec",
 		className = "ModuleScript",
 		sourcePath = "tests/specs/MatchProtocol.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.MatchReadyController.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/MatchReadyController.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.MatchReadyView.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/MatchReadyView.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.MatchReadyViewModel.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/MatchReadyViewModel.spec.luau",
 	},
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.MatchStateMachine.spec",
@@ -593,6 +630,15 @@ local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): {
 				className = source.className,
 				sourcePath = "src/server/match/bootstrap/Main.server.luau",
 			})
+		elseif
+			role == "Match"
+			and source.dataModelPath == "StarterPlayer.StarterPlayerScripts.Client.common.bootstrap.Main"
+		then
+			table.insert(expected, {
+				dataModelPath = source.dataModelPath,
+				className = source.className,
+				sourcePath = "src/client/match/bootstrap/Main.client.luau",
+			})
 		else
 			table.insert(expected, source)
 		end
@@ -608,6 +654,9 @@ local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): {
 			table.insert(expected, source)
 		end
 		for _, source in EXPECTED_MATCH_READY_SOURCES do
+			table.insert(expected, source)
+		end
+		for _, source in EXPECTED_MATCH_CLIENT_SOURCES do
 			table.insert(expected, source)
 		end
 	end
@@ -852,7 +901,7 @@ end
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
 	currentStage = `verify_counts_{definition.name}`
 	local modules, scripts, localScripts = countClasses(dataModel)
-	local expectedModules = if definition.role == "Lobby" then 42 else 50
+	local expectedModules = if definition.role == "Lobby" then 43 else 54
 	if modules ~= expectedModules or scripts ~= 1 or localScripts ~= 1 then
 		emit("FAIL", definition.name, `PRODUCTION_CLASS_COUNTS_{modules}_{scripts}_{localScripts}`)
 		return false
@@ -878,7 +927,7 @@ end
 
 local function verifyTest(dataModel: DataModel, definition: BuildDefinition): boolean
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 84 then
+	if modules ~= 90 then
 		emit("FAIL", definition.name, `TEST_MODULE_COUNT_{modules}`)
 		return false
 	end
@@ -910,6 +959,9 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local productionClientNetworking = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionClientNetworking")
+	local productionClientMatch = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionClientMatch")
 	local productionServerMaps = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerMaps")
@@ -1035,15 +1087,22 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	then
 		return false
 	end
+	if
+		not verifyMirroredSources(definition, productionClientMatch, EXPECTED_MATCH_CLIENT_SOURCES, "TEST_CLIENT_MATCH")
+	then
+		return false
+	end
 	local mapModules = #EXPECTED_MATCH_SERVER_SOURCES
 	local matchLifecycleModules = #EXPECTED_MATCH_LIFECYCLE_SOURCES
 	local matchRosterModules = #EXPECTED_MATCH_ROSTER_SOURCES
 	local matchReadyModules = #EXPECTED_MATCH_READY_SOURCES
+	local clientMatchModules = #EXPECTED_MATCH_CLIENT_SOURCES
 	if
 		not verifyTestOwnedSources(dataModel, definition, {
 			shared :: Instance,
 			productionServerNetworking :: Instance,
 			productionClientNetworking :: Instance,
+			productionClientMatch :: Instance,
 			productionServerMaps :: Instance,
 			productionServerMatchLifecycle :: Instance,
 			productionServerMatchRoster :: Instance,
@@ -1057,7 +1116,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	emit(
 		"PASS",
 		definition.name,
-		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
+		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_CLIENT_MATCH_{clientMatchModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
 	)
 	return true
 end

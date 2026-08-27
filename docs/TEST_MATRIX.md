@@ -9,17 +9,22 @@ checks that require later systems or explicit authorization.
 
 Phases 00–07 are complete. Gate A passed on 2026-08-26, and the Phase 07 exit
 gate passed on 2026-08-27 after the exact Match Studio authoring, consolidated
-review, 241-case local suite, and all four structural builds. Phase 08 is next
-but has not begun.
+review, 241-case local suite, and all four structural builds. Phase 08's
+Packets 08.1–08.5, exact four-client Match Studio gate, consolidated final
+review, 347-case local suite, and all four current structural builds passed on
+2026-08-27. Phase 08 is complete; Phase 09 is next but has not begun.
 
 The current repository has a fixed remote-registry/network-ownership foundation,
 strict shared payload validators, a server-authoritative token-bucket limiter,
-and bounded asynchronous request/correlation/error contracts with an empty
-lasting production endpoint registry and rate-policy list.
-It still has no gameplay, persistence, UI, or external-service implementation.
-A separate private test universe has not been created or configured. Future
-tests are therefore marked `Deferred`, `Unavailable`, or `Prohibited`; they are
-never presented as passing evidence.
+and bounded asynchronous request/correlation/error contracts. Production now
+contains only the three Match-ready endpoints and two exact client-request rate
+policies added by Phase 08, plus the server-owned lifecycle/roster/Ready system
+and minimal Match Ready UI. It still has no enemies, waves, combat, towers,
+placement, rewards, persistence, matchmaking, teleports, or external-service
+implementation. A separate private test universe has not been created or
+configured. Later tests remain `Deferred`, `Unavailable`, or `Prohibited` when
+their exact systems or environments do not exist; they are never presented as
+passing evidence.
 
 ## Status vocabulary
 
@@ -591,30 +596,68 @@ linked historical document for the original Studio evidence.
 - **Cleanup procedure:** loader cleanup removes the runtime clone. Studio remains
   in Edit with only the exact 25-record trusted catalog lasting.
 - **Phase or prerequisite:** Packets 07.1–07.4 and the Phase 07 gate are
-  complete; Phase 08 has not begun.
+  complete. Phase 08 subsequently completed without changing the saved
+  Phase 07 map catalog.
 
 ## Studio Server & Clients and other multi-client tests
 
 ### M-01 — Ready protocol and initial match state
 
 - **System or contract:** server roster, per-player ready state, timeout policy,
-  disconnect handling, and first-wave start gate.
+  disconnect/reconnect-placeholder handling, revisioned snapshot protocol,
+  minimal Ready UI/input, and the `PreWave` start gate. No wave or combat
+  behavior is included.
 - **Test category:** Studio Server & Clients multi-client test.
-- **Current status:** `Deferred`; the match state machine, networking, ready
-  protocol, and ready UI do not exist.
-- **Environment:** future Match place in Studio Server & Clients mode.
-- **Command or procedure:** none yet; the exact procedure belongs to Packet 08.5.
-- **Required players or devices:** four simulated clients, exercising the
-  established maximum roster.
-- **Authorization requirement:** none for local unsaved Studio simulation.
+- **Current status:** `Passed` on 2026-08-27 for the exact Packet 08.5 Studio
+  gate. The consolidated final review and complete Phase 08 local exit gate also
+  pass.
+- **Environment:** connected Match Studio PlaceId `136401514513678`, GameId
+  `10757629094`, CreatorType `Group`, CreatorId `35420107`, official group API
+  name `PHJGAMES`, resolved `ATDPlaceRole = Match`, with only
+  `match.project.json` synchronized. Every sub-session began and ended in Edit
+  mode.
+- **Command or procedure:** follow
+  [Packet 08.5 four-client procedure](MATCH_LIFECYCLE_READY.md#packet-085-four-client-procedure).
+  Capture the bounded persistent inventory and mapped source first; then use
+  fresh four-client Server & Clients sub-sessions for zero-ready, one-ready
+  mixed timeout, all-ready input, stale/duplicate protocol, and early-disconnect
+  cases. Use direct MCP Luau for setup/assertions and the authorized Studio
+  controls only where MCP lacks Server & Clients or device/input control. Run
+  the isolated production-roster reconnect-placeholder harness through direct
+  MCP while a fresh four-client session remains live, end every sub-session,
+  reset emulation, and repeat the residue probe.
+- **Required players or devices:** four simulated clients. The all-ready run used
+  keyboard `R` on Players 1 and 4, virtual `ButtonA` on Player 2, and the
+  touch-translated Ready button on Player 3 under iPhone 17 Pro emulation
+  (`TouchEnabled`, viewport `750x361`).
+- **Authorization requirement:** the user authorized active Team Create Rojo
+  synchronization of only current-branch mapped Match source and unsaved local
+  simulation. Manual Script.Source edits, Script Sync, save, publish, settings,
+  Lobby content, and unrelated instances remained unauthorized.
 - **External service or publication requirement:** none for the local Studio
   gate.
-- **Destructive-data risk:** none with in-memory participant state.
-- **Expected evidence:** no premature start, deterministic all-ready/timeout
-  transition, safe disconnect behavior, and consistent UI/server state.
-- **Cleanup procedure:** stop all clients/server and leave the place in Edit mode
-  without save/publish.
-- **Phase or prerequisite:** Phases 06 and 08; specifically Packet 08.5.
+- **Destructive-data risk:** low because Team Create synchronization touches
+  mapped source; the pre/post inventory and exact source capture guard unmapped
+  content. Match/roster state itself is in-memory.
+- **Expected evidence:** zero ready reached identical `Closing` revision `7` on
+  all four clients; mixed timeout reached identical `PreWave` revision `9` with
+  one `Active` ready and three `Returned`; all ready reached identical
+  `PreWave` revision `11` with four `Active` ready; initial recovery succeeded
+  at revision `7`, followed by `STALE_REQUEST` and `DUPLICATE_REQUEST` without
+  an extra transition; early disconnect left Player 2/UserId `-2`
+  `Disconnected` and caused immediate consistent `PreWave` revision `11` after
+  three Ready actions. In a fresh live session, four registered client
+  DataModels each reported four players in the exact Match place while the
+  isolated same-UserId reconnect/returned-placeholder production-module harness
+  passed `43` assertions without touching the production match.
+- **Cleanup procedure:** stop every server/client sub-session and leave Studio
+  in Edit mode without save/publish. The final probe counted `54` ModuleScripts,
+  one Script, one LocalScript, the exact server/client common bootstrap paths,
+  and `24` map-catalog descendants; it found no runtime map, `ATDNetwork`, Ready
+  GUI, `AutomatedTests`, or `TestRunner`. Device emulation was reset and no
+  simulated window remained.
+- **Phase or prerequisite:** Phases 06 and 08. M-01 and the Phase 08 exit gate
+  passed; Phase 09 is next but has not begun.
 
 ### M-02 — Placement, combat, and transaction races
 

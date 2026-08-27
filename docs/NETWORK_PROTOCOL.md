@@ -12,7 +12,10 @@
 - Packet 06.5 status: complete — 2026-08-26
 - Phase 06 / Gate A status: complete / passed — 2026-08-26
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
-- Production feature endpoints: none; the lasting authenticated registry is empty
+- Phase 06 checkpoint endpoints: none; that completed checkpoint used an empty
+  authenticated registry
+- Current Phase 08 endpoints: `GetMatchSnapshot`, `SubmitReady`, and
+  `MatchSnapshot`, all Match-only reliable `RemoteEvent` contracts
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
   decision
 - Generic remote bus, client-selected action, service, handler, or path: prohibited
@@ -21,9 +24,13 @@
 
 This is the authoritative Phase 06 network-boundary document. The decision
 section was recorded before implementation. The sections below also record the
-completed Packet 06.1–06.5 implementations and evidence. The fresh exit audit
-and its exact clean workflow evidence pass; Phase 06 is complete and Gate A
-passed. Phase 07 is next and has not begun.
+completed Packet 06.1–06.5 implementations and evidence. Statements that the
+production registry or rate-policy catalog was empty describe those historical
+checkpoints. The current Phase 08 extension is recorded below and uses the same
+authenticated registry, validation, dispatcher, limiter, correlation, logging,
+and cleanup boundary. Phase 08, its consolidated final review, complete local
+exit gate, and exact Studio gate passed on 2026-08-27. Phase 09 is next but has
+not begun.
 
 ## Official Roblox behavior that shapes the design
 
@@ -178,9 +185,10 @@ The following combinations are invalid:
 - an empty, duplicate, malformed, or unsupported place-role list; or
 - two definitions that claim the same physical identity.
 
-The lasting production registry remains empty until a later packet introduces a
-concrete feature remote. Phase 06 tests use deterministic test-only definitions;
-they never populate a gameplay catalog or production endpoint.
+At the Phase 06 checkpoint the production registry was empty. Phase 08 later
+added only the three Match-ready definitions in the current extension below.
+The Phase 06 tests continue to use deterministic test-only definitions; they do
+not populate any additional production endpoint.
 
 ## Server runtime ownership and binding
 
@@ -195,8 +203,10 @@ Every active client-to-server definition must receive exactly one handler while
 the network owner is in `Registering`. Unknown names, inactive role definitions,
 server-to-client definitions, non-function handlers, late binding, and duplicate
 binding fail closed. Initialization refuses to publish if any active inbound
-definition is unbound. The production registry is empty, so Packet 06.1
-publishes only `ATDNetwork/v1` and binds no production request or event handler.
+definition is unbound. At Packet 06.1 completion the production registry was
+empty, so that historical checkpoint published only `ATDNetwork/v1`. The
+current Match composition binds both Phase 08 inbound requests and captures the
+one outbound event before network initialization.
 
 The service-owned `Cleanup` container registers the root before connection
 objects. Its LIFO sweep therefore disconnects all listeners before destroying
@@ -228,6 +238,69 @@ ModuleScript has the exact
 `ServerStorage.AutomatedTests.ProductionClientNetworking.ClientRemoteLookup`
 test identity. That non-replicated structural gate cannot be satisfied by the
 normal `StarterPlayerScripts` production location, where the seam is `nil`.
+
+## Phase 08 Match-ready protocol (current)
+
+Phase 08 adds exactly three production definitions. All use reliable
+`RemoteEvent` transport, are active only for the Match role, and remain under
+the fixed `ReplicatedStorage.ATDNetwork.v1` tree:
+
+| Endpoint | Direction and kind | Exact payload | Response |
+| --- | --- | --- | --- |
+| `GetMatchSnapshot` | client-to-server Request | exact empty record `{}` | required revisioned Match snapshot |
+| `SubmitReady` | client-to-server Request | `{ matchId: MatchId, observedRevision: positive safe integer }` | required revisioned Match snapshot |
+| `MatchSnapshot` | server-to-client Event | revisioned Match snapshot | none |
+
+The snapshot schema contains one immutable server-generated MatchId, a positive
+revision, one of `Loading`, `ReadyCheck`, `PreWave`, `WaveActive`, `Results`, or
+`Closing`, an authoritative deadline only while in `ReadyCheck`, and at most
+four UserId-sorted participant records. Participant records contain only a
+nonzero safe-integer `userId`, `Active`/`Disconnected`/`Returned`/`Spectator`
+state, and a ready boolean that may be true only for `Active`. Validation
+detaches and freezes the complete graph. It carries no Player Instance, map
+Instance, client-selected state, target, deadline, participant, or transition.
+
+The engine-authenticated Player supplied to `OnServerEvent` is the only Ready
+actor. `SubmitReady` never accepts a UserId or ready value from the payload.
+The dispatcher validates the exact envelope and payload, applies the endpoint's
+rate policy, derives authorization from that Player context, and invokes one
+non-yielding protected handler. The current production rate bindings are:
+
+| Endpoint | Capacity | Refill per second |
+| --- | ---: | ---: |
+| `GetMatchSnapshot` | 2 | 1 |
+| `SubmitReady` | 2 | 0.5 |
+
+The outbound event has no inbound rate-policy entry. `SnapshotBroadcaster`
+instead validates every snapshot and bounds publication to one immediate batch,
+at most one batch per 0.1 seconds, 64 lifetime batches, one latest-value
+coalescing slot, and at most four current server-derived recipients per batch.
+It retains no Player as roster or snapshot state and performs no retry.
+
+Ready failures expose only the existing allowlisted public codes:
+`INVALID_PAYLOAD`, `RATE_LIMITED`, `STALE_REQUEST`, `DUPLICATE_REQUEST`,
+`NOT_AUTHORIZED`, `UNAVAILABLE`, or `INTERNAL_ERROR`. Only
+`INVALID_PAYLOAD` may carry the dispatcher's canonical validation path. No
+public error or log includes a UserId, Player, request payload, deadline input,
+map reference, caught error, or internal roster object.
+
+The client connects the `MatchSnapshot` listener and both response listeners
+before its initial `GetMatchSnapshot` fire. The first valid snapshot locks the
+controller to one MatchId. Only strictly greater revisions for that identity
+mutate the view model; equal revisions terminalize event/response races without
+rolling back state, and lower or foreign snapshots are ignored. The controller
+sends one initial Get and at most one lifetime recovery Get. It clears or
+cancels owned Pending correlation on malformed terminal traffic, state exit,
+fire failure, and cleanup. Ready is marked locally Pending before `FireServer`,
+but every authorization and transition remains server-owned.
+
+The Match server composition is created only after place-role and complete
+configuration validation. It registers `NetworkRegistry`, binds the two inbound
+contracts and one outbound sender while the network is still Registering, then
+registers `MatchLifecycle` with `dependencies = { "NetworkRegistry" }`.
+Network therefore initializes first and shuts down last. Phase 08 and its
+four-client Studio, consolidated-review, and complete-local-gate evidence pass.
+Phase 09 enemies, waves, combat, and rendering have not begun.
 
 ## Payload-validation architecture decision
 
@@ -301,9 +374,11 @@ registry direction is `ClientToServer`, including definitions inactive in the
 current place role. Policies for unknown or `ServerToClient` definitions,
 duplicates, malformed tables, and missing inbound definitions fail construction.
 The canonical policy set follows registry order and filters an active role view
-without accepting a runtime action string. The lasting server-only production
-policy list remains empty while the production registry is empty. Future
-registration must add the definition and its explicit policy together.
+without accepting a runtime action string. At the Packet 06.3 checkpoint, the
+server-only production policy list and registry were empty. Phase 08 later added
+the two inbound definitions and their explicit policies together, as recorded
+in the current extension above; that paired-registration rule remains
+mandatory.
 
 Each explicitly selected default policy starts with capacity 4, refill 2 tokens
 per second, and fixed cost 1. A missing policy never receives an implicit
@@ -589,9 +664,12 @@ disconnects listeners, and destroys the exact owned tree through the existing
 reverse lifecycle and graceful-shutdown path. No independent `BindToClose` hook
 is added.
 
-The current common server ready record reports lifecycle `Started` with one
-registered service. The client lifecycle remains at zero services; client lookup
-and request tracking are fixed utilities and are not lifecycle owners.
+Lobby and the combined Development composition retain the common network-only
+behavior described by the historical Phase 06 records. In Match, the server
+runner contains `NetworkRegistry` followed by dependent `MatchLifecycle`, and
+the client runner contains `MatchReadyController`. Client lookup and request
+tracking remain fixed utilities owned and cleared by that controller rather than
+becoming separate lifecycle services.
 
 ## Logging boundary
 

@@ -65,7 +65,31 @@
         "$ignoreUnknownInstances": true,
 
         "Client": {
-          "$path": "src/client"
+          "$className": "Folder",
+
+          "common": {
+            "$path": "src/client/common"
+          },
+
+          "lobby": {
+            "$path": "src/client/lobby"
+          },
+
+          "match": {
+            "$className": "Folder",
+
+            "MatchReadyController": {
+              "$path": "src/client/match/MatchReadyController.luau"
+            },
+
+            "MatchReadyView": {
+              "$path": "src/client/match/MatchReadyView.luau"
+            },
+
+            "MatchReadyViewModel": {
+              "$path": "src/client/match/MatchReadyViewModel.luau"
+            }
+          }
         }
       }
     }

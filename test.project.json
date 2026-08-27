@@ -37,6 +37,22 @@
           "$path": "src/client/common/networking"
         },
 
+        "ProductionClientMatch": {
+          "$className": "Folder",
+
+          "MatchReadyController": {
+            "$path": "src/client/match/MatchReadyController.luau"
+          },
+
+          "MatchReadyView": {
+            "$path": "src/client/match/MatchReadyView.luau"
+          },
+
+          "MatchReadyViewModel": {
+            "$path": "src/client/match/MatchReadyViewModel.luau"
+          }
+        },
+
         "ProductionServerMaps": {
           "$path": "src/server/match/maps"
         },

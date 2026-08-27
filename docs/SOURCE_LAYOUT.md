@@ -17,7 +17,7 @@ place-isolated mappings recorded in `docs/ROJO_PROJECTS.md`.
 - Studio-authored content changed: no
 - Place saved or published: no
 
-## Current Phase 07-relevant source tree excerpt
+## Current Phase 08-relevant source tree excerpt
 
 ```text
 src/
@@ -49,6 +49,8 @@ src/
     logging/
       EnvironmentContext.luau
       Log.luau
+    match/
+      MatchProtocol.luau
     network/
       PayloadValidation.luau
       ProductionRemotes.luau
@@ -65,6 +67,7 @@ src/
     common/
       bootstrap/
         Main.server.luau
+        ServerBootstrap.luau
         Shutdown.luau
       networking/
         ProductionRateLimits.luau
@@ -74,14 +77,25 @@ src/
     lobby/
       .gitkeep
     match/
+      bootstrap/
+        Main.server.luau
+      lifecycle/
+        MatchLifecycleService.luau
+        MatchStateMachine.luau
       maps/
         MapContract.luau
         MapLoader.luau
         MapValidator.luau
+      ready/
+        ReadyCheckCoordinator.luau
+        SnapshotBroadcaster.luau
+      roster/
+        ParticipantRoster.luau
       .gitkeep
   client/
     common/
       bootstrap/
+        ClientBootstrap.luau
         Main.client.luau
       networking/
         ClientRemoteLookup.luau
@@ -89,6 +103,11 @@ src/
     lobby/
       .gitkeep
     match/
+      bootstrap/
+        Main.client.luau
+      MatchReadyController.luau
+      MatchReadyView.luau
+      MatchReadyViewModel.luau
       .gitkeep
 tests/
   fixtures/
@@ -100,13 +119,22 @@ tests/
     MapContract.spec.luau
     MapLoader.spec.luau
     MapValidator.spec.luau
+    MatchLifecycleService.spec.luau
+    MatchProtocol.spec.luau
+    MatchReadyController.spec.luau
+    MatchReadyView.spec.luau
+    MatchReadyViewModel.spec.luau
+    MatchStateMachine.spec.luau
     NetworkSecurity.spec.luau
+    ParticipantRoster.spec.luau
     PayloadValidation.spec.luau
+    ReadyCheckCoordinator.spec.luau
     RemoteRegistry.spec.luau
     RemoteRuntime.spec.luau
     RequestProtocol.spec.luau
     ServerRateLimiter.spec.luau
     ServerRequestDispatcher.spec.luau
+    SnapshotBroadcaster.spec.luau
   studio/
     Phase06NetworkClient.client.luau
     Phase06NetworkServer.server.luau
@@ -115,14 +143,16 @@ tests/
   support/
 ```
 
-This excerpt shows every production source and the Phase 06/07 test areas
-relevant to the network and map boundaries. It intentionally omits unrelated
+This excerpt shows every production source and the Phase 06–08 test areas
+relevant to the network, map, lifecycle, roster, ready, and minimal-client
+boundaries. It intentionally omits unrelated
 test fixtures, negative controls, older specs, support modules, and runner
 entrypoints; it is not a complete tracked-file inventory.
 
-The remaining `.gitkeep` files preserve the place-specific architecture
-directories. Server Match now also contains the Phase 07 `maps` modules. The
-markers are not Luau modules or runnable scripts and create no Roblox Instance.
+Any remaining `.gitkeep` markers preserve otherwise empty architecture
+directories. They are not Luau modules or runnable scripts and create no Roblox
+Instance. Match now contains the Phase 07 map modules and the Phase 08
+server/client composition shown above.
 
 `src/shared` remains the location for code that is safe and useful across both
 execution contexts and both place roles. Packet 02.3 added the typed place-role
@@ -154,16 +184,17 @@ contract are recorded in `docs/NETWORK_PROTOCOL.md`.
 
 Packet 06.2 added only the pure shared `network/PayloadValidation.luau` contract
 and its test-only spec. It reuses lower-level shared `Ids`, `Result`, and
-`Validation` modules and is safe to replicate; neither bootstrap imports it yet
-because the lasting production endpoint registry remains empty. It adds no
+`Validation` modules and is safe to replicate; neither bootstrap imported it at
+that checkpoint because the production endpoint registry was empty. It adds no
 server/client layer, lifecycle service, runnable entrypoint, gameplay schema, or
 place-specific dependency.
 
 Packet 06.3 added the server-only `networking/ProductionRateLimits.luau` and
 `networking/ServerRateLimiter.luau` modules under the existing common server
 network owner, plus one test-only spec. It adds no lifecycle service or runnable
-entrypoint. The lasting production rate-policy list is frozen and empty because
-the lasting production registry is empty.
+entrypoint. At that checkpoint the production rate-policy list and registry were
+both frozen and empty; Phase 08 later added the Match-only definitions recorded
+above.
 
 Packet 06.4 adds the shared `network/RequestProtocol.luau`, server-common
 `networking/ServerRequestDispatcher.luau`, and client-common
@@ -184,11 +215,28 @@ forbid handler-supplied validation metadata. The production file inventory,
 runnable entrypoints, empty lasting registry, and empty lasting rate-policy list
 are unchanged.
 
-Phase 07 adds exactly three server-only Match modules under `match/maps`:
-`MapContract`, `MapValidator`, and `MapLoader`. They are not imported by the
-bootstrap and add no runnable entrypoint or lifecycle service. Three focused
+At Phase 07 completion, exactly three server-only Match modules existed under
+`match/maps`: `MapContract`, `MapValidator`, and `MapLoader`. That packet did
+not import them from bootstrap or add a runnable entrypoint or lifecycle
+service. Three focused
 specs and `MapFixtures` are mapped only into Test. Both Phase 07 Studio tools
 remain unmapped; the saved graybox is Studio-owned content outside `src/`.
+
+Phase 08 adds one shared `match/MatchProtocol.luau`; two server lifecycle
+modules; one UserId-keyed roster module; two ready modules; three Match client
+modules; reusable common `ServerBootstrap` and `ClientBootstrap` composition
+owners; and role-specific Match server/client entrypoint sources. The Match
+project maps each role-specific entrypoint at the established common Main
+DataModel path and excludes the corresponding common Main source, preserving
+exactly one Script and one LocalScript. Default maps only the common Main files
+and excludes both physical Match entrypoints. Lobby maps no Match source.
+
+The Phase 08 Match server entrypoint binds exactly `GetMatchSnapshot`,
+`SubmitReady`, and `MatchSnapshot`, then registers the dependent
+`MatchLifecycle` service. The Match client entrypoint registers the one
+`MatchReadyController`; its controller, view model, and programmatic view remain
+under `src/client/match`. No Phase 09 enemy, wave, combat, tower, placement,
+reward, persistence, teleport, or Lobby behavior has begun.
 
 ## Bootstrap move manifest
 
@@ -250,29 +298,28 @@ solve duplication by importing across the lobby/match boundary.
 
 ## Runnable-entrypoint invariant
 
-Roblox automatically runs files mapped as `Script` or `LocalScript`. Under the
-current unsplit `default.project.json`, all descendants of `src/server` and
-`src/client` are mapped into the same development place. Therefore Packet 02.1
-enforces:
+Roblox automatically runs files mapped as `Script` or `LocalScript`. Phase 08
+adds physical Match entrypoint sources, so the shipping invariant is now
+enforced by explicit project mappings rather than by a repository-wide filename
+count:
 
-1. The only `*.server.luau` file is
-   `src/server/common/bootstrap/Main.server.luau`.
-2. The only `*.client.luau` file is
-   `src/client/common/bootstrap/Main.client.luau`.
-3. Lobby and match directories contain no runnable BaseScript.
-4. The common bootstraps validate the declared role, emit development
-   diagnostics, and start no lobby or match service. The common server now
-   registers one foundation-only `NetworkRegistry` service, whose internal
-   dispatcher and limiter remain owned children rather than additional lifecycle
-   services; the client remains at zero services.
-5. Any future lobby or match entrypoint must be tested through its isolated
-   Packet 02.2 project, never through the combined project as evidence of role
-   isolation.
+1. Every production build contains exactly one Script and one LocalScript.
+2. Default and Lobby map the common Main sources at the established common
+   bootstrap paths and do not map either physical Match entrypoint.
+3. Match replaces only those two mapped Main sources with
+   `src/server/match/bootstrap/Main.server.luau` and
+   `src/client/match/bootstrap/Main.client.luau` at the same DataModel paths.
+4. The Match entrypoints call the reusable common bootstrap owners, require an
+   exact Match role, and register services only after complete configuration
+   validation.
+5. Lobby contains no Match source, Match contains no Lobby source, and the
+   combined Default build remains inspection/development-only rather than
+   evidence for Match role behavior.
 
-This is how the default development place avoids starting both roles. Packet
-02.1 did not infer a role from PlaceId or add conditional place loading. Packet
-02.3 subsequently added centralized boot validation without adding either
-place's services.
+The structural verifier authenticates each mapped Main by exact DataModel path,
+class, authoritative source file, and byte-for-byte content. This prevents a
+second runner or stale common Main from executing alongside the role-specific
+composition.
 
 ## Dependency direction
 
@@ -359,38 +406,45 @@ headless seam is gated by the exact Test-project structure.
 The ignored smoke-build artifact was inspected and removed. It can be recreated
 with the build command above.
 
-### Current Phase 07 source layout
+### Current Phase 08 source layout
 
-The structural contract now expects 43 ModuleScripts in Default and Match, 40
-in Lobby, and one Script plus one LocalScript in every production build. The
-common inventory remains 42 Lua source containers: 33 shared modules; the
-server-only `Shutdown`, `ProductionRateLimits`, `ServerRemoteRegistry`,
-`ServerRateLimiter`, and `ServerRequestDispatcher` modules; the client-only
-`ClientRemoteLookup` and `ClientRequestTracker` modules; and the two common
-bootstraps. Default and Match add the three server-only Match map modules.
+The structural contract now expects 54 ModuleScripts in Default and Match, 43
+in Lobby, and exactly one Script plus one LocalScript in every production
+build. The common inventory contains 34 shared modules; six server-only common
+modules (`Shutdown`, `ServerBootstrap`, and the four networking modules); and
+three client-only common modules (`ClientBootstrap` and the two networking
+modules). Default and Match add eight server-only Match modules and three
+client-only Match modules. Default deliberately excludes both physical Match
+entrypoint sources; Match maps those sources in place of the common Main files.
 
-The Test build's production source subset contains all 33 shared modules and
-exactly six common networking modules copied under test-only `ServerStorage`
-paths. It maps four server modules (`ProductionRateLimits`,
-`ServerRemoteRegistry`, `ServerRateLimiter`, and `ServerRequestDispatcher`) and
-two client modules (`ClientRemoteLookup` and `ClientRequestTracker`), plus the
-three production Match map modules. The full Test build now contains 72
-ModuleScripts: 33 shared, six networking, three map, and 30 test-owned modules.
-The verifier authenticates every test-owned module by exact DataModel path,
-class, authoritative file, and byte-for-byte source; unlisted test source fails.
-Test has zero runnable scripts.
-Lobby contains no Match source, Match contains no Lobby source, and lasting
-production remote definitions and rate policies remain empty. Lobby remains at
-40 ModuleScripts; Default and Match contain 43, each with one Script and one
-LocalScript. The existing
-dispatcher now enforces synchronous non-yielding feature callbacks and reserves
-validation metadata to its own strict payload failure path. Packet 06.5 and the
-fresh Phase 06/Gate A audit pass, including clean workflow run `33022784985`.
-Phase 07 implementation, Studio authoring, consolidated review, 241-case local
-suite, and all four structural builds pass. Phase 07 is complete; Phase 08 is
-next but has not begun.
+The Test build contains exactly 90 ModuleScripts and zero runnable Script or
+LocalScript instances: 34 shared modules, six common networking mirrors, three
+map mirrors, two lifecycle mirrors, one roster mirror, two ready mirrors, three
+client-Match mirrors, and 39 test-owned modules. Its Phase 08 production mirrors
+are exact and Test-only:
 
-## Roblox Studio verification
+- `ProductionServerMatchLifecycle`: `MatchLifecycleService` and
+  `MatchStateMachine`;
+- `ProductionServerMatchRoster`: `ParticipantRoster`;
+- `ProductionServerMatchReady`: `ReadyCheckCoordinator` and
+  `SnapshotBroadcaster`; and
+- `ProductionClientMatch`: `MatchReadyController`, `MatchReadyView`, and
+  `MatchReadyViewModel`.
+
+`MatchProtocol` is mapped once through the normal 34-module shared tree. The
+exact Phase 08 Test-owned specs are `MatchProtocol`, `MatchStateMachine`,
+`MatchLifecycleService`, `ParticipantRoster`, `ReadyCheckCoordinator`,
+`SnapshotBroadcaster`, `MatchReadyViewModel`, `MatchReadyView`, and
+`MatchReadyController`. The verifier authenticates every production mirror and
+test-owned module by exact DataModel path, class, authoritative file, and
+byte-for-byte source; unlisted Test-owned source fails.
+
+Lobby contains no Match source, Match contains no Lobby source, and tests and
+Studio tools occur in no production build. Packets 08.1–08.5, the four-client
+Studio gate, consolidated final review, and complete local exit gate passed.
+Phase 08 is complete; Phase 09 is next but has not begun.
+
+## Historical Packet 02 Roblox Studio verification
 
 The connected Ant Tower Defense place, PlaceId `100561454756026`, was verified
 without manually editing or saving any Studio instance.

@@ -24,16 +24,18 @@ only change through an explicit architecture decision recorded here.
 ## Current status
 
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
-- Gameplay state: minimal Rojo scaffold with harmless Studio-only client and
-  server bootstraps; temporary example behavior has been removed.
-- Current implementation phase: Phases 00–07 complete; Gate A passed on
-  2026-08-26 and the Phase 07 exit gate passed on 2026-08-27. Phase 08 is next
-  but has not begun.
+- Gameplay state: the Match place has a server-owned lifecycle, UserId roster,
+  45-second initial Ready protocol, revisioned snapshots, and minimal Ready UI.
+  It still has no enemy, wave, combat, tower, placement, reward, persistence,
+  matchmaking, teleport, or Phase 09 behavior.
+- Current implementation phase: Phases 00–08 are complete. The Phase 08 exit
+  gate passed on 2026-08-27. Phase 09 is next but has not begun.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
   Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, 06.3, 06.4,
   and 06.5 completed on 2026-08-26. Packets 07.1–07.4 and their Phase 07 exit
-  gate completed on 2026-08-27.
+  gate completed on 2026-08-27. Packets 08.1–08.5 and the Phase 08 exit gate
+  completed on 2026-08-27.
 - Current checkpoint: Phase 06 and Gate A are complete. Its three exact current-tree
   canonical runs are byte-identical at 200 cases across 16 suites, all four
   structural builds pass, and the unsaved three-cycle Lobby, three-cycle Match,
@@ -44,11 +46,17 @@ only change through an explicit architecture decision recorded here.
   consolidated Phase 07 review resolved all four material findings. The final
   local gate passes 241 cases across 19 suites, all four structural builds,
   formatting, lint, diff, scope, test-exclusion, and role-isolation checks. The
-  exact Match Studio gate and controlled 25-record graybox save also pass. The
-  lasting production registry, rate-policy list, and `Maps`, `Difficulties`,
-  and `Waves` source catalogs remain empty; the Studio-owned graybox is not a
-  source catalog entry. One exact-final-SHA Repository Verification run remains
-  a handoff requirement and is cited outside this tracked plan to avoid a
+  exact Match Studio gate and controlled 25-record graybox save also pass.
+  Phase 08 now adds only three Match-ready production endpoints, two exact
+  client-request rate policies, and the lifecycle/roster/Ready/UI systems in its
+  recorded scope. Its fresh four-client Studio regressions and Edit-mode cleanup
+  probe pass. The consolidated review resolved three material findings, and the
+  complete local gate passes formatting, lint, 347 tests across 28 suites, all
+  four structural builds, diff, scope, generated-output, production-test
+  exclusion, exact remote-catalog, and role-isolation checks. `Maps`,
+  `Difficulties`, and `Waves` source catalogs remain empty; the Studio-owned
+  graybox is not a source catalog entry. The exact-final-SHA Repository
+  Verification run is cited outside this tracked plan to avoid a
   self-referential evidence commit.
 - Publishing state: the user authorized the Packet 02.4 Match-place creation and
   one controlled Phase 07 Save To Cloud of the reviewed Match graybox. No
@@ -733,9 +741,9 @@ runtime validation/load/query/unload/reload/cleanup regression passed. Commits
 `345ca44`, `98e4df5`, and `0332277` contain the architecture, executable
 implementation/tests, and unmapped authoring tooling. The consolidated review
 resolved all four material findings, and the complete local gate passes 241
-cases across 19 suites plus all four structural builds. Phase 08 is next but
-has not begun. Authoritative contract and Studio evidence are in
-`docs/MAP_RUNTIME_CONTRACT.md`.
+cases across 19 suites plus all four structural builds. At that Phase 07
+completion checkpoint, Phase 08 was next and had not begun. Authoritative
+contract and Studio evidence are in `docs/MAP_RUNTIME_CONTRACT.md`.
 
 ### Packet 07.1 — Map tag and attribute contract
 
@@ -767,13 +775,26 @@ has not begun. Authoritative contract and Studio evidence are in
 **Exit gate:** Passed on 2026-08-27. The graybox validates, loads, exposes
 deterministic read-only lane data, unloads/reloads/cleans, and contains no
 lasting Rojo-managed script edit. The consolidated review and complete local
-gate also pass. Phase 07 is complete; Phase 08 is next but has not begun.
+gate also pass. Phase 07 is complete. At that recorded gate, Phase 08 was next
+and unbegun; its current status is recorded below.
 
 ## Phase 08 — Match lifecycle and initial ready check
 
 **Objective:** Make the match an explicit server-owned state machine.
 
+**Current status:** Complete on 2026-08-27. Packets 08.1–08.5, the exact
+Match-place four-client Studio gate, consolidated review, complete local gate,
+and scope/isolation checks pass. Phase 09 is next but has not begun. The
+authoritative contract and Studio evidence are in
+`docs/MATCH_LIFECYCLE_READY.md`; current test status is in M-01 of
+`docs/TEST_MATRIX.md`.
+
 ### Packet 08.1 — Match state machine
+
+**Executable status:** Passed on 2026-08-27. Strict typed states, authenticated
+transition tokens, revisioned frozen snapshots, fail-closed map loading, service
+lifecycle composition, rollback/re-entry rejection, and cleanup are implemented
+and covered by focused headless tests.
 
 - Implement Loading, ReadyCheck, PreWave, WaveActive, Results, and Closing states.
 - Define legal transitions and reject illegal ones.
@@ -782,11 +803,20 @@ gate also pass. Phase 07 is complete; Phase 08 is next but has not begun.
 
 ### Packet 08.2 — Roster and participant state
 
+**Executable status:** Passed on 2026-08-27. The lifetime-capped roster is keyed
+by validated UserId, uses connection epochs, exposes deterministic detached
+snapshots, excludes non-active states from thresholds, and cleans idempotently.
+
 - Track active, disconnected, returned, and spectator participants by UserId.
 - Keep match identity separate from Player instances.
 - Define current-player thresholds for votes and readiness.
 
 ### Packet 08.3 — Ready protocol
+
+**Executable status:** Passed on 2026-08-27. The server owns the exact 45-second
+deadline, threshold recalculation, mixed/zero-ready outcomes, three minimum
+Match endpoints, two request-rate policies, snapshot validation/broadcasting,
+and cleanup-safe injected timing seams.
 
 - Add a 45-second server timer.
 - Validate one readiness state per active participant.
@@ -796,6 +826,12 @@ gate also pass. Phase 07 is complete; Phase 08 is next but has not begun.
 
 ### Packet 08.4 — Minimal ready UI
 
+**Executable status:** Passed on 2026-08-27. The Match-only controller, pure
+view model, and minimal programmatic view recover initial snapshots, reject
+stale revisions, prevent overlapping local submissions, project the server
+deadline for display only, and support Ready through `Activated`, keyboard `R`,
+and gamepad `ButtonA`.
+
 - Show participant readiness and countdown.
 - Disable duplicate Ready submissions.
 - Handle server rejection and state changes.
@@ -803,16 +839,27 @@ gate also pass. Phase 07 is complete; Phase 08 is next but has not begun.
 
 ### Packet 08.5 — Multi-client ready test
 
+**Studio status:** Passed on 2026-08-27 in the exact Match place with four fresh
+simulated clients. All-ready, mixed timeout, zero-ready cancellation, disconnect
+threshold recalculation, reconnect-placeholder, stale/duplicate protocol,
+consistent snapshot/UI, keyboard/touch/gamepad, and final Edit-mode cleanup
+checks passed. Exact evidence is recorded in
+`docs/MATCH_LIFECYCLE_READY.md#studio-execution-evidence--2026-08-27`.
+
 - Test all ready, timeout, disconnect during ready, reconnect placeholder, and
   zero-ready cancellation with Server & Clients.
 
-**Exit gate:** Four simulated clients cannot desynchronize or deadlock the ready
-state.
+**Exit gate:** Passed on 2026-08-27. Four simulated clients cannot desynchronize
+or deadlock readiness; the complete local gate and consolidated review also
+pass. Phase 08 is complete. The exact-final-SHA Repository Verification run is
+cited outside this tracked plan.
 
 ## Phase 09 — Server enemy simulation and client rendering
 
 **Objective:** Move placeholder ants along fixed lanes with server-owned progress
 and smooth client visuals.
+
+**Current status:** Next but not begun.
 
 ### Packet 09.1 — Enemy runtime model
 

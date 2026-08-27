@@ -8,14 +8,16 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phases 00–07 are complete; Gate A passed on 2026-08-26 and the Phase 07
-exit gate passed on 2026-08-27. The map contract, deterministic
-validator/loader, 241-case local suite, all four structural builds, consolidated
-review, and Studio-owned Match graybox are complete. Phase 08 is next but has
-not begun. The lasting production endpoint registry, rate-policy list, and
-`Maps`, `Difficulties`, and `Waves` source catalogs remain empty. The final
-branch SHA must still receive the separately cited Repository Verification run
-before task handoff.
+order. Phases 00–08 are complete; Gate A passed on 2026-08-26 and the Phase 07
+and Phase 08 exit gates passed on 2026-08-27. Phase 08 adds the server-owned
+match lifecycle, UserId roster, exact 45-second Ready protocol, revisioned
+snapshots, and minimal keyboard/touch/gamepad Ready UI. Its consolidated review,
+347-case local suite, four structural builds, and exact four-client Match Studio
+gate pass. Phase 09 is next but has not begun. Production networking contains
+only the three Match-ready endpoints and the two required client-request rate
+policies; `Maps`, `Difficulties`, and `Waves` source catalogs remain empty. The
+final exact-SHA Repository Verification run is cited outside this tracked tree
+to avoid a self-referential evidence commit.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -35,6 +37,7 @@ before task handoff.
 - [Tower, enemy, and symbolic-asset schemas](docs/TOWER_ENEMY_SCHEMAS.md)
 - [Map, difficulty, and wave schemas](docs/MAP_DIFFICULTY_WAVE_SCHEMAS.md)
 - [Studio map contract, validator, loader, and authoring procedure](docs/MAP_RUNTIME_CONTRACT.md)
+- [Match lifecycle, roster, Ready protocol, UI, and four-client evidence](docs/MATCH_LIFECYCLE_READY.md)
 - [Economy, banner, and default-settings schemas](docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md)
 - [Whole-configuration validation and bootstrap gate](docs/CONFIGURATION_VALIDATION.md)
 - [Phase 04 exit-gate audit](docs/PHASE_04_EXIT_AUDIT.md)
