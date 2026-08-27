@@ -146,6 +146,11 @@ local EXPECTED_PRODUCTION_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/shared/logging/Log.luau",
 	},
 	{
+		dataModelPath = "ReplicatedStorage.Shared.match.MatchProtocol",
+		className = "ModuleScript",
+		sourcePath = "src/shared/match/MatchProtocol.luau",
+	},
+	{
 		dataModelPath = "ReplicatedStorage.Shared.network.ProductionRemotes",
 		className = "ModuleScript",
 		sourcePath = "src/shared/network/ProductionRemotes.luau",
@@ -194,6 +199,11 @@ local EXPECTED_PRODUCTION_SOURCES: { SourceDefinition } = table.freeze({
 		dataModelPath = "ServerScriptService.Server.common.bootstrap.Main",
 		className = "Script",
 		sourcePath = "src/server/common/bootstrap/Main.server.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.common.bootstrap.ServerBootstrap",
+		className = "ModuleScript",
+		sourcePath = "src/server/common/bootstrap/ServerBootstrap.luau",
 	},
 	{
 		dataModelPath = "ServerScriptService.Server.common.bootstrap.Shutdown",
@@ -251,6 +261,37 @@ local EXPECTED_MATCH_SERVER_SOURCES: { SourceDefinition } = table.freeze({
 		dataModelPath = "ServerScriptService.Server.match.maps.MapValidator",
 		className = "ModuleScript",
 		sourcePath = "src/server/match/maps/MapValidator.luau",
+	},
+})
+local EXPECTED_MATCH_LIFECYCLE_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "ServerScriptService.Server.match.lifecycle.MatchLifecycleService",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/lifecycle/MatchLifecycleService.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.lifecycle.MatchStateMachine",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/lifecycle/MatchStateMachine.luau",
+	},
+})
+local EXPECTED_MATCH_ROSTER_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "ServerScriptService.Server.match.roster.ParticipantRoster",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/roster/ParticipantRoster.luau",
+	},
+})
+local EXPECTED_MATCH_READY_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "ServerScriptService.Server.match.ready.ReadyCheckCoordinator",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/ready/ReadyCheckCoordinator.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.ready.SnapshotBroadcaster",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/ready/SnapshotBroadcaster.luau",
 	},
 })
 local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
@@ -325,6 +366,21 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "tests/specs/MapValidator.spec.luau",
 	},
 	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.MatchLifecycleService.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/MatchLifecycleService.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.MatchProtocol.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/MatchProtocol.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.MatchStateMachine.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/MatchStateMachine.spec.luau",
+	},
+	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.NetworkSecurity.spec",
 		className = "ModuleScript",
 		sourcePath = "tests/specs/NetworkSecurity.spec.luau",
@@ -335,6 +391,11 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "tests/specs/PayloadValidation.spec.luau",
 	},
 	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.ParticipantRoster.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/ParticipantRoster.spec.luau",
+	},
+	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.RemoteRegistry.spec",
 		className = "ModuleScript",
 		sourcePath = "tests/specs/RemoteRegistry.spec.luau",
@@ -343,6 +404,16 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.RemoteRuntime.spec",
 		className = "ModuleScript",
 		sourcePath = "tests/specs/RemoteRuntime.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.ReadyCheckCoordinator.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/ReadyCheckCoordinator.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.SnapshotBroadcaster.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/SnapshotBroadcaster.spec.luau",
 	},
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.RequestProtocol.spec",
@@ -516,10 +587,27 @@ end
 local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): { SourceDefinition }
 	local expected: { SourceDefinition } = {}
 	for _, source in EXPECTED_PRODUCTION_SOURCES do
-		table.insert(expected, source)
+		if role == "Match" and source.dataModelPath == "ServerScriptService.Server.common.bootstrap.Main" then
+			table.insert(expected, {
+				dataModelPath = source.dataModelPath,
+				className = source.className,
+				sourcePath = "src/server/match/bootstrap/Main.server.luau",
+			})
+		else
+			table.insert(expected, source)
+		end
 	end
 	if role ~= "Lobby" then
 		for _, source in EXPECTED_MATCH_SERVER_SOURCES do
+			table.insert(expected, source)
+		end
+		for _, source in EXPECTED_MATCH_LIFECYCLE_SOURCES do
+			table.insert(expected, source)
+		end
+		for _, source in EXPECTED_MATCH_ROSTER_SOURCES do
+			table.insert(expected, source)
+		end
+		for _, source in EXPECTED_MATCH_READY_SOURCES do
 			table.insert(expected, source)
 		end
 	end
@@ -644,10 +732,7 @@ end
 local function verifyTestOwnedSources(
 	dataModel: DataModel,
 	definition: BuildDefinition,
-	shared: Instance,
-	productionServerNetworking: Instance,
-	productionClientNetworking: Instance,
-	productionServerMaps: Instance
+	excludedProductionContainers: { Instance }
 ): boolean
 	local expectedByPath: { [string]: SourceDefinition } = {}
 	for _, expected in EXPECTED_TEST_OWNED_SOURCES do
@@ -660,13 +745,14 @@ local function verifyTestOwnedSources(
 
 	local actualSources: { ModuleScript } = {}
 	for _, descendant in dataModel:GetDescendants() do
-		if
-			descendant.ClassName == "ModuleScript"
-			and not hasAncestor(descendant, shared)
-			and not hasAncestor(descendant, productionServerNetworking)
-			and not hasAncestor(descendant, productionClientNetworking)
-			and not hasAncestor(descendant, productionServerMaps)
-		then
+		local belongsToProductionContainer = false
+		for _, container in excludedProductionContainers do
+			if hasAncestor(descendant, container) then
+				belongsToProductionContainer = true
+				break
+			end
+		end
+		if descendant.ClassName == "ModuleScript" and not belongsToProductionContainer then
 			table.insert(actualSources, descendant :: ModuleScript)
 		end
 	end
@@ -724,10 +810,49 @@ local function verifyTestOwnedSources(
 	return true
 end
 
+local function verifyMirroredSources(
+	definition: BuildDefinition,
+	container: Instance?,
+	expectedSources: { SourceDefinition },
+	codePrefix: string
+): boolean
+	if container == nil or container.ClassName ~= "Folder" then
+		emit("FAIL", definition.name, `{codePrefix}_CONTAINER_MISSING`)
+		return false
+	end
+
+	local descendants = collectDescendants(container)
+	if #descendants ~= #expectedSources then
+		emit("FAIL", definition.name, `{codePrefix}_SOURCE_COUNT`)
+		return false
+	end
+
+	for _, expectedSourceDefinition in expectedSources do
+		local moduleName = string.match(expectedSourceDefinition.dataModelPath, "([^.]+)$")
+		local module = if moduleName == nil then nil else container:FindFirstChild(moduleName)
+		if module == nil or module.ClassName ~= "ModuleScript" then
+			emit("FAIL", definition.name, `{codePrefix}_SOURCE_MISMATCH`, container:GetFullName())
+			return false
+		end
+		if not fs.isFile(expectedSourceDefinition.sourcePath) then
+			emit("FAIL", definition.name, `{codePrefix}_AUTHORITATIVE_SOURCE_MISSING`, module:GetFullName())
+			return false
+		end
+
+		local readSucceeded, expectedSource = pcall(fs.readFile, expectedSourceDefinition.sourcePath)
+		if not readSucceeded or (module :: ModuleScript).Source ~= expectedSource then
+			emit("FAIL", definition.name, `{codePrefix}_SOURCE_CONTENT_MISMATCH`, module:GetFullName())
+			return false
+		end
+	end
+
+	return true
+end
+
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
 	currentStage = `verify_counts_{definition.name}`
 	local modules, scripts, localScripts = countClasses(dataModel)
-	local expectedModules = if definition.role == "Lobby" then 40 else 43
+	local expectedModules = if definition.role == "Lobby" then 42 else 50
 	if modules ~= expectedModules or scripts ~= 1 or localScripts ~= 1 then
 		emit("FAIL", definition.name, `PRODUCTION_CLASS_COUNTS_{modules}_{scripts}_{localScripts}`)
 		return false
@@ -753,7 +878,7 @@ end
 
 local function verifyTest(dataModel: DataModel, definition: BuildDefinition): boolean
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 72 then
+	if modules ~= 84 then
 		emit("FAIL", definition.name, `TEST_MODULE_COUNT_{modules}`)
 		return false
 	end
@@ -772,7 +897,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			end
 		end
 	end
-	if sharedModules ~= 33 then
+	if sharedModules ~= 34 then
 		emit("FAIL", definition.name, "SHARED_MODULE_COUNT")
 		return false
 	end
@@ -788,6 +913,15 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local productionServerMaps = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerMaps")
+	local productionServerMatchLifecycle = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionServerMatchLifecycle")
+	local productionServerMatchRoster = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionServerMatchRoster")
+	local productionServerMatchReady = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionServerMatchReady")
 	local starterPlayerScripts = dataModel:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
 	if
 		automatedTests == nil
@@ -868,44 +1002,53 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 		end
 	end
 	local networkingModules = 6
-	if productionServerMaps == nil or productionServerMaps.ClassName ~= "Folder" then
-		emit("FAIL", definition.name, "TEST_MAP_CONTAINER_MISSING")
+	if not verifyMirroredSources(definition, productionServerMaps, EXPECTED_MATCH_SERVER_SOURCES, "TEST_MAP") then
 		return false
 	end
-	local mapDescendants = collectDescendants(productionServerMaps)
-	if #mapDescendants ~= #EXPECTED_MATCH_SERVER_SOURCES then
-		emit("FAIL", definition.name, "TEST_MAP_SOURCE_COUNT")
+	if
+		not verifyMirroredSources(
+			definition,
+			productionServerMatchLifecycle,
+			EXPECTED_MATCH_LIFECYCLE_SOURCES,
+			"TEST_MATCH_LIFECYCLE"
+		)
+	then
 		return false
 	end
-	for _, expectedSourceDefinition in EXPECTED_MATCH_SERVER_SOURCES do
-		local moduleName = string.match(expectedSourceDefinition.dataModelPath, "([^.]+)$")
-		local module = if moduleName == nil then nil else productionServerMaps:FindFirstChild(moduleName)
-		if module == nil or module.ClassName ~= "ModuleScript" then
-			emit("FAIL", definition.name, "TEST_MAP_SOURCE_MISMATCH", productionServerMaps:GetFullName())
-			return false
-		end
-
-		if not fs.isFile(expectedSourceDefinition.sourcePath) then
-			emit("FAIL", definition.name, "TEST_MAP_AUTHORITATIVE_SOURCE_MISSING", module:GetFullName())
-			return false
-		end
-
-		local readSucceeded, expectedSource = pcall(fs.readFile, expectedSourceDefinition.sourcePath)
-		if not readSucceeded or (module :: ModuleScript).Source ~= expectedSource then
-			emit("FAIL", definition.name, "TEST_MAP_SOURCE_CONTENT_MISMATCH", module:GetFullName())
-			return false
-		end
+	if
+		not verifyMirroredSources(
+			definition,
+			productionServerMatchRoster,
+			EXPECTED_MATCH_ROSTER_SOURCES,
+			"TEST_MATCH_ROSTER"
+		)
+	then
+		return false
+	end
+	if
+		not verifyMirroredSources(
+			definition,
+			productionServerMatchReady,
+			EXPECTED_MATCH_READY_SOURCES,
+			"TEST_MATCH_READY"
+		)
+	then
+		return false
 	end
 	local mapModules = #EXPECTED_MATCH_SERVER_SOURCES
+	local matchLifecycleModules = #EXPECTED_MATCH_LIFECYCLE_SOURCES
+	local matchRosterModules = #EXPECTED_MATCH_ROSTER_SOURCES
+	local matchReadyModules = #EXPECTED_MATCH_READY_SOURCES
 	if
-		not verifyTestOwnedSources(
-			dataModel,
-			definition,
+		not verifyTestOwnedSources(dataModel, definition, {
 			shared :: Instance,
 			productionServerNetworking :: Instance,
 			productionClientNetworking :: Instance,
-			productionServerMaps :: Instance
-		)
+			productionServerMaps :: Instance,
+			productionServerMatchLifecycle :: Instance,
+			productionServerMatchRoster :: Instance,
+			productionServerMatchReady :: Instance,
+		})
 	then
 		return false
 	end
@@ -914,7 +1057,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	emit(
 		"PASS",
 		definition.name,
-		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
+		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
 	)
 	return true
 end

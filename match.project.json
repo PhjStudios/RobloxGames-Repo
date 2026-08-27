@@ -26,13 +26,55 @@
         "$ignoreUnknownInstances": true,
 
         "common": {
-          "$path": "src/server/common",
-          "$ignoreUnknownInstances": true
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true,
+
+          "bootstrap": {
+            "$className": "Folder",
+            "$ignoreUnknownInstances": true,
+
+            "Main": {
+              "$path": "src/server/match/bootstrap/Main.server.luau"
+            },
+
+            "ServerBootstrap": {
+              "$path": "src/server/common/bootstrap/ServerBootstrap.luau"
+            },
+
+            "Shutdown": {
+              "$path": "src/server/common/bootstrap/Shutdown.luau"
+            }
+          },
+
+          "networking": {
+            "$path": "src/server/common/networking",
+            "$ignoreUnknownInstances": true
+          }
         },
 
         "match": {
-          "$path": "src/server/match",
-          "$ignoreUnknownInstances": true
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true,
+
+          "maps": {
+            "$path": "src/server/match/maps",
+            "$ignoreUnknownInstances": true
+          },
+
+          "lifecycle": {
+            "$path": "src/server/match/lifecycle",
+            "$ignoreUnknownInstances": true
+          },
+
+          "roster": {
+            "$path": "src/server/match/roster",
+            "$ignoreUnknownInstances": true
+          },
+
+          "ready": {
+            "$path": "src/server/match/ready",
+            "$ignoreUnknownInstances": true
+          }
         }
       }
     },

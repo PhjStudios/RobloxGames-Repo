@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 
 local RemoteRegistry = require(ReplicatedStorage.Shared.network.RemoteRegistry)
 local PayloadValidation = require(ReplicatedStorage.Shared.network.PayloadValidation)
+local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
 local Cleanup = require(ReplicatedStorage.Shared.util.Cleanup)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
@@ -25,6 +26,9 @@ export type ConnectAdapter = (remote: RemoteEvent, listener: Listener) -> RBXScr
 export type Authorizer = ServerRequestDispatcher.Authorizer
 export type Handler = ServerRequestDispatcher.Handler
 export type HandlerOutcome = ServerRequestDispatcher.HandlerOutcome
+export type EventEnvelope = RequestProtocol.RawEvent
+export type OutboundSendAdapter = (remote: RemoteEvent, player: Player, envelope: EventEnvelope) -> ()
+export type ServerEventSender = (recipient: unknown, payload: unknown) -> boolean
 export type LimiterDependencies = {
 	players: Instance?,
 	clock: ServerRateLimiter.Clock?,
@@ -32,11 +36,21 @@ export type LimiterDependencies = {
 	reporter: ServerRateLimiter.Reporter?,
 }
 export type DispatcherDependencies = ServerRequestDispatcher.Dependencies
+export type OutboundDependencies = {
+	sender: OutboundSendAdapter?,
+}
 
 type ContractMap = { [string]: ServerRequestDispatcher.Contract }
+type OutboundBinding = {
+	definition: RemoteRegistry.Definition,
+	payloadSchema: PayloadValidation.Schema,
+	remote: RemoteEvent?,
+}
+type OutboundBindingMap = { [string]: OutboundBinding }
 type EndpointRemotes = {
 	inbound: RemoteEvent?,
 	response: RemoteEvent?,
+	outbound: RemoteEvent?,
 }
 type RemoteMap = { [string]: EndpointRemotes }
 type ResolvedLimiterDependencies = {
@@ -58,6 +72,8 @@ type ServerData = {
 	activeDefinitions: { RemoteRegistry.Definition },
 	activeDefinitionsByName: { [string]: RemoteRegistry.Definition },
 	contracts: ContractMap,
+	outboundBindings: OutboundBindingMap,
+	outboundSendAdapter: OutboundSendAdapter,
 	state: NetworkState,
 	cleanup: Cleanup.Container?,
 	rateLimiter: ServerRateLimiter.Limiter?,
@@ -83,9 +99,16 @@ local LIMITER_DEPENDENCY_FIELDS: { [string]: boolean } = table.freeze({
 	players = true,
 	reporter = true,
 })
+local OUTBOUND_DEPENDENCY_FIELDS: { [string]: boolean } = table.freeze({
+	sender = true,
+})
 
 local function defaultConnect(remote: RemoteEvent, listener: Listener): RBXScriptConnection
 	return remote.OnServerEvent:Connect(listener)
+end
+
+local function defaultOutboundSend(remote: RemoteEvent, player: Player, envelope: EventEnvelope)
+	remote:FireClient(player, envelope)
 end
 
 local function requireServer(value: unknown): ServerData
@@ -206,6 +229,43 @@ local function resolveLimiterDependencies(logger: Log.Logger, value: LimiterDepe
 	})
 end
 
+local function resolveOutboundSendAdapter(logger: Log.Logger, value: OutboundDependencies?): OutboundSendAdapter
+	if value == nil then
+		return defaultOutboundSend
+	end
+	if type(value) ~= "table" or getmetatable(value) ~= nil then
+		failConstruction(
+			logger,
+			"INVALID_OUTBOUND_DEPENDENCIES",
+			"Outbound dependencies must be an exact plain record",
+			"outboundDependencies"
+		)
+	end
+
+	local rawDependencies = value :: { [any]: unknown }
+	for rawKey in next, rawDependencies do
+		if type(rawKey) ~= "string" or OUTBOUND_DEPENDENCY_FIELDS[rawKey] ~= true then
+			failConstruction(
+				logger,
+				"INVALID_OUTBOUND_DEPENDENCIES",
+				"Outbound dependencies contain an unsupported field",
+				"outboundDependencies"
+			)
+		end
+	end
+
+	local sender = rawget(rawDependencies, "sender")
+	if sender ~= nil and type(sender) ~= "function" then
+		failConstruction(
+			logger,
+			"INVALID_OUTBOUND_DEPENDENCIES",
+			"Outbound sender dependency must be a function or nil",
+			"outboundDependencies.sender"
+		)
+	end
+	return (sender or defaultOutboundSend) :: OutboundSendAdapter
+end
+
 local function endpointForLog(server: ServerData, endpointName: unknown): string
 	if type(endpointName) ~= "string" then
 		return UNKNOWN_ENDPOINT
@@ -247,12 +307,14 @@ local function populateUnpublishedTree(root: Folder, definitions: { RemoteRegist
 			endpointRemotes[definition.name] = {
 				inbound = if definition.direction == "ClientToServer" then request else nil,
 				response = response,
+				outbound = nil,
 			}
 		else
 			local event = createRemote("Event", endpoint)
 			endpointRemotes[definition.name] = {
 				inbound = if definition.direction == "ClientToServer" then event else nil,
 				response = nil,
+				outbound = if definition.direction == "ServerToClient" then event else nil,
 			}
 		end
 	end
@@ -260,7 +322,14 @@ local function populateUnpublishedTree(root: Folder, definitions: { RemoteRegist
 	return endpointRemotes
 end
 
+local function invalidateOutboundBindings(server: ServerData)
+	for _, binding in server.outboundBindings do
+		binding.remote = nil
+	end
+end
+
 local function rollback(server: ServerData): boolean
+	invalidateOutboundBindings(server)
 	local cleanup = server.cleanup
 	if cleanup == nil then
 		server.rateLimiter = nil
@@ -382,6 +451,15 @@ local function requireCompleteBindings(server: ServerData)
 				definition.name,
 				"Every active client-to-server endpoint requires exactly one secure contract before initialization"
 			)
+		elseif definition.direction == "ServerToClient" and server.outboundBindings[definition.name] == nil then
+			server.state = "Failed"
+			fail(
+				server,
+				"initialization_rejected",
+				"MISSING_OUTBOUND_BINDING",
+				definition.name,
+				"Every active server-to-client endpoint requires exactly one secure binding before initialization"
+			)
 		end
 	end
 end
@@ -439,6 +517,19 @@ local function initialize(server: ServerData)
 	end
 
 	local remoteMap = remotesOrError :: RemoteMap
+	for endpointName, binding in server.outboundBindings do
+		local endpointRemotes = remoteMap[endpointName]
+		local remote = if endpointRemotes == nil then nil else endpointRemotes.outbound
+		if remote == nil then
+			rejectInitialization(
+				server,
+				"OUTBOUND_REMOTE_MISSING",
+				binding.definition.name,
+				"The fixed outbound endpoint leaf could not be resolved"
+			)
+		end
+		binding.remote = remote
+	end
 	local limiterDependencies = server.limiterDependencies
 	local limiterCreated, limiterValue = pcall(
 		ServerRateLimiter.new,
@@ -615,6 +706,165 @@ local function initialize(server: ServerData)
 	server.state = "Initialized"
 end
 
+local function requireOutboundDefinition(server: ServerData, endpointName: unknown): RemoteRegistry.Definition
+	if server.state ~= "Registering" then
+		fail(
+			server,
+			"binding_rejected",
+			"INVALID_STATE",
+			endpointForLog(server, endpointName),
+			"Outbound bindings may only be registered before lifecycle initialization"
+		)
+	end
+
+	local definition = if type(endpointName) == "string" then server.registry:get(endpointName) else nil
+	if definition == nil then
+		fail(
+			server,
+			"binding_rejected",
+			"UNKNOWN_ENDPOINT",
+			UNKNOWN_ENDPOINT,
+			"Outbound binding registration requires one fixed registry name"
+		)
+	end
+	if server.activeDefinitionsByName[definition.name] == nil then
+		fail(
+			server,
+			"binding_rejected",
+			"INACTIVE_ENDPOINT",
+			definition.name,
+			"The outbound endpoint is not active for this place role"
+		)
+	end
+	if definition.kind ~= "Event" or definition.response ~= "None" then
+		fail(
+			server,
+			"binding_rejected",
+			"WRONG_KIND",
+			definition.name,
+			"Outbound bindings require a no-response Event endpoint"
+		)
+	end
+	if definition.direction ~= "ServerToClient" then
+		fail(
+			server,
+			"binding_rejected",
+			"WRONG_DIRECTION",
+			definition.name,
+			"Outbound bindings may bind only active server-to-client endpoints"
+		)
+	end
+	if server.outboundBindings[definition.name] ~= nil then
+		fail(
+			server,
+			"binding_rejected",
+			"DUPLICATE_OUTBOUND_BINDING",
+			definition.name,
+			"An outbound endpoint may have only one secure server binding"
+		)
+	end
+	return definition
+end
+
+local function isActiveRecipient(server: ServerData, value: unknown): boolean
+	if typeof(value) ~= "Instance" then
+		return false
+	end
+	local succeeded, active = pcall(function(): boolean
+		local instance = value :: Instance
+		return instance:IsA("Player") and instance.Parent == server.limiterDependencies.players
+	end)
+	return succeeded and active == true
+end
+
+local function outboundRejected(server: ServerData, endpoint: string, code: string, message: string): boolean
+	pcall(function()
+		server.logger:warn("network", "outbound_event_rejected", message, {
+			code = code,
+			endpoint = endpoint,
+			networkState = server.state,
+		})
+	end)
+	return false
+end
+
+local function sendOutboundEvent(
+	server: ServerData,
+	binding: OutboundBinding,
+	recipient: unknown,
+	payload: unknown
+): boolean
+	if server.state ~= "Started" then
+		return outboundRejected(
+			server,
+			binding.definition.name,
+			"UNAVAILABLE",
+			"Outbound event publication requires the Started state"
+		)
+	end
+	if not isActiveRecipient(server, recipient) then
+		return outboundRejected(
+			server,
+			binding.definition.name,
+			"INVALID_RECIPIENT",
+			"Outbound event publication requires one currently connected Player"
+		)
+	end
+
+	local validated, validationResult = pcall(PayloadValidation.validate, binding.payloadSchema, payload)
+	if not validated or not validationResult.ok then
+		return outboundRejected(
+			server,
+			binding.definition.name,
+			"INVALID_PAYLOAD",
+			"Outbound event payload validation failed closed"
+		)
+	end
+	local built, envelopeResult = pcall(RequestProtocol.buildEvent, validationResult.value)
+	if not built or not envelopeResult.ok then
+		return outboundRejected(
+			server,
+			binding.definition.name,
+			"ENVELOPE_CONSTRUCTION_FAILED",
+			"Outbound event envelope construction failed closed"
+		)
+	end
+
+	local remote = binding.remote
+	local root = server.root
+	local remoteOwned = false
+	if remote ~= nil and root ~= nil then
+		local checked, owned = pcall(function(): boolean
+			return remote:IsDescendantOf(root) and root.Parent == server.replicatedStorage
+		end)
+		remoteOwned = checked and owned == true
+	end
+	if not remoteOwned then
+		return outboundRejected(
+			server,
+			binding.definition.name,
+			"OUTBOUND_REMOTE_UNAVAILABLE",
+			"Outbound event publication requires the owned fixed remote"
+		)
+	end
+
+	local sent = pcall(
+		server.outboundSendAdapter,
+		remote :: RemoteEvent,
+		recipient :: Player,
+		envelopeResult.value :: RequestProtocol.RawEvent
+	)
+	if not sent then
+		return outboundRejected(
+			server,
+			binding.definition.name,
+			"OUTBOUND_SEND_FAILED",
+			"Outbound event publication failed and was not retried"
+		)
+	end
+	return true
+end
+
 local function start(server: ServerData)
 	if server.state ~= "Initialized" then
 		fail(
@@ -721,13 +971,13 @@ local function start(server: ServerData)
 end
 
 local function shutdown(server: ServerData)
-	if server.state ~= "Started" then
+	if server.state ~= "Initialized" and server.state ~= "Started" and server.state ~= "Failed" then
 		fail(
 			server,
 			"transition_rejected",
 			"INVALID_STATE",
 			UNKNOWN_ENDPOINT,
-			"Network shutdown requires the Started state"
+			"Network shutdown requires an initialized, started, or failed owned runtime"
 		)
 	end
 
@@ -948,6 +1198,30 @@ function Server.registerEvent(
 	server.contracts[definition.name] = contractValue :: ServerRequestDispatcher.EventContract
 end
 
+function Server.registerServerEvent(self: Server, endpointName: unknown, payloadSchema: unknown): ServerEventSender
+	local server = requireServer(self)
+	local definition = requireOutboundDefinition(server, endpointName)
+	if not PayloadValidation.isSchema(payloadSchema) then
+		fail(
+			server,
+			"binding_rejected",
+			"INVALID_PAYLOAD_SCHEMA",
+			definition.name,
+			"An outbound event binding requires an authentic strict payload schema"
+		)
+	end
+
+	local binding: OutboundBinding = {
+		definition = definition,
+		payloadSchema = payloadSchema :: PayloadValidation.Schema,
+		remote = nil,
+	}
+	server.outboundBindings[definition.name] = binding
+	return function(recipient: unknown, payload: unknown): boolean
+		return sendOutboundEvent(server, binding, recipient, payload)
+	end
+end
+
 function Server.getServiceDefinition(self: Server): ServiceLifecycle.ServiceDefinition
 	local server = requireServer(self)
 	return server.serviceDefinition :: ServiceLifecycle.ServiceDefinition
@@ -965,7 +1239,8 @@ function ServerRemoteRegistry.new(
 	ratePolicyBindings: unknown,
 	connectAdapter: ConnectAdapter?,
 	limiterDependencies: LimiterDependencies?,
-	dispatcherDependencies: DispatcherDependencies?
+	dispatcherDependencies: DispatcherDependencies?,
+	outboundDependencies: OutboundDependencies?
 ): Server
 	if not Log.isLogger(logger) then
 		error(
@@ -996,6 +1271,7 @@ function ServerRemoteRegistry.new(
 		failConstruction(logger, "INVALID_CONNECT_ADAPTER", "The endpoint connector must be a function or nil")
 	end
 	local resolvedLimiterDependencies = resolveLimiterDependencies(logger, limiterDependencies)
+	local outboundSendAdapter = resolveOutboundSendAdapter(logger, outboundDependencies)
 
 	local activeDefinitions = registry:listForRole(role)
 	local activeDefinitionsByName: { [string]: RemoteRegistry.Definition } = {}
@@ -1015,6 +1291,8 @@ function ServerRemoteRegistry.new(
 		activeDefinitions = activeDefinitions,
 		activeDefinitionsByName = activeDefinitionsByName,
 		contracts = {},
+		outboundBindings = {},
+		outboundSendAdapter = outboundSendAdapter,
 		state = "Registering",
 		cleanup = nil,
 		rateLimiter = nil,

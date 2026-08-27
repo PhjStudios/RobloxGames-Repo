@@ -14,6 +14,8 @@ local RemoteRegistry = require(Shared.network.RemoteRegistry)
 local PayloadValidation = require(Shared.network.PayloadValidation)
 local EnvironmentContext = require(Shared.logging.EnvironmentContext)
 local Log = require(Shared.logging.Log)
+local RequestProtocol = require(Shared.network.RequestProtocol)
+local ServiceLifecycle = require(Shared.lifecycle.ServiceLifecycle)
 
 local resolveForTests = ClientRemoteLookup.resolveForTests
 if resolveForTests == nil then
@@ -147,7 +149,9 @@ end
 
 local function bindActiveHandlers(server: Server, role: RuntimePlaceRole, callback: ServerRemoteRegistry.Handler?)
 	for _, definition in FULL_REGISTRY:listForRole(role) do
-		if definition.direction == "ClientToServer" then
+		if definition.direction == "ServerToClient" then
+			server:registerServerEvent(definition.name, REQUEST_SCHEMA)
+		else
 			local selectedHandler: ServerRemoteRegistry.Handler = callback
 				or function(_context, _payload)
 					return ServerRequestDispatcher.success(
@@ -326,6 +330,77 @@ local function assertNoPublishedRoot(assertions: Assertions)
 end
 
 return TestHarness.suite("fixed remote runtime and client lookup", {
+	runtimeCase(
+		"transactionally removes the real network runtime after downstream lifecycle failures",
+		function(assertions)
+			for _, failurePhase in { "initialize", "start", "shutdown" } do
+				assertNoPublishedRoot(assertions)
+				local connectedCount = 0
+				local disconnectedCount = 0
+				local matchShutdownCount = 0
+				local limiterDependencies, dispatcherDependencies, childDisconnects = countingChildDependencies()
+				local server = createOwnedServer(
+					loggerFor("Match"),
+					FULL_REGISTRY,
+					ReplicatedStorage,
+					"Match",
+					FULL_RATE_BINDINGS,
+					fakeConnector(function(_remote)
+						disconnectedCount += 1
+					end, function(_remote, _handler)
+						connectedCount += 1
+					end),
+					limiterDependencies,
+					dispatcherDependencies
+				)
+				bindActiveHandlers(server, "Match", nil)
+
+				local runner = ServiceLifecycle.new(loggerFor("Match"))
+				runner:register(server:getServiceDefinition())
+				runner:register(table.freeze({
+					name = "MatchLifecycle",
+					dependencies = table.freeze({ "NetworkRegistry" }),
+					initialize = function()
+						if failurePhase == "initialize" then
+							error(PRIVATE_SENTINEL, 0)
+						end
+					end,
+					start = function()
+						if failurePhase == "start" then
+							error(PRIVATE_SENTINEL, 0)
+						end
+					end,
+					shutdown = function()
+						matchShutdownCount += 1
+						if failurePhase == "shutdown" then
+							error(PRIVATE_SENTINEL, 0)
+						end
+					end,
+				}))
+
+				local lifecycleFailure = captureError(assertions, function()
+					runner:initialize()
+					if failurePhase ~= "initialize" then
+						runner:start()
+					end
+					if failurePhase == "shutdown" then
+						runner:shutdown()
+					end
+				end)
+				assertCode(assertions, lifecycleFailure, string.upper(failurePhase) .. "_FAILED")
+				assertions.isNil(string.find(lifecycleFailure, PRIVATE_SENTINEL, 1, true))
+				assertions.equal(runner:getState(), "Failed")
+				assertions.equal(server:getState(), "Shutdown")
+				assertions.equal(matchShutdownCount, 1)
+				assertions.isTrue(connectedCount > 0)
+				assertions.equal(disconnectedCount, connectedCount)
+				assertions.equal(childDisconnects.limiter, 1)
+				assertions.equal(childDisconnects.dispatcher, 1)
+				assertNoPublishedRoot(assertions)
+			end
+		end
+	),
+
 	runtimeCase(
 		"publishes the exact Match tree only after binding and disconnects before destruction",
 		function(assertions)
@@ -572,6 +647,54 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 			end)
 			assertCode(assertions, wrongDirection, "WRONG_DIRECTION")
 
+			local unknownOutbound = captureError(assertions, function()
+				server:registerServerEvent(PRIVATE_SENTINEL .. "/arbitrary/path", REQUEST_SCHEMA)
+			end)
+			assertCode(assertions, unknownOutbound, "UNKNOWN_ENDPOINT")
+			assertions.contains(unknownOutbound, "[endpoint=<unknown>]")
+			assertions.isNil(string.find(unknownOutbound, PRIVATE_SENTINEL, 1, true))
+
+			local inactiveOutbound = captureError(assertions, function()
+				server:registerServerEvent("TestClientEvent", REQUEST_SCHEMA)
+			end)
+			assertCode(assertions, inactiveOutbound, "INACTIVE_ENDPOINT")
+
+			local wrongOutboundKind = captureError(assertions, function()
+				server:registerServerEvent("TestResponseRequest", REQUEST_SCHEMA)
+			end)
+			assertCode(assertions, wrongOutboundKind, "WRONG_KIND")
+
+			local developmentServer = createOwnedServer(
+				loggerFor("Development"),
+				FULL_REGISTRY,
+				ReplicatedStorage,
+				"Development",
+				FULL_RATE_BINDINGS,
+				nil,
+				TEST_LIMITER_DEPENDENCIES,
+				TEST_DISPATCHER_DEPENDENCIES
+			)
+			local wrongOutboundDirection = captureError(assertions, function()
+				developmentServer:registerServerEvent("TestClientEvent", REQUEST_SCHEMA)
+			end)
+			assertCode(assertions, wrongOutboundDirection, "WRONG_DIRECTION")
+
+			local invalidOutboundSchema = captureError(assertions, function()
+				server:registerServerEvent("TestServerEvent", {} :: any)
+			end)
+			assertCode(assertions, invalidOutboundSchema, "INVALID_PAYLOAD_SCHEMA")
+
+			server:registerServerEvent("TestServerEvent", REQUEST_SCHEMA)
+			local duplicateOutbound = captureError(assertions, function()
+				server:registerServerEvent("TestServerEvent", REQUEST_SCHEMA)
+			end)
+			assertCode(assertions, duplicateOutbound, "DUPLICATE_OUTBOUND_BINDING")
+
+			local counterfeitContext = captureError(assertions, function()
+				(server.registerServerEvent :: any)({}, "TestServerEvent", REQUEST_SCHEMA)
+			end)
+			assertCode(assertions, counterfeitContext, "INVALID_CONTEXT")
+
 			local invalidHandler = captureError(assertions, function()
 				server:registerRequest(
 					"TestResponseRequest",
@@ -599,6 +722,40 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		end
 	),
 
+	runtimeCase("rejects invalid exact outbound dependency records", function(assertions)
+		local invalidSender = captureError(assertions, function()
+			createOwnedServer(
+				loggerFor("Lobby"),
+				FULL_REGISTRY,
+				ReplicatedStorage,
+				"Lobby",
+				FULL_RATE_BINDINGS,
+				nil,
+				TEST_LIMITER_DEPENDENCIES,
+				TEST_DISPATCHER_DEPENDENCIES,
+				{ sender = PRIVATE_SENTINEL :: any }
+			)
+		end)
+		assertCode(assertions, invalidSender, "INVALID_OUTBOUND_DEPENDENCIES")
+		assertions.isNil(string.find(invalidSender, PRIVATE_SENTINEL, 1, true))
+
+		local unknownField = captureError(assertions, function()
+			createOwnedServer(
+				loggerFor("Lobby"),
+				FULL_REGISTRY,
+				ReplicatedStorage,
+				"Lobby",
+				FULL_RATE_BINDINGS,
+				nil,
+				TEST_LIMITER_DEPENDENCIES,
+				TEST_DISPATCHER_DEPENDENCIES,
+				{ private = PRIVATE_SENTINEL } :: any
+			)
+		end)
+		assertCode(assertions, unknownField, "INVALID_OUTBOUND_DEPENDENCIES")
+		assertions.isNil(string.find(unknownField, PRIVATE_SENTINEL, 1, true))
+	end),
+
 	runtimeCase("fails closed on missing contracts and rolls back a partial listener bind", function(assertions)
 		assertNoPublishedRoot(assertions)
 		local missingServer = createOwnedServer(
@@ -617,6 +774,36 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		assertCode(assertions, missing, "MISSING_CONTRACT")
 		assertions.contains(missing, "[endpoint=TestClientEvent]")
 		assertions.equal(missingServer:getState(), "Failed")
+		assertNoPublishedRoot(assertions)
+
+		local missingOutboundServer = createOwnedServer(
+			loggerFor("Lobby"),
+			FULL_REGISTRY,
+			ReplicatedStorage,
+			"Lobby",
+			FULL_RATE_BINDINGS,
+			fakeConnector(nil, nil),
+			TEST_LIMITER_DEPENDENCIES,
+			TEST_DISPATCHER_DEPENDENCIES
+		)
+		local function authorize(_context: ServerRequestDispatcher.ServerContext): boolean
+			return true
+		end
+		missingOutboundServer:registerRequest(
+			"TestResponseRequest",
+			REQUEST_SCHEMA,
+			RESPONSE_SCHEMA,
+			authorize,
+			function(_context, _payload)
+				return ServerRequestDispatcher.success({ accepted = true })
+			end
+		)
+		local missingOutbound = captureError(assertions, function()
+			initialize(missingOutboundServer)
+		end)
+		assertCode(assertions, missingOutbound, "MISSING_OUTBOUND_BINDING")
+		assertions.contains(missingOutbound, "[endpoint=TestServerEvent]")
+		assertions.equal(missingOutboundServer:getState(), "Failed")
 		assertNoPublishedRoot(assertions)
 
 		local connectionAttempts = 0
@@ -733,6 +920,102 @@ return TestHarness.suite("fixed remote runtime and client lookup", {
 		assertions.equal(dispatcherFailureServer:getState(), "Failed")
 		assertNoPublishedRoot(assertions)
 	end),
+
+	runtimeCase(
+		"validates and envelopes captured outbound sends once while Started and invalidates on cleanup",
+		function(assertions)
+			assertNoPublishedRoot(assertions)
+			local sendAttempts = 0
+			local sentRemote: RemoteEvent? = nil
+			local sentPlayer: Player? = nil
+			local sentEnvelope: RequestProtocol.RawEvent? = nil
+			local server = createOwnedServer(
+				loggerFor("Lobby"),
+				FULL_REGISTRY,
+				ReplicatedStorage,
+				"Lobby",
+				FULL_RATE_BINDINGS,
+				fakeConnector(nil, nil),
+				TEST_LIMITER_DEPENDENCIES,
+				TEST_DISPATCHER_DEPENDENCIES,
+				{
+					sender = function(remote: RemoteEvent, player: Player, envelope: RequestProtocol.RawEvent)
+						sendAttempts += 1
+						if (envelope.payload :: any).marker == "fail" then
+							error(PRIVATE_SENTINEL, 0)
+						end
+						sentRemote = remote
+						sentPlayer = player
+						sentEnvelope = envelope
+					end,
+				}
+			)
+			local function authorize(_context: ServerRequestDispatcher.ServerContext): boolean
+				return true
+			end
+			server:registerRequest(
+				"TestResponseRequest",
+				REQUEST_SCHEMA,
+				RESPONSE_SCHEMA,
+				authorize,
+				function(_context, _payload)
+					return ServerRequestDispatcher.success({ accepted = true })
+				end
+			)
+			local sendSnapshot = server:registerServerEvent("TestServerEvent", REQUEST_SCHEMA)
+			local player = ownInstance(Instance.new("Player")) :: Player
+			player.Parent = game:GetService("Players")
+
+			assertions.isFalse(sendSnapshot(player, { marker = "before-init" }))
+			initialize(server)
+			assertions.isFalse(sendSnapshot(player, { marker = "before-start" }))
+			start(server)
+
+			local authored = { marker = "safe" }
+			assertions.isTrue(sendSnapshot(player, authored))
+			assertions.equal(sendAttempts, 1)
+			assertions.equal(sentPlayer, player)
+			assertions.isNotNil(sentRemote)
+			if sentRemote ~= nil then
+				assertions.equal(sentRemote.Name, "Event")
+				assertions.equal(sentRemote.Parent.Name, "TestServerEvent")
+			end
+			assertions.isNotNil(sentEnvelope)
+			if sentEnvelope ~= nil then
+				assertions.isTrue(table.isfrozen(sentEnvelope))
+				assertions.isNil((sentEnvelope :: any).requestId)
+				local parsed = RequestProtocol.parseEvent(sentEnvelope)
+				assertions.isTrue(parsed.ok)
+				assertions.equal((sentEnvelope.payload :: any).marker, "safe")
+				assertions.isTrue(table.isfrozen(sentEnvelope.payload :: any))
+			end
+			authored.marker = PRIVATE_SENTINEL
+			assertions.equal((sentEnvelope :: RequestProtocol.RawEvent).payload.marker, "safe")
+
+			assertions.isFalse(sendSnapshot(player, { marker = "safe", extra = PRIVATE_SENTINEL }))
+			assertions.equal(sendAttempts, 1)
+			local model = ownInstance(Instance.new("Model"))
+			assertions.isFalse(sendSnapshot(model, { marker = "safe" }))
+			assertions.equal(sendAttempts, 1)
+			local detachedPlayer = ownInstance(Instance.new("Player")) :: Player
+			assertions.isFalse(sendSnapshot(detachedPlayer, { marker = "safe" }))
+			assertions.equal(sendAttempts, 1)
+
+			assertions.isFalse(sendSnapshot(player, { marker = "fail" }))
+			assertions.equal(sendAttempts, 2)
+			assertions.equal((sentEnvelope :: RequestProtocol.RawEvent).payload.marker, "safe")
+
+			local lateBinding = captureError(assertions, function()
+				server:registerServerEvent("TestServerEvent", REQUEST_SCHEMA)
+			end)
+			assertCode(assertions, lateBinding, "INVALID_STATE")
+
+			shutdown(server)
+			assertions.isFalse(sendSnapshot(player, { marker = "after-shutdown" }))
+			assertions.equal(sendAttempts, 2)
+			assertNoPublishedRoot(assertions)
+		end
+	),
 
 	runtimeCase("preserves pre-existing root conflicts and distinguishes their classes", function(assertions)
 		assertNoPublishedRoot(assertions)

@@ -39,6 +39,18 @@
 
         "ProductionServerMaps": {
           "$path": "src/server/match/maps"
+        },
+
+        "ProductionServerMatchLifecycle": {
+          "$path": "src/server/match/lifecycle"
+        },
+
+        "ProductionServerMatchRoster": {
+          "$path": "src/server/match/roster"
+        },
+
+        "ProductionServerMatchReady": {
+          "$path": "src/server/match/ready"
         }
       },
 

@@ -4,9 +4,11 @@ local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local RobloxAdapter = require(script.Parent.Parent.Support.RobloxAdapter)
 local NetworkFixtures = require(script.Parent.Parent.Fixtures.NetworkFixtures)
 local ServerRateLimiter = require(script.Parent.Parent.ProductionServerNetworking.ServerRateLimiter)
+local ProductionRateLimits = require(script.Parent.Parent.ProductionServerNetworking.ProductionRateLimits)
 
 local Players = game:GetService("Players")
 local Shared = game:GetService("ReplicatedStorage").Shared
+local ProductionRemotes = require(Shared.network.ProductionRemotes)
 local RemoteRegistry = require(Shared.network.RemoteRegistry)
 local EnvironmentContext = require(Shared.logging.EnvironmentContext)
 local Log = require(Shared.logging.Log)
@@ -230,6 +232,43 @@ return TestHarness.suite("server authoritative rate limiter", {
 			capacity = minimum.capacity,
 			refillPerSecond = minimum.refillPerSecond,
 		})))
+	end),
+
+	TestHarness.case("binds exact production readiness rates and no outbound policy", function(assertions)
+		assertions.isTrue(table.isfrozen(ProductionRateLimits))
+		assertions.equal(rawlen(ProductionRateLimits), 2)
+
+		local expected = {
+			GetMatchSnapshot = { capacity = 2, refillPerSecond = 1 },
+			SubmitReady = { capacity = 2, refillPerSecond = 0.5 },
+		}
+		for _, binding in ProductionRateLimits do
+			assertions.isTrue(table.isfrozen(binding))
+			assertions.isTrue(ServerRateLimiter.isPolicy(binding.policy))
+			local policy = expected[binding.endpoint]
+			assertions.isNotNil(policy)
+			if policy ~= nil then
+				assertions.equal(binding.policy.capacity, policy.capacity)
+				assertions.equal(binding.policy.refillPerSecond, policy.refillPerSecond)
+			end
+			assertions.notEqual(binding.endpoint, "MatchSnapshot")
+		end
+
+		local matchResult = ServerRateLimiter.createPolicySet(ProductionRemotes, "Match", ProductionRateLimits)
+		assertions.isTrue(matchResult.ok)
+		if matchResult.ok then
+			assertions.equal(matchResult.value:count(), 2)
+			assertions.equal(matchResult.value:activeCount(), 2)
+			assertions.equal(matchResult.value:listActive()[1].endpoint, "GetMatchSnapshot")
+			assertions.equal(matchResult.value:listActive()[2].endpoint, "SubmitReady")
+		end
+
+		local lobbyResult = ServerRateLimiter.createPolicySet(ProductionRemotes, "Lobby", ProductionRateLimits)
+		assertions.isTrue(lobbyResult.ok)
+		if lobbyResult.ok then
+			assertions.equal(lobbyResult.value:count(), 2)
+			assertions.equal(lobbyResult.value:activeCount(), 0)
+		end
 	end),
 
 	TestHarness.case("rejects malformed policy numbers without coercion or private echo", function(assertions)

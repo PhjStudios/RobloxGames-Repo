@@ -424,6 +424,9 @@ local function bindAll(runtime: Runtime)
 			return responseHandler(runtime, context, payload)
 		end
 	)
+	if runtime.role == "Development" then
+		runtime.server:registerServerEvent("TestServerEvent", SECURITY_PAYLOAD_SCHEMA)
+	end
 end
 
 local function initializeRuntime(runtime: Runtime)

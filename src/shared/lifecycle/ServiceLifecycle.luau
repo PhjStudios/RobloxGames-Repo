@@ -248,22 +248,23 @@ local function resolveServiceOrder(runner: RunnerData): { StoredService }
 	return table.freeze(order)
 end
 
-local function invokeMethod(
-	runner: RunnerData,
-	service: StoredService,
-	methodName: "initialize" | "start" | "shutdown",
-	errorCode: ErrorCode
-)
+local function invokeMethod(service: StoredService, methodName: "initialize" | "start" | "shutdown"): boolean
 	local method = service[methodName]
 	if method == nil then
-		return
+		return true
 	end
+	return pcall(method)
+end
 
-	local success = pcall(method)
-	if not success then
-		runner.state = "Failed"
-		fail(runner, `{methodName}_failed`, errorCode, service.name, `Lifecycle method '{methodName}' failed`)
+local function unwindReachedServices(serviceOrder: { StoredService }, lastReachedIndex: number): string?
+	local firstFailure: string? = nil
+	for index = lastReachedIndex, 1, -1 do
+		local service = serviceOrder[index]
+		if not invokeMethod(service, "shutdown") and firstFailure == nil then
+			firstFailure = service.name
+		end
 	end
+	return firstFailure
 end
 
 function Runner.register(self: Runner, service: ServiceDefinition)
@@ -310,8 +311,18 @@ function Runner.initialize(self: Runner)
 	self.serviceOrder = resolveServiceOrder(self)
 	self.state = "Initializing"
 
-	for _, service in self.serviceOrder do
-		invokeMethod(self, service, "initialize", "INITIALIZE_FAILED")
+	for index, service in self.serviceOrder do
+		if not invokeMethod(service, "initialize") then
+			self.state = "Failed"
+			unwindReachedServices(self.serviceOrder, index)
+			fail(
+				self,
+				"initialize_failed",
+				"INITIALIZE_FAILED",
+				service.name,
+				"Lifecycle method 'initialize' failed; reached services were unwound"
+			)
+		end
 	end
 
 	self.state = "Initialized"
@@ -322,8 +333,19 @@ function Runner.start(self: Runner)
 
 	self.state = "Starting"
 
-	for _, service in self.serviceOrder :: { StoredService } do
-		invokeMethod(self, service, "start", "START_FAILED")
+	local serviceOrder = self.serviceOrder :: { StoredService }
+	for _, service in serviceOrder do
+		if not invokeMethod(service, "start") then
+			self.state = "Failed"
+			unwindReachedServices(serviceOrder, #serviceOrder)
+			fail(
+				self,
+				"start_failed",
+				"START_FAILED",
+				service.name,
+				"Lifecycle method 'start' failed; initialized services were unwound"
+			)
+		end
 	end
 
 	self.state = "Started"
@@ -335,8 +357,16 @@ function Runner.shutdown(self: Runner)
 	self.state = "ShuttingDown"
 
 	local serviceOrder = self.serviceOrder :: { StoredService }
-	for index = #serviceOrder, 1, -1 do
-		invokeMethod(self, serviceOrder[index], "shutdown", "SHUTDOWN_FAILED")
+	local firstFailure = unwindReachedServices(serviceOrder, #serviceOrder)
+	if firstFailure ~= nil then
+		self.state = "Failed"
+		fail(
+			self,
+			"shutdown_failed",
+			"SHUTDOWN_FAILED",
+			firstFailure,
+			"Lifecycle shutdown attempted every service and one or more methods failed"
+		)
 	end
 
 	self.state = "Shutdown"

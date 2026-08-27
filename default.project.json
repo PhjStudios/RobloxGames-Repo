@@ -24,7 +24,35 @@
       "$ignoreUnknownInstances": true,
 
       "Server": {
-        "$path": "src/server"
+        "$className": "Folder",
+
+        "common": {
+          "$path": "src/server/common"
+        },
+
+        "lobby": {
+          "$path": "src/server/lobby"
+        },
+
+        "match": {
+          "$className": "Folder",
+
+          "maps": {
+            "$path": "src/server/match/maps"
+          },
+
+          "lifecycle": {
+            "$path": "src/server/match/lifecycle"
+          },
+
+          "roster": {
+            "$path": "src/server/match/roster"
+          },
+
+          "ready": {
+            "$path": "src/server/match/ready"
+          }
+        }
       }
     },
 
