@@ -25,7 +25,10 @@ The fields above describe Packet 02.2 at completion. The current project files
 now also declare their Packet 02.3 roles as `Development`, `Lobby`, and `Match`;
 they still do not duplicate runtime PlaceIds. Phase 08 and its four-client
 Studio, consolidated-review, and complete-local-gate evidence passed on
-2026-08-27. Phase 09 is next but has not begun.
+2026-08-27. Packets 09.1–09.5, the exact Phase 09 Match Studio gate,
+consolidated review, 467-case local gate, and all four current structural builds
+passed on 2026-08-27. Phase 09 is complete; Phase 10 is next but has not begun,
+and Phase 11 has not begun.
 
 ## Project inventory
 
@@ -34,7 +37,7 @@ Studio, consolidated-review, and complete-local-gate evidence passed on
 | `default.project.json` | Combined convenience project and documented `rojo serve` default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | Existing development `servePlaceIds`; current role is `Development` |
 | `lobby.project.json` | Role-isolated lobby source | `common`, `lobby` | `common`, `lobby` | No ID binding; current role is `Lobby` |
 | `match.project.json` | Role-isolated match source | `common`, `match` | `common`, `match` | No ID binding; current role is `Match` |
-| `test.project.json` | Headless contract/runtime-module test DataModel | No runnable layer; exact networking, map, lifecycle, roster, and ready mirrors under `ServerStorage` | No runnable layer; exact networking and Match-ready client mirrors under `ServerStorage` | Build-only; no role or `servePlaceIds` |
+| `test.project.json` | Headless contract/runtime-module test DataModel | No runnable layer; exact networking, map, lifecycle, roster, ready, and enemy mirrors under `ServerStorage` | No runnable layer; exact networking, Match-ready, and enemy mirrors under `ServerStorage` | Build-only; no role or `servePlaceIds` |
 
 All four projects map `src/shared` to `ReplicatedStorage.Shared`. Only the test
 project additionally maps `tests/specs`, `tests/fixtures`, `tests/support`, and
@@ -74,6 +77,23 @@ mapped under `ServerStorage.AutomatedTests.Specs` are `MatchProtocol`,
 mapped into Test, and no Studio harness is mapped into Test or any production
 project.
 
+Phase 09 adds exactly these Test-only production mirrors:
+
+- `ProductionServerEnemies`: `EnemyPath`, `EnemyReplicationPublisher`,
+  `EnemyRuntimeStore`, and `EnemySimulationService`; and
+- `ProductionClientEnemies`: `EnemyController`, `EnemyPresentation`,
+  `EnemyRenderer`, and `EnemyReplicationState`.
+
+`EnemyProtocol` remains in the normal authoritative shared mapping. The eleven
+Phase 09 specs mapped under `ServerStorage.AutomatedTests.Specs` are
+`EnemyProtocol`, `EnemyPath`, `EnemyRuntimeStore`, `EnemyMovement`,
+`EnemyReplicationPublisher`, `EnemyReplicationState`, `EnemyPresentation`,
+`EnemyRenderer`, `EnemySimulationService`, `EnemySimulationIntegration`, and
+`EnemyController`; `EnemyFixtures` is the one new fixture. These suites contain
+120 focused cases. The complete local run passes 39 suites and 467 cases. Test
+still maps no bootstrap, shutdown module, role
+entrypoint, or runnable Script/LocalScript.
+
 The role projects intentionally omit `servePlaceIds`, raw PlaceIds, universe
 IDs, and conditional role selection. Their only identity declaration is the
 `ATDPlaceRole` string attribute. Packet 02.3 owns the single shared role
@@ -94,6 +114,11 @@ excludes both physical Match entrypoint files from Default, so only the common
 Main Script and LocalScript run there. Role testing must use
 `lobby.project.json` or `match.project.json`; the combined project is not proof
 of place-role isolation or Match lifecycle behavior.
+
+Phase 09 adds the four server and four client enemy ModuleScripts to Default's
+non-runnable Match folders. It adds no entrypoint: Default still runs only the
+two common Main sources, while Match composes the enemy service/controller
+through its existing role-specific Main sources.
 
 Keeping the combined project does not weaken the dependency rules in
 `docs/SOURCE_LAYOUT.md`. Lobby and match source still may not import each other.
@@ -125,8 +150,11 @@ Lobby continues to use the common Main sources. Phase 08 Match maps its
 role-specific server and client Main sources at those same stable DataModel
 paths and maps the reusable common bootstrap owners beside them. It therefore
 retains exactly one Script and one LocalScript while adding Match-only modules
-under the `match` folders. Lobby contains no Match source, and Match contains no
-Lobby source.
+under the `match` folders. Lobby contains no server/client Match-role source,
+and Match contains no Lobby source. Phase 09 extends those Match-only folders
+with `enemies` on both runtime sides without changing either stable Main path or
+runnable count. Lobby receives `EnemyProtocol` only through the normal shared
+mapping.
 
 ## Unknown-instance preservation
 
@@ -178,11 +206,15 @@ artifacts are local verification products, not authoritative Studio content.
 
 ## Structural verification
 
-All four current project JSON files parsed successfully and all four builds
-completed with Rojo 7.7.0. The original Packet 02.2 evidence covered only the
-three production definitions; Packet 05.1 added the Test definition and check,
-and Packets 06.1, 06.3, and 06.4 added the six narrow networking module mappings
-described above.
+All four project JSON files parsed successfully and all four builds completed
+with Rojo 7.7.0 at the completed checkpoints recorded below. The original
+Packet 02.2 evidence covered only the three production definitions; Packet 05.1
+added the Test definition and check, and Packets 06.1, 06.3, and 06.4 added the
+six narrow networking module mappings described above.
+
+### Historical Phase 08 build counts
+
+At Phase 08 completion, the verified inventory was:
 
 | Build | Server layers | Client layers | ModuleScripts | Scripts | LocalScripts |
 | --- | --- | --- | ---: | ---: | ---: |
@@ -191,7 +223,18 @@ described above.
 | Match | role Main at common path plus common modules and `match` | role Main at common path plus common modules and `match` | 54 | 1 | 1 |
 | Test | No runnable layer; exact server production mirrors under `ServerStorage` | No runnable layer; exact client production mirrors under `ServerStorage` | 90 | 0 | 0 |
 
-Additional assertions passed:
+### Current Phase 09 derived inventory
+
+The current project definitions and verifier inventory derive these counts:
+
+| Build | Server layers | Client layers | ModuleScripts | Scripts | LocalScripts |
+| --- | --- | --- | ---: | ---: | ---: |
+| Default | common Main plus non-runnable `lobby`/`match` modules | common Main plus non-runnable `lobby`/`match` modules | 63 | 1 | 1 |
+| Lobby | `common`, `lobby` | `common`, `lobby` | 44 | 1 | 1 |
+| Match | role Main at common path plus common modules and `match` | role Main at common path plus common modules and `match` | 63 | 1 | 1 |
+| Test | No runnable layer; 25 exact server/client production mirrors under `ServerStorage` | No runnable layer; authoritative shared tree plus Test-owned modules | 111 | 0 | 0 |
+
+At Phase 08 completion, these additional assertions passed:
 
 - Lobby JSON contains no server/client match source path.
 - Match JSON contains no server/client lobby source path.
@@ -225,8 +268,8 @@ Additional assertions passed:
   or duplicated runtime PlaceId. Packet 02.3 later added only their role
   attributes.
 
-The current production source inventory contains 34 shared ModuleScripts:
-`PlaceRoles`,
+At Phase 08 completion, the production source inventory contained 34 shared
+ModuleScripts: `PlaceRoles`,
 `ServiceLifecycle`, `EnvironmentContext`, `Log`, `Cleanup`, `Ids`, `Result`,
 `Validation`, `ConfigTypes`, `AssetSchema`, `Assets`, `BannerSchema`, `Banners`,
 `ConfigurationValidator`, `DefaultSettings`, `Difficulties`, `DifficultySchema`, `Economy`,
@@ -237,19 +280,50 @@ The current production source inventory contains 34 shared ModuleScripts:
 The server-only common `Shutdown`, `ServerBootstrap`, `ProductionRateLimits`,
 `ServerRemoteRegistry`, `ServerRateLimiter`, and `ServerRequestDispatcher`
 modules and client-only common `ClientBootstrap`, `ClientRemoteLookup`, and
-`ClientRequestTracker` modules bring the common production inventory to 43
-ModuleScripts. Default and Match add the eight server Match modules
+`ClientRequestTracker` modules brought the common production inventory to 43
+ModuleScripts. Default and Match added the eight server Match modules
 (`MapContract`, `MapValidator`, `MapLoader`, `MatchLifecycleService`,
 `MatchStateMachine`, `ParticipantRoster`, `ReadyCheckCoordinator`, and
 `SnapshotBroadcaster`) and three client Match modules (`MatchReadyController`,
-`MatchReadyView`, and `MatchReadyViewModel`) for 54 ModuleScripts. Lobby remains
-at 43. Every production build retains one Script and one LocalScript. Default
-contains both non-runnable role folders but excludes the physical Match Main
-files; Lobby contains no Match source; Match contains no Lobby source.
+`MatchReadyView`, and `MatchReadyViewModel`) for 54 ModuleScripts. Lobby remained
+at 43. Every production build retained one Script and one LocalScript. Default
+contained both non-runnable role folders but excluded the physical Match Main
+files; Lobby contained no server/client Match-role source; Match contained no
+Lobby source.
 Packet 04.4 schema evidence is recorded in
 `docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md`; current whole-catalog
 evidence is in `docs/CONFIGURATION_VALIDATION.md`, and the network layout is in
 `docs/NETWORK_PROTOCOL.md`.
+
+### Current Phase 09 source and Test boundary
+
+The current production source inventory contains 35 shared ModuleScripts: the
+34-module Phase 08 shared inventory above plus `EnemyProtocol`. The six
+server-common and three client-common modules bring the common production
+inventory to 44. Default and Match additionally contain 12 server-Match modules
+(the prior eight plus `EnemyPath`, `EnemyReplicationPublisher`,
+`EnemyRuntimeStore`, and `EnemySimulationService`) and seven client-Match
+modules (the prior three plus `EnemyController`, `EnemyPresentation`,
+`EnemyRenderer`, and `EnemyReplicationState`) for 63 ModuleScripts. Lobby
+contains 44. Each production build still has exactly one authenticated Script
+and one authenticated LocalScript.
+
+The current Test inventory contains 35 authoritative shared modules, 25 exact
+production mirrors, and 51 Test-owned modules. Those Test-owned modules are
+exactly 39 specs, four fixtures, three support modules, and five negative
+controls. The 25 mirrors comprise six common networking, three map, two
+lifecycle, one roster, two ready, three Phase 08 client-Match, four server-enemy,
+and four client-enemy modules. The resulting Test build has 111 ModuleScripts
+and no runnable Script or LocalScript.
+
+The current verifier also requires Default/Lobby/Match to contain no test source,
+Lobby to contain no server/client Match-role source, Match to contain no Lobby
+source, every mapped Lua container to match its exact path/class/source bytes,
+and all four tracked Studio tools to occur in no generated DataModel. It rejects
+unlisted Test-owned source and Phase 10/11 production markers. The five
+production endpoints are all reliable and Match-only, and exactly the three
+inbound requests have rate policies. Production `Enemies` and `Assets` remain
+frozen empty arrays.
 
 The inspected ignored build artifacts were removed. They can be recreated with
 the commands above. `lune run tests/verify-builds.luau` rebuilds and checks all
@@ -267,8 +341,9 @@ manual Studio harness sources. The Test-only networking copies remain
 source-identical and do not make the test project suitable for serving. At that
 historical Phase 06 checkpoint, Default, Lobby, and Match each had 40
 ModuleScripts, one Script, and one LocalScript, and the production registry and
-policy list were empty. The current Phase 08 counts, Match-only remotes, and
-narrow test mirrors are recorded above.
+policy list were empty. The historical Phase 08 counts and narrow mirrors are
+preserved above; the current Phase 09 counts, Match-only remotes, rate policies,
+and enemy mirrors are recorded in the current sections.
 
 For Packet 06.5, `lobby.project.json` was connected only to Lobby and
 `match.project.json` only to Match, one at a time. Three unsaved cycles passed in
@@ -279,8 +354,13 @@ is complete and Gate A passed. Phase 07 implementation, exact Match Studio
 authoring, consolidated review, 241-case local suite, and all four structural
 builds pass. Phase 07 is complete. Packets 08.1–08.5, the four-client Match
 Studio gate, consolidated final review, 347-case local suite, and all four
-current structural builds pass. Phase 08 is complete; Phase 09 is next but has
-not begun.
+then-current structural builds pass. Phase 08 is complete; Phase 09 was next but
+had not begun at that historical checkpoint. Packets 09.1–09.5, their 11 focused
+suites with 120 cases, and the exact two-client Match Studio gate passed on
+2026-08-27. The complete local run passes 39 repository suites and 467 cases;
+the consolidated review and all four current structural builds also pass.
+Phase 09 is complete; Phase 10 is next but has not begun, and Phase 11 has not
+begun. Exact-final-SHA CI evidence is cited at handoff.
 
 ## Scope boundary and next gate
 

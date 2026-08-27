@@ -455,6 +455,53 @@ return TestHarness.suite("enemy simulation deterministic headless integration", 
 		end
 	),
 
+	TestHarness.case(
+		"converges when a snapshot includes spawns queued across multiple bounded flushes",
+		function(assertions)
+			local rig = newRig(assertions, 1)
+			local recipient = rig.recipients[1]
+			for _ = 1, EnemyProtocol.MAX_ACTIVE_ENEMIES do
+				spawnEnemy(assertions, rig, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID)
+			end
+			assertions.equal(rig.publisher:getMetrics().pendingEntryCount, EnemyProtocol.MAX_ACTIVE_ENEMIES)
+
+			local installed = requestAndInstallSnapshot(assertions, rig, recipient, 1)
+			assertions.equal(installed.kind, "SnapshotApplied")
+			local snapshotCovered = stateSnapshot(assertions, rig.states[recipient])
+			assertions.equal(snapshotCovered.lastSequence, 0)
+			assertions.equal(#snapshotCovered.entries, EnemyProtocol.MAX_ACTIVE_ENEMIES)
+
+			local spawnRecords = flushPending(assertions, rig)
+			assertions.equal(#spawnRecords, 16)
+			local spawnOutcomes = deliverRecords(assertions, rig, spawnRecords)
+			for _, outcome in spawnOutcomes do
+				assertions.equal(outcome.kind, "Applied")
+				assertions.equal(outcome.appliedEntryCount, 0)
+				assertions.isFalse(outcome.recoveryRequired)
+			end
+			local afterSpawns = stateSnapshot(assertions, rig.states[recipient])
+			assertions.equal(afterSpawns.lastSequence, 16)
+			assertions.equal(#afterSpawns.entries, EnemyProtocol.MAX_ACTIVE_ENEMIES)
+			assertions.equal(afterSpawns.bufferedCount, 0)
+			assertions.isFalse(afterSpawns.recoveryRequired)
+			assertions.equal(rig.publisher:getMetrics().flushCount, 2)
+
+			local step = stepSimulation(assertions, rig, 0.1)
+			assertions.equal(step.visitedCount, EnemyProtocol.MAX_ACTIVE_ENEMIES)
+			local correctionRecords = flushPending(assertions, rig)
+			assertions.equal(#correctionRecords, 16)
+			deliverRecords(assertions, rig, correctionRecords)
+			local afterCorrections = stateSnapshot(assertions, rig.states[recipient])
+			assertions.equal(afterCorrections.lastSequence, 32)
+			assertions.equal(#afterCorrections.entries, EnemyProtocol.MAX_ACTIVE_ENEMIES)
+			assertions.equal(afterCorrections.entries[1].revision, 2)
+			assertions.equal(afterCorrections.entries[1].pathProgress, 1)
+			assertions.isFalse(afterCorrections.recoveryRequired)
+
+			cleanupRig(assertions, rig)
+		end
+	),
+
 	TestHarness.case("bounds centralized headless work at the declared 1 32 64 128 ladder", function(assertions)
 		for _, enemyCount in { 1, 32, 64, 128 } do
 			local rig = newRig(assertions, 1)

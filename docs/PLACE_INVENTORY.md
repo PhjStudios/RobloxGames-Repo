@@ -86,6 +86,12 @@ combined Rojo project name is `Ant Tower Defense`.
   `35420107`, official Roblox group API name `PHJGAMES`, and resolved
   `ATDPlaceRole = Match`. Exact lifecycle/Ready evidence is in
   `docs/MATCH_LIFECYCLE_READY.md#studio-execution-evidence--2026-08-27`.
+- Phase 09 two-client enemy gate identity reconfirmed on 2026-08-27: PlaceId
+  `136401514513678`, GameId `10757629094`, CreatorType `Group`, CreatorId
+  `35420107`, official Roblox group API name `PHJGAMES`, and resolved
+  `ATDPlaceRole = Match`. Exact simulation, replication, renderer, stress, and
+  cleanup evidence is in
+  `docs/ENEMY_SIMULATION.md#executed-studio-evidence--2026-08-27`.
 - Controlled Phase 07 Save To Cloud: succeeded at `2026-08-27T02:11:31Z` under
   the user's exact graybox authorization; it did not change visibility,
   settings, services, Lobby, or unrelated assets.
@@ -99,6 +105,14 @@ combined Rojo project name is `Ant Tower Defense`.
   paths and found no runtime map, `ATDNetwork`, Ready GUI, `AutomatedTests`, or
   `TestRunner`. Device emulation was reset, no Server & Clients window remained,
   and no Save or publish occurred.
+- The final Phase 09 Edit-mode probe counted the current `63` mapped
+  ModuleScripts, one Script, one LocalScript, and the unchanged `24` descendants
+  below the map-catalog root. It found no runtime map, enemy visual root,
+  placeholder Part, production network root, runtime trigger, Ready GUI,
+  automated-test root, timer, queue, snapshot, or cache residue. The task-owned
+  Rojo server was stopped, emulation and profiling were reset, all simulated
+  windows were closed, and Studio remained in Edit mode. No map, unmapped
+  Instance, asset, setting, Lobby content, save, or publish changed.
 
 The Match place must:
 
@@ -387,6 +401,19 @@ Roblox environment.
   or Rojo-managed Instance changed, and no runtime clone remains.
 - This Studio-owned template is not a `Maps.luau` production catalog entry and
   does not substitute for the still-unavailable separate private test universe.
+
+### Phase 09 enemy simulation gate
+
+- Complete in the exact restricted Match place on 2026-08-27 under the user's
+  active Team Create and Rojo authorization for mapped current-branch source.
+- The real saved Phase 07 five-point bent lane was consumed read-only through the
+  detached runtime snapshot. No additional lane, map marker, model, production
+  enemy content, asset ID, or Studio-authored enemy was created or saved.
+- Runtime-only server triggers and measurement objects were discarded with the
+  session. The delayed-bootstrap recovery, two-client convergence, endpoint,
+  visual recreation, `1/32/64/128` stress ladder, constant connection counts,
+  profiling, and residue checks are recorded in
+  [Enemy Simulation and Replication](ENEMY_SIMULATION.md#executed-studio-evidence--2026-08-27).
 
 ### Needed before Phase 26 teleport testing
 

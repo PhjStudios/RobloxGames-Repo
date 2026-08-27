@@ -46,6 +46,8 @@ type Rig = {
 	disconnectCount: number,
 	preRenderConnectionCount: number,
 	stateCleanupCount: number,
+	rendererResetCount: number,
+	rendererVisualCount: number,
 	rendererCleanupCount: number,
 	stateSnapshotCallCount: number,
 }
@@ -55,7 +57,8 @@ local MATCH_B = "match:enemy-controller-b"
 local logger = Log.new(EnvironmentContext.new("client", "Match", 0, false))
 local newTrackerForTests = ClientRequestTracker.newForTests
 local newControllerForTests = EnemyController.newForTests
-if newTrackerForTests == nil or newControllerForTests == nil then
+local invokeStudioDiagnosticsForTests = EnemyController.invokeStudioDiagnosticsForTests
+if newTrackerForTests == nil or newControllerForTests == nil or invokeStudioDiagnosticsForTests == nil then
 	error("[ATD_TEST_FIXTURE][code=ENEMY_CONTROLLER_TEST_SEAM_MISSING]", 0)
 end
 
@@ -290,6 +293,8 @@ local function makeRig(options: Options?): Rig
 		disconnectCount = 0,
 		preRenderConnectionCount = 0,
 		stateCleanupCount = 0,
+		rendererResetCount = 0,
+		rendererVisualCount = 0,
 		rendererCleanupCount = 0,
 		stateSnapshotCallCount = 0,
 	} :: Rig
@@ -320,6 +325,12 @@ local function makeRig(options: Options?): Rig
 		render = function(_self, snapshot, now)
 			table.insert(rig.renderSnapshots, snapshot)
 			table.insert(rig.renderTimes, now)
+			rig.rendererVisualCount = #(snapshot :: any).entries
+			return Result.ok(true)
+		end,
+		reset = function(_self)
+			rig.rendererResetCount += 1
+			rig.rendererVisualCount = 0
 			return Result.ok(true)
 		end,
 		cleanup = function(_self)
@@ -552,6 +563,147 @@ return TestHarness.suite("enemy replication client controller", {
 		assertions.equal(#(diagnostics.replication :: any).entries, 24)
 		assertions.isNil(diagnostics.renderer)
 		assertions.isTrue(table.isfrozen(diagnostics))
+		shutdown(rig)
+	end),
+
+	TestHarness.case("strictly validates Studio diagnostics and resets only render timing", function(assertions)
+		local rig = makeRig({ respondDuringFirstFire = true })
+		preRender(rig)
+		preRender(rig)
+		local before = rig.controller:getMetrics()
+		assertions.equal(before.renderPassCount, 2)
+		assertions.equal(before.renderDurationSampleCount, 2)
+
+		local invoke = invokeStudioDiagnosticsForTests :: (Controller, ...unknown) -> unknown
+		local diagnostics = invoke(rig.controller, { operation = "Diagnostics" }) :: any
+		assertions.isTrue(diagnostics.ok)
+		assertions.equal(diagnostics.value.controller.renderPassCount, 2)
+		assertions.isTrue(table.isfrozen(diagnostics))
+
+		local malformed = {
+			invoke(rig.controller),
+			invoke(rig.controller, 42),
+			invoke(rig.controller, {}),
+			invoke(rig.controller, { operation = "Unknown" }),
+			invoke(rig.controller, { operation = "Diagnostics", extra = true }),
+			invoke(rig.controller, setmetatable({ operation = "Diagnostics" }, {})),
+			invoke(rig.controller, { operation = "Diagnostics" }, "extra"),
+		}
+		for _, response in malformed do
+			assertions.isFalse((response :: any).ok)
+			assertions.equal((response :: any).error.code, "INVALID_REQUEST")
+			assertions.isTrue(table.isfrozen(response :: any))
+		end
+
+		local reset = invoke(rig.controller, { operation = "ResetTiming" }) :: any
+		assertions.isTrue(reset.ok)
+		assertions.equal(reset.value.controller.renderPassCount, 0)
+		assertions.equal(reset.value.controller.renderDurationSampleCount, 0)
+		assertions.equal(reset.value.controller.renderDurationP50Milliseconds, 0)
+		assertions.equal(reset.value.controller.renderDurationP95Milliseconds, 0)
+		assertions.equal(reset.value.controller.renderDurationMaximumMilliseconds, 0)
+		local after = rig.controller:getMetrics()
+		assertions.equal(after.renderConnectionCount, before.renderConnectionCount)
+		assertions.equal(after.snapshotRefreshCount, before.snapshotRefreshCount)
+		assertions.equal(after.cachedMatchId, before.cachedMatchId)
+		assertions.equal(after.cachedEnemyEpoch, before.cachedEnemyEpoch)
+		assertions.equal(after.cachedLastSequence, before.cachedLastSequence)
+		assertions.equal(after.cachedEntryCount, before.cachedEntryCount)
+		assertions.equal(#rig.renderSnapshots, 2)
+		preRender(rig)
+		assertions.equal(rig.controller:getMetrics().renderPassCount, 1)
+
+		shutdown(rig)
+		local unavailable = invoke(rig.controller, { operation = "Diagnostics" }) :: any
+		assertions.isFalse(unavailable.ok)
+		assertions.equal(unavailable.error.code, "UNAVAILABLE")
+	end),
+
+	TestHarness.case("suspends callbacks and resumes through the existing bounded snapshot path", function(assertions)
+		local rig = makeRig()
+		local invoke = invokeStudioDiagnosticsForTests :: (Controller, ...unknown) -> unknown
+		local before = rig.controller:getMetrics()
+		assertions.equal(before.snapshotAttemptCount, 1)
+		assertions.isTrue(before.snapshotRequestPending)
+		assertions.isFalse(before.studioRecoverySuspended)
+
+		local suspended = invoke(rig.controller, { operation = "SuspendRecovery" }) :: any
+		assertions.isTrue(suspended.ok)
+		assertions.isTrue(suspended.value.controller.studioRecoverySuspended)
+		assertions.equal(suspended.value.controller.snapshotAttemptCount, 1)
+		assertions.isFalse(suspended.value.controller.snapshotRequestPending)
+		assertions.equal(rig.tracker:getStats().pendingCount, 0)
+		assertions.equal(rig.rendererResetCount, 1)
+		assertions.equal(rig.rendererVisualCount, 0)
+
+		local suspendedAgain = invoke(rig.controller, { operation = "SuspendRecovery" }) :: any
+		assertions.isTrue(suspendedAgain.ok)
+		assertions.equal(rig.rendererResetCount, 1)
+		assertions.equal(#rig.requestFires, 1)
+
+		sendEvent(rig, delta("SpawnBatch", MATCH_A, 1, 1, { stateEntry(1, 1) }))
+		rig.responseSignal:force(successWire(rig.requestFires[1], canonicalReceipt(MATCH_A, 1, 0, 1, 0, 0)))
+		preRender(rig)
+		assertions.equal(#snapshot(rig).entries, 0)
+		assertions.equal(#rig.renderSnapshots, 0)
+		assertions.equal(rig.rendererVisualCount, 0)
+		assertions.equal(rig.preRenderConnectionCount, 1)
+		assertions.equal(rig.controller:getMetrics().renderConnectionCount, 1)
+
+		local resumed = invoke(rig.controller, { operation = "ResumeRecovery" }) :: any
+		assertions.isTrue(resumed.ok)
+		assertions.isFalse(resumed.value.controller.studioRecoverySuspended)
+		assertions.equal(resumed.value.controller.snapshotAttemptCount, 2)
+		assertions.isTrue(resumed.value.controller.snapshotRequestPending)
+		assertions.equal(#rig.requestFires, 2)
+		assertions.equal(rig.tracker:getStats().pendingCount, 1)
+
+		-- A canceled request may have a response already queued when suspension
+		-- begins. Its old request ID cannot consume or replace the resumed request.
+		rig.responseSignal:force(successWire(rig.requestFires[1], canonicalReceipt(MATCH_A, 1, 0, 1, 0, 0)))
+		assertions.equal(rig.tracker:getStats().pendingCount, 1)
+		assertions.equal(#rig.requestFires, 2)
+
+		sendSnapshotEvents(rig, MATCH_A, 1, 1, 2, { stateEntry(1, 1) })
+		sendReceipt(rig, 2, MATCH_A, 1, 1, 2, 1)
+		assertions.equal(#snapshot(rig).entries, 1)
+		assertions.equal(snapshot(rig).entries[1].runtimeEnemyId, 1)
+		assertions.equal(rig.tracker:getStats().pendingCount, 0)
+		preRender(rig)
+		assertions.equal(rig.rendererVisualCount, 1)
+		assertions.equal(#rig.renderSnapshots, 1)
+
+		local resumedAgain = invoke(rig.controller, { operation = "ResumeRecovery" }) :: any
+		assertions.isTrue(resumedAgain.ok)
+		assertions.equal(#rig.requestFires, 2)
+		assertions.equal(rig.preRenderConnectionCount, 1)
+		assertions.equal(rig.disconnectCount, 0)
+
+		local capturedRender = rig.preRender :: () -> ()
+		shutdown(rig)
+		assertions.equal(rig.disconnectCount, 3)
+		assertions.equal(rig.stateCleanupCount, 1)
+		assertions.equal(rig.rendererCleanupCount, 1)
+		assertions.isFalse(rig.controller:getMetrics().studioRecoverySuspended)
+		local firesBeforeLateCallbacks = #rig.requestFires
+		rig.eventSignal:force({ payload = delta("SpawnBatch", MATCH_A, 1, 2, { stateEntry(2, 1) }) })
+		rig.responseSignal:force(successWire(rig.requestFires[2], canonicalReceipt(MATCH_A, 1, 1, 2, 0, 0)))
+		capturedRender()
+		assertions.equal(#rig.requestFires, firesBeforeLateCallbacks)
+	end),
+
+	TestHarness.case("keeps recovery suspended when the fixed request budget is exhausted", function(assertions)
+		local rig = makeRig({ fireAlwaysThrows = true })
+		local invoke = invokeStudioDiagnosticsForTests :: (Controller, ...unknown) -> unknown
+		assertions.equal(#rig.requestFires, EnemyController.MAX_SNAPSHOT_ATTEMPTS)
+		local suspended = invoke(rig.controller, { operation = "SuspendRecovery" }) :: any
+		assertions.isTrue(suspended.ok)
+		assertions.isTrue(suspended.value.controller.studioRecoverySuspended)
+		local resumed = invoke(rig.controller, { operation = "ResumeRecovery" }) :: any
+		assertions.isFalse(resumed.ok)
+		assertions.equal(resumed.error.code, "UNAVAILABLE")
+		assertions.isTrue(rig.controller:getMetrics().studioRecoverySuspended)
+		assertions.equal(#rig.requestFires, EnemyController.MAX_SNAPSHOT_ATTEMPTS)
 		shutdown(rig)
 	end),
 

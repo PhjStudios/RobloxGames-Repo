@@ -8,7 +8,9 @@
 - Implementation status: complete on 2026-08-27; Packets 08.1–08.5, the exact
   four-client Match Studio gate, consolidated review, and complete local exit
   gate passed
-- Phase 09 status: next but not begun
+- Phase 09 status: the enemy simulation/replication consumer now uses this
+  lifecycle unchanged; its executable, Studio, consolidated-review, complete
+  local, and structural gates passed on 2026-08-27; Phase 09 is complete
 
 This is the authoritative Phase 08 lifecycle, roster, ready-protocol, minimal-UI,
 and four-client test decision. Phase 08 adds no enemies, waves, combat, towers,
@@ -16,6 +18,12 @@ placement, rewards, persistence, matchmaking, teleports, Lobby behavior,
 monetization, production content, art, audio, effects, or unrelated interface.
 `PreWave` and `WaveActive` are contract states only; Phase 08 never starts wave
 or combat behavior.
+
+Phase 09 does not revise this Phase 08 decision. Its separate authoritative
+[Enemy Simulation and Replication](ENEMY_SIMULATION.md) contract consumes the
+same MatchId and already-loaded detached map snapshot while adding no base
+health/damage, Results transition, wave scheduler, or automatic state
+progression. Phase 10 and Phase 11 remain unbegun.
 
 ## Official Roblox behavior that constrains the decision
 
@@ -338,6 +346,18 @@ converted to one static privacy-safe thrown failure so the established Cleanup
 aggregate and lifecycle shutdown cannot report success while a runtime root may
 remain. No loader error payload or Instance enters that failure.
 
+Phase 09 extends the current Match service graph to
+`NetworkRegistry -> MatchLifecycle -> EnemySimulation`. The enemy service
+depends on both earlier services, reads the same detached frozen snapshot through
+`MatchLifecycle:getRuntimeMapSnapshot()`, and never constructs a second
+MapLoader. Reverse shutdown stops enemy spawning, simulation, publication,
+snapshot handling, and replication state before MatchLifecycle clears its
+roster and MapLoader; networking shuts down last. The current client graph is
+`MatchReadyController -> EnemyController`, so the one enemy render connection,
+replication listeners, request tracker, state, visuals, and visual root clean
+before the Ready controller. This supplement changes no Phase 08 roster, Ready,
+deadline, state-machine, or UI behavior.
+
 ## Minimal client controller and UI
 
 The Match client owns one `MatchReadyController` lifecycle service and one
@@ -479,11 +499,13 @@ starts; the reconnect fallback was repeated during a fresh live four-client
 session with `43` passing assertions; and the lifecycle document now records
 transactional initialize/start unwind and all-service shutdown behavior.
 
-The complete local exit gate passes formatting, lint, `347` tests across `28`
+The complete Phase 08 local exit gate passed formatting, lint, `347` tests across `28`
 suites, all four structural builds, diff, scope, generated-output,
 production-test-exclusion, exact remote/rate-catalog, and Lobby/Match isolation
 checks. Studio ended in Edit mode with the bounded persistent inventory intact
-and no runtime residue. Phase 08 is complete on 2026-08-27; Phase 09 is next but
-unbegun. The final exact-SHA Repository Verification run is cited at task
-handoff rather than copied into this tracked record by a self-referential
-evidence commit.
+and no runtime residue. Phase 08 is complete on 2026-08-27. Phase 09 subsequently
+implemented the separate enemy contract and passed its exact unsaved Studio,
+consolidated-review, 467-case local, and four-project structural gates. Phase 09
+is complete; Phase 10 is next but unbegun, and Phase 11 is unbegun. The
+exact-SHA Repository Verification runs are cited at task handoff rather than
+copied into this tracked record by self-referential evidence commits.

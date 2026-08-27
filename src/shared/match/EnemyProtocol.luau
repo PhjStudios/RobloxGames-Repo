@@ -139,6 +139,9 @@ local MAX_COORDINATE = 100_000
 local MIN_SEGMENT_DISTANCE = 0.01
 local MAX_SEGMENT_DISTANCE = 512
 local POSITION_TOLERANCE = 1e-6
+-- Reliable RemoteEvent transport quantizes arbitrary CFrame rotations. Accepted
+-- wire drift is discarded by canonicalStateEntry before state reaches consumers.
+local WIRE_CFRAME_COMPONENT_TOLERANCE = 1e-4
 local PARALLEL_TOLERANCE = 1e-6
 local MAX_FINITE_NUMBER = 1.7976931348623157e308
 local MAX_ENEMY_REVISION = Validation.MAX_SAFE_INTEGER
@@ -293,11 +296,48 @@ local function cframesWithinTolerance(left: CFrame, right: CFrame): boolean
 		return false
 	end
 	for index = 1, 12 do
-		if math.abs((leftComponents[index] :: number) - (rightComponents[index] :: number)) > POSITION_TOLERANCE then
+		local tolerance = if index <= 3 then POSITION_TOLERANCE else WIRE_CFRAME_COMPONENT_TOLERANCE
+		if math.abs((leftComponents[index] :: number) - (rightComponents[index] :: number)) > tolerance then
 			return false
 		end
 	end
 	return true
+end
+
+local function canonicalStateEntry(entry: EnemyStateEntry): EnemyStateEntry
+	local segmentDistance = entry.segmentEndDistance - entry.segmentStartDistance
+	local boundedProgress = math.clamp(entry.pathProgress, entry.segmentStartDistance, entry.segmentEndDistance)
+	local alpha = (boundedProgress - entry.segmentStartDistance) / segmentDistance
+	local position = entry.segmentStartPosition:Lerp(entry.segmentEndPosition, alpha)
+	local worldCFrame = canonicalCFrame(position, entry.segmentEndPosition - entry.segmentStartPosition)
+	return table.freeze({
+		runtimeEnemyId = entry.runtimeEnemyId,
+		enemyId = entry.enemyId,
+		laneId = entry.laneId,
+		revision = entry.revision,
+		lifecycle = entry.lifecycle,
+		pathProgress = entry.pathProgress,
+		currentHealth = entry.currentHealth,
+		maximumHealth = entry.maximumHealth,
+		slowMultiplier = entry.slowMultiplier,
+		spawnServerTime = entry.spawnServerTime,
+		sampleServerTime = entry.sampleServerTime,
+		worldCFrame = worldCFrame,
+		effectiveSpeed = entry.effectiveSpeed,
+		segmentIndex = entry.segmentIndex,
+		segmentStartDistance = entry.segmentStartDistance,
+		segmentEndDistance = entry.segmentEndDistance,
+		segmentStartPosition = entry.segmentStartPosition,
+		segmentEndPosition = entry.segmentEndPosition,
+	})
+end
+
+local function canonicalStateEntries(entries: { EnemyStateEntry }): { EnemyStateEntry }
+	local canonical = table.create(#entries)
+	for index, entry in entries do
+		canonical[index] = canonicalStateEntry(entry)
+	end
+	return table.freeze(canonical)
 end
 
 local function validateStateEntry(
@@ -527,6 +567,7 @@ local EnemyProtocol = {
 	MAX_SEGMENT_INDEX = MAX_SEGMENT_INDEX,
 	MAX_COORDINATE = MAX_COORDINATE,
 	POSITION_TOLERANCE = POSITION_TOLERANCE,
+	WIRE_CFRAME_COMPONENT_TOLERANCE = WIRE_CFRAME_COMPONENT_TOLERANCE,
 	MAX_ENEMY_REVISION = MAX_ENEMY_REVISION,
 	MAX_REPLICATION_SEQUENCE = MAX_REPLICATION_SEQUENCE,
 	MAX_SNAPSHOT_BASE_SEQUENCE = MAX_SNAPSHOT_BASE_SEQUENCE,
@@ -548,7 +589,7 @@ function EnemyProtocol.validateEnemyStateEntry(value: unknown): Result.Result<En
 	if entryFailure ~= nil then
 		return entryFailure
 	end
-	return Result.ok(entry)
+	return Result.ok(canonicalStateEntry(entry))
 end
 
 function EnemyProtocol.validateDespawnEntry(value: unknown): Result.Result<DespawnEntry, Validation.Issue>
@@ -578,16 +619,33 @@ function EnemyProtocol.validateEnemyReplication(
 		if entriesFailure ~= nil then
 			return entriesFailure
 		end
+		return Result.ok(table.freeze({
+			kind = stateMessage.kind,
+			matchId = stateMessage.matchId,
+			enemyEpoch = stateMessage.enemyEpoch,
+			sequence = stateMessage.sequence,
+			entries = canonicalStateEntries(stateMessage.entries),
+		}))
 	elseif message.kind == DESPAWN_BATCH_KIND then
 		local entriesFailure = validateDespawnEntries((message :: DespawnBatchMessage).entries)
 		if entriesFailure ~= nil then
 			return entriesFailure
 		end
 	elseif message.kind == SNAPSHOT_CHUNK_KIND then
-		local entriesFailure = validateStateEntries((message :: SnapshotChunkMessage).entries, SNAPSHOT_CHUNK_KIND)
+		local chunk = message :: SnapshotChunkMessage
+		local entriesFailure = validateStateEntries(chunk.entries, SNAPSHOT_CHUNK_KIND)
 		if entriesFailure ~= nil then
 			return entriesFailure
 		end
+		return Result.ok(table.freeze({
+			kind = SNAPSHOT_CHUNK_KIND,
+			matchId = chunk.matchId,
+			enemyEpoch = chunk.enemyEpoch,
+			baseSequence = chunk.baseSequence,
+			snapshotId = chunk.snapshotId,
+			chunkIndex = chunk.chunkIndex,
+			entries = canonicalStateEntries(chunk.entries),
+		}))
 	else
 		local boundary = message :: SnapshotBoundaryMessage
 		local countsFailure =

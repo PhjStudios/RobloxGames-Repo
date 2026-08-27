@@ -257,6 +257,37 @@ return TestHarness.suite("pure enemy replication convergence state", {
 		)
 	end),
 
+	TestHarness.case("consumes snapshot-covered spawn sequences without rollback or resurrection", function(assertions)
+		local state = EnemyReplicationState.new()
+		installSnapshot(state, MATCH_A, 1, 0, 1, { stateEntry(1, 2) }, 1, true)
+
+		local covered: EnemyReplicationState.ApplyOutcome =
+			success(state:observeMessage(delta("SpawnBatch", MATCH_A, 1, 1, { stateEntry(1, 1), stateEntry(2, 1) })))
+		assertions.equal(covered.kind, "Applied")
+		assertions.equal(covered.appliedEntryCount, 1)
+		assertions.isFalse(covered.recoveryRequired)
+		local afterCovered = snapshot(state)
+		assertions.equal(afterCovered.lastSequence, 1)
+		assertions.equal(#afterCovered.entries, 2)
+		assertions.equal(afterCovered.entries[1].runtimeEnemyId, 1)
+		assertions.equal(afterCovered.entries[1].revision, 2)
+		assertions.equal(afterCovered.entries[2].runtimeEnemyId, 2)
+
+		local newer: EnemyReplicationState.ApplyOutcome =
+			success(state:observeMessage(delta("SpawnBatch", MATCH_A, 1, 2, { stateEntry(1, 3) })))
+		assertions.equal(newer.kind, "Applied")
+		assertions.equal(newer.appliedEntryCount, 1)
+		assertions.equal(snapshot(state).entries[1].revision, 3)
+
+		success(state:observeMessage(delta("DespawnBatch", MATCH_A, 1, 3, { despawnEntry(1, 4) })))
+		local resurrection: EnemyReplicationState.ApplyOutcome =
+			success(state:observeMessage(delta("SpawnBatch", MATCH_A, 1, 4, { stateEntry(1, 5) })))
+		assertions.equal(resurrection.kind, "RecoveryRequired")
+		assertions.equal(snapshot(state).lastSequence, 3)
+		assertions.equal(#snapshot(state).tombstones, 1)
+		assertions.equal(snapshot(state).entries[1].runtimeEnemyId, 2)
+	end),
+
 	TestHarness.case(
 		"clears the thirty-third unique buffered delta without rolling back converged state",
 		function(assertions)

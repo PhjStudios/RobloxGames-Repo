@@ -261,10 +261,15 @@ The resulting deterministic `CFrame.lookAt` policy is shared by spawn, exact
 corners, corrections, snapshots, and endpoint outcomes.
 
 Distance/progress comparisons use a scale-aware tolerance of
-`max(1, lane.totalDistance) * 1e-9`; position and replicated correction tests use
-`1e-6` studs. Accepted partitionings of the same elapsed time are equivalent
-within those tolerances until the same exact endpoint clamp. No backwards
-progress API exists.
+`max(1, lane.totalDistance) * 1e-9`; position comparisons use `1e-6` studs.
+Studio transport measured a maximum `0.00003069639205932617` rotation-component
+change when a reliable RemoteEvent carried the real diagonal-lane CFrame. Wire
+validation therefore keeps position at `1e-6`, permits rotation-component drift
+only through an explicit `1e-4` transport tolerance, revalidates the advertised
+tangent, and canonicalizes the accepted CFrame from authenticated segment data.
+Accepted partitionings of the same elapsed time are equivalent within the
+movement tolerances until the same exact endpoint clamp. No backwards progress
+API exists.
 
 ## Endpoint outcome and despawn semantics
 
@@ -380,12 +385,14 @@ domains are exact:
 | positions / CFrame | finite; position components in `[-100,000,100,000]`; canonical orientation |
 
 Segment start is strictly below segment end, the entry progress lies in the
-advertised window, and `worldCFrame` must equal the canonical route sample
-within the movement tolerances. Server emitters construct these values only
-from authenticated records; client validation repeats the structural, finite,
-range, and CFrame-component checks before staging a message. No message contains
-a Player, recipient, map Instance, marker, visual, definition table, caught
-error, or private state.
+advertised window, and `worldCFrame` must equal the canonical route sample. The
+wire check uses exact `1e-6` position tolerance and the recorded `1e-4`
+rotation-component transport tolerance; accepted values are replaced with the
+canonical route CFrame before client state can observe them. Server emitters
+construct these values only from authenticated records; client validation
+repeats the structural, finite, range, tangent, and CFrame-component checks
+before staging a message. No message contains a Player, recipient, map Instance,
+marker, visual, definition table, caught error, or private state.
 
 Exact replication bounds are:
 
@@ -491,10 +498,16 @@ or stale and ignored. A higher value creates a gap: it and later bounded values
 are buffered without mutation and one recovery is requested if available.
 Buffer overflow clears the buffer, preserves the last converged state, and
 requires recovery. A snapshot/delta entry can update an enemy only with a
-strictly greater enemy revision. A despawn records a terminal tombstone for that
-RuntimeEnemyId; no later spawn/correction/state entry in the same epoch can
-resurrect it. Tombstones are bounded by the 4,096 lifetime ID ceiling and clear
-only on epoch replacement or controller cleanup.
+strictly greater enemy revision. A snapshot may contain an active enemy whose
+queued spawn has not yet received a publication sequence. Its later contiguous
+`SpawnBatch` is therefore idempotent only while that same ID remains active and
+untombstoned: the client consumes the sequence, merges a strictly newer
+revision, otherwise keeps the snapshot state, and counts only genuinely unseen
+IDs against the active cap. A seen-but-inactive or tombstoned ID still forces
+recovery and can never be resurrected. A despawn records a terminal tombstone
+for that RuntimeEnemyId; no later spawn/correction/state entry in the same epoch
+can resurrect it. Tombstones are bounded by the 4,096 lifetime ID ceiling and
+clear only on epoch replacement or controller cleanup.
 
 Only a complete snapshot may replace a locked MatchId/epoch. Foreign deltas do
 not replace it. A new-epoch snapshot clears records, tombstones, samples,
@@ -640,6 +653,86 @@ client focus, late-player, or visual-observation controls. All clients/server
 are stopped, task-owned Rojo is disconnected, emulation/profiling state is
 reset, and Studio is left in Edit mode without saving or publishing.
 
+## Executed Studio evidence — 2026-08-27
+
+The accepted run used the exact connected Match place and Windows desktop Studio
+installation `version-dcbeee682ce74ee0`, one local server, and two simulated
+clients. Identity was rechecked before and after: PlaceId `136401514513678`,
+GameId `10757629094`, CreatorType `Group`, CreatorId `35420107`, visible owner
+PHJGAMES, and `ATDPlaceRole = Match`. Only current-branch `match.project.json`
+source was synchronized. The saved 25-record graybox catalog remained unchanged;
+there was no map edit, manual Script.Source edit, Script Sync, save, or publish.
+
+`StudioTestService:AddPlayers(1)` existed and the active-server call returned,
+but this Studio build ended the multiplayer server and disconnected the existing
+client instead of adding a late client. That attempt is not claimed as a true
+late join. The declared active-session fallback was therefore used in a fresh
+two-client session: Player 2's controller recovery was suspended before 16
+server-owned spawns, the enemies advanced for three seconds to
+`11.9991526119411` studs, and Player 2 then resumed through the existing
+authenticated empty snapshot request. It converged in
+`0.16652670002076776` seconds at enemy sequence `56`, with 16 authoritative
+entries, 16 visuals, no buffered gap, one render connection, and two lifetime
+snapshot attempts. Player 1 stayed converged throughout.
+
+The live ordering injection proved stale sequence `55` and duplicate sequence
+`56` were ignored, sequence `58` waited for missing `57`, and the authenticated
+snapshot path recovered the gap. Both clients converged at sequence `64` with
+the same 16 IDs/revisions/progress values. Runtime ID `16` then despawned once;
+a duplicate despawn returned `ILLEGAL_LIFECYCLE`, and an older correction could
+not resurrect it. Destroying Player 1's visual for ID `1` recreated one exact
+three-Part model without changing the server's 16 active records.
+
+The separate speed-12 endpoint enemy traversed the real five-point bent lane in
+`9.565340995788575` seconds. The terminal count increased exactly from `16` to
+`17`; active count became zero; a repeated manual despawn returned
+`STALE_RUNTIME_ID`; both clients reached sequence `160` with zero entries and
+zero visuals; Ready UI stayed `PreWave`; and no base health, Results state, or
+wave progression occurred. The two visual motion samples observed two real route
+turns, maximum individual pivot steps `2.219654083251953` and
+`2.1900634765625` studs, and zero final pivot residual.
+
+The accepted increasing-count ladder used two seconds of warm-up plus ten
+measured seconds at each rung. Every server row contains 601 simulation samples;
+client rows show `{p50 / p95 / max}` render-pass milliseconds:
+
+| Active | Server `{p50 / p95 / max}` ms | Player 1 `{p50 / p95 / max}` ms | Player 2 `{p50 / p95 / max}` ms |
+| ---: | ---: | ---: | ---: |
+| 1 | `0.0399 / 0.2558 / 0.8079` | `0.0833 / 0.1135 / 0.3352` (150) | `0.0816 / 0.1048 / 0.1955` (150) |
+| 32 | `0.1481 / 2.6609 / 3.7279` | `0.9972 / 1.4166 / 1.7170` (150) | `1.0024 / 1.3758 / 1.5714` (150) |
+| 64 | `0.2519 / 4.7050 / 6.5431` | `1.9511 / 2.5769 / 3.2257` (150) | `2.0418 / 2.7853 / 3.2785` (151) |
+| 128 | `0.5448 / 7.7824 / 10.6230` | `3.4835 / 4.4726 / 5.4417` (150) | `3.7056 / 4.9146 / 5.9445` (151) |
+
+Every rung retained one server simulation connection and one client render
+connection, exact active/entry/visual counts, no buffered recovery gap, and zero
+sender failures. At 128, each client owned exactly 128 Models and 384 anchored,
+massless, non-colliding, non-touching, non-querying Parts below a direct
+`Workspace.ATDEnemyVisuals` root, never below `ATDRuntimeMap`. Total client
+memory samples were `1692.293` and `1737.250` MB. Maximum observed correction
+errors over the complete session were `4.551680088043213` and
+`4.585128784179688` studs, both below the 8-stud snap threshold; maximum
+post-pivot residual was zero.
+
+LibMP captured 256 foreground frames per client at the 128-enemy rung. Player 1
+frames `1..256` / absolute `61971..62226` measured
+`16.707 / 17.669 / 18.217` ms p50/p95/max; Player 2 frames `1..256` / absolute
+`61919..62174` measured `16.643 / 17.466 / 18.035` ms. Both satisfy the
+33.4-ms frame-p95 criterion. Capture buffers were `5,794,128` and `5,794,280`
+bytes and were disposed; capture, profiler UI, and device emulation were reset.
+
+The accepted evidence folder reached 388 successful runtime assertions,
+including bounded exploratory reruns used to correct the client capture timing;
+the final rungs above replaced those exploratory measurements. Each client
+console contained only the two expected configuration/bootstrap info records and
+no warning/error. Final live cleanup removed 128 active records and reached
+server active/pending/dirty/sender-failure counts `0/0/0/0`; both clients reached
+zero entries, visuals, descendants, and buffered deltas before their test-only
+watchers and evidence folder were destroyed. End Session then removed the visual
+roots, enemy trigger, network root, runtime map, timers, caches, UI, and every
+service connection. The task-owned Rojo server stopped, its port closed, all
+simulated windows closed, and Studio remained in Edit mode with zero runtime
+residue. The three pre-existing user Rojo servers were not touched.
+
 ## Verification and completion boundary
 
 Headless tests use injected clocks, deltas, schedulers, senders, connections,
@@ -650,14 +743,29 @@ snapshot races/gaps, renderer interpolation/correction/recreation, constant
 connection ownership, and idempotent mass cleanup. Synthetic fixtures prove
 multiple lanes; Studio uses only the real authored one-lane graybox.
 
-The structural verifier must authenticate all mappings/source bytes, retain
+The structural verifier authenticates all mappings/source bytes, retains
 exactly one Script and one LocalScript per production build and zero runnable
 Test scripts, exclude every spec/fixture/Studio harness from production, keep
 Lobby free of Match source and Match free of Lobby source, prove production
 `Enemies`/`Assets` remain empty, and reject Phase 10/11 source markers. Final
 module/suite/test counts are recorded only from the actual final run.
 
-Phase 09 can be marked complete only after Packets 09.1–09.5, the focused Studio
-gate, consolidated independent review, complete local gate, clean exact branch,
-one final push, and exact-final-SHA Repository Verification with zero artifacts
-all pass. Phase 10 is next and remains not begun.
+The consolidated independent review found no P0, one P1, and one P2. The P1
+snapshot-covered-spawn race now consumes later queued spawn sequences
+idempotently while preserving newer revisions and tombstone non-resurrection;
+the new 128-enemy integration regression crosses two bounded spawn flushes and
+continues through sequence `32`. The P2 stale H-06 record was reconciled. The
+same reviewer confirmed both findings resolved.
+
+The complete local gate passes `467` tests across `39` suites. The Phase 09
+subset is `120` cases across `11` suites. Structural verification passes Default
+`63/1/1`, Lobby `44/1/1`, Match `63/1/1`, and Test `111/0/0`; Test contains 35
+authoritative shared modules, 25 exact production mirrors, and 51 test-owned
+modules. Formatting, lint, diff, scope, generated-output, exact remote/rate
+catalogs, production-test exclusion, Lobby/Match isolation, empty production
+`Enemies`/`Assets`, and the Phase 10/11 boundary all pass.
+
+Packets 09.1–09.5, Studio, review, local, and structural gates are complete on
+2026-08-27. The exact-final-SHA Repository Verification run and zero-artifact
+result are cited at handoff rather than through a self-referential evidence
+commit. Phase 09 is complete; Phase 10 is next and remains not begun.

@@ -25,17 +25,21 @@ only change through an explicit architecture decision recorded here.
 
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
 - Gameplay state: the Match place has a server-owned lifecycle, UserId roster,
-  45-second initial Ready protocol, revisioned snapshots, and minimal Ready UI.
-  It still has no enemy, wave, combat, tower, placement, reward, persistence,
-  matchmaking, teleport, or Phase 09 behavior.
-- Current implementation phase: Phases 00–08 are complete. The Phase 08 exit
-  gate passed on 2026-08-27. Phase 09 is next but has not begun.
+  45-second initial Ready protocol, revisioned match/enemy recovery, deterministic
+  fixed-lane placeholder enemies, and minimal Ready/enemy presentation. It still
+  has no wave scheduler, combat, tower, placement, base-health/leak behavior,
+  reward, persistence, matchmaking, or teleport implementation.
+- Current implementation phase: Phases 00–09 are complete. Packets 09.1–09.5,
+  the exact Match Studio gate, consolidated review, complete local gate, and all
+  four structural builds passed on 2026-08-27. Phase 10 is next but has not
+  begun; Phase 11 is also unbegun.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
   Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, 06.3, 06.4,
   and 06.5 completed on 2026-08-26. Packets 07.1–07.4 and their Phase 07 exit
   gate completed on 2026-08-27. Packets 08.1–08.5 and the Phase 08 exit gate
-  completed on 2026-08-27.
+  completed on 2026-08-27. Packets 09.1–09.5 completed their implementation,
+  deterministic, and exact Match Studio checks on 2026-08-27.
 - Current checkpoint: Phase 06 and Gate A are complete. Its three exact current-tree
   canonical runs are byte-identical at 200 cases across 16 suites, all four
   structural builds pass, and the unsaved three-cycle Lobby, three-cycle Match,
@@ -57,7 +61,17 @@ only change through an explicit architecture decision recorded here.
   `Difficulties`, and `Waves` source catalogs remain empty; the Studio-owned
   graybox is not a source catalog entry. The exact-final-SHA Repository
   Verification run is cited outside this tracked plan to avoid a
-  self-referential evidence commit.
+  self-referential evidence commit. Phase 09 now adds only the bounded enemy
+  runtime/movement/replication/placeholder-rendering systems recorded in
+  `docs/ENEMY_SIMULATION.md`. Its 120 focused cases and exact two-client Studio
+  stress/late-recovery/endpoint/cleanup evidence pass. The consolidated review
+  found no P0, one P1 snapshot-covered-spawn convergence race, and one P2 stale
+  test-matrix record; both findings were fixed and the same reviewer confirmed
+  resolution. The complete local gate passes 467 cases across 39 suites,
+  Default/Lobby/Match/Test module counts `63/44/63/111`, formatting, lint, diff,
+  scope, generated-output, production-test exclusion, catalogs, and role
+  isolation. The exact-final-SHA Repository Verification run is cited at
+  handoff rather than through a self-referential evidence commit.
 - Publishing state: the user authorized the Packet 02.4 Match-place creation and
   one controlled Phase 07 Save To Cloud of the reviewed Match graybox. No
   release, public-audience, settings, service, Lobby, or unrelated publication
@@ -784,7 +798,8 @@ and unbegun; its current status is recorded below.
 
 **Current status:** Complete on 2026-08-27. Packets 08.1–08.5, the exact
 Match-place four-client Studio gate, consolidated review, complete local gate,
-and scope/isolation checks pass. Phase 09 is next but has not begun. The
+and scope/isolation checks pass. At that Phase 08 completion checkpoint, Phase
+09 was next and had not begun; its current status is recorded below. The
 authoritative contract and Studio evidence are in
 `docs/MATCH_LIFECYCLE_READY.md`; current test status is in M-01 of
 `docs/TEST_MATRIX.md`.
@@ -859,15 +874,29 @@ cited outside this tracked plan.
 **Objective:** Move placeholder ants along fixed lanes with server-owned progress
 and smooth client visuals.
 
-**Current status:** Next but not begun.
+**Current status:** Complete on 2026-08-27. Packets 09.1–09.5, the exact Match
+Studio gate, consolidated review with both material findings resolved, the
+467-case/39-suite local gate, all four structural builds, and scope/isolation
+checks pass. Phase 10 is next but has not begun. The authoritative decision and
+executed evidence are in `docs/ENEMY_SIMULATION.md`.
 
 ### Packet 09.1 — Enemy runtime model
+
+**Executable status:** Passed on 2026-08-27. The server owns authenticated
+immutable definitions, match/epoch-scoped ordered runtime IDs, bounded mutable
+records, detached frozen queries, strict lifecycle transitions, and idempotent
+mass cleanup. Production content remains empty and dormant.
 
 - Define runtime enemy ID, definition ID, lane, path progress, health, status
   container, spawn time, and lifecycle state.
 - Store authoritative state outside the visual model.
 
 ### Packet 09.2 — Fixed-path movement
+
+**Executable status:** Passed on 2026-08-27. One bounded server Heartbeat
+service advances analytic cumulative distance over detached frozen lane
+snapshots, samples deterministic corner/endpoint CFrames, owns the one slow
+multiplier, and resolves endpoints exactly once without base behavior.
 
 - Advance enemies by distance and speed on the server.
 - Convert path distance to world CFrame.
@@ -876,11 +905,21 @@ and smooth client visuals.
 
 ### Packet 09.3 — Spawn/despawn replication
 
+**Executable status:** Passed on 2026-08-27. Two minimum reliable Match-only
+endpoints provide bounded tagged delta batches and one authenticated empty
+snapshot request, with separate enemy epoch/sequence/revision locks, deterministic
+ordering, hostile-payload rejection, recovery, and cleanup.
+
 - Replicate compact spawn, correction, state-change, and despawn messages.
 - Define how late-joining clients receive a snapshot.
 - Keep authoritative health and progress on the server.
 
 ### Packet 09.4 — Client enemy renderer
+
+**Executable status:** Passed on 2026-08-27. One client controller/render
+connection converges snapshots/deltas, rejects stale or terminal identities,
+interpolates through route segments, corrects within fixed thresholds, recreates
+lost presentation, and owns three-Part programmatic placeholder ants.
 
 - Create placeholder enemy visuals.
 - Interpolate movement locally and correct drift smoothly.
@@ -888,12 +927,22 @@ and smooth client visuals.
 
 ### Packet 09.5 — Enemy simulation tests
 
+**Studio/headless status:** Passed on 2026-08-27. The eleven focused suites pass
+120 deterministic cases. The exact two-client Match Studio procedure passed
+late-bootstrap recovery, stale/gap/duplicate ordering, visual recreation,
+endpoint exact-once, the `1/32/64/128` measured ladder, engine profiling, and
+clean Edit-mode shutdown without saving or publishing.
+
 - Test deterministic travel time, multiple speeds, multiple lanes, end-of-path,
   and mass cleanup.
 - Run a Studio stress sample with increasing enemy counts.
 
-**Exit gate:** Placeholder enemies reach the base consistently and render smoothly
-without one permanent movement loop per model.
+**Exit gate:** Passed on 2026-08-27. Placeholder enemies reach the base
+consistently and render within the declared bounds without one permanent
+movement loop per model. The review findings are resolved, the complete local
+and structural gates pass, and the exact-final-SHA Repository Verification run
+is cited outside this tracked plan. Phase 09 is complete; Phase 10 is next but
+not begun.
 
 ## Phase 10 — Defender base and leak damage
 

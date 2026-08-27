@@ -20,13 +20,16 @@ automatic shutdown hook.
 - Studio-authored content changed: no
 - Place saved or published: no
 
-Those fields record Packet 03.1 at completion. Packet 06.1 registers one
-foundation-only `NetworkRegistry`
-service on the server after configuration validation. Phase 08 now adds the
-Match-only `MatchLifecycle` server service and `MatchReadyController` client
-service described below. Phase 08 and its Studio, consolidated-review, and
-complete-local-gate evidence passed on 2026-08-27. Phase 09 is next but has not
-begun.
+Those fields record Packet 03.1 at completion. Packet 06.1 later registered one
+foundation-only `NetworkRegistry` service on the server after configuration
+validation. Phase 08 added the Match-only `MatchLifecycle` server service and
+`MatchReadyController` client service. The current Phase 09 composition also
+registers `EnemySimulation` on the Match server and `EnemyController` on the
+Match client. Phase 08 and its Studio, consolidated-review, and
+complete-local-gate evidence passed on 2026-08-27. Phase 09 code, exact Match
+Studio gate, consolidated review, 467-case local gate, and all four structural
+builds passed on 2026-08-27. Phase 09 is complete; Phase 10 is next but has not
+begun, and Phase 11 has not begun.
 
 ## Public contract
 
@@ -147,12 +150,12 @@ runner. Each resolves one environment context, creates one local logger, calls
 the shared `ConfigurationValidator.validateLoaded()` gate, and passes the
 logger to the runner only after success. At the historical Phase 06 checkpoint
 the client initialized an empty runner and the server registered only
-`NetworkRegistry`. The current Phase 08 Match composition extends those
+`NetworkRegistry`. The current Phase 09 Match composition extends those
 validated owners without bypassing them:
 
 ```text
 Lobby server/client: [serviceCount=1]/[serviceCount=0]
-Match server/client: [serviceCount=2]/[serviceCount=1]
+Match server/client: [serviceCount=3]/[serviceCount=2]
 ```
 
 The runner remains local to its bootstrap. No global registry or service locator was
@@ -200,7 +203,7 @@ contract registration is rejected rather than creating duplicate resources.
 The existing reverse lifecycle and outer bootstrap cleanup remain the sole
 shutdown route.
 
-## Phase 08 Match composition (current)
+## Phase 08 Match composition (historical baseline)
 
 `src/server/common/bootstrap/ServerBootstrap.luau` performs role and complete
 configuration validation, constructs `NetworkRegistry`, and exposes a bounded
@@ -243,8 +246,65 @@ destroys the exact ScreenGui. The entrypoint's `script.Destroying` connection
 triggers the same idempotent client bootstrap cleanup.
 
 Packets 08.1–08.5, the four-client Studio gate, consolidated final review, and
-complete local exit gate passed. Phase 08 is complete; Phase 09 is next but has
-not begun.
+complete local exit gate passed. At that dated checkpoint Phase 08 was complete
+and Phase 09 was next but had not begun. The current Phase 09 extension follows.
+
+## Phase 09 Match composition (current)
+
+The Match server entrypoint now binds the authenticated `GetEnemySnapshot`
+request and captures the `EnemyReplication` sender while `NetworkRegistry` is
+still Registering. It constructs `EnemySimulation` from `MatchLifecycle`, the
+validated production enemy catalog, and that sender, then registers its service
+definition with exact dependencies `{ "NetworkRegistry", "MatchLifecycle" }`.
+The resolved server order is:
+
+```text
+initialize/start: NetworkRegistry -> MatchLifecycle -> EnemySimulation
+shutdown:         EnemySimulation -> MatchLifecycle -> NetworkRegistry
+```
+
+`EnemySimulation` captures the immutable MatchId and detached frozen runtime-map
+snapshot only after `MatchLifecycle` has loaded the map. It owns exactly one
+shared server `Heartbeat` connection for all enemies and one service-level
+`PlayerRemoving` connection for the bounded snapshot-request ledger; enemy
+records do not own connections, tasks, timers, or coroutines. Shutdown first
+closes spawn, snapshot-request, simulation/update, and publication admission. It
+then disconnects both owned connections, destroys the Studio-only runtime
+trigger, clears the publisher's pending and coalesced queues, representations,
+snapshot publication state/counters, and per-Player request ledger, clears the
+runtime store and all active, issued-ID, and terminal state, and releases
+retained timing/dependency references. Only after that may `MatchLifecycle`
+cancel Ready work, disconnect its Player listeners, clear Match state, and clean
+the MapLoader/runtime map; the network registry and remote tree shut down last.
+
+The Match client entrypoint now registers `EnemyController` after
+`MatchReadyController`. Its service definition depends on
+`{ "MatchReadyController" }`, so the resolved client order is:
+
+```text
+initialize/start: MatchReadyController -> EnemyController
+shutdown:         EnemyController -> MatchReadyController
+```
+
+`EnemyController` owns the `EnemyReplication` event listener,
+`GetEnemySnapshot` response listener, request tracker, replication state and
+bounded recovery buffers, renderer, and exactly one `PreRender` connection for
+all enemy visuals. No enemy Model owns a render connection. Its shutdown closes
+callbacks, disconnects the render and endpoint listeners, cancels and clears
+request correlation, clears locked identity/records/tombstones/snapshot and gap
+buffers, and destroys every exact owned visual Model and the client-created
+`Workspace.ATDEnemyVisuals` root. `MatchReadyController` then disconnects its
+match response/event, render, activation, and input bindings, clears its tracker
+and view-model state, and destroys its Ready UI. Finally the outer bootstrap
+owner completes; its LocalScript `Destroying` listener still invokes this same
+idempotent reverse lifecycle path.
+
+Packets 09.1–09.5 and the exact two-client Match Studio gate passed on
+2026-08-27, including constant one-server-simulation/one-client-render
+connection ownership and residue-free shutdown. The consolidated review and
+complete local/structural gates also pass. Phase 09 is complete; Phase 10 is
+next but no base-health behavior has begun, and no Phase 11 wave scheduler has
+begun.
 
 ## Focused Studio Edit-mode validation
 
@@ -275,9 +335,9 @@ the limiter, dispatcher, two `PlayerRemoving` owners, and fixed listener
 bindings. Packet 06.5 adds nine integrated adversarial cases that exercise the
 same registry, limiter, dispatcher, protocol, client tracker, Player-removal,
 and whole-network cleanup boundaries. That Phase 06 canonical run passed all
-200 cases across 16 suites. Phase 07 adds separate focused map suites without
-changing this lifecycle contract; the current complete local run passes 241
-cases across 19 suites and the Phase 07 gate is complete. The evidence in this
+200 cases across 16 suites. Phase 07 added separate focused map suites without
+changing this lifecycle contract; its complete local run passed 241 cases across
+19 suites and the Phase 07 gate completed. The evidence in this
 section remains historical Studio validation; reusable general lifecycle
 coverage is deferred until a dedicated regression packet. See
 `docs/TEST_MATRIX.md`.
@@ -294,7 +354,7 @@ zero-service shutdown, repeated idempotent cleanup, and eventual state
 finalization after a cooperative timeout. Three final Lobby and Match Play–Stop
 cycles each ended in lifecycle state `Shutdown`.
 
-## Toolchain and build verification
+## Historical Packet 03 toolchain and build verification
 
 | Check | Result |
 | --- | --- |
@@ -332,7 +392,7 @@ combined synchronization; each has zero descendants and zero scripts/modules.
 They are not match source and were not deleted because unknown Studio instances
 remain preserved by policy.
 
-Packet 06.5 subsequently passed the current unsaved networking regression.
+Packet 06.5 subsequently passed the then-current unsaved networking regression.
 Three plain Lobby and three plain Match Play/Stop cycles each reported one
 server `NetworkRegistry` service and zero client services. The final runtime-only
 Match Server & Clients harness used exactly two clients and passed real
@@ -351,8 +411,16 @@ in `docs/NETWORK_SECURITY_STUDIO_REGRESSION.md`.
    lifecycle state `Started`. The server service count is `1` for
    `NetworkRegistry`; the client service count remains `0`.
 4. Stop Play.
-5. Repeat with `match.project.json` and the Match place, expecting role `Match`.
-6. Do not save or publish either place merely to perform this test.
+5. Repeat with `match.project.json` and the Match place, expecting role `Match`,
+   server order `NetworkRegistry -> MatchLifecycle -> EnemySimulation`, and
+   client order `MatchReadyController -> EnemyController` (service counts `3`
+   and `2`).
+6. When exercising the Phase 09 Studio-only enemy trigger, confirm one server
+   enemy `Heartbeat` and one client enemy `PreRender` connection regardless of
+   enemy count. Stop Play and confirm the enemy trigger, visual root, runtime
+   map, remote root, Ready UI, service connections, and retained enemy/match
+   state are gone.
+7. Do not save or publish either place merely to perform this test.
 
 Phase 03 is complete. Packet 03.4 evidence is in
 `docs/GRACEFUL_SHUTDOWN.md`. Phase 04 added pure content contracts, and Packet
@@ -361,6 +429,10 @@ this lifecycle behavior. Packets 06.1–06.5 add only the common server network
 service, its nested limiter/dispatcher ownership, and test-only security
 evidence described in `docs/NETWORK_PROTOCOL.md`. Packet 06.5 and the fresh
 Phase 06/Gate A audit pass, including clean workflow run `33022784985`. Phase 06
-is complete and Gate A passed.
+is complete and Gate A passed. Phase 08 is also complete. Phase 09 code, exact
+Match Studio evidence, consolidated review, 467-case local gate, and all four
+structural builds pass on 2026-08-27. Phase 09 is complete; Phase 10 is next but
+has not begun, and Phase 11 has not begun. The current enemy lifecycle evidence is in
+`docs/ENEMY_SIMULATION.md`.
 Configuration evidence remains in
 `docs/CONFIGURATION_VALIDATION.md`.

@@ -1,4 +1,4 @@
-# Future Remote Security Checklist
+# Production Remote Security Checklist
 
 ## Authority and status
 
@@ -8,12 +8,18 @@ this document defines the evidence and approval record that a concrete endpoint
 must have before it can enter `ProductionRemotes.luau`; every C2S endpoint must
 also enter `ProductionRateLimits.luau`, while an S2C endpoint must not.
 
-- Recorded: 2026-08-26 during Packet 06.5
+- Recorded: 2026-08-26 during Packet 06.5; current catalog reconciled during
+  Phase 09 on 2026-08-27
 - Applies to: every production `RemoteEvent` definition and every server or
   client binding that uses it
-- Current production endpoint records: none
-- Current production registry and rate-policy list: intentionally empty
-- Gameplay or Phase 07 endpoint authorized by this document: none
+- Current production endpoint records: `GetMatchSnapshot`, `SubmitReady`,
+  `MatchSnapshot`, `GetEnemySnapshot`, and `EnemyReplication`; all are reliable
+  Match-only definitions
+- Current production rate-policy list: exactly `GetEnemySnapshot` `2 / 0.25`,
+  `GetMatchSnapshot` `2 / 1`, and `SubmitReady` `2 / 0.5`; outbound events have
+  no inbound policy
+- Phase 06 and Phase 07 authorized no feature endpoint. Phase 08 owns the three
+  Match-ready records; Phase 09 owns only the two enemy records.
 
 No checklist item is satisfied merely because the shared foundation implements
 it in general. The endpoint owner must prove the behavior for that endpoint's
@@ -386,3 +392,39 @@ audit-content commit `7ada807586164c8ab0c940c749393c243d4fe9e3` passed clean
 workflow run `33022784985`. Phase 06 is complete and Gate A passed. The next
 feature packet must still complete this checklist for each endpoint it
 proposes; no test-only fixture is an approved production endpoint.
+
+## Current feature endpoint record index
+
+The feature contracts below are the authoritative completed records; this table
+keeps the current registry, direction, schema/policy source, owner, and evidence
+auditable in one place. Every endpoint uses the fixed
+`ReplicatedStorage.ATDNetwork.v1` owner, `ReliableRemoteEvent`, Match-only role,
+strict schema validation, captured fixed lookup/sender, and lifecycle-owned
+cleanup. No endpoint accepts a client-selected recipient, service, handler,
+Instance path, enemy, lane, transform, health, speed, time, or simulation
+transition.
+
+| Endpoint | Contract | Schema / rate | Authority and owner | Current evidence status |
+| --- | --- | --- | --- | --- |
+| `GetMatchSnapshot` | C2S Request, required response | `MatchProtocol.GetMatchSnapshotPayloadSchema`; capacity `2`, refill `1/s` | actual sender only; `NetworkRegistry` dispatcher to `MatchLifecycle`; origin-only snapshot response | Phase 08 approved; exact source, bounds, Studio, review, local, and CI evidence is recorded in `MATCH_LIFECYCLE_READY.md` |
+| `SubmitReady` | C2S Request, required response | `MatchProtocol.SubmitReadyPayloadSchema`; capacity `2`, refill `0.5/s` | actual sender plus server roster/MatchId/revision/state; `NetworkRegistry` dispatcher to `MatchLifecycle`; origin-only response | Phase 08 approved in `MATCH_LIFECYCLE_READY.md` |
+| `MatchSnapshot` | S2C Event, no response | `MatchProtocol.MatchSnapshotSchema`; no inbound policy | server derives current participants and snapshot; `SnapshotBroadcaster`/`MatchLifecycle` owns bounded emission and cleanup | Phase 08 approved in `MATCH_LIFECYCLE_READY.md` |
+| `GetEnemySnapshot` | C2S Request, required response | `EnemyProtocol.GetEnemySnapshotPayloadSchema` exact empty record; capacity `2`, refill `0.25/s` | actual live sender only; `NetworkRegistry` dispatcher to `EnemySimulation`; origin-only receipt plus recipient-specific bounded snapshot event stream | Phase 09 approved; executable, security, Studio, consolidated-review, complete-local, and structural evidence passes in `ENEMY_SIMULATION.md`; exact-SHA CI is cited at handoff |
+| `EnemyReplication` | S2C Event, no response | `EnemyProtocol.EnemyReplicationSchema`; no inbound policy | server derives sorted recipients and every enemy field; `EnemyReplicationPublisher` owns cadence, sequences, queues, fan-out, and cleanup | Phase 09 approved under the same authoritative record as `GetEnemySnapshot` |
+
+The Phase 08 record defines the exact Ready payloads, response/public errors,
+rate rationale, authorization, coalescing, recipient limits, client behavior,
+adversarial tests, unsaved four-client evidence, cleanup, review, and completion
+evidence in
+[Match Lifecycle and Initial Ready Contract](MATCH_LIFECYCLE_READY.md#production-remote-contracts-and-rates).
+The Phase 09 record defines the exact tagged enemy payloads and receipts,
+numeric/graph/array ceilings, token and per-connection request bounds,
+server-only mutation, sequence/epoch rules, snapshot/delta convergence,
+recipient-specific sends, publication budgets, client recovery, adversarial
+tests, unsaved two-client stress evidence, and cleanup in
+[Enemy Simulation and Replication](ENEMY_SIMULATION.md#production-network-contract).
+The exact registry source is `src/shared/network/ProductionRemotes.luau`; the
+three C2S bindings are frozen in
+`src/server/common/networking/ProductionRateLimits.luau`. The final Phase 09
+review and exact-SHA CI references are intentionally cited at handoff rather
+than added through a self-referential evidence commit.

@@ -19,6 +19,16 @@ local function canonicalCFrame(position: Vector3, tangent: Vector3): CFrame
 	return CFrame.fromMatrix(position, right, up, -direction)
 end
 
+local function maxCFrameComponentError(left: CFrame, right: CFrame): number
+	local leftComponents = table.pack(left:GetComponents())
+	local rightComponents = table.pack(right:GetComponents())
+	local maximum = 0
+	for index = 1, 12 do
+		maximum = math.max(maximum, math.abs((leftComponents[index] :: number) - (rightComponents[index] :: number)))
+	end
+	return maximum
+end
+
 local function stateEntry(runtimeEnemyId: number): { [string]: unknown }
 	local progress = runtimeEnemyId
 	local startPosition = Vector3.new(0, 2, 0)
@@ -216,6 +226,7 @@ return TestHarness.suite("enemy replication wire contract", {
 		assertions.equal(EnemyProtocol.MAX_SEGMENT_INDEX, 257)
 		assertions.equal(EnemyProtocol.MAX_COORDINATE, 100_000)
 		assertions.equal(EnemyProtocol.POSITION_TOLERANCE, 1e-6)
+		assertions.equal(EnemyProtocol.WIRE_CFRAME_COMPONENT_TOLERANCE, 1e-4)
 		assertions.equal(EnemyProtocol.MAX_ENEMY_REVISION, Validation.MAX_SAFE_INTEGER)
 		assertions.equal(EnemyProtocol.MAX_REPLICATION_SEQUENCE, Validation.MAX_SAFE_INTEGER)
 		assertions.equal(EnemyProtocol.MAX_SNAPSHOT_BASE_SEQUENCE, Validation.MAX_SAFE_INTEGER)
@@ -387,6 +398,74 @@ return TestHarness.suite("enemy replication wire contract", {
 			stateBatch("CorrectionBatch", { unbounded }),
 			"OUT_OF_RANGE",
 			"payload.entries[1].segmentStartPosition"
+		)
+	end),
+
+	TestHarness.case("accepts wire-sized diagonal CFrame drift and returns only canonical state", function(assertions)
+		local segmentStart = Vector3.new(-20, 2, -25)
+		local segmentEnd = Vector3.new(-5, 2, 0)
+		local tangent = segmentEnd - segmentStart
+		local segmentStartDistance = 30
+		local segmentEndDistance = segmentStartDistance + tangent.Magnitude
+		local progress = segmentStartDistance + tangent.Magnitude * 0.4
+		local position = segmentStart:Lerp(segmentEnd, 0.4)
+		local canonical = canonicalCFrame(position, tangent)
+		local liveMeasuredRotationError = 0.00003069639205932617
+		local transported = canonical * CFrame.Angles(0, liveMeasuredRotationError, 0)
+		local transportedError = maxCFrameComponentError(transported, canonical)
+		assertions.isTrue(transportedError > EnemyProtocol.POSITION_TOLERANCE)
+		assertions.isTrue(transportedError < EnemyProtocol.WIRE_CFRAME_COMPONENT_TOLERANCE)
+
+		local diagonal = stateEntry(1)
+		diagonal.pathProgress = progress
+		diagonal.sampleServerTime = 104
+		diagonal.worldCFrame = transported
+		diagonal.segmentIndex = 2
+		diagonal.segmentStartDistance = segmentStartDistance
+		diagonal.segmentEndDistance = segmentEndDistance
+		diagonal.segmentStartPosition = segmentStart
+		diagonal.segmentEndPosition = segmentEnd
+
+		local direct = EnemyProtocol.validateEnemyStateEntry(diagonal)
+		assertions.isTrue(direct.ok)
+		if direct.ok then
+			assertions.isTrue(table.isfrozen(direct.value))
+			assertions.equal(maxCFrameComponentError(direct.value.worldCFrame, canonical), 0)
+			assertions.notEqual(direct.value.worldCFrame, transported)
+		end
+
+		local correction = expectMessageSuccess(assertions, stateBatch("CorrectionBatch", { diagonal }))
+		local correctionEntry = (correction :: EnemyProtocol.StateBatchMessage).entries[1]
+		assertions.equal(maxCFrameComponentError(correctionEntry.worldCFrame, canonical), 0)
+		local snapshot = expectMessageSuccess(assertions, snapshotChunk({ diagonal }))
+		local snapshotEntry = (snapshot :: EnemyProtocol.SnapshotChunkMessage).entries[1]
+		assertions.equal(maxCFrameComponentError(snapshotEntry.worldCFrame, canonical), 0)
+
+		local beyondWireBound = table.clone(diagonal)
+		beyondWireBound.worldCFrame = canonical * CFrame.Angles(0, EnemyProtocol.WIRE_CFRAME_COMPONENT_TOLERANCE * 4, 0)
+		expectMessageFailure(
+			assertions,
+			stateBatch("CorrectionBatch", { beyondWireBound }),
+			"INVALID_REFERENCE",
+			"payload.entries[1].worldCFrame"
+		)
+
+		local beyondPositionBound = table.clone(diagonal)
+		beyondPositionBound.worldCFrame = transported + Vector3.new(EnemyProtocol.POSITION_TOLERANCE * 2, 0, 0)
+		expectMessageFailure(
+			assertions,
+			stateBatch("CorrectionBatch", { beyondPositionBound }),
+			"INVALID_REFERENCE",
+			"payload.entries[1].worldCFrame"
+		)
+
+		local wrongTangent = table.clone(diagonal)
+		wrongTangent.worldCFrame = canonicalCFrame(position, Vector3.xAxis)
+		expectMessageFailure(
+			assertions,
+			stateBatch("CorrectionBatch", { wrongTangent }),
+			"INVALID_REFERENCE",
+			"payload.entries[1].worldCFrame"
 		)
 	end),
 

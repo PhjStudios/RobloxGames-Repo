@@ -8,16 +8,18 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phases 00–08 are complete; Gate A passed on 2026-08-26 and the Phase 07
-and Phase 08 exit gates passed on 2026-08-27. Phase 08 adds the server-owned
-match lifecycle, UserId roster, exact 45-second Ready protocol, revisioned
-snapshots, and minimal keyboard/touch/gamepad Ready UI. Its consolidated review,
-347-case local suite, four structural builds, and exact four-client Match Studio
-gate pass. Phase 09 is next but has not begun. Production networking contains
-only the three Match-ready endpoints and the two required client-request rate
-policies; `Maps`, `Difficulties`, and `Waves` source catalogs remain empty. The
-final exact-SHA Repository Verification run is cited outside this tracked tree
-to avoid a self-referential evidence commit.
+order. Phases 00–09 are complete; Gate A passed on 2026-08-26 and the Phase
+07–09 exit gates passed on 2026-08-27. Phase 09's exact two-client Match Studio
+gate, consolidated review, 467-case local suite, and all four structural builds
+pass. Phase 09 adds a server-owned,
+match-scoped enemy runtime; deterministic distance movement over the detached
+Phase 07 lane; bounded reliable replication and snapshot recovery; and one
+client render loop with programmatic placeholder ants. Production networking
+contains five Match-only endpoints and three client-request rate policies.
+`Enemies`, `Assets`, `Maps`, `Difficulties`, and `Waves` remain empty production
+catalogs. Phase 10 is next but has not begun, and no Phase 11 wave behavior has
+begun. The final exact-SHA Repository Verification run is cited outside this
+tracked tree to avoid a self-referential evidence commit.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -38,6 +40,7 @@ to avoid a self-referential evidence commit.
 - [Map, difficulty, and wave schemas](docs/MAP_DIFFICULTY_WAVE_SCHEMAS.md)
 - [Studio map contract, validator, loader, and authoring procedure](docs/MAP_RUNTIME_CONTRACT.md)
 - [Match lifecycle, roster, Ready protocol, UI, and four-client evidence](docs/MATCH_LIFECYCLE_READY.md)
+- [Phase 09 enemy simulation, replication, rendering, and Studio evidence](docs/ENEMY_SIMULATION.md)
 - [Economy, banner, and default-settings schemas](docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md)
 - [Whole-configuration validation and bootstrap gate](docs/CONFIGURATION_VALIDATION.md)
 - [Phase 04 exit-gate audit](docs/PHASE_04_EXIT_AUDIT.md)
@@ -46,7 +49,7 @@ to avoid a self-referential evidence commit.
 - [Current automated, Studio, device, published, and destructive test matrix](docs/TEST_MATRIX.md)
 - [Phase 05 combined exit-gate audit](docs/PHASE_05_EXIT_AUDIT.md)
 - [Network protocol and remote-security architecture](docs/NETWORK_PROTOCOL.md)
-- [Future remote security checklist](docs/REMOTE_SECURITY_CHECKLIST.md)
+- [Production remote security checklist](docs/REMOTE_SECURITY_CHECKLIST.md)
 - [Unsaved Phase 06 Studio networking regression](docs/NETWORK_SECURITY_STUDIO_REGRESSION.md)
 - [Phase 06 and Gate A combined exit audit](docs/PHASE_06_EXIT_AUDIT.md)
 - [Project instructions](AGENTS.md)
@@ -59,10 +62,10 @@ to avoid a self-referential evidence commit.
 - Do not make lasting edits to Rojo-managed scripts in Roblox Studio.
 - Never use Roblox Script Sync on folders managed by Rojo.
 
-## Planned code layout
+## Code layout
 
-The repository is currently a minimal scaffold. The roadmap will gradually
-separate shared, lobby-only, match-only, server, and client responsibilities:
+The repository separates shared, lobby-only, match-only, server, and client
+responsibilities while later roadmap phases continue to fill those layers:
 
     src/
       shared/

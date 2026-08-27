@@ -105,6 +105,28 @@ The module exports `MAX_ID_LENGTH = 50` so future boundary code can share the
 same complete-ID limit without duplicating a magic number. The module table is
 frozen.
 
+## Phase 09 match-scoped RuntimeEnemyId
+
+Phase 09 introduces one runtime identity that deliberately is not another
+`Ids.luau` string family. `RuntimeEnemyId` is a positive safe integer in
+`1..4,096`, meaningful only inside the authenticated pair
+`(MatchId, enemyEpoch)`. `EnemyId` continues to identify immutable content;
+`RuntimeEnemyId` identifies one server-owned occurrence of that content in one
+match epoch. It is not persistent, globally unique, secret, or client-selectable.
+
+The server allocator begins at `1`, advances by one only after a successful
+spawn, rejects collisions and exhaustion, never reuses an issued value within
+the epoch, and retains bounded terminal identity through cleanup. Queries and
+replication order runtime IDs numerically. A client locks the MatchId/epoch pair,
+retains terminal tombstones, and rejects older epochs, stale revisions, and any
+message that would resurrect a terminal runtime ID. The current production
+service has one non-restartable epoch `1`; tests may inject a bounded epoch to
+prove replacement, but Phase 09 does not add service restart or rollover.
+
+The complete identity/lifecycle limits and wire rules are authoritative in
+`docs/ENEMY_SIMULATION.md`. The existing string-family constructors and Result
+shape remain unchanged.
+
 ## Validation and error contract
 
 `IdError` has exactly:

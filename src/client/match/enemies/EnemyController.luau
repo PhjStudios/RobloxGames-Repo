@@ -45,6 +45,9 @@ export type Metrics = {
 	renderDurationP95Milliseconds: number,
 	renderDurationMaximumMilliseconds: number,
 	snapshotRefreshCount: number,
+	snapshotAttemptCount: number,
+	snapshotRequestPending: boolean,
+	studioRecoverySuspended: boolean,
 	cachedLocked: boolean,
 	cachedMatchId: string?,
 	cachedEnemyEpoch: number?,
@@ -91,6 +94,7 @@ export type StateAdapter = {
 
 export type RendererAdapter = {
 	render: (self: RendererAdapter, snapshot: unknown, serverTime: unknown) -> any,
+	reset: (self: RendererAdapter) -> any,
 	cleanup: (self: RendererAdapter) -> any,
 }
 
@@ -123,6 +127,8 @@ type ControllerData = {
 	renderDurationSamples: { number },
 	renderDurationWriteIndex: number,
 	renderDurationMaximum: number,
+	studioDiagnosticsBridge: BindableFunction?,
+	studioRecoverySuspended: boolean,
 	cleanupFailed: boolean,
 }
 
@@ -139,6 +145,7 @@ local SERVICE_NAME = "EnemyController"
 local MATCH_READY_SERVICE_NAME = "MatchReadyController"
 local LOOKUP_TIMEOUT_SECONDS = 5
 local MAX_RENDER_DURATION_SAMPLES = 1_024
+local STUDIO_DIAGNOSTICS_BRIDGE_NAME = "_ATDPhase09EnemyDiagnostics"
 local STATIC_PREFIX = "[ATD_ENEMY_CONTROLLER]"
 
 local CONTROLLER_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ControllerData }
@@ -154,9 +161,14 @@ local ERRORS: { [ErrorCode]: Error } = table.freeze({
 local EnemyController = {
 	SERVICE_NAME = SERVICE_NAME,
 	MAX_SNAPSHOT_ATTEMPTS = EnemyProtocol.MAX_CLIENT_SNAPSHOT_ATTEMPTS,
+	STUDIO_DIAGNOSTICS_BRIDGE_NAME = STUDIO_DIAGNOSTICS_BRIDGE_NAME,
 	newForTests = nil :: TestConstructor?,
 	getStudioDiagnostics = nil :: (() -> StudioDiagnostics?)?,
+	invokeStudioDiagnosticsForTests = nil :: ((Controller, ...unknown) -> unknown)?,
 }
+
+local destroyStudioDiagnosticsBridge: (ControllerData) -> boolean
+local installStudioDiagnosticsBridge: (ControllerData) -> ()
 
 local function failure(code: ErrorCode): Result.Failure<Error>
 	return Result.err(ERRORS[code])
@@ -251,6 +263,7 @@ local function validateDependencies(value: unknown): boolean
 		and type(state.cleanup) == "function"
 		and type(renderer) == "table"
 		and type(renderer.render) == "function"
+		and type(renderer.reset) == "function"
 		and type(renderer.cleanup) == "function"
 		and type(dependencies.connectPreRender) == "function"
 		and type(dependencies.getServerTimeNow) == "function"
@@ -298,6 +311,9 @@ local function cleanup(data: ControllerData): boolean
 		end
 	end
 	table.clear(data.connections)
+	if not destroyStudioDiagnosticsBridge(data) then
+		failed = true
+	end
 
 	cancelPending(data)
 	if dependencies ~= nil and not pcall(function()
@@ -322,6 +338,7 @@ local function cleanup(data: ControllerData): boolean
 
 	data.pending = nil
 	data.forcedRecoveryQueued = false
+	data.studioRecoverySuspended = false
 	data.lastServerTime = nil
 	data.cachedSnapshot = nil
 	data.renderConnectionCount = 0
@@ -390,6 +407,7 @@ issueSnapshotRequest = function(data: ControllerData): boolean
 	if
 		not data.callbacksEnabled
 		or data.state ~= "Started"
+		or data.studioRecoverySuspended
 		or data.pending ~= nil
 		or data.attemptCount >= EnemyProtocol.MAX_CLIENT_SNAPSHOT_ATTEMPTS
 	then
@@ -414,7 +432,7 @@ issueSnapshotRequest = function(data: ControllerData): boolean
 end
 
 requestRecovery = function(data: ControllerData, forced: boolean)
-	if not data.callbacksEnabled or data.state ~= "Started" then
+	if not data.callbacksEnabled or data.state ~= "Started" or data.studioRecoverySuspended then
 		return
 	end
 	if data.pending ~= nil then
@@ -444,7 +462,7 @@ local function reconcileRecovery(data: ControllerData)
 end
 
 local function onReplicationEvent(data: ControllerData, value: unknown, ...: unknown)
-	if not data.callbacksEnabled or data.state ~= "Started" then
+	if not data.callbacksEnabled or data.state ~= "Started" or data.studioRecoverySuspended then
 		return
 	end
 	local parsed = RequestProtocol.parseEvent(value, ...)
@@ -477,7 +495,7 @@ local function shouldRecover(code: RequestProtocol.PublicErrorCode): boolean
 end
 
 local function onSnapshotResponse(data: ControllerData, value: unknown, ...: unknown)
-	if not data.callbacksEnabled or data.state ~= "Started" then
+	if not data.callbacksEnabled or data.state ~= "Started" or data.studioRecoverySuspended then
 		return
 	end
 	local dependencies = data.dependencies :: Dependencies
@@ -521,6 +539,9 @@ end
 local function renderNow(data: ControllerData): boolean
 	if not data.callbacksEnabled or data.state ~= "Started" then
 		return false
+	end
+	if data.studioRecoverySuspended then
+		return true
 	end
 	local now = sampleServerTime(data)
 	if now == nil then
@@ -652,6 +673,7 @@ local function start(data: ControllerData)
 	if not issueSnapshotRequest(data) then
 		requestRecovery(data, true)
 	end
+	installStudioDiagnosticsBridge(data)
 end
 
 local function construct(logger: Log.Logger, dependencyFactory: () -> Dependencies): ControllerResult
@@ -682,6 +704,8 @@ local function construct(logger: Log.Logger, dependencyFactory: () -> Dependenci
 		renderDurationSamples = {},
 		renderDurationWriteIndex = 1,
 		renderDurationMaximum = 0,
+		studioDiagnosticsBridge = nil,
+		studioRecoverySuspended = false,
 		cleanupFailed = false,
 	}
 	return Result.ok(controller)
@@ -714,6 +738,9 @@ function ControllerMethods.getMetrics(self: Controller): Metrics
 		renderDurationP95Milliseconds = percentileMilliseconds(data.renderDurationSamples, 0.95),
 		renderDurationMaximumMilliseconds = data.renderDurationMaximum * 1_000,
 		snapshotRefreshCount = data.snapshotRefreshCount,
+		snapshotAttemptCount = data.attemptCount,
+		snapshotRequestPending = data.pending ~= nil,
+		studioRecoverySuspended = data.studioRecoverySuspended,
 		cachedLocked = snapshotTable ~= nil and snapshotTable.locked == true,
 		cachedMatchId = if snapshotTable == nil then nil else snapshotTable.matchId,
 		cachedEnemyEpoch = if snapshotTable == nil then nil else snapshotTable.enemyEpoch,
@@ -739,6 +766,121 @@ function ControllerMethods.getStudioDiagnostics(self: Controller): StudioDiagnos
 		controller = self:getMetrics(),
 		replication = data.cachedSnapshot,
 		renderer = rendererMetrics,
+	})
+end
+
+local function resetStudioTiming(data: ControllerData)
+	data.renderPassCount = 0
+	table.clear(data.renderDurationSamples)
+	data.renderDurationWriteIndex = 1
+	data.renderDurationMaximum = 0
+end
+
+local function suspendStudioRecovery(data: ControllerData): boolean
+	if data.studioRecoverySuspended then
+		return true
+	end
+	-- Suspension is idempotent and fail-closed: gate callbacks before canceling
+	-- the one pending request or clearing presentation, and never reopen the
+	-- gate when presentation reset reports a failure.
+	data.studioRecoverySuspended = true
+	data.forcedRecoveryQueued = false
+	cancelPending(data)
+	local dependencies = data.dependencies
+	if dependencies == nil then
+		return false
+	end
+	local reset, resetResult = pcall(function()
+		return dependencies.renderer:reset()
+	end)
+	return reset and isSuccess(resetResult)
+end
+
+local function resumeStudioRecovery(data: ControllerData): boolean
+	if not data.studioRecoverySuspended then
+		-- An already-active controller is an idempotent success and must not
+		-- consume another attempt or create another request.
+		return true
+	end
+	if data.attemptCount >= EnemyProtocol.MAX_CLIENT_SNAPSHOT_ATTEMPTS then
+		return false
+	end
+	-- Reopen callbacks only for the existing bounded request path. A sender or
+	-- construction failure restores suspension, so diagnostics cannot claim
+	-- recovery without an authenticated request in flight.
+	data.studioRecoverySuspended = false
+	if issueSnapshotRequest(data) then
+		return true
+	end
+	data.studioRecoverySuspended = true
+	return false
+end
+
+local STUDIO_DIAGNOSTICS_ERRORS = table.freeze({
+	INVALID_REQUEST = table.freeze({
+		ok = false,
+		error = table.freeze({ code = "INVALID_REQUEST" }),
+	}),
+	UNAVAILABLE = table.freeze({
+		ok = false,
+		error = table.freeze({ code = "UNAVAILABLE" }),
+	}),
+	INTERNAL_ERROR = table.freeze({
+		ok = false,
+		error = table.freeze({ code = "INTERNAL_ERROR" }),
+	}),
+})
+
+local function isExactStudioDiagnosticsRequest(value: unknown): boolean
+	if type(value) ~= "table" or getmetatable(value :: any) ~= nil then
+		return false
+	end
+	local count = 0
+	for key in next, value :: any do
+		if key ~= "operation" then
+			return false
+		end
+		count += 1
+	end
+	local operation = (value :: any).operation
+	return count == 1
+		and (
+			operation == "Diagnostics"
+			or operation == "ResetTiming"
+			or operation == "SuspendRecovery"
+			or operation == "ResumeRecovery"
+		)
+end
+
+local function invokeStudioDiagnostics(data: ControllerData, argumentCount: number, request: unknown): unknown
+	if argumentCount ~= 1 or not isExactStudioDiagnosticsRequest(request) then
+		return STUDIO_DIAGNOSTICS_ERRORS.INVALID_REQUEST
+	end
+	local controller = data.controller
+	if controller == nil or data.state ~= "Started" then
+		return STUDIO_DIAGNOSTICS_ERRORS.UNAVAILABLE
+	end
+	local operation = (request :: any).operation
+	if operation == "ResetTiming" then
+		resetStudioTiming(data)
+	elseif operation == "SuspendRecovery" then
+		if not suspendStudioRecovery(data) then
+			return STUDIO_DIAGNOSTICS_ERRORS.INTERNAL_ERROR
+		end
+	elseif operation == "ResumeRecovery" then
+		if not resumeStudioRecovery(data) then
+			return STUDIO_DIAGNOSTICS_ERRORS.UNAVAILABLE
+		end
+	end
+	local read, diagnostics = pcall(function()
+		return (controller :: Controller):getStudioDiagnostics()
+	end)
+	if not read then
+		return STUDIO_DIAGNOSTICS_ERRORS.INTERNAL_ERROR
+	end
+	return table.freeze({
+		ok = true,
+		value = diagnostics,
 	})
 end
 
@@ -854,6 +996,49 @@ local function isProductionStudioClient(): boolean
 	return checked and valid == true
 end
 
+destroyStudioDiagnosticsBridge = function(data: ControllerData): boolean
+	local bridge = data.studioDiagnosticsBridge
+	data.studioDiagnosticsBridge = nil
+	if bridge == nil then
+		return true
+	end
+	return pcall(function()
+		bridge.OnInvoke = nil
+		bridge:Destroy()
+	end)
+end
+
+installStudioDiagnosticsBridge = function(data: ControllerData)
+	if not isProductionStudioClient() or data.studioDiagnosticsBridge ~= nil then
+		return
+	end
+	local localPlayer = Players.LocalPlayer
+	local playerScripts = if localPlayer == nil then nil else localPlayer:FindFirstChild("PlayerScripts")
+	if playerScripts == nil or playerScripts:FindFirstChild(STUDIO_DIAGNOSTICS_BRIDGE_NAME) ~= nil then
+		return
+	end
+
+	local bridge = Instance.new("BindableFunction")
+	local installed = pcall(function()
+		bridge.Name = STUDIO_DIAGNOSTICS_BRIDGE_NAME
+		bridge.OnInvoke = function(...: unknown): unknown
+			return invokeStudioDiagnostics(data, select("#", ...), ...)
+		end
+		if playerScripts:FindFirstChild(STUDIO_DIAGNOSTICS_BRIDGE_NAME) ~= nil then
+			return
+		end
+		bridge.Parent = playerScripts
+	end)
+	if not installed or bridge.Parent ~= playerScripts then
+		pcall(function()
+			bridge.OnInvoke = nil
+			bridge:Destroy()
+		end)
+		return
+	end
+	data.studioDiagnosticsBridge = bridge
+end
+
 if isProductionStudioClient() then
 	EnemyController.getStudioDiagnostics = function(): StudioDiagnostics?
 		local controller = activeStudioController
@@ -880,6 +1065,10 @@ local function isExactTestModule(): boolean
 end
 
 if isExactTestModule() then
+	EnemyController.invokeStudioDiagnosticsForTests = function(controller: Controller, ...: unknown): unknown
+		local data = requireData(controller)
+		return invokeStudioDiagnostics(data, select("#", ...), ...)
+	end
 	EnemyController.newForTests = function(logger: Log.Logger, dependencies: Dependencies): ControllerResult
 		if not validateDependencies(dependencies) then
 			return failure("INVALID_DEPENDENCIES")

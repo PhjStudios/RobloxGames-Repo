@@ -416,6 +416,16 @@ an already-Idle loader); `cleanup()` returns `Result<boolean, LoaderError>` and
 is idempotent; and `getState()` returns the fixed loader state. All are
 synchronous.
 
+Phase 09 does not construct or receive a second loader. The one server-owned
+`MatchLifecycle` retains the successful value returned by this loader and now
+exposes `getRuntimeMapSnapshot()` only while its already-loaded map is available.
+That accessor returns the same detached, deeply frozen, Instance-free
+`RuntimeMapSnapshot` through a privacy-safe Result; it never returns the loader,
+catalog, template, runtime Model, marker Instances, tags, or mutable cache.
+`EnemySimulation` captures that value during lifecycle initialization and reads
+only its frozen `RuntimeLaneSnapshot` records. Enemy shutdown occurs before
+`MatchLifecycle` releases the snapshot and cleans the loader/runtime map.
+
 `LoaderError` is a deeply frozen `{ code, operation, state, validationReport? }`
 record with a fixed code from `INVALID_MAP_ID`, `INVALID_LANE_ID`,
 `INVALID_STATE`, `NOT_LOADED`, `CATALOG_ROOT_MISSING`,

@@ -19,13 +19,16 @@ logging framework, external shutdown trigger, gameplay system, or networking.
 - Studio-authored content changed: no
 - Place saved or published: no
 
-Those fields describe Packet 03.2 at completion. Packet 06.1 reuses this utility
-inside the common server network service; it does not add a second cleanup
-implementation. Phase 08 now applies the same one-owner/idempotent rules to the
-Match lifecycle, roster, deadline, snapshot broadcaster, MapLoader, request
-tracker, input bindings, and ready GUI. Phase 08 and its Studio,
-consolidated-review, and complete-local-gate evidence passed on 2026-08-27.
-Phase 09 is next but has not begun.
+Those fields describe Packet 03.2 at completion. Packet 06.1 later reused this
+utility inside the common server network service; it did not add a second
+cleanup implementation. Phase 08 applied the same one-owner/idempotent rules to
+the Match lifecycle, roster, deadline, snapshot broadcaster, MapLoader, request
+tracker, input bindings, and Ready GUI. Phase 09 now extends the ownership model
+to enemy simulation, replication queues and ledgers, client recovery state, and
+programmatic visuals. Phase 08 is complete. Phase 09 code, exact Match Studio
+gate, consolidated review, 467-case local gate, and all four structural builds
+passed on 2026-08-27. Phase 09 is complete; Phase 10 is next but has not begun,
+and Phase 11 has not begun.
 
 ## Public contract
 
@@ -142,9 +145,12 @@ reports:
 Packet 03.4 now invokes the server container from the one ordered
 `BindToClose` path. The Match client entrypoint additionally connects the exact
 LocalScript's `Destroying` signal to its bootstrap cleanup. No save operation
-was added. Phase 08's `MatchReadyController` now owns and releases its real
+was added. Phase 08's `MatchReadyController` owns and releases its real
 remote/render/GUI connections, request state, input binding, view model, and
-ScreenGui through its idempotent lifecycle shutdown.
+ScreenGui through its idempotent lifecycle shutdown. Phase 09's
+`EnemyController` independently owns its enemy endpoint listeners, one shared
+`PreRender` connection, tracker/state buffers, renderer, placeholder Models, and
+client-created visual root through the same reverse lifecycle path.
 
 Packet 06.1's `NetworkRegistry` lifecycle service creates one internal
 `network-registry` cleanup container during initialization. Packet 06.4 preserves
@@ -187,7 +193,7 @@ on rollback, `unload()`, or terminal `cleanup()`. Idempotent unload/reload and
 cleanup leave no runtime root, template reference, cache, connection, or mutable
 query state; pre-existing conflicting roots are preserved.
 
-## Phase 08 Match ownership and release order
+## Phase 08 Match ownership and release order (historical baseline)
 
 The Match server lifecycle registers child ownership in dependency order:
 MapLoader cleanup, state-machine cleanup, roster cleanup, PlayerAdded and
@@ -227,7 +233,61 @@ listener/input/GUI release, repeated cleanup, and no post-clean callbacks. The
 four-client Studio gate also ended every server/client session with no runtime
 map or ready UI residue and returned Studio to Edit mode. The consolidated
 review and complete local exit gate pass; Phase 08 is complete and Phase 09 is
-next but has not begun.
+next but has not begun at that dated checkpoint. The current extension follows.
+
+## Phase 09 enemy ownership and release order (current)
+
+The current Match lifecycle order is:
+
+```text
+server initialize/start: NetworkRegistry -> MatchLifecycle -> EnemySimulation
+server shutdown:         EnemySimulation -> MatchLifecycle -> NetworkRegistry
+client initialize/start: MatchReadyController -> EnemyController
+client shutdown:         EnemyController -> MatchReadyController
+```
+
+`EnemySimulation` owns one server `Heartbeat` connection for all enemies and one
+service-level `PlayerRemoving` connection for snapshot-request accounting. It
+creates no per-enemy connection, task, timer, coroutine, or cleanup container.
+On shutdown it first disables spawn, snapshot-request, simulation/update, and
+publication callbacks. It disconnects both owned connections, destroys the
+Studio-only trigger, and cleans the publisher and runtime store. Publisher
+cleanup clears pending/dirty replication queues, retained representations,
+snapshot IDs/counters, sender/recipient references, and the weak per-Player
+request ledger. Store cleanup clears active records, issued IDs, terminal
+outcomes, authenticated definitions, and detached lane state. Timing samples and
+construction references are also released. The cleanup is idempotent and a
+captured post-clean callback cannot spawn, request, simulate, publish, or retain
+enemy state.
+
+Only after enemy cleanup does `MatchLifecycle` invalidate Ready work, disconnect
+its Player-added/removing listeners, clear roster and match state, and clean the
+one MapLoader and exact `Workspace.ATDRuntimeMap`. `NetworkRegistry` then
+disconnects its endpoint listeners and the dispatcher/limiter Player-removal
+listeners, clears their request ledgers and buckets, and destroys the exact
+remote root. Thus the enemy service cannot read a released map snapshot or
+publish through a destroyed network tree.
+
+`EnemyController` owns its `EnemyReplication` event listener,
+`GetEnemySnapshot` response listener, and one shared `PreRender` connection for
+every visual. Reverse connection cleanup stops render first, then snapshot
+response and replication delivery. It cancels the live Pending request and
+clears the request tracker; clears locked match/epoch identity, records,
+tombstones, snapshot assembly/receipt, gap buffer, recovery flags, and cached
+render state; then cleans the renderer, destroying every exact three-Part enemy
+Model and the exact client-created `Workspace.ATDEnemyVisuals` root. The later
+`MatchReadyController` cleanup unbinds input, disconnects its render,
+activation, match-event, and response listeners, clears its tracker/view model,
+and destroys the exact Ready GUI. The outer LocalScript `Destroying` connection
+is disconnected before the reverse client lifecycle sweep.
+
+The exact two-client Match Studio gate passed this ownership boundary on
+2026-08-27 with one server simulation connection, one enemy render connection
+per client, and no enemy record, request ledger, queue, buffer, trigger, visual,
+runtime map, remote root, Ready UI, or service connection after End Session.
+The consolidated review and complete local/structural gates also pass. Phase 09
+is complete; Phase 10 is next but no Phase 10 or Phase 11 ownership has been
+introduced.
 
 ## Focused Studio Edit-mode validation
 
@@ -266,9 +326,9 @@ conflicts, duplicate-owner/re-entry rejection, both exact Player-removal state
 releases, whole-child shutdown clearing, explicit client correlation clearing,
 and removal of the exact published root. Packet 06.5 adds nine integrated
 adversarial cases over those real boundaries; the Phase 06 canonical run passed
-all 200 cases across 16 suites. Phase 07 adds focused loader rollback,
-unload/reload, and cleanup coverage; the current complete local run passes 241
-cases across 19 suites. Packet 06.5 and the fresh Phase 06/Gate A audit pass,
+all 200 cases across 16 suites. Phase 07 added focused loader rollback,
+unload/reload, and cleanup coverage; its complete local run passed 241 cases
+across 19 suites. Packet 06.5 and the fresh Phase 06/Gate A audit pass,
 including clean workflow run `33022784985`. Phase 07's cleanup gate is also
 complete.
 
@@ -283,7 +343,7 @@ runner. Normal and repeated cleanup reached `Cleaned`; failure still completed
 the sweep; a yielding task that crossed the private wait deadline was allowed
 to finish later instead of being canceled and poisoning the container state.
 
-## Toolchain and build verification
+## Historical Packet 03 toolchain and build verification
 
 | Check | Result |
 | --- | --- |
@@ -318,7 +378,7 @@ evidence.
 Both Play sessions were stopped and returned to Edit mode. No external service,
 save, or publish operation occurred.
 
-Packet 06.5 subsequently passed the current unsaved networking regression.
+Packet 06.5 subsequently passed the then-current unsaved networking regression.
 Three plain Lobby and three plain Match Play/Stop cycles each reported one
 server `NetworkRegistry` service, zero client services, and clean shutdown. The
 final runtime-only Match harness used two clients and proved real
@@ -337,9 +397,14 @@ reported `caseCount=10`; and bounded Output audits reported
    `Active`, and one outer cleanup task. The server has one registered
    `NetworkRegistry` service; the client has zero services.
 4. Confirm no match executable source and stop Play.
-5. Repeat through `match.project.json`, expecting role `Match` and no lobby
-   executable source.
-6. Do not save or publish merely to run this regression.
+5. Repeat through `match.project.json`, expecting role `Match`, server service
+   order `NetworkRegistry -> MatchLifecycle -> EnemySimulation`, client service
+   order `MatchReadyController -> EnemyController`, and counts `3`/`2`.
+6. When using the Phase 09 Studio-only trigger, confirm one shared enemy
+   `Heartbeat` and one shared enemy `PreRender` connection per client. Stop Play
+   and confirm no enemy queue, ledger, record, buffer, trigger, visual root,
+   runtime map, remote root, Ready UI, or service connection remains.
+7. Do not save or publish merely to run this regression.
 
 Phase 03 is complete. Packet 03.4 evidence is in
 `docs/GRACEFUL_SHUTDOWN.md`. Packet 04.5 now gates construction before cleanup
@@ -348,6 +413,10 @@ network ownership contract is described in `docs/NETWORK_PROTOCOL.md`; it reuses
 the same contract. Packet 06.5 is complete with review-driven dispatcher
 hardening, test-only adversarial fixtures, and unsaved Studio evidence. The
 fresh Phase 06/Gate A audit and clean workflow run `33022784985` pass. Phase 06
-is complete and Gate A passed.
+is complete and Gate A passed. Phase 08 is also complete. Phase 09 code, exact
+Match Studio cleanup evidence, consolidated review, 467-case local gate, and all
+four structural builds pass on 2026-08-27. Phase 09 is complete; Phase 10 is
+next but has not begun, and Phase 11 has not begun. The current enemy cleanup evidence is in
+`docs/ENEMY_SIMULATION.md`.
 Configuration evidence is in
 `docs/CONFIGURATION_VALIDATION.md`.

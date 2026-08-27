@@ -1070,6 +1070,12 @@ local function dispatchRuntimeTrigger(data: ServiceData, request: unknown): unkn
 			return invalidTriggerRequest()
 		end
 		return Result.ok((service :: any):getMetrics())
+	elseif operation == "ResetTiming" then
+		if not hasExactFields(request :: any, { operation = true }) then
+			return invalidTriggerRequest()
+		end
+		resetPassTiming(data)
+		return Result.ok(table.freeze({ reset = true }))
 	elseif operation == "Clear" then
 		if not hasExactFields(request :: any, { operation = true }) then
 			return invalidTriggerRequest()
@@ -1087,7 +1093,6 @@ local function dispatchRuntimeTrigger(data: ServiceData, request: unknown): unkn
 			table.insert(despawns, (despawned :: any).value)
 		end
 		table.freeze(despawns)
-		resetPassTiming(data)
 		return Result.ok(despawns)
 	end
 	return invalidTriggerRequest()

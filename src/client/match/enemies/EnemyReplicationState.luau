@@ -469,20 +469,27 @@ local function preflightDelta(data: StateData, message: DeltaMessage): boolean
 		local additionCount = 0
 		for _, entry in message.entries do
 			local runtimeEnemyId = entry.runtimeEnemyId
-			if data.seenById[runtimeEnemyId] then
+			local active = data.activeById[runtimeEnemyId]
+			local seen = data.seenById[runtimeEnemyId] == true
+			if seen then
+				-- A snapshot can include an active record whose queued SpawnBatch
+				-- has not received a sequence yet. That later contiguous spawn is
+				-- idempotent for the still-active identity, but a terminal or
+				-- snapshot-omitted identity may never be resurrected.
+				if active == nil or data.tombstoneById[runtimeEnemyId] ~= nil then
+					return false
+				end
+			elseif active ~= nil or data.tombstoneById[runtimeEnemyId] ~= nil then
 				return false
+			else
+				additionCount += 1
 			end
-			additionCount += 1
 		end
-		return additionCount
-			<= MAX_ACTIVE_ENEMIES
-				- (function(): number
-					local count = 0
-					for _ in data.activeById do
-						count += 1
-					end
-					return count
-				end)()
+		local activeCount = 0
+		for _ in data.activeById do
+			activeCount += 1
+		end
+		return additionCount <= MAX_ACTIVE_ENEMIES - activeCount
 	elseif message.kind == "CorrectionBatch" or message.kind == "StateChangeBatch" then
 		for _, entry in message.entries do
 			local runtimeEnemyId = entry.runtimeEnemyId
@@ -502,11 +509,21 @@ local function applyDeltaNow(data: StateData, message: DeltaMessage): (boolean, 
 	if message.kind == "SpawnBatch" then
 		for _, entry in message.entries do
 			local runtimeEnemyId = entry.runtimeEnemyId
-			data.activeById[runtimeEnemyId] = entry
-			data.revisionById[runtimeEnemyId] = entry.revision
-			data.seenById[runtimeEnemyId] = true
-			data.seenCount += 1
-			appliedEntryCount += 1
+			local current = data.activeById[runtimeEnemyId]
+			if current ~= nil then
+				local currentRevision = data.revisionById[runtimeEnemyId] or 0
+				if entry.revision > currentRevision then
+					data.activeById[runtimeEnemyId] = entry
+					data.revisionById[runtimeEnemyId] = entry.revision
+					appliedEntryCount += 1
+				end
+			else
+				data.activeById[runtimeEnemyId] = entry
+				data.revisionById[runtimeEnemyId] = entry.revision
+				data.seenById[runtimeEnemyId] = true
+				data.seenCount += 1
+				appliedEntryCount += 1
+			end
 		end
 	elseif message.kind == "CorrectionBatch" or message.kind == "StateChangeBatch" then
 		for _, entry in message.entries do
