@@ -70,6 +70,41 @@ type RuntimeOverrides = {
 local PRIVATE_SENTINEL = "PRIVATE_MATCH_LIFECYCLE_SENTINEL_0f26b8"
 local MATCH_ID = "match:phase08-service-test"
 local logger = Log.new(EnvironmentContext.new("server", "Development", 0, false))
+local RUNTIME_MAP_SNAPSHOT: MatchLifecycleService.RuntimeMapSnapshot = table.freeze({
+	mapId = MatchLifecycleService.FIXED_MAP_ID,
+	base = table.freeze({
+		cframe = CFrame.new(10, 0, 0),
+		position = Vector3.new(10, 0, 0),
+	}),
+	bounds = table.freeze({
+		cframe = CFrame.new(5, 0, 0),
+		size = Vector3.new(20, 10, 20),
+	}),
+	lanes = table.freeze({
+		table.freeze({
+			id = "lane.main",
+			totalDistance = 10,
+			points = table.freeze({
+				table.freeze({
+					kind = "EnemySpawn",
+					cframe = CFrame.new(0, 0, 0),
+					position = Vector3.new(0, 0, 0),
+					distance = 0,
+				}),
+				table.freeze({
+					kind = "DefenderBase",
+					cframe = CFrame.new(10, 0, 0),
+					position = Vector3.new(10, 0, 0),
+					distance = 10,
+				}),
+			}),
+		}),
+	}),
+	placementZones = table.freeze({}),
+	noPlacementZones = table.freeze({}),
+	cameraAnchors = table.freeze({}),
+	playerSpawns = table.freeze({}),
+})
 
 local newForTests = MatchLifecycleService.newForTests
 if newForTests == nil then
@@ -221,6 +256,24 @@ local function captureError(assertions: Assertions, callback: () -> ()): string
 	return if type(value) == "string" then value else ""
 end
 
+local function assertDetachedAndFrozen(assertions: Assertions, value: unknown, seen: { [any]: boolean }?)
+	assertions.isFalse(typeof(value) == "Instance")
+	if type(value) ~= "table" then
+		return
+	end
+
+	local visited = seen or {}
+	if visited[value :: any] then
+		return
+	end
+	visited[value :: any] = true
+	assertions.isTrue(table.isfrozen(value :: any))
+	for key, child in next, value :: { [any]: unknown } do
+		assertDetachedAndFrozen(assertions, key, visited)
+		assertDetachedAndFrozen(assertions, child, visited)
+	end
+end
+
 local function invoke(method: (() -> ())?)
 	if method == nil then
 		error("[ATD_TEST][code=LIFECYCLE_METHOD_MISSING]", 0)
@@ -242,11 +295,19 @@ end
 
 return TestHarness.suite("match lifecycle service", {
 	TestHarness.case("loads the fixed map and follows lifecycle dependency order", function(assertions)
-		local loader = fakeLoader(Result.ok(table.freeze({})), Result.ok(true))
+		local loader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true))
 		local service = newService(loader, nil)
 		local definition = service:getServiceDefinition()
 
 		assertions.equal(service:getLifecycleState(), "Constructed")
+		local beforeInitialize = service:getRuntimeMapSnapshot()
+		assertions.isFalse(beforeInitialize.ok)
+		assertions.isTrue(table.isfrozen(beforeInitialize))
+		if not beforeInitialize.ok then
+			assertions.isTrue(table.isfrozen(beforeInitialize.error))
+			assertions.equal(beforeInitialize.error.code, "UNAVAILABLE")
+			assertions.equal(beforeInitialize.error.operation, "getRuntimeMapSnapshot")
+		end
 		assertions.equal(definition.name, "MatchLifecycle")
 		assertions.isTrue(table.isfrozen(definition))
 		assertions.isTrue(table.isfrozen(definition.dependencies :: { string }))
@@ -255,6 +316,12 @@ return TestHarness.suite("match lifecycle service", {
 		assertions.equal(service:getLifecycleState(), "Initialized")
 		assertions.equal(loader.loadCount, 1)
 		assertions.equal(loader.lastMapId, MatchLifecycleService.FIXED_MAP_ID)
+		local runtimeMap = service:getRuntimeMapSnapshot()
+		assertions.isTrue(runtimeMap.ok)
+		if runtimeMap.ok then
+			assertions.equal(runtimeMap.value, RUNTIME_MAP_SNAPSHOT)
+			assertDetachedAndFrozen(assertions, runtimeMap.value)
+		end
 		local loading = successSnapshot(assertions, service)
 		local loadingAgain = successSnapshot(assertions, service)
 		assertions.equal(loading.matchId, MATCH_ID)
@@ -264,6 +331,11 @@ return TestHarness.suite("match lifecycle service", {
 		assertions.isTrue(table.isfrozen(loading))
 		invoke(definition.start)
 		assertions.equal(service:getLifecycleState(), "Started")
+		local startedRuntimeMap = service:getRuntimeMapSnapshot()
+		assertions.isTrue(startedRuntimeMap.ok)
+		if startedRuntimeMap.ok then
+			assertions.equal(startedRuntimeMap.value, RUNTIME_MAP_SNAPSHOT)
+		end
 		local readyCheck = successSnapshot(assertions, service)
 		assertions.equal(readyCheck.revision, 2)
 		assertions.equal(readyCheck.state, "ReadyCheck")
@@ -271,6 +343,14 @@ return TestHarness.suite("match lifecycle service", {
 		invoke(definition.shutdown)
 		assertions.equal(service:getLifecycleState(), "Shutdown")
 		assertions.equal(loader.cleanupCount, 1)
+		local runtimeMapAfterShutdown = service:getRuntimeMapSnapshot()
+		assertions.isFalse(runtimeMapAfterShutdown.ok)
+		assertions.isTrue(table.isfrozen(runtimeMapAfterShutdown))
+		if not runtimeMapAfterShutdown.ok then
+			assertions.isTrue(table.isfrozen(runtimeMapAfterShutdown.error))
+			assertions.equal(runtimeMapAfterShutdown.error.code, "UNAVAILABLE")
+			assertions.equal(runtimeMapAfterShutdown.error.operation, "getRuntimeMapSnapshot")
+		end
 		local afterShutdown = service:getSnapshot()
 		assertions.isFalse(afterShutdown.ok)
 		if not afterShutdown.ok then
@@ -283,7 +363,8 @@ return TestHarness.suite("match lifecycle service", {
 		local lower = { userId = 10 }
 		local higher = { userId = 20 }
 		local source = fakePlayerSource({ higher, lower })
-		local service = newService(fakeLoader(Result.ok(true), Result.ok(true)), nil, nil, source, runtime)
+		local service =
+			newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil, nil, source, runtime)
 		local definition = service:getServiceDefinition()
 		invoke(definition.initialize)
 		invoke(definition.start)
@@ -356,8 +437,13 @@ return TestHarness.suite("match lifecycle service", {
 		local returnedPlayer = { userId = 2 }
 		local mixedSource = fakePlayerSource({ readyPlayer, returnedPlayer })
 		local mixedRuntime = deterministicRuntime(200)
-		local mixedService =
-			newService(fakeLoader(Result.ok(true), Result.ok(true)), nil, nil, mixedSource, mixedRuntime)
+		local mixedService = newService(
+			fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)),
+			nil,
+			nil,
+			mixedSource,
+			mixedRuntime
+		)
 		local mixedDefinition = mixedService:getServiceDefinition()
 		invoke(mixedDefinition.initialize)
 		invoke(mixedDefinition.start)
@@ -390,7 +476,8 @@ return TestHarness.suite("match lifecycle service", {
 
 		local zeroRuntime = deterministicRuntime(300)
 		local zeroSource = fakePlayerSource({ { userId = 11 }, { userId = 12 } })
-		local zeroService = newService(fakeLoader(Result.ok(true), Result.ok(true)), nil, nil, zeroSource, zeroRuntime)
+		local zeroService =
+			newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil, nil, zeroSource, zeroRuntime)
 		local zeroDefinition = zeroService:getServiceDefinition()
 		invoke(zeroDefinition.initialize)
 		invoke(zeroDefinition.start)
@@ -413,7 +500,8 @@ return TestHarness.suite("match lifecycle service", {
 			local departing = { userId = 3 }
 			local source = fakePlayerSource({ first, second, departing })
 			local runtime = deterministicRuntime(400)
-			local service = newService(fakeLoader(Result.ok(true), Result.ok(true)), nil, nil, source, runtime)
+			local service =
+				newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil, nil, source, runtime)
 			local definition = service:getServiceDefinition()
 			invoke(definition.initialize)
 			invoke(definition.start)
@@ -447,7 +535,8 @@ return TestHarness.suite("match lifecycle service", {
 		local runtime = deterministicRuntime(500)
 		local player = { userId = 1 }
 		local source = fakePlayerSource({ player })
-		local service = newService(fakeLoader(Result.ok(true), Result.ok(true)), nil, nil, source, runtime)
+		local service =
+			newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil, nil, source, runtime)
 		local definition = service:getServiceDefinition()
 		invoke(definition.initialize)
 		invoke(definition.start)
@@ -465,19 +554,33 @@ return TestHarness.suite("match lifecycle service", {
 		assertions.isFalse(service:getSnapshot().ok)
 	end),
 
-	TestHarness.case("fails closed to Closing for failed and throwing map loads", function(assertions)
+	TestHarness.case("fails closed to Closing for failed malformed and throwing map loads", function(assertions)
+		local throwingLoader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true))
+		throwingLoader.loadCallback = function()
+			error(PRIVATE_SENTINEL, 0)
+		end
 		local loaders = {
 			fakeLoader(Result.err({ code = PRIVATE_SENTINEL }), Result.ok(true)),
 			fakeLoader(Result.ok(true), Result.ok(true)),
+			fakeLoader(
+				Result.ok(table.freeze({
+					mapId = MatchLifecycleService.FIXED_MAP_ID,
+					lanes = table.freeze({ { id = "mutable-nested" } }),
+				})),
+				Result.ok(true)
+			),
+			throwingLoader,
 		}
-		loaders[2].loadCallback = function()
-			error(PRIVATE_SENTINEL, 0)
-		end
 
 		for _, loader in loaders do
 			local service = newService(loader, nil)
 			local definition = service:getServiceDefinition()
 			invoke(definition.initialize)
+			local runtimeMap = service:getRuntimeMapSnapshot()
+			assertions.isFalse(runtimeMap.ok)
+			if not runtimeMap.ok then
+				assertions.equal(runtimeMap.error.code, "UNAVAILABLE")
+			end
 			local closing = successSnapshot(assertions, service)
 			assertions.equal(closing.state, "Closing")
 			assertions.equal(closing.revision, 2)
@@ -492,7 +595,7 @@ return TestHarness.suite("match lifecycle service", {
 	end),
 
 	TestHarness.case("rejects lifecycle reentry without repeating map work", function(assertions)
-		local loader = fakeLoader(Result.ok(true), Result.ok(true))
+		local loader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true))
 		local service = newService(loader, nil)
 		local definition = service:getServiceDefinition()
 		local reentryFailure = ""
@@ -523,7 +626,7 @@ return TestHarness.suite("match lifecycle service", {
 
 	TestHarness.case("runs after NetworkRegistry and cleans before it", function(assertions)
 		local order = {}
-		local loader = fakeLoader(Result.ok(true), Result.ok(true))
+		local loader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true))
 		loader.loadCallback = function()
 			table.insert(order, "match-initialize")
 		end
@@ -595,7 +698,7 @@ return TestHarness.suite("match lifecycle service", {
 			local ten = { userId = 10 }
 			local source = fakePlayerSource({ forty, minusSeven, ten })
 			local roster = newRoster()
-			local loader = fakeLoader(Result.ok(true), Result.ok(true))
+			local loader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true))
 			local service = newService(loader, nil, roster, source)
 			local definition = service:getServiceDefinition()
 
@@ -667,7 +770,7 @@ return TestHarness.suite("match lifecycle service", {
 			table.insert(existing, { userId = userId })
 		end
 		local source = fakePlayerSource(existing)
-		local service = newService(fakeLoader(Result.ok(true), Result.ok(true)), nil, nil, source)
+		local service = newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil, nil, source)
 		local definition = service:getServiceDefinition()
 		invoke(definition.initialize)
 		invoke(definition.start)
@@ -683,7 +786,7 @@ return TestHarness.suite("match lifecycle service", {
 	end),
 
 	TestHarness.case("rolls back owned tracking when the initial player snapshot fails", function(assertions)
-		local loader = fakeLoader(Result.ok(true), Result.ok(true))
+		local loader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true))
 		local roster = newRoster()
 		local source = fakePlayerSource()
 		function source.getPlayers(_self: FakePlayerSource): unknown
@@ -757,7 +860,7 @@ return TestHarness.suite("match lifecycle service", {
 	end),
 
 	TestHarness.case("surfaces one privacy safe cached cleanup failure", function(assertions)
-		local loader = fakeLoader(Result.ok(true), Result.err({ private = PRIVATE_SENTINEL }))
+		local loader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.err({ private = PRIVATE_SENTINEL }))
 		local service = newService(loader, nil)
 		local definition = service:getServiceDefinition()
 		invoke(definition.initialize)
@@ -777,7 +880,7 @@ return TestHarness.suite("match lifecycle service", {
 	end),
 
 	TestHarness.case("rejects invalid generated identities without touching the loader", function(assertions)
-		local loader = fakeLoader(Result.ok(true), Result.ok(true))
+		local loader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true))
 		local failure = captureError(assertions, function()
 			(newForTests :: MatchLifecycleService.TestConstructor)(logger, {
 				mapLoader = loader,
@@ -794,7 +897,7 @@ return TestHarness.suite("match lifecycle service", {
 	end),
 
 	TestHarness.case("rejects inexact test dependency records", function(assertions)
-		local loader = fakeLoader(Result.ok(true), Result.ok(true))
+		local loader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true))
 		local extraFieldFailure = captureError(assertions, function()
 			(newForTests :: MatchLifecycleService.TestConstructor)(
 				logger,

@@ -43,11 +43,61 @@ export type MatchSnapshot = {
 	participants: { ParticipantSnapshot },
 }
 
+export type RuntimeRoutePointKind = "EnemySpawn" | "PathNode" | "DefenderBase"
+
+export type RuntimeRoutePointSnapshot = {
+	kind: RuntimeRoutePointKind,
+	nodeOrder: number?,
+	cframe: CFrame,
+	position: Vector3,
+	distance: number,
+}
+
+export type RuntimeLaneSnapshot = {
+	id: string,
+	totalDistance: number,
+	points: { RuntimeRoutePointSnapshot },
+}
+
+export type RuntimeRegionSnapshot = {
+	id: string,
+	cframe: CFrame,
+	size: Vector3,
+}
+
+export type RuntimeNamedPointSnapshot = {
+	id: string,
+	cframe: CFrame,
+	position: Vector3,
+}
+
+export type RuntimeMapSnapshot = {
+	mapId: Ids.MapId,
+	base: {
+		cframe: CFrame,
+		position: Vector3,
+	},
+	bounds: {
+		cframe: CFrame,
+		size: Vector3,
+	},
+	lanes: { RuntimeLaneSnapshot },
+	placementZones: { RuntimeRegionSnapshot },
+	noPlacementZones: { RuntimeRegionSnapshot },
+	cameraAnchors: { RuntimeNamedPointSnapshot },
+	playerSpawns: { RuntimeNamedPointSnapshot },
+}
+
 export type SnapshotErrorCode = "UNAVAILABLE" | "INTERNAL_ERROR"
 
 export type SnapshotError = {
 	code: SnapshotErrorCode,
 	operation: "getSnapshot",
+}
+
+export type RuntimeMapSnapshotError = {
+	code: SnapshotErrorCode,
+	operation: "getRuntimeMapSnapshot",
 }
 
 export type ReadyErrorCode = "STALE_REQUEST" | "DUPLICATE_REQUEST" | "NOT_AUTHORIZED" | "UNAVAILABLE" | "INTERNAL_ERROR"
@@ -145,6 +195,7 @@ type ServiceData = {
 	available: boolean,
 	shutdownFailure: string?,
 	serviceDefinition: ServiceLifecycle.ServiceDefinition?,
+	runtimeMapSnapshot: RuntimeMapSnapshot?,
 }
 
 type ExistingPlayer = {
@@ -164,6 +215,7 @@ local SERVICE_NAME = "MatchLifecycle"
 local CLEANUP_LABEL = "match-lifecycle"
 local STATIC_ERROR_PREFIX = "[ATD_MATCH_LIFECYCLE]"
 local MAX_PARTICIPANTS = 4
+local MAX_RUNTIME_SNAPSHOT_NODES = 20_000
 
 local PARTICIPANT_STATES: { [string]: boolean } = table.freeze({
 	Active = true,
@@ -215,6 +267,13 @@ local function snapshotFailure(code: SnapshotErrorCode): Result.Failure<Snapshot
 	return Result.err(makeSnapshotError(code))
 end
 
+local function runtimeMapSnapshotFailure(code: SnapshotErrorCode): Result.Failure<RuntimeMapSnapshotError>
+	return Result.err(table.freeze({
+		code = code,
+		operation = "getRuntimeMapSnapshot",
+	}))
+end
+
 local function readyFailure(code: ReadyErrorCode): Result.Failure<ReadyError>
 	return Result.err(table.freeze({
 		code = code,
@@ -235,6 +294,70 @@ end
 
 local function isSuccess(value: unknown): boolean
 	return type(value) == "table" and (value :: any).ok == true
+end
+
+local function isDetachedFrozenValue(
+	value: unknown,
+	visiting: { [any]: boolean },
+	visited: { [any]: boolean },
+	nodeCount: { value: number }
+): boolean
+	if typeof(value) == "Instance" then
+		return false
+	end
+	if type(value) ~= "table" then
+		local valueType = typeof(value)
+		return value == nil
+			or valueType == "boolean"
+			or valueType == "number"
+			or valueType == "string"
+			or valueType == "Vector3"
+			or valueType == "CFrame"
+	end
+	local tableValue = value :: { [any]: unknown }
+	if getmetatable(tableValue) ~= nil or not table.isfrozen(tableValue) or visiting[tableValue] then
+		return false
+	end
+	if visited[tableValue] then
+		return true
+	end
+	nodeCount.value += 1
+	if nodeCount.value > MAX_RUNTIME_SNAPSHOT_NODES then
+		return false
+	end
+	visiting[tableValue] = true
+	for key, child in next, tableValue do
+		if
+			not isDetachedFrozenValue(key, visiting, visited, nodeCount)
+			or not isDetachedFrozenValue(child, visiting, visited, nodeCount)
+		then
+			visiting[tableValue] = nil
+			return false
+		end
+	end
+	visiting[tableValue] = nil
+	visited[tableValue] = true
+	return true
+end
+
+local function validateRuntimeMapSnapshot(value: unknown): RuntimeMapSnapshot?
+	if type(value) ~= "table" or getmetatable(value :: any) ~= nil or not table.isfrozen(value :: any) then
+		return nil
+	end
+	local snapshot = value :: any
+	if
+		snapshot.mapId ~= FIXED_MAP_ID
+		or type(snapshot.lanes) ~= "table"
+		or not table.isfrozen(snapshot.lanes)
+		or rawlen(snapshot.lanes) < 1
+		or rawlen(snapshot.lanes) > 32
+	then
+		return nil
+	end
+	if not isDetachedFrozenValue(value, {}, {}, { value = 0 }) then
+		return nil
+	end
+	return value :: RuntimeMapSnapshot
 end
 
 local function resultErrorCode(value: unknown): string?
@@ -445,6 +568,7 @@ local function releaseOwnedResources(data: ServiceData): (boolean, string?)
 	local cleanup = data.cleanup
 	data.cleanup = nil
 	data.mapLoaded = false
+	data.runtimeMapSnapshot = nil
 
 	if cleanup == nil then
 		data.mapLoader = nil
@@ -834,7 +958,9 @@ local function initialize(data: ServiceData)
 	end
 
 	local loaded, loadResult = pcall((mapLoader :: MapLoaderAdapter).load, mapLoader, FIXED_MAP_ID)
-	data.mapLoaded = loaded and isSuccess(loadResult)
+	local loadedSnapshot = if loaded and isSuccess(loadResult) then (loadResult :: any).value else nil
+	data.runtimeMapSnapshot = validateRuntimeMapSnapshot(loadedSnapshot)
+	data.mapLoaded = data.runtimeMapSnapshot ~= nil
 	if not data.mapLoaded and not transition(machine :: StateMachineAdapter, "Closing") then
 		failAfterRollback(data, "TRANSITION_FAILED")
 	end
@@ -920,6 +1046,19 @@ function ServiceMethods.getSnapshot(self: Service): Result.Result<MatchSnapshot,
 	local snapshot = composeSnapshot(data)
 	if snapshot == nil then
 		return snapshotFailure("INTERNAL_ERROR")
+	end
+	return Result.ok(snapshot)
+end
+
+function ServiceMethods.getRuntimeMapSnapshot(self: Service): Result.Result<RuntimeMapSnapshot, RuntimeMapSnapshotError>
+	local data = requireData(self)
+	if not data.available or (data.state ~= "Initialized" and data.state ~= "Started") or not data.mapLoaded then
+		return runtimeMapSnapshotFailure("UNAVAILABLE")
+	end
+
+	local snapshot = data.runtimeMapSnapshot
+	if snapshot == nil then
+		return runtimeMapSnapshotFailure("INTERNAL_ERROR")
 	end
 	return Result.ok(snapshot)
 end
@@ -1095,6 +1234,7 @@ local function construct(
 		available = true,
 		shutdownFailure = nil,
 		serviceDefinition = nil,
+		runtimeMapSnapshot = nil,
 	}
 
 	local coordinatorCreated, coordinatorResult = pcall(createReadyCoordinator, {

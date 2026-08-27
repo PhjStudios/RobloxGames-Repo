@@ -37,6 +37,10 @@
         "match": {
           "$className": "Folder",
 
+          "enemies": {
+            "$path": "src/server/match/enemies"
+          },
+
           "maps": {
             "$path": "src/server/match/maps"
           },
@@ -77,6 +81,10 @@
 
           "match": {
             "$className": "Folder",
+
+            "enemies": {
+              "$path": "src/client/match/enemies"
+            },
 
             "MatchReadyController": {
               "$path": "src/client/match/MatchReadyController.luau"

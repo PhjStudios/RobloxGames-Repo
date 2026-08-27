@@ -56,6 +56,11 @@
           "$className": "Folder",
           "$ignoreUnknownInstances": true,
 
+          "enemies": {
+            "$path": "src/server/match/enemies",
+            "$ignoreUnknownInstances": true
+          },
+
           "maps": {
             "$path": "src/server/match/maps",
             "$ignoreUnknownInstances": true
@@ -117,6 +122,11 @@
           "match": {
             "$className": "Folder",
             "$ignoreUnknownInstances": true,
+
+            "enemies": {
+              "$path": "src/client/match/enemies",
+              "$ignoreUnknownInstances": true
+            },
 
             "MatchReadyController": {
               "$path": "src/client/match/MatchReadyController.luau"

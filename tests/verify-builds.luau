@@ -151,6 +151,11 @@ local EXPECTED_PRODUCTION_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/shared/match/MatchProtocol.luau",
 	},
 	{
+		dataModelPath = "ReplicatedStorage.Shared.match.EnemyProtocol",
+		className = "ModuleScript",
+		sourcePath = "src/shared/match/EnemyProtocol.luau",
+	},
+	{
 		dataModelPath = "ReplicatedStorage.Shared.network.ProductionRemotes",
 		className = "ModuleScript",
 		sourcePath = "src/shared/network/ProductionRemotes.luau",
@@ -268,6 +273,28 @@ local EXPECTED_MATCH_SERVER_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/server/match/maps/MapValidator.luau",
 	},
 })
+local EXPECTED_MATCH_ENEMY_SERVER_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "ServerScriptService.Server.match.enemies.EnemyPath",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/enemies/EnemyPath.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.enemies.EnemyReplicationPublisher",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/enemies/EnemyReplicationPublisher.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.enemies.EnemyRuntimeStore",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/enemies/EnemyRuntimeStore.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.enemies.EnemySimulationService",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/enemies/EnemySimulationService.luau",
+	},
+})
 local EXPECTED_MATCH_LIFECYCLE_SOURCES: { SourceDefinition } = table.freeze({
 	{
 		dataModelPath = "ServerScriptService.Server.match.lifecycle.MatchLifecycleService",
@@ -316,11 +343,38 @@ local EXPECTED_MATCH_CLIENT_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/client/match/MatchReadyViewModel.luau",
 	},
 })
+local EXPECTED_MATCH_ENEMY_CLIENT_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.enemies.EnemyController",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/enemies/EnemyController.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.enemies.EnemyPresentation",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/enemies/EnemyPresentation.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.enemies.EnemyRenderer",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/enemies/EnemyRenderer.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.enemies.EnemyReplicationState",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/enemies/EnemyReplicationState.luau",
+	},
+})
 local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.ConfigurationFixtures",
 		className = "ModuleScript",
 		sourcePath = "tests/fixtures/ConfigurationFixtures.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.EnemyFixtures",
+		className = "ModuleScript",
+		sourcePath = "tests/fixtures/EnemyFixtures.luau",
 	},
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.MapFixtures",
@@ -371,6 +425,61 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.CoreContracts.spec",
 		className = "ModuleScript",
 		sourcePath = "tests/specs/CoreContracts.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.EnemyController.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/EnemyController.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.EnemyMovement.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/EnemyMovement.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.EnemyPath.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/EnemyPath.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.EnemyPresentation.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/EnemyPresentation.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.EnemyProtocol.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/EnemyProtocol.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.EnemyRenderer.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/EnemyRenderer.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.EnemyReplicationPublisher.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/EnemyReplicationPublisher.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.EnemyReplicationState.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/EnemyReplicationState.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.EnemyRuntimeStore.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/EnemyRuntimeStore.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.EnemySimulationIntegration.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/EnemySimulationIntegration.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.EnemySimulationService.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/EnemySimulationService.spec.luau",
 	},
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.MapContract.spec",
@@ -518,6 +627,92 @@ local createdBuildDirectory = false
 local ownedOutputs: { [string]: boolean } = {}
 local currentStage = "startup"
 
+local function normalizeNewlines(value: string): string
+	return string.gsub(value, "\r\n", "\n")
+end
+
+local function verifyPhase09Scope(): boolean
+	local exactEmptyConfigs = {
+		{
+			path = "src/shared/config/Enemies.luau",
+			expected = table.concat({
+				"--!strict",
+				"",
+				"local ConfigTypes = require(script.Parent.Parent.types.ConfigTypes)",
+				"",
+				"local Enemies: { ConfigTypes.EnemyDefinition } = {}",
+				"",
+				"return table.freeze(Enemies)",
+				"",
+			}, "\n"),
+		},
+		{
+			path = "src/shared/config/Assets.luau",
+			expected = table.concat({
+				"--!strict",
+				"",
+				"local ConfigTypes = require(script.Parent.Parent.types.ConfigTypes)",
+				"",
+				"local Assets: { ConfigTypes.AssetDefinition } = {}",
+				"",
+				"return table.freeze(Assets)",
+				"",
+			}, "\n"),
+		},
+	}
+	for _, definition in exactEmptyConfigs do
+		if not fs.isFile(definition.path) then
+			return false
+		end
+		local readSucceeded, source = pcall(fs.readFile, definition.path)
+		if not readSucceeded or normalizeNewlines(source :: string) ~= definition.expected then
+			return false
+		end
+	end
+
+	for _, forbiddenDirectory in
+		{
+			"src/server/match/base",
+			"src/server/match/waves",
+			"src/client/match/base",
+			"src/client/match/waves",
+		}
+	do
+		if fs.isDir(forbiddenDirectory) then
+			return false
+		end
+	end
+
+	for _, definition in EXPECTED_MATCH_ENEMY_SERVER_SOURCES do
+		local readSucceeded, source = pcall(fs.readFile, definition.sourcePath)
+		if not readSucceeded then
+			return false
+		end
+		local lowered = string.lower(source :: string)
+		for _, forbidden in
+			{
+				"basehealth",
+				"pathfindingservice",
+				"prewave",
+				"rbxassetid://",
+				"results",
+				"waveactive",
+			}
+		do
+			if string.find(lowered, forbidden, 1, true) ~= nil then
+				return false
+			end
+		end
+	end
+	for _, definition in EXPECTED_MATCH_ENEMY_CLIENT_SOURCES do
+		local readSucceeded, source = pcall(fs.readFile, definition.sourcePath)
+		if not readSucceeded or string.find(string.lower(source :: string), "rbxassetid://", 1, true) ~= nil then
+			return false
+		end
+	end
+	return true
+end
+
 local function safeLogPath(path: string): string
 	if #path > 512 or string.match(path, "^[A-Za-z0-9_.:-]+$") == nil then
 		return "<unsafe>"
@@ -608,6 +803,7 @@ local function hasTestLeak(dataModel: DataModel): boolean
 				or string.find(source, "ATD_PHASE06_STUDIO", 1, true) ~= nil
 				or string.find(source, "ATD_PHASE07_STUDIO", 1, true) ~= nil
 				or string.find(source, "ATD_PHASE07_AUTHORING", 1, true) ~= nil
+				or string.find(source, "ATD_PHASE09_STUDIO", 1, true) ~= nil
 				or string.find(source, "PRIVATE_MODULE_LOAD_VALUE", 1, true) ~= nil
 			then
 				return true
@@ -647,6 +843,9 @@ local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): {
 		for _, source in EXPECTED_MATCH_SERVER_SOURCES do
 			table.insert(expected, source)
 		end
+		for _, source in EXPECTED_MATCH_ENEMY_SERVER_SOURCES do
+			table.insert(expected, source)
+		end
 		for _, source in EXPECTED_MATCH_LIFECYCLE_SOURCES do
 			table.insert(expected, source)
 		end
@@ -657,6 +856,9 @@ local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): {
 			table.insert(expected, source)
 		end
 		for _, source in EXPECTED_MATCH_CLIENT_SOURCES do
+			table.insert(expected, source)
+		end
+		for _, source in EXPECTED_MATCH_ENEMY_CLIENT_SOURCES do
 			table.insert(expected, source)
 		end
 	end
@@ -901,7 +1103,7 @@ end
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
 	currentStage = `verify_counts_{definition.name}`
 	local modules, scripts, localScripts = countClasses(dataModel)
-	local expectedModules = if definition.role == "Lobby" then 43 else 54
+	local expectedModules = if definition.role == "Lobby" then 44 else 63
 	if modules ~= expectedModules or scripts ~= 1 or localScripts ~= 1 then
 		emit("FAIL", definition.name, `PRODUCTION_CLASS_COUNTS_{modules}_{scripts}_{localScripts}`)
 		return false
@@ -927,7 +1129,7 @@ end
 
 local function verifyTest(dataModel: DataModel, definition: BuildDefinition): boolean
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 90 then
+	if modules ~= 111 then
 		emit("FAIL", definition.name, `TEST_MODULE_COUNT_{modules}`)
 		return false
 	end
@@ -946,7 +1148,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			end
 		end
 	end
-	if sharedModules ~= 34 then
+	if sharedModules ~= 35 then
 		emit("FAIL", definition.name, "SHARED_MODULE_COUNT")
 		return false
 	end
@@ -962,6 +1164,12 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local productionClientMatch = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionClientMatch")
+	local productionClientEnemies = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionClientEnemies")
+	local productionServerEnemies = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionServerEnemies")
 	local productionServerMaps = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerMaps")
@@ -1060,6 +1268,16 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	if
 		not verifyMirroredSources(
 			definition,
+			productionServerEnemies,
+			EXPECTED_MATCH_ENEMY_SERVER_SOURCES,
+			"TEST_SERVER_ENEMY"
+		)
+	then
+		return false
+	end
+	if
+		not verifyMirroredSources(
+			definition,
 			productionServerMatchLifecycle,
 			EXPECTED_MATCH_LIFECYCLE_SOURCES,
 			"TEST_MATCH_LIFECYCLE"
@@ -1092,17 +1310,31 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	then
 		return false
 	end
+	if
+		not verifyMirroredSources(
+			definition,
+			productionClientEnemies,
+			EXPECTED_MATCH_ENEMY_CLIENT_SOURCES,
+			"TEST_CLIENT_ENEMY"
+		)
+	then
+		return false
+	end
 	local mapModules = #EXPECTED_MATCH_SERVER_SOURCES
+	local serverEnemyModules = #EXPECTED_MATCH_ENEMY_SERVER_SOURCES
 	local matchLifecycleModules = #EXPECTED_MATCH_LIFECYCLE_SOURCES
 	local matchRosterModules = #EXPECTED_MATCH_ROSTER_SOURCES
 	local matchReadyModules = #EXPECTED_MATCH_READY_SOURCES
 	local clientMatchModules = #EXPECTED_MATCH_CLIENT_SOURCES
+	local clientEnemyModules = #EXPECTED_MATCH_ENEMY_CLIENT_SOURCES
 	if
 		not verifyTestOwnedSources(dataModel, definition, {
 			shared :: Instance,
 			productionServerNetworking :: Instance,
 			productionClientNetworking :: Instance,
 			productionClientMatch :: Instance,
+			productionClientEnemies :: Instance,
+			productionServerEnemies :: Instance,
 			productionServerMaps :: Instance,
 			productionServerMatchLifecycle :: Instance,
 			productionServerMatchRoster :: Instance,
@@ -1116,12 +1348,17 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	emit(
 		"PASS",
 		definition.name,
-		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_CLIENT_MATCH_{clientMatchModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
+		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_SERVER_ENEMIES_{serverEnemyModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_CLIENT_MATCH_{clientMatchModules}_CLIENT_ENEMIES_{clientEnemyModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
 	)
 	return true
 end
 
 local function run(): boolean
+	currentStage = "phase09_scope"
+	if not verifyPhase09Scope() then
+		emit("FAIL", "All", "PHASE09_SCOPE_BOUNDARY")
+		return false
+	end
 	currentStage = "build_directory"
 	if fs.isFile(BUILD_DIRECTORY) then
 		emit("FAIL", "All", "BUILD_PATH_NOT_DIRECTORY")

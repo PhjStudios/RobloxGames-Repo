@@ -9,6 +9,7 @@ local EnvironmentContext = require(ReplicatedStorage.Shared.logging.EnvironmentC
 local Log = require(ReplicatedStorage.Shared.logging.Log)
 local ProductionRemotes = require(ReplicatedStorage.Shared.network.ProductionRemotes)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
+local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
 local Cleanup = require(ReplicatedStorage.Shared.util.Cleanup)
 local ProductionRateLimits = require(script.Parent.Parent.networking.ProductionRateLimits)
 local ServerRemoteRegistry = require(script.Parent.Parent.networking.ServerRemoteRegistry)
@@ -17,6 +18,7 @@ local Shutdown = require(script.Parent.Shutdown)
 export type Configuration = {
 	role: PlaceRoles.PlaceRole,
 	log: Log.Logger,
+	coreConfiguration: ConfigTypes.CoreConfiguration,
 	lifecycleRunner: ServiceLifecycle.Runner,
 	serverRemoteRegistry: ServerRemoteRegistry.Server?,
 }
@@ -26,6 +28,7 @@ export type Configure = (configuration: Configuration) -> ()
 export type Handle = {
 	role: PlaceRoles.PlaceRole,
 	log: Log.Logger,
+	coreConfiguration: ConfigTypes.CoreConfiguration,
 	lifecycleRunner: ServiceLifecycle.Runner,
 	serverRemoteRegistry: ServerRemoteRegistry.Server?,
 	cleanup: Cleanup.Container,
@@ -133,6 +136,7 @@ function ServerBootstrap.run(expectedRole: PlaceRoles.PlaceRole?, configure: Con
 	log:info("configuration", "validated", "Core configuration validated", {
 		configurationFamilyCount = ConfigurationValidator.FAMILY_COUNT,
 	})
+	local coreConfiguration = coreConfigurationResult.value
 
 	local lifecycleRunner = ServiceLifecycle.new(log)
 	local serverRemoteRegistry: ServerRemoteRegistry.Server? = nil
@@ -146,6 +150,7 @@ function ServerBootstrap.run(expectedRole: PlaceRoles.PlaceRole?, configure: Con
 		configure({
 			role = roleResult.role,
 			log = log,
+			coreConfiguration = coreConfiguration,
 			lifecycleRunner = lifecycleRunner,
 			serverRemoteRegistry = serverRemoteRegistry,
 		})
@@ -175,6 +180,7 @@ function ServerBootstrap.run(expectedRole: PlaceRoles.PlaceRole?, configure: Con
 	return table.freeze({
 		role = roleResult.role,
 		log = log,
+		coreConfiguration = coreConfiguration,
 		lifecycleRunner = lifecycleRunner,
 		serverRemoteRegistry = serverRemoteRegistry,
 		cleanup = bootstrapCleanup,

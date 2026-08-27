@@ -2,11 +2,13 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local EnemyProtocol = require(ReplicatedStorage.Shared.match.EnemyProtocol)
 local MatchProtocol = require(ReplicatedStorage.Shared.match.MatchProtocol)
 local PlaceRoles = require(ReplicatedStorage.Shared.config.PlaceRoles)
 local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
 local ServerBootstrap = require(script.Parent.ServerBootstrap)
 local ServerRequestDispatcher = require(script.Parent.Parent.networking.ServerRequestDispatcher)
+local EnemySimulationService = require(script.Parent.Parent.Parent.match.enemies.EnemySimulationService)
 local MatchLifecycleService = require(script.Parent.Parent.Parent.match.lifecycle.MatchLifecycleService)
 
 local function publicError(code: RequestProtocol.PublicErrorCode): RequestProtocol.PublicError
@@ -34,6 +36,15 @@ local function authorizeContext(context: ServerRequestDispatcher.ServerContext):
 	return ServerRequestDispatcher.isContext(context)
 end
 
+local function rejectEnemySnapshot(code: unknown): ServerRequestDispatcher.HandlerOutcome
+	if code == "INVALID_RECIPIENT" then
+		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.NOT_AUTHORIZED)
+	elseif code == "INTERNAL_ERROR" or code == "INVALID_PROVIDER" then
+		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.INTERNAL_ERROR)
+	end
+	return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+end
+
 ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 	local network = configuration.serverRemoteRegistry
 	if network == nil then
@@ -42,7 +53,11 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 
 	local sendSnapshot =
 		network:registerServerEvent(MatchProtocol.MATCH_SNAPSHOT_ENDPOINT, MatchProtocol.MatchSnapshotSchema)
+	local sendEnemyReplication =
+		network:registerServerEvent(EnemyProtocol.ENEMY_REPLICATION_ENDPOINT, EnemyProtocol.EnemyReplicationSchema)
 	local matchLifecycle = MatchLifecycleService.new(configuration.log, sendSnapshot)
+	local enemySimulation =
+		EnemySimulationService.new(matchLifecycle, configuration.coreConfiguration.enemies, sendEnemyReplication)
 
 	network:registerRequest(
 		MatchProtocol.GET_MATCH_SNAPSHOT_ENDPOINT,
@@ -72,5 +87,19 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			return rejectCode(readyResult.error.code)
 		end
 	)
+	network:registerRequest(
+		EnemyProtocol.GET_ENEMY_SNAPSHOT_ENDPOINT,
+		EnemyProtocol.GetEnemySnapshotPayloadSchema,
+		EnemyProtocol.EnemySnapshotReceiptSchema,
+		authorizeContext,
+		function(context, _payload)
+			local snapshotResult = enemySimulation:requestSnapshot(context.player)
+			if snapshotResult.ok then
+				return ServerRequestDispatcher.success(snapshotResult.value)
+			end
+			return rejectEnemySnapshot(snapshotResult.error.code)
+		end
+	)
 	configuration.lifecycleRunner:register(matchLifecycle:getServiceDefinition())
+	configuration.lifecycleRunner:register(enemySimulation:getServiceDefinition())
 end)

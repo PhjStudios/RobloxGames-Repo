@@ -37,6 +37,10 @@
           "$path": "src/client/common/networking"
         },
 
+        "ProductionClientEnemies": {
+          "$path": "src/client/match/enemies"
+        },
+
         "ProductionClientMatch": {
           "$className": "Folder",
 
@@ -55,6 +59,10 @@
 
         "ProductionServerMaps": {
           "$path": "src/server/match/maps"
+        },
+
+        "ProductionServerEnemies": {
+          "$path": "src/server/match/enemies"
         },
 
         "ProductionServerMatchLifecycle": {
