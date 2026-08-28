@@ -7,6 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local AssetSchema = require(ReplicatedStorage.Shared.config.AssetSchema)
+local DifficultySchema = require(ReplicatedStorage.Shared.config.DifficultySchema)
 local EnemySchema = require(ReplicatedStorage.Shared.config.EnemySchema)
 local EnemyProtocol = require(ReplicatedStorage.Shared.match.EnemyProtocol)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
@@ -36,7 +37,9 @@ export type Operation =
 	| "despawn"
 	| "requestSnapshot"
 	| "getIdentity"
-	| "installStudioCatalog"
+	| "installStudioFixtures"
+	| "initializeStudioBase"
+	| "activateStudioWave"
 	| "runtimeTrigger"
 
 export type ErrorCode = "UNAVAILABLE" | "REENTRANT" | "INTERNAL_ERROR" | "INVALID_ARGUMENT" | "STUDIO_ONLY"
@@ -48,6 +51,24 @@ export type ServiceError = {
 export type MatchLifecycleAdapter = {
 	getSnapshot: (self: MatchLifecycleAdapter) -> unknown,
 	getRuntimeMapSnapshot: (self: MatchLifecycleAdapter) -> unknown,
+	beginBaseDefeat: (self: MatchLifecycleAdapter, matchId: unknown) -> unknown,
+	commitBaseDefeat: (self: MatchLifecycleAdapter, token: unknown) -> unknown,
+	rollbackBaseDefeat: (self: MatchLifecycleAdapter, token: unknown) -> unknown,
+	activateStudioWaveForEvidence: (self: MatchLifecycleAdapter) -> unknown,
+}
+
+export type BaseRuntimeAdapter = {
+	installStudioCatalog: (self: BaseRuntimeAdapter, catalog: unknown) -> unknown,
+	initializeBase: (self: BaseRuntimeAdapter, definition: unknown) -> unknown,
+	recordLeak: (self: BaseRuntimeAdapter, outcome: unknown) -> unknown,
+	finishEnemyPass: (self: BaseRuntimeAdapter, passOrdinal: unknown) -> unknown,
+	commitPreparedDefeat: (self: BaseRuntimeAdapter, token: unknown) -> unknown,
+	failPreparedDefeat: (self: BaseRuntimeAdapter, token: unknown) -> unknown,
+	fault: (self: BaseRuntimeAdapter) -> unknown,
+	getSnapshot: (self: BaseRuntimeAdapter) -> unknown,
+	getResultSeed: (self: BaseRuntimeAdapter) -> unknown,
+	getDefeatState: (self: BaseRuntimeAdapter) -> unknown,
+	getMetrics: (self: BaseRuntimeAdapter) -> unknown,
 }
 
 export type RuntimeStoreAdapter = {
@@ -58,6 +79,7 @@ export type RuntimeStoreAdapter = {
 	setSlowMultiplier: (self: RuntimeStoreAdapter, runtimeEnemyId: unknown, multiplier: unknown) -> unknown,
 	resolveEndpoint: (self: RuntimeStoreAdapter, runtimeEnemyId: unknown) -> unknown,
 	despawn: (self: RuntimeStoreAdapter, runtimeEnemyId: unknown) -> unknown,
+	despawnAllForDefeat: (self: RuntimeStoreAdapter, runtimeEnemyIds: unknown) -> unknown,
 	step: (self: RuntimeStoreAdapter, deltaSeconds: unknown) -> unknown,
 	getIdentity: (self: RuntimeStoreAdapter) -> unknown,
 	getMetrics: (self: RuntimeStoreAdapter) -> unknown,
@@ -71,11 +93,13 @@ export type PublisherAdapter = {
 	preflightStateChange: (self: PublisherAdapter, runtimeEnemyId: unknown) -> unknown,
 	preflightEndpoint: (self: PublisherAdapter, runtimeEnemyId: unknown) -> unknown,
 	preflightManualDespawn: (self: PublisherAdapter, runtimeEnemyId: unknown) -> unknown,
+	preflightDefeat: (self: PublisherAdapter, runtimeEnemyIds: unknown) -> unknown,
 	preflightStep: (self: PublisherAdapter, runtimeEnemyIds: unknown) -> unknown,
 	commitSpawn: (self: PublisherAdapter, snapshot: unknown) -> unknown,
 	commitStateChange: (self: PublisherAdapter, snapshot: unknown) -> unknown,
 	commitEndpoint: (self: PublisherAdapter, endpoint: unknown, despawn: unknown) -> unknown,
 	commitManualDespawn: (self: PublisherAdapter, despawn: unknown) -> unknown,
+	commitDefeat: (self: PublisherAdapter, despawns: unknown) -> unknown,
 	observeCorrection: (self: PublisherAdapter, runtimeEnemyId: unknown) -> unknown,
 	advance: (self: PublisherAdapter, deltaSeconds: unknown, snapshotProvider: unknown) -> unknown,
 	requestSnapshot: (self: PublisherAdapter, recipient: unknown, snapshotProvider: unknown) -> unknown,
@@ -84,7 +108,12 @@ export type PublisherAdapter = {
 	cleanup: (self: PublisherAdapter) -> unknown,
 }
 
-export type RuntimeStoreFactory = (matchId: unknown, catalog: unknown, runtimeMapSnapshot: unknown) -> unknown
+export type RuntimeStoreFactory = (
+	matchId: unknown,
+	catalog: unknown,
+	runtimeMapSnapshot: unknown,
+	endpointSink: unknown
+) -> unknown
 export type PublisherFactory = (matchId: unknown, enemyEpoch: unknown, dependencies: unknown) -> unknown
 export type StepCallback = (deltaSeconds: number) -> ()
 export type ConnectStep = (callback: StepCallback) -> unknown
@@ -99,6 +128,7 @@ export type CreateRuntimeTrigger = (handler: RuntimeTriggerHandler) -> unknown
 
 export type TestDependencies = {
 	matchLifecycle: MatchLifecycleAdapter,
+	baseRuntime: BaseRuntimeAdapter,
 	catalog: unknown,
 	createStore: RuntimeStoreFactory,
 	createPublisher: PublisherFactory,
@@ -109,6 +139,7 @@ export type TestDependencies = {
 	isStudio: IsStudio?,
 	passClock: PassClock?,
 	createRuntimeTrigger: CreateRuntimeTrigger?,
+	initialEnemyPassOrdinal: number?,
 }
 
 export type PassTimingMetrics = {
@@ -132,12 +163,22 @@ export type ServiceMetrics = {
 	publisher: unknown?,
 	studioTriggerCount: number,
 	studioCatalogInstalled: boolean,
+	studioBaseInitialized: boolean,
+	studioBaseVariant: string?,
+	studioWaveActivated: boolean,
+	studioSpawnCount: number,
+	studioBatchCount: number,
+	spawnAdmissionClosed: boolean,
+	nextEnemyPassOrdinal: number,
+	defeatCount: number,
+	resultsCommitCount: number,
 	passTiming: PassTimingMetrics,
 }
 
 type ServiceData = {
 	state: LifecycleState,
 	matchLifecycle: MatchLifecycleAdapter?,
+	baseRuntime: BaseRuntimeAdapter?,
 	catalog: unknown,
 	createStore: RuntimeStoreFactory?,
 	createPublisher: PublisherFactory?,
@@ -160,8 +201,19 @@ type ServiceData = {
 	releasing: boolean,
 	deferredDisconnectFailed: boolean,
 	studioTrigger: unknown?,
+	studioTriggerOperationActive: boolean,
 	studioCatalogInstalled: boolean,
 	studioLaneId: string?,
+	studioDifficultyDefinitions: { [string]: ConfigTypes.DifficultyDefinition }?,
+	studioBaseInitialized: boolean,
+	studioBaseVariant: string?,
+	studioWaveActivated: boolean,
+	studioSpawnCount: number,
+	studioBatchCount: number,
+	spawnAdmissionClosed: boolean,
+	nextEnemyPassOrdinal: number,
+	defeatCount: number,
+	resultsCommitCount: number,
 	passDurationSamples: { number },
 	nextPassDurationIndex: number,
 	totalPassDurationCount: number,
@@ -185,10 +237,38 @@ type CommittedStepResult = {
 
 local SERVICE_NAME = "EnemySimulation"
 local STATIC_ERROR_PREFIX = "[ATD_ENEMY_SIMULATION_SERVICE]"
-local STUDIO_TRIGGER_NAME = "ATDPhase09EnemyRuntime"
-local STUDIO_STRESS_ENEMY_ID = "enemy:phase09-studio-stress"
-local STUDIO_ENDPOINT_ENEMY_ID = "enemy:phase09-studio-endpoint"
-local STUDIO_MODEL_ASSET_KEY = "test.phase09.enemy-model"
+local STUDIO_TRIGGER_NAME = "ATDPhase10BaseRuntime"
+local STUDIO_MODEL_ASSET_KEY = "test.phase10.enemy-model"
+local STUDIO_MEASUREMENT_ENEMY_ID = "enemy:phase10-studio-measurement"
+local STUDIO_ZERO_ENEMY_ID = "enemy:phase10-studio-zero"
+local STUDIO_ORDINARY_ENEMY_ID = "enemy:phase10-studio-ordinary"
+local STUDIO_LOW_ENEMY_ID = "enemy:phase10-studio-low"
+local STUDIO_EXACT_ENEMY_ID = "enemy:phase10-studio-exact"
+local STUDIO_OVERKILL_ENEMY_ID = "enemy:phase10-studio-overkill"
+local STUDIO_HIGH_ENEMY_ID = "enemy:phase10-studio-high"
+local STUDIO_SURVIVOR_ENEMY_ID = "enemy:phase10-studio-survivor"
+local STUDIO_MEASUREMENT_DIFFICULTY_ID = "difficulty:phase10-studio-measurement"
+local STUDIO_DEFEAT_DIFFICULTY_ID = "difficulty:phase10-studio-defeat"
+local STUDIO_MEASUREMENT_MAX_HEALTH = 1_000_000
+local STUDIO_DEFEAT_MAX_HEALTH = 100
+local STUDIO_FAST_SPEED = 1_000_000
+local STUDIO_SURVIVOR_SPEED = 1
+local STUDIO_BATCH_COUNTS = table.freeze({
+	One = 1,
+	ThirtyTwo = 32,
+	SixtyFour = 64,
+	OneTwentyEight = 128,
+})
+local STUDIO_ENEMY_IDS = table.freeze({
+	Measurement = STUDIO_MEASUREMENT_ENEMY_ID,
+	Zero = STUDIO_ZERO_ENEMY_ID,
+	Ordinary = STUDIO_ORDINARY_ENEMY_ID,
+	Low = STUDIO_LOW_ENEMY_ID,
+	Exact = STUDIO_EXACT_ENEMY_ID,
+	Overkill = STUDIO_OVERKILL_ENEMY_ID,
+	High = STUDIO_HIGH_ENEMY_ID,
+	Survivor = STUDIO_SURVIVOR_ENEMY_ID,
+})
 local PASS_DURATION_CAPACITY = 1_024
 local MAX_STUDIO_LANES = 32
 
@@ -260,6 +340,25 @@ local function isMatchLifecycleAdapter(value: unknown): boolean
 	return type(value) == "table"
 		and type((value :: any).getSnapshot) == "function"
 		and type((value :: any).getRuntimeMapSnapshot) == "function"
+		and type((value :: any).beginBaseDefeat) == "function"
+		and type((value :: any).commitBaseDefeat) == "function"
+		and type((value :: any).rollbackBaseDefeat) == "function"
+		and type((value :: any).activateStudioWaveForEvidence) == "function"
+end
+
+local function isBaseRuntimeAdapter(value: unknown): boolean
+	return type(value) == "table"
+		and type((value :: any).installStudioCatalog) == "function"
+		and type((value :: any).initializeBase) == "function"
+		and type((value :: any).recordLeak) == "function"
+		and type((value :: any).finishEnemyPass) == "function"
+		and type((value :: any).commitPreparedDefeat) == "function"
+		and type((value :: any).failPreparedDefeat) == "function"
+		and type((value :: any).fault) == "function"
+		and type((value :: any).getSnapshot) == "function"
+		and type((value :: any).getResultSeed) == "function"
+		and type((value :: any).getDefeatState) == "function"
+		and type((value :: any).getMetrics) == "function"
 end
 
 local STORE_METHODS = table.freeze({
@@ -270,6 +369,7 @@ local STORE_METHODS = table.freeze({
 	"setSlowMultiplier",
 	"resolveEndpoint",
 	"despawn",
+	"despawnAllForDefeat",
 	"step",
 	"getIdentity",
 	"getMetrics",
@@ -283,11 +383,13 @@ local PUBLISHER_METHODS = table.freeze({
 	"preflightStateChange",
 	"preflightEndpoint",
 	"preflightManualDespawn",
+	"preflightDefeat",
 	"preflightStep",
 	"commitSpawn",
 	"commitStateChange",
 	"commitEndpoint",
 	"commitManualDespawn",
+	"commitDefeat",
 	"observeCorrection",
 	"advance",
 	"requestSnapshot",
@@ -341,7 +443,6 @@ local function isRuntimeTriggerAdapter(value: unknown): boolean
 end
 
 local function clearConstructionDependencies(data: ServiceData)
-	data.matchLifecycle = nil
 	data.catalog = nil
 	data.createStore = nil
 	data.createPublisher = nil
@@ -392,8 +493,15 @@ end
 local function destroyRuntimeTrigger(data: ServiceData): boolean
 	local trigger = data.studioTrigger
 	data.studioTrigger = nil
+	data.studioTriggerOperationActive = false
 	data.studioCatalogInstalled = false
 	data.studioLaneId = nil
+	data.studioDifficultyDefinitions = nil
+	data.studioBaseInitialized = false
+	data.studioBaseVariant = nil
+	data.studioWaveActivated = false
+	data.studioSpawnCount = 0
+	data.studioBatchCount = 0
 	data.service = nil
 	if trigger == nil then
 		return true
@@ -439,6 +547,12 @@ local function releaseOwnedResources(data: ServiceData): boolean
 	data.isStudio = nil
 	data.createRuntimeTrigger = nil
 	clearConstructionDependencies(data)
+	data.matchLifecycle = nil
+	data.baseRuntime = nil
+	data.spawnAdmissionClosed = true
+	data.nextEnemyPassOrdinal = 1
+	data.defeatCount = 0
+	data.resultsCommitCount = 0
 	data.releasing = false
 	return stepDisconnected and removalDisconnected and triggerDestroyed and publisherCleaned and storeCleaned
 end
@@ -560,7 +674,10 @@ local function beginPublicOperation(data: ServiceData, operation: Operation, mut
 		return makeServiceError("REENTRANT", operation)
 	end
 	if mutation then
-		if data.state ~= "Started" then
+		if
+			data.state ~= "Started"
+			or (data.spawnAdmissionClosed and operation ~= "requestSnapshot" and operation ~= "runtimeTrigger")
+		then
 			return makeServiceError("UNAVAILABLE", operation)
 		end
 	elseif data.state ~= "Started" and data.state ~= "Failed" then
@@ -771,9 +888,22 @@ local function getCommittedStepResult(value: unknown, deltaSeconds: number, acti
 	return stepResult :: CommittedStepResult
 end
 
+local function abortCurrentBasePass(data: ServiceData)
+	-- The store has already committed this simulation pass. If its matching
+	-- publisher transaction cannot complete, no later call may finish or reuse
+	-- the leak outcomes queued synchronously by the endpoint callback.
+	data.spawnAdmissionClosed = true
+	local baseRuntime = data.baseRuntime
+	if baseRuntime ~= nil then
+		callResult(baseRuntime.fault, baseRuntime)
+	end
+	data.faultRequested = true
+end
+
 local function commitStepResult(data: ServiceData, activeIds: { number }, stepResult: CommittedStepResult): boolean
 	local publisher = data.publisher
 	if publisher == nil then
+		abortCurrentBasePass(data)
 		return false
 	end
 	local updatedIndex = 1
@@ -784,6 +914,7 @@ local function commitStepResult(data: ServiceData, activeIds: { number }, stepRe
 			local called, resultValue =
 				callResult(publisher.commitEndpoint, publisher, resolution.endpoint, resolution.despawn)
 			if not called or not isSuccess(resultValue) then
+				abortCurrentBasePass(data)
 				return false
 			end
 			endpointIndex += 1
@@ -791,13 +922,168 @@ local function commitStepResult(data: ServiceData, activeIds: { number }, stepRe
 			if not stepResult.cleaned then
 				local called, resultValue = callResult(publisher.observeCorrection, publisher, runtimeEnemyId)
 				if not called or not isSuccess(resultValue) then
+					abortCurrentBasePass(data)
 					return false
 				end
 			end
 			updatedIndex += 1
 		end
 	end
-	return updatedIndex > #stepResult.updatedRuntimeEnemyIds and endpointIndex > #stepResult.endpointResolutions
+	if updatedIndex <= #stepResult.updatedRuntimeEnemyIds or endpointIndex <= #stepResult.endpointResolutions then
+		abortCurrentBasePass(data)
+		return false
+	end
+	return true
+end
+
+local function failPreparedDefeat(data: ServiceData, lifecycleToken: unknown?, baseToken: unknown)
+	local lifecycle = data.matchLifecycle
+	local baseRuntime = data.baseRuntime
+	if lifecycleToken ~= nil and lifecycle ~= nil then
+		callResult(lifecycle.rollbackBaseDefeat, lifecycle, lifecycleToken)
+	end
+	if baseRuntime ~= nil then
+		callResult(baseRuntime.failPreparedDefeat, baseRuntime, baseToken)
+	end
+	data.spawnAdmissionClosed = true
+end
+
+local function coordinateDefeat(data: ServiceData, boundary: any): boolean
+	local store = data.store
+	local publisher = data.publisher
+	local lifecycle = data.matchLifecycle
+	local baseRuntime = data.baseRuntime
+	local baseToken = if type(boundary) == "table" then boundary.preparedDefeat else nil
+	if
+		store == nil
+		or publisher == nil
+		or lifecycle == nil
+		or baseRuntime == nil
+		or type(baseToken) ~= "table"
+		or not table.isfrozen(baseToken)
+		or data.defeatCount ~= 0
+	then
+		return false
+	end
+	data.defeatCount = 1
+
+	local listed, listResult = callResult(store.list, store)
+	local activeIds = if listed and isSuccess(listResult)
+		then denseFrozenAscendingIdsFromSnapshots((listResult :: any).value)
+		else nil
+	if activeIds == nil then
+		failPreparedDefeat(data, nil, baseToken)
+		return false
+	end
+	local preflighted, preflightResult = callResult(publisher.preflightDefeat, publisher, activeIds)
+	if not preflighted or not isSuccess(preflightResult) then
+		failPreparedDefeat(data, nil, baseToken)
+		return false
+	end
+	local identityCalled, identityResult = callResult(store.getIdentity, store)
+	local identity = if identityCalled and isSuccess(identityResult) then (identityResult :: any).value else nil
+	local matchId = if type(identity) == "table" then (identity :: any).matchId else nil
+	if type(matchId) ~= "string" then
+		failPreparedDefeat(data, nil, baseToken)
+		return false
+	end
+	local began, beginResult = callResult(lifecycle.beginBaseDefeat, lifecycle, matchId)
+	if not began or not isSuccess(beginResult) then
+		failPreparedDefeat(data, nil, baseToken)
+		return false
+	end
+	local lifecycleToken = (beginResult :: any).value
+	if type(lifecycleToken) ~= "table" or not table.isfrozen(lifecycleToken) then
+		failPreparedDefeat(data, lifecycleToken, baseToken)
+		return false
+	end
+
+	-- This is the first irreversible gameplay closure. Every preflight above is
+	-- complete, and no public mutation can re-enter the active service operation.
+	data.spawnAdmissionClosed = true
+	local despawned, despawnResult = callResult(store.despawnAllForDefeat, store, activeIds)
+	if not despawned or not isSuccess(despawnResult) then
+		failPreparedDefeat(data, lifecycleToken, baseToken)
+		return false
+	end
+	local committedEnemies, enemyCommitResult =
+		callResult(publisher.commitDefeat, publisher, (despawnResult :: any).value)
+	if not committedEnemies or not isSuccess(enemyCommitResult) then
+		failPreparedDefeat(data, lifecycleToken, baseToken)
+		return false
+	end
+
+	local transitioned, transitionResult = callResult(lifecycle.commitBaseDefeat, lifecycle, lifecycleToken)
+	if not transitioned or not isSuccess(transitionResult) then
+		failPreparedDefeat(data, lifecycleToken, baseToken)
+		return false
+	end
+	local transition = (transitionResult :: any).value
+	if
+		type(transition) ~= "table"
+		or not table.isfrozen(transition)
+		or transition.committed ~= true
+		or type(transition.published) ~= "boolean"
+		or type(transition.snapshot) ~= "table"
+		or transition.snapshot.state ~= "Results"
+	then
+		failPreparedDefeat(data, nil, baseToken)
+		return false
+	end
+	data.resultsCommitCount = 1
+
+	-- The production BaseRuntimeService makes this a trusted total postcondition:
+	-- the prepared token was authenticated and all terminal/publication capacity
+	-- was reserved before Results committed. A returned failure is contained as
+	-- an adapter-contract invariant violation, not a recoverable transaction.
+	local baseCommitted, baseCommitResult = callResult(baseRuntime.commitPreparedDefeat, baseRuntime, baseToken)
+	if not baseCommitted or not isSuccess(baseCommitResult) then
+		return false
+	end
+	local baseOutcome = (baseCommitResult :: any).value
+	return type(baseOutcome) == "table"
+		and table.isfrozen(baseOutcome)
+		and baseOutcome.committed == true
+		and type(baseOutcome.published) == "boolean"
+end
+
+local function finishBasePass(data: ServiceData): boolean
+	local baseRuntime = data.baseRuntime
+	local passOrdinal = data.nextEnemyPassOrdinal
+	if baseRuntime == nil or passOrdinal > Validation.MAX_SAFE_INTEGER then
+		return false
+	end
+	local called, boundaryResult = callResult(baseRuntime.finishEnemyPass, baseRuntime, passOrdinal)
+	if not called or not isSuccess(boundaryResult) then
+		callResult(baseRuntime.fault, baseRuntime)
+		return false
+	end
+	local boundary = (boundaryResult :: any).value
+	if
+		type(boundary) ~= "table"
+		or not table.isfrozen(boundary)
+		or boundary.passOrdinal ~= passOrdinal
+		or (boundary.kind ~= "Noop" and boundary.kind ~= "Damage" and boundary.kind ~= "DefeatPending")
+	then
+		callResult(baseRuntime.fault, baseRuntime)
+		return false
+	end
+	if passOrdinal < Validation.MAX_SAFE_INTEGER then
+		data.nextEnemyPassOrdinal = passOrdinal + 1
+	else
+		-- A terminal defeat needs no successor. A nonterminal pass cannot be
+		-- represented safely and therefore faults closed without ever retaining
+		-- MAX_SAFE_INTEGER + 1.
+		data.nextEnemyPassOrdinal = Validation.MAX_SAFE_INTEGER
+	end
+	if boundary.kind == "DefeatPending" then
+		return coordinateDefeat(data, boundary)
+	end
+	if passOrdinal == Validation.MAX_SAFE_INTEGER then
+		abortCurrentBasePass(data)
+		return false
+	end
+	return true
 end
 
 local function advancePublisher(data: ServiceData, deltaSeconds: number): boolean
@@ -858,6 +1144,12 @@ local function update(data: ServiceData, deltaSeconds: number)
 	end
 
 	data.operationActive = true
+	if data.spawnAdmissionClosed then
+		local advanced = advancePublisher(data, deltaSeconds)
+		data.faultRequested = not advanced
+		finishOperation(data)
+		return
+	end
 	local listed, listResult = callResult(store.list, store)
 	local activeIds = if listed and isSuccess(listResult)
 		then denseFrozenAscendingIdsFromSnapshots((listResult :: any).value)
@@ -874,10 +1166,11 @@ local function update(data: ServiceData, deltaSeconds: number)
 			if stepResult == nil or not commitStepResult(data, activeIds, stepResult) then
 				data.faultRequested = true
 			else
+				local baseFinished = finishBasePass(data)
 				local requestedShutdown = data.shutdownRequested or stepResult.cleaned
 				local advanced = requestedShutdown or advancePublisher(data, deltaSeconds)
 				data.shutdownRequested = requestedShutdown
-				data.faultRequested = not requestedShutdown and (not advanced or stepResult.faulted)
+				data.faultRequested = not requestedShutdown and (not baseFinished or not advanced or stepResult.faulted)
 			end
 		end
 	end
@@ -956,7 +1249,51 @@ local function removePlayer(data: ServiceData, player: unknown)
 	end
 end
 
-local function createFreshStudioCatalog(): ConfigTypes.EnemyCatalog?
+type StudioFixtures = {
+	enemyCatalog: ConfigTypes.EnemyCatalog,
+	difficultyCatalog: ConfigTypes.DifficultyCatalog,
+	difficultyDefinitions: { [string]: ConfigTypes.DifficultyDefinition },
+}
+
+local function studioEnemyDefinition(
+	id: string,
+	displayName: string,
+	moveSpeedStudsPerSecond: number,
+	leakDamage: number
+): { [string]: unknown }
+	return {
+		id = id,
+		displayName = displayName,
+		modelAssetKey = STUDIO_MODEL_ASSET_KEY,
+		maxHealth = 100,
+		moveSpeedStudsPerSecond = moveSpeedStudsPerSecond,
+		leakDamage = leakDamage,
+		damageIncomeClass = "None",
+	}
+end
+
+local function studioDifficultyDefinition(id: string, displayName: string, maxHealth: number): { [string]: unknown }
+	return {
+		id = id,
+		displayName = displayName,
+		kind = "Finite",
+		waveCount = 1,
+		base = {
+			maxHealth = maxHealth,
+		},
+		modifiers = {
+			enemyHealthMultiplier = 1,
+			enemyMoveSpeedMultiplier = 1,
+		},
+		timing = {
+			earlyClearIntermissionSeconds = 0,
+			bossCadenceWaves = 1,
+			skipVoteMinimumDelaySeconds = 0,
+		},
+	}
+end
+
+local function createFreshStudioFixtures(): StudioFixtures?
 	local manifestResult = AssetSchema.validateManifest({
 		{
 			key = STUDIO_MODEL_ASSET_KEY,
@@ -966,34 +1303,73 @@ local function createFreshStudioCatalog(): ConfigTypes.EnemyCatalog?
 	if not manifestResult.ok or not AssetSchema.isValidatedManifest(manifestResult.value) then
 		return nil
 	end
-	local catalogResult = EnemySchema.validateCatalog({
-		{
-			id = STUDIO_STRESS_ENEMY_ID,
-			displayName = "Phase 09 Studio Stress Enemy",
-			modelAssetKey = STUDIO_MODEL_ASSET_KEY,
-			maxHealth = 100,
-			moveSpeedStudsPerSecond = 4,
-			leakDamage = 0,
-			damageIncomeClass = "None",
-		},
-		{
-			id = STUDIO_ENDPOINT_ENEMY_ID,
-			displayName = "Phase 09 Studio Endpoint Enemy",
-			modelAssetKey = STUDIO_MODEL_ASSET_KEY,
-			maxHealth = 100,
-			moveSpeedStudsPerSecond = 12,
-			leakDamage = 0,
-			damageIncomeClass = "None",
-		},
+	local enemyCatalogResult = EnemySchema.validateCatalog({
+		studioEnemyDefinition(STUDIO_MEASUREMENT_ENEMY_ID, "Phase 10 Studio Measurement Enemy", STUDIO_FAST_SPEED, 1),
+		studioEnemyDefinition(STUDIO_ZERO_ENEMY_ID, "Phase 10 Studio Zero Enemy", STUDIO_FAST_SPEED, 0),
+		studioEnemyDefinition(STUDIO_ORDINARY_ENEMY_ID, "Phase 10 Studio Ordinary Enemy", STUDIO_FAST_SPEED, 25),
+		studioEnemyDefinition(STUDIO_LOW_ENEMY_ID, "Phase 10 Studio Low Enemy", STUDIO_FAST_SPEED, 750_000),
+		studioEnemyDefinition(STUDIO_EXACT_ENEMY_ID, "Phase 10 Studio Exact Enemy", STUDIO_FAST_SPEED, 100),
+		studioEnemyDefinition(STUDIO_OVERKILL_ENEMY_ID, "Phase 10 Studio Overkill Enemy", STUDIO_FAST_SPEED, 101),
+		studioEnemyDefinition(
+			STUDIO_HIGH_ENEMY_ID,
+			"Phase 10 Studio High Enemy",
+			STUDIO_FAST_SPEED,
+			Validation.MAX_SAFE_INTEGER
+		),
+		studioEnemyDefinition(STUDIO_SURVIVOR_ENEMY_ID, "Phase 10 Studio Survivor Enemy", STUDIO_SURVIVOR_SPEED, 25),
 	}, manifestResult.value)
-	if not catalogResult.ok or not EnemySchema.isValidatedCatalog(catalogResult.value) then
+	if not enemyCatalogResult.ok or not EnemySchema.isValidatedCatalog(enemyCatalogResult.value) then
 		return nil
 	end
-	return catalogResult.value
+	local difficultyCatalogResult = DifficultySchema.validateCatalog({
+		studioDifficultyDefinition(
+			STUDIO_MEASUREMENT_DIFFICULTY_ID,
+			"Phase 10 Studio Measurement Difficulty",
+			STUDIO_MEASUREMENT_MAX_HEALTH
+		),
+		studioDifficultyDefinition(
+			STUDIO_DEFEAT_DIFFICULTY_ID,
+			"Phase 10 Studio Defeat Difficulty",
+			STUDIO_DEFEAT_MAX_HEALTH
+		),
+	}, manifestResult.value)
+	if not difficultyCatalogResult.ok or not DifficultySchema.isValidatedCatalog(difficultyCatalogResult.value) then
+		return nil
+	end
+	local measurementDefinition = difficultyCatalogResult.value.byId[STUDIO_MEASUREMENT_DIFFICULTY_ID]
+	local defeatDefinition = difficultyCatalogResult.value.byId[STUDIO_DEFEAT_DIFFICULTY_ID]
+	if measurementDefinition == nil or defeatDefinition == nil then
+		return nil
+	end
+	return table.freeze({
+		enemyCatalog = enemyCatalogResult.value,
+		difficultyCatalog = difficultyCatalogResult.value,
+		difficultyDefinitions = table.freeze({
+			Measurement = measurementDefinition,
+			Defeat = defeatDefinition,
+		}),
+	})
 end
 
 local function invalidTriggerRequest(): Result.Failure<ServiceError>
 	return serviceFailure("INVALID_ARGUMENT", "runtimeTrigger")
+end
+
+local function studioVariantAllowed(baseVariant: string?, enemyVariant: string): boolean
+	if baseVariant == "Measurement" then
+		return enemyVariant == "Measurement"
+			or enemyVariant == "Zero"
+			or enemyVariant == "Ordinary"
+			or enemyVariant == "Low"
+	end
+	return baseVariant == "Defeat"
+		and (
+			enemyVariant == "Zero"
+			or enemyVariant == "Exact"
+			or enemyVariant == "Overkill"
+			or enemyVariant == "High"
+			or enemyVariant == "Survivor"
+		)
 end
 
 local function dispatchRuntimeTrigger(data: ServiceData, request: unknown): unknown
@@ -1009,91 +1385,72 @@ local function dispatchRuntimeTrigger(data: ServiceData, request: unknown): unkn
 		return invalidTriggerRequest()
 	end
 	local operation = (request :: any).operation
-	if operation == "InstallCatalog" then
+	if operation == "InstallFixtures" then
 		if not hasExactFields(request :: any, { operation = true }) then
 			return invalidTriggerRequest()
 		end
-		return (service :: any):installStudioCatalog()
-	elseif operation == "Spawn" then
+		return (service :: any):installStudioFixtures()
+	elseif operation == "InitializeBase" then
 		if not hasExactFields(request :: any, { operation = true, variant = true }) then
 			return invalidTriggerRequest()
 		end
 		local variant = (request :: any).variant
-		if variant ~= "Stress" and variant ~= "Endpoint" then
+		if variant ~= "Measurement" and variant ~= "Defeat" then
 			return invalidTriggerRequest()
 		end
+		return (service :: any):initializeStudioBase(variant)
+	elseif operation == "ActivateWave" then
+		if not hasExactFields(request :: any, { operation = true }) then
+			return invalidTriggerRequest()
+		end
+		return (service :: any):activateStudioWave()
+	elseif operation == "SpawnFixture" then
+		if not hasExactFields(request :: any, { operation = true, variant = true }) then
+			return invalidTriggerRequest()
+		end
+		local variant = (request :: any).variant
+		if type(variant) ~= "string" or STUDIO_ENEMY_IDS[variant] == nil then
+			return invalidTriggerRequest()
+		end
+		local enemyId = STUDIO_ENEMY_IDS[variant]
 		local laneId = data.studioLaneId
-		if not data.studioCatalogInstalled or laneId == nil then
+		if
+			not data.studioWaveActivated
+			or not studioVariantAllowed(data.studioBaseVariant, variant)
+			or laneId == nil
+		then
 			return serviceFailure("UNAVAILABLE", "runtimeTrigger")
 		end
-		local enemyId = if variant == "Stress" then STUDIO_STRESS_ENEMY_ID else STUDIO_ENDPOINT_ENEMY_ID
-		return (service :: any):spawn(enemyId, laneId)
-	elseif operation == "SetSlow" then
-		if not hasExactFields(request :: any, { operation = true, runtimeEnemyId = true, multiplier = true }) then
+		local spawnResult = (service :: any):spawn(enemyId, laneId)
+		if isSuccess(spawnResult) then
+			data.studioSpawnCount = math.min(data.studioSpawnCount + 1, Validation.MAX_SAFE_INTEGER)
+		end
+		return spawnResult
+	elseif operation == "SpawnBatch" then
+		if not hasExactFields(request :: any, { operation = true, batch = true }) then
 			return invalidTriggerRequest()
 		end
-		local runtimeEnemyId = (request :: any).runtimeEnemyId
-		local multiplier = (request :: any).multiplier
-		if
-			type(runtimeEnemyId) ~= "number"
-			or not Validation.isSafeInteger(runtimeEnemyId)
-			or runtimeEnemyId < 1
-			or runtimeEnemyId > EnemyProtocol.MAX_RUNTIME_ENEMY_ID
-			or not Validation.isFiniteNumber(multiplier)
-			or multiplier < 0
-			or multiplier > 1
-		then
+		local batch = (request :: any).batch
+		if type(batch) ~= "string" or STUDIO_BATCH_COUNTS[batch] == nil then
 			return invalidTriggerRequest()
 		end
-		return (service :: any):setSlowMultiplier(runtimeEnemyId, multiplier)
-	elseif operation == "Despawn" then
-		if not hasExactFields(request :: any, { operation = true, runtimeEnemyId = true }) then
-			return invalidTriggerRequest()
-		end
-		local runtimeEnemyId = (request :: any).runtimeEnemyId
-		if
-			type(runtimeEnemyId) ~= "number"
-			or not Validation.isSafeInteger(runtimeEnemyId)
-			or runtimeEnemyId < 1
-			or runtimeEnemyId > EnemyProtocol.MAX_RUNTIME_ENEMY_ID
-		then
-			return invalidTriggerRequest()
-		end
-		return (service :: any):despawn(runtimeEnemyId)
-	elseif operation == "Snapshot" then
+		return (service :: any):spawnStudioBatch(batch)
+	elseif operation == "Diagnostics" then
 		if not hasExactFields(request :: any, { operation = true }) then
 			return invalidTriggerRequest()
 		end
-		return (service :: any):list()
-	elseif operation == "Metrics" then
-		if not hasExactFields(request :: any, { operation = true }) then
-			return invalidTriggerRequest()
-		end
-		return Result.ok((service :: any):getMetrics())
+		return (service :: any):getStudioDiagnostics()
 	elseif operation == "ResetTiming" then
 		if not hasExactFields(request :: any, { operation = true }) then
 			return invalidTriggerRequest()
 		end
 		resetPassTiming(data)
 		return Result.ok(table.freeze({ reset = true }))
-	elseif operation == "Clear" then
+	elseif operation == "ClearEnemies" then
 		if not hasExactFields(request :: any, { operation = true }) then
 			return invalidTriggerRequest()
 		end
-		local listed = (service :: any):list()
-		if not isSuccess(listed) then
-			return listed
-		end
-		local despawns: { unknown } = {}
-		for _, enemySnapshot in (listed :: any).value do
-			local despawned = (service :: any):despawn(enemySnapshot.runtimeEnemyId)
-			if not isSuccess(despawned) then
-				return despawned
-			end
-			table.insert(despawns, (despawned :: any).value)
-		end
-		table.freeze(despawns)
-		return Result.ok(despawns)
+		return (service :: any):clearStudioEnemies()
 	end
 	return invalidTriggerRequest()
 end
@@ -1114,7 +1471,21 @@ local function installRuntimeTrigger(data: ServiceData): boolean
 		return true
 	end
 	local handler = function(request: unknown): unknown
-		return dispatchRuntimeTrigger(data, request)
+		if data.studioTriggerOperationActive then
+			return serviceFailure("REENTRANT", "runtimeTrigger")
+		end
+		data.studioTriggerOperationActive = true
+		local called, resultValue = callNonYielding(dispatchRuntimeTrigger, data, request)
+		data.studioTriggerOperationActive = false
+		if not called then
+			if data.operationActive then
+				data.faultRequested = true
+			else
+				beginRuntimeFault(data)
+			end
+			return serviceFailure("INTERNAL_ERROR", "runtimeTrigger")
+		end
+		return resultValue
 	end
 	local created, trigger = callNonYielding(createRuntimeTrigger, handler)
 	if not created or not isRuntimeTriggerAdapter(trigger) then
@@ -1176,12 +1547,14 @@ local function initialize(data: ServiceData)
 	end
 	data.state = "Initializing"
 	local matchLifecycle = data.matchLifecycle
+	local baseRuntime = data.baseRuntime
 	local createStore = data.createStore
 	local createPublisher = data.createPublisher
 	local sender = data.sender
 	local getRecipients = data.getRecipients
 	if
 		matchLifecycle == nil
+		or baseRuntime == nil
 		or createStore == nil
 		or createPublisher == nil
 		or sender == nil
@@ -1204,12 +1577,19 @@ local function initialize(data: ServiceData)
 	if type(matchSnapshot) ~= "table" or (matchSnapshot :: any).matchId == nil then
 		failInitialize(data, "MATCH_SNAPSHOT_INVALID")
 	end
+	local endpointSink = function(outcome: unknown)
+		local recorded, recordResult = callResult((baseRuntime :: BaseRuntimeAdapter).recordLeak, baseRuntime, outcome)
+		if not recorded or not isSuccess(recordResult) then
+			staticError("BASE_ENDPOINT_CALLBACK_FAILED")
+		end
+	end
 
 	local storeCalled, storeResult = callResult(
 		createStore :: RuntimeStoreFactory,
 		(matchSnapshot :: any).matchId,
 		data.catalog,
-		(mapResult :: any).value
+		(mapResult :: any).value,
+		endpointSink
 	)
 	if not storeCalled or not isSuccess(storeResult) then
 		failInitialize(data, "STORE_CREATION_FAILED")
@@ -1341,41 +1721,237 @@ local function finishAndReturn(data: ServiceData, resultValue: any): any
 	return resultValue
 end
 
-function ServiceMethods.installStudioCatalog(self: Service): unknown
+function ServiceMethods.installStudioFixtures(self: Service): unknown
 	local data = requireData(self)
-	local unavailable = requireFacade(data, "installStudioCatalog", true)
+	local operation: Operation = "installStudioFixtures"
+	local unavailable = requireFacade(data, operation, true)
 	if unavailable ~= nil then
 		return unavailable
 	end
 	if data.studioTrigger == nil or data.studioCatalogInstalled then
-		return finishAndReturn(data, serviceFailure("STUDIO_ONLY", "installStudioCatalog"))
+		return finishAndReturn(data, serviceFailure("STUDIO_ONLY", operation))
 	end
-	local catalog = createFreshStudioCatalog()
+	local fixtures = createFreshStudioFixtures()
 	local store = data.store
-	if catalog == nil or store == nil then
-		return finishAndReturn(data, malformedDependencyResult(data, "installStudioCatalog"))
+	local baseRuntime = data.baseRuntime
+	if fixtures == nil or store == nil or baseRuntime == nil then
+		return finishAndReturn(data, malformedDependencyResult(data, operation))
 	end
-	local installed, installResult = callResult(store.installStudioCatalog, store, catalog)
-	if not installed then
-		return finishAndReturn(data, malformedDependencyResult(data, "installStudioCatalog"))
+	local baseInstalled, baseInstallResult =
+		callResult(baseRuntime.installStudioCatalog, baseRuntime, fixtures.difficultyCatalog)
+	if not baseInstalled then
+		return finishAndReturn(data, malformedDependencyResult(data, operation))
 	end
-	if not isSuccess(installResult) then
-		return finishAndReturn(data, installResult)
+	if not isSuccess(baseInstallResult) then
+		return finishAndReturn(data, baseInstallResult)
+	end
+	local enemyInstalled, enemyInstallResult = callResult(store.installStudioCatalog, store, fixtures.enemyCatalog)
+	if not enemyInstalled or not isSuccess(enemyInstallResult) then
+		data.faultRequested = true
+		return finishAndReturn(
+			data,
+			if enemyInstalled then enemyInstallResult else serviceFailure("INTERNAL_ERROR", operation)
+		)
 	end
 	local listed, laneResult = callResult(store.listLaneIds, store)
 	local laneIds = if listed and isSuccess(laneResult) then (laneResult :: any).value else nil
 	if not isValidLaneIdList(laneIds) then
-		return finishAndReturn(data, malformedDependencyResult(data, "installStudioCatalog"))
+		return finishAndReturn(data, malformedDependencyResult(data, operation))
 	end
 	data.studioCatalogInstalled = true
 	data.studioLaneId = laneIds[1]
+	data.studioDifficultyDefinitions = fixtures.difficultyDefinitions
 	return finishAndReturn(
 		data,
 		Result.ok(table.freeze({
-			enemyIds = table.freeze({ STUDIO_STRESS_ENEMY_ID, STUDIO_ENDPOINT_ENEMY_ID }),
+			baseVariants = table.freeze({ "Measurement", "Defeat" }),
+			enemyVariants = table.freeze({
+				"Measurement",
+				"Zero",
+				"Ordinary",
+				"Low",
+				"Exact",
+				"Overkill",
+				"High",
+				"Survivor",
+			}),
+			batchVariants = table.freeze({ "One", "ThirtyTwo", "SixtyFour", "OneTwentyEight" }),
 			laneId = laneIds[1],
 		}))
 	)
+end
+
+function ServiceMethods.initializeStudioBase(self: Service, variant: unknown): unknown
+	local data = requireData(self)
+	local operation: Operation = "initializeStudioBase"
+	local unavailable = requireFacade(data, operation, true)
+	if unavailable ~= nil then
+		return unavailable
+	end
+	local definitions = data.studioDifficultyDefinitions
+	local baseRuntime = data.baseRuntime
+	local definition = if definitions ~= nil and type(variant) == "string" then definitions[variant] else nil
+	if
+		data.studioTrigger == nil
+		or not data.studioCatalogInstalled
+		or data.studioBaseInitialized
+		or definition == nil
+		or baseRuntime == nil
+	then
+		return finishAndReturn(data, serviceFailure("STUDIO_ONLY", operation))
+	end
+	local called, resultValue = callResult(baseRuntime.initializeBase, baseRuntime, definition)
+	if not called then
+		return finishAndReturn(data, malformedDependencyResult(data, operation))
+	end
+	if isSuccess(resultValue) then
+		data.studioBaseInitialized = true
+		data.studioBaseVariant = variant :: string
+		data.studioDifficultyDefinitions = nil
+	end
+	return finishAndReturn(data, resultValue)
+end
+
+function ServiceMethods.activateStudioWave(self: Service): unknown
+	local data = requireData(self)
+	local operation: Operation = "activateStudioWave"
+	local unavailable = requireFacade(data, operation, true)
+	if unavailable ~= nil then
+		return unavailable
+	end
+	local matchLifecycle = data.matchLifecycle
+	if
+		data.studioTrigger == nil
+		or not data.studioBaseInitialized
+		or data.studioWaveActivated
+		or matchLifecycle == nil
+	then
+		return finishAndReturn(data, serviceFailure("STUDIO_ONLY", operation))
+	end
+	local called, resultValue = callResult(matchLifecycle.activateStudioWaveForEvidence, matchLifecycle)
+	if not called then
+		return finishAndReturn(data, malformedDependencyResult(data, operation))
+	end
+	if isSuccess(resultValue) then
+		data.studioWaveActivated = true
+	end
+	return finishAndReturn(data, resultValue)
+end
+
+function ServiceMethods.spawnStudioBatch(self: Service, batch: unknown): unknown
+	local data = requireData(self)
+	local count = if type(batch) == "string" then STUDIO_BATCH_COUNTS[batch] else nil
+	local laneId = data.studioLaneId
+	if
+		data.studioTrigger == nil
+		or not data.studioWaveActivated
+		or data.studioBaseVariant ~= "Measurement"
+		or type(count) ~= "number"
+		or laneId == nil
+	then
+		return serviceFailure("STUDIO_ONLY", "runtimeTrigger")
+	end
+	local listed = (self :: any):list()
+	local activeSnapshots = if isSuccess(listed) then (listed :: any).value else nil
+	if
+		type(activeSnapshots) ~= "table"
+		or getmetatable(activeSnapshots :: any) ~= nil
+		or #activeSnapshots > EnemyProtocol.MAX_ACTIVE_ENEMIES - count
+	then
+		return serviceFailure("UNAVAILABLE", "runtimeTrigger")
+	end
+	for _ = 1, count do
+		local spawned = (self :: any):spawn(STUDIO_MEASUREMENT_ENEMY_ID, laneId)
+		if not isSuccess(spawned) then
+			return spawned
+		end
+		data.studioSpawnCount = math.min(data.studioSpawnCount + 1, Validation.MAX_SAFE_INTEGER)
+	end
+	data.studioBatchCount = math.min(data.studioBatchCount + 1, Validation.MAX_SAFE_INTEGER)
+	return Result.ok(table.freeze({
+		batch = batch,
+		count = count,
+	}))
+end
+
+function ServiceMethods.clearStudioEnemies(self: Service): unknown
+	local data = requireData(self)
+	if data.studioTrigger == nil then
+		return serviceFailure("STUDIO_ONLY", "runtimeTrigger")
+	end
+	local listed = (self :: any):list()
+	if not isSuccess(listed) then
+		return listed
+	end
+	local clearedCount = 0
+	for _, enemySnapshot in (listed :: any).value do
+		local despawned = (self :: any):despawn(enemySnapshot.runtimeEnemyId)
+		if not isSuccess(despawned) then
+			return despawned
+		end
+		clearedCount += 1
+	end
+	return Result.ok(table.freeze({ count = clearedCount }))
+end
+
+function ServiceMethods.getStudioDiagnostics(self: Service): unknown
+	local data = requireData(self)
+	local matchLifecycle = data.matchLifecycle
+	local baseRuntime = data.baseRuntime
+	if data.studioTrigger == nil or matchLifecycle == nil or baseRuntime == nil then
+		return serviceFailure("UNAVAILABLE", "runtimeTrigger")
+	end
+	local matchCalled, matchResult = callResult(matchLifecycle.getSnapshot, matchLifecycle)
+	local baseCalled, baseResult = callResult(baseRuntime.getSnapshot, baseRuntime)
+	local seedCalled, seedResult = callResult(baseRuntime.getResultSeed, baseRuntime)
+	local listed = (self :: any):list()
+	local metricsCalled, baseMetrics = callNonYielding(baseRuntime.getMetrics, baseRuntime)
+	local defeatCalled, defeatState = callNonYielding(baseRuntime.getDefeatState, baseRuntime)
+	local matchSnapshot = if isSuccess(matchResult) then (matchResult :: any).value else nil
+	local baseSnapshot = if isSuccess(baseResult) then (baseResult :: any).value else nil
+	local resultSeed = if isSuccess(seedResult) then (seedResult :: any).value else nil
+	local activeSnapshots = if isSuccess(listed) then (listed :: any).value else nil
+	if
+		not matchCalled
+		or not isSuccess(matchResult)
+		or not baseCalled
+		or not seedCalled
+		or not isSuccess(listed)
+		or not metricsCalled
+		or type(baseMetrics) ~= "table"
+		or not table.isfrozen(baseMetrics :: any)
+		or not defeatCalled
+		or type(defeatState) ~= "table"
+		or not table.isfrozen(defeatState :: any)
+		or type(matchSnapshot) ~= "table"
+		or not table.isfrozen(matchSnapshot :: any)
+		or type((matchSnapshot :: any).matchId) ~= "string"
+		or type((matchSnapshot :: any).state) ~= "string"
+		or type((matchSnapshot :: any).revision) ~= "number"
+		or not Validation.isSafeInteger((matchSnapshot :: any).revision)
+		or (baseSnapshot ~= nil and (type(baseSnapshot) ~= "table" or not table.isfrozen(baseSnapshot :: any)))
+		or (resultSeed ~= nil and (type(resultSeed) ~= "table" or not table.isfrozen(resultSeed :: any)))
+		or type(activeSnapshots) ~= "table"
+		or not table.isfrozen(activeSnapshots :: any)
+		or #activeSnapshots > EnemyProtocol.MAX_ACTIVE_ENEMIES
+	then
+		return serviceFailure("INTERNAL_ERROR", "runtimeTrigger")
+	end
+	return Result.ok(table.freeze({
+		activeEnemyCount = #activeSnapshots,
+		enemy = self:getMetrics(),
+		base = baseMetrics,
+		baseSnapshotAvailable = baseSnapshot ~= nil,
+		baseSnapshot = baseSnapshot,
+		defeatState = defeatState,
+		match = table.freeze({
+			matchId = (matchSnapshot :: any).matchId,
+			state = (matchSnapshot :: any).state,
+			revision = (matchSnapshot :: any).revision,
+		}),
+		resultSeedAvailable = resultSeed ~= nil,
+		resultSeed = resultSeed,
+	}))
 end
 
 function ServiceMethods.spawn(self: Service, enemyId: unknown, laneId: unknown): unknown
@@ -1509,13 +2085,14 @@ function ServiceMethods.resolveEndpoint(self: Service, runtimeEnemyId: unknown):
 	local commitCalled, commitResult =
 		callResult(publisher.commitEndpoint, publisher, (resolution :: any).endpoint, (resolution :: any).despawn)
 	if not commitCalled or not isSuccess(commitResult) then
-		data.faultRequested = true
+		abortCurrentBasePass(data)
 		return finishAndReturn(
 			data,
 			if commitCalled then commitResult else serviceFailure("INTERNAL_ERROR", "resolveEndpoint")
 		)
 	end
-	if (resolution :: any).callbackSucceeded ~= true then
+	local baseFinished = finishBasePass(data)
+	if (resolution :: any).callbackSucceeded ~= true or not baseFinished then
 		data.faultRequested = true
 	end
 	return finishAndReturn(data, storeResult)
@@ -1617,12 +2194,22 @@ function ServiceMethods.getMetrics(self: Service): ServiceMetrics
 		publisher = publisherMetrics(data),
 		studioTriggerCount = if data.studioTrigger == nil then 0 else 1,
 		studioCatalogInstalled = data.studioCatalogInstalled,
+		studioBaseInitialized = data.studioBaseInitialized,
+		studioBaseVariant = data.studioBaseVariant,
+		studioWaveActivated = data.studioWaveActivated,
+		studioSpawnCount = data.studioSpawnCount,
+		studioBatchCount = data.studioBatchCount,
+		spawnAdmissionClosed = data.spawnAdmissionClosed,
+		nextEnemyPassOrdinal = data.nextEnemyPassOrdinal,
+		defeatCount = data.defeatCount,
+		resultsCommitCount = data.resultsCommitCount,
 		passTiming = passTiming,
 	})
 end
 
 local function construct(
 	matchLifecycleValue: unknown,
+	baseRuntimeValue: unknown,
 	catalog: unknown,
 	createStoreValue: unknown,
 	createPublisherValue: unknown,
@@ -1632,10 +2219,12 @@ local function construct(
 	getRecipientsValue: unknown,
 	isStudioValue: unknown,
 	passClockValue: unknown,
-	createRuntimeTriggerValue: unknown
+	createRuntimeTriggerValue: unknown,
+	initialEnemyPassOrdinalValue: unknown
 ): Service
 	if
 		not isMatchLifecycleAdapter(matchLifecycleValue)
+		or not isBaseRuntimeAdapter(baseRuntimeValue)
 		or type(createStoreValue) ~= "function"
 		or type(createPublisherValue) ~= "function"
 		or type(connectStepValue) ~= "function"
@@ -1645,6 +2234,14 @@ local function construct(
 		or type(isStudioValue) ~= "function"
 		or type(passClockValue) ~= "function"
 		or type(createRuntimeTriggerValue) ~= "function"
+		or not (
+			initialEnemyPassOrdinalValue == nil
+			or (
+				type(initialEnemyPassOrdinalValue) == "number"
+				and Validation.isSafeInteger(initialEnemyPassOrdinalValue :: number)
+				and (initialEnemyPassOrdinalValue :: number) >= 1
+			)
+		)
 	then
 		staticError("INVALID_DEPENDENCIES")
 	end
@@ -1652,6 +2249,7 @@ local function construct(
 	local data: ServiceData = {
 		state = "Constructed",
 		matchLifecycle = matchLifecycleValue :: MatchLifecycleAdapter,
+		baseRuntime = baseRuntimeValue :: BaseRuntimeAdapter,
 		catalog = catalog,
 		createStore = createStoreValue :: RuntimeStoreFactory,
 		createPublisher = createPublisherValue :: PublisherFactory,
@@ -1674,8 +2272,21 @@ local function construct(
 		releasing = false,
 		deferredDisconnectFailed = false,
 		studioTrigger = nil,
+		studioTriggerOperationActive = false,
 		studioCatalogInstalled = false,
 		studioLaneId = nil,
+		studioDifficultyDefinitions = nil,
+		studioBaseInitialized = false,
+		studioBaseVariant = nil,
+		studioWaveActivated = false,
+		studioSpawnCount = 0,
+		studioBatchCount = 0,
+		spawnAdmissionClosed = false,
+		nextEnemyPassOrdinal = if initialEnemyPassOrdinalValue == nil
+			then 1
+			else initialEnemyPassOrdinalValue :: number,
+		defeatCount = 0,
+		resultsCommitCount = 0,
 		passDurationSamples = {},
 		nextPassDurationIndex = 1,
 		totalPassDurationCount = 0,
@@ -1689,7 +2300,7 @@ local function construct(
 	data.service = service
 	data.serviceDefinition = table.freeze({
 		name = SERVICE_NAME,
-		dependencies = table.freeze({ "NetworkRegistry", "MatchLifecycle" }),
+		dependencies = table.freeze({ "NetworkRegistry", "MatchLifecycle", "BaseRuntime" }),
 		initialize = function()
 			initialize(data)
 		end,
@@ -1704,8 +2315,13 @@ local function construct(
 	return service
 end
 
-local function productionCreateStore(matchId: unknown, catalog: unknown, runtimeMapSnapshot: unknown): unknown
-	return EnemyRuntimeStore.new(matchId, catalog, runtimeMapSnapshot, nil)
+local function productionCreateStore(
+	matchId: unknown,
+	catalog: unknown,
+	runtimeMapSnapshot: unknown,
+	endpointSink: unknown
+): unknown
+	return EnemyRuntimeStore.new(matchId, catalog, runtimeMapSnapshot, endpointSink)
 end
 
 local function productionCreatePublisher(matchId: unknown, enemyEpoch: unknown, dependencies: unknown): unknown
@@ -1761,11 +2377,13 @@ end
 
 function EnemySimulationService.new(
 	matchLifecycle: MatchLifecycleAdapter,
+	baseRuntime: BaseRuntimeAdapter,
 	catalog: ConfigTypes.EnemyCatalog,
 	enemySender: EnemySender
 ): Service
 	return construct(
 		matchLifecycle,
+		baseRuntime,
 		catalog,
 		productionCreateStore,
 		productionCreatePublisher,
@@ -1775,7 +2393,8 @@ function EnemySimulationService.new(
 		productionGetRecipients,
 		productionIsStudio,
 		productionPassClock,
-		productionCreateRuntimeTrigger
+		productionCreateRuntimeTrigger,
+		nil
 	)
 end
 
@@ -1812,6 +2431,7 @@ if testModuleIdentityIsExact() then
 		end
 		local allowedFields = {
 			matchLifecycle = true,
+			baseRuntime = true,
 			catalog = true,
 			createStore = true,
 			createPublisher = true,
@@ -1822,6 +2442,7 @@ if testModuleIdentityIsExact() then
 			isStudio = true,
 			passClock = true,
 			createRuntimeTrigger = true,
+			initialEnemyPassOrdinal = true,
 		}
 		for key in next, dependencies :: any do
 			if type(key) ~= "string" or allowedFields[key] ~= true then
@@ -1849,6 +2470,7 @@ if testModuleIdentityIsExact() then
 		end
 		return construct(
 			dependencyValue.matchLifecycle,
+			dependencyValue.baseRuntime,
 			dependencyValue.catalog,
 			dependencyValue.createStore,
 			dependencyValue.createPublisher,
@@ -1858,7 +2480,8 @@ if testModuleIdentityIsExact() then
 			dependencyValue.getRecipients,
 			isStudio,
 			passClock,
-			createRuntimeTrigger
+			createRuntimeTrigger,
+			dependencyValue.initialEnemyPassOrdinal
 		)
 	end
 end

@@ -8,7 +8,7 @@ local Validation = require(script.Parent.Parent.util.Validation)
 export type RuntimeEnemyId = number
 export type EnemyEpoch = number
 export type EnemyLifecycle = "Active" | "EndpointResolved"
-export type DespawnReason = "Manual" | "Endpoint"
+export type DespawnReason = "Manual" | "Endpoint" | "Defeat"
 export type StateBatchKind = "SpawnBatch" | "CorrectionBatch" | "StateChangeBatch"
 export type SnapshotBoundaryKind = "SnapshotBegin" | "SnapshotEnd"
 export type ReplicationKind = StateBatchKind | "DespawnBatch" | SnapshotBoundaryKind | "SnapshotChunk"
@@ -194,7 +194,7 @@ local DESPAWN_ENTRY_VALIDATOR = PayloadValidation.record({
 	runtimeEnemyId = RUNTIME_ENEMY_ID_VALIDATOR,
 	revision = POSITIVE_SEQUENCE_VALIDATOR,
 	sampleServerTime = NONNEGATIVE_FINITE_NUMBER_VALIDATOR,
-	reason = PayloadValidation.enum({ "Manual", "Endpoint" }),
+	reason = PayloadValidation.enum({ "Manual", "Endpoint", "Defeat" }),
 })
 
 local STATE_ENTRY_ARRAY_VALIDATOR = PayloadValidation.array(ENEMY_STATE_ENTRY_VALIDATOR, MAX_ENTRIES_PER_MESSAGE)

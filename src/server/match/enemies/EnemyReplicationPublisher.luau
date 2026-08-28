@@ -17,11 +17,13 @@ export type Operation =
 	| "preflightStateChange"
 	| "preflightEndpoint"
 	| "preflightManualDespawn"
+	| "preflightDefeat"
 	| "preflightStep"
 	| "commitSpawn"
 	| "commitStateChange"
 	| "commitEndpoint"
 	| "commitManualDespawn"
+	| "commitDefeat"
 	| "observeCorrection"
 	| "advance"
 	| "requestSnapshot"
@@ -124,7 +126,7 @@ type RuntimeDespawnSnapshot = {
 	laneId: string,
 	revision: number,
 	lifecycle: "Despawned",
-	reason: "Manual" | "Endpoint",
+	reason: "Manual" | "Endpoint" | "Defeat",
 	sampleServerTime: number,
 }
 
@@ -734,6 +736,72 @@ function PublisherMethods.preflightManualDespawn(
 	return Result.ok(true)
 end
 
+local function validateDefeatIdSet(
+	data: PublisherData,
+	runtimeEnemyIdsValue: unknown,
+	operation: Operation
+): ({ RuntimeEnemyId }?, PublisherError?)
+	if
+		type(runtimeEnemyIdsValue) ~= "table"
+		or not table.isfrozen(runtimeEnemyIdsValue :: any)
+		or getmetatable(runtimeEnemyIdsValue :: any) ~= nil
+	then
+		return nil, makeError("INVALID_ARGUMENT", operation)
+	end
+	local runtimeEnemyIds = runtimeEnemyIdsValue :: { unknown }
+	local length = #runtimeEnemyIds
+	if length > data.limits.maxActive or length ~= data.activeRepresentationCount then
+		return nil, makeError("INVALID_ARGUMENT", operation)
+	end
+	local count = 0
+	for key in next, runtimeEnemyIds :: any do
+		count += 1
+		if type(key) ~= "number" or not Validation.isSafeInteger(key) or key < 1 or key > length then
+			return nil, makeError("INVALID_ARGUMENT", operation)
+		end
+	end
+	if count ~= length then
+		return nil, makeError("INVALID_ARGUMENT", operation)
+	end
+	local previousId: number? = nil
+	for _, runtimeEnemyId in runtimeEnemyIds do
+		if
+			not isSafePositiveInteger(runtimeEnemyId, data.limits.maxLifetime)
+			or (previousId ~= nil and (runtimeEnemyId :: number) <= previousId)
+		then
+			return nil, makeError("INVALID_ARGUMENT", operation)
+		end
+		local record = data.representations[runtimeEnemyId :: number]
+		if record == nil or not record.active or not record.despawnReserved then
+			return nil, makeError("ILLEGAL_LIFECYCLE", operation)
+		end
+		if record.lastRevision >= Validation.MAX_SAFE_INTEGER then
+			return nil, makeError("REVISION_EXHAUSTED", operation)
+		end
+		previousId = runtimeEnemyId :: number
+	end
+	return runtimeEnemyIds :: any, nil
+end
+
+function PublisherMethods.preflightDefeat(
+	self: Publisher,
+	runtimeEnemyIdsValue: unknown
+): Result.Result<boolean, PublisherError>
+	local data = requireData(self)
+	local liveError = validateLive(data, "preflightDefeat", true)
+	if liveError ~= nil then
+		return Result.err(liveError)
+	end
+	local runtimeEnemyIds, idError = validateDefeatIdSet(data, runtimeEnemyIdsValue, "preflightDefeat")
+	if runtimeEnemyIds == nil then
+		return Result.err(idError :: PublisherError)
+	end
+	if not canAdvanceOrdinal(data, #runtimeEnemyIds) then
+		return failure("REVISION_EXHAUSTED", "preflightDefeat")
+	end
+	return Result.ok(true)
+end
+
 function PublisherMethods.preflightStep(
 	self: Publisher,
 	runtimeEnemyIdsValue: unknown
@@ -964,6 +1032,28 @@ function PublisherMethods.commitEndpoint(
 	return Result.ok(true)
 end
 
+local function commitDespawn(data: PublisherData, record: Representation, despawn: EnemyProtocol.DespawnEntry)
+	clearDirty(data, despawn.runtimeEnemyId)
+	removeActiveEntries(data, record)
+	if record.endpointReserved then
+		record.endpointReserved = false
+		data.reservedFutureMessageCount -= 1
+	end
+	insertEntry(data, record, {
+		kind = "Despawn",
+		ordinal = takeOrdinal(data),
+		runtimeEnemyId = despawn.runtimeEnemyId,
+		revision = despawn.revision,
+		state = nil,
+		despawn = despawn,
+		funding = "Despawn",
+	})
+	record.lastRevision = despawn.revision
+	record.active = false
+	data.activeRepresentationCount -= 1
+	data.terminalPendingCount += 1
+end
+
 function PublisherMethods.commitManualDespawn(
 	self: Publisher,
 	despawnValue: unknown
@@ -988,26 +1078,73 @@ function PublisherMethods.commitManualDespawn(
 		return failure("REVISION_EXHAUSTED", "commitManualDespawn")
 	end
 
-	clearDirty(data, despawn.runtimeEnemyId)
-	removeActiveEntries(data, record)
-	if record.endpointReserved then
-		record.endpointReserved = false
-		data.reservedFutureMessageCount -= 1
-	end
-	insertEntry(data, record, {
-		kind = "Despawn",
-		ordinal = takeOrdinal(data),
-		runtimeEnemyId = despawn.runtimeEnemyId,
-		revision = despawn.revision,
-		state = nil,
-		despawn = despawn,
-		funding = "Despawn",
-	})
-	record.lastRevision = despawn.revision
-	record.active = false
-	data.activeRepresentationCount -= 1
-	data.terminalPendingCount += 1
+	commitDespawn(data, record, despawn)
 	return Result.ok(despawn)
+end
+
+function PublisherMethods.commitDefeat(
+	self: Publisher,
+	despawnValues: unknown
+): Result.Result<{ EnemyProtocol.DespawnEntry }, PublisherError>
+	local data = requireData(self)
+	local liveError = validateLive(data, "commitDefeat", true)
+	if liveError ~= nil then
+		return Result.err(liveError)
+	end
+	if
+		type(despawnValues) ~= "table"
+		or not table.isfrozen(despawnValues :: any)
+		or getmetatable(despawnValues :: any) ~= nil
+	then
+		return failure("INVALID_ARGUMENT", "commitDefeat")
+	end
+	local values = despawnValues :: { unknown }
+	local length = #values
+	if length ~= data.activeRepresentationCount or length > data.limits.maxActive then
+		return failure("INVALID_ARGUMENT", "commitDefeat")
+	end
+	local keyCount = 0
+	for key in next, values :: any do
+		keyCount += 1
+		if type(key) ~= "number" or not Validation.isSafeInteger(key) or key < 1 or key > length then
+			return failure("INVALID_ARGUMENT", "commitDefeat")
+		end
+	end
+	if keyCount ~= length or not canAdvanceOrdinal(data, length) then
+		return failure(if keyCount ~= length then "INVALID_ARGUMENT" else "REVISION_EXHAUSTED", "commitDefeat")
+	end
+
+	local despawns: { EnemyProtocol.DespawnEntry } = table.create(length)
+	local records: { Representation } = table.create(length)
+	local previousId: number? = nil
+	for index, value in values do
+		local despawn = canonicalDespawn(value)
+		if
+			despawn == nil
+			or despawn.reason ~= "Defeat"
+			or (previousId ~= nil and despawn.runtimeEnemyId <= previousId)
+		then
+			return failure("INVALID_SNAPSHOT", "commitDefeat")
+		end
+		local record = data.representations[despawn.runtimeEnemyId]
+		if
+			record == nil
+			or not record.active
+			or not record.despawnReserved
+			or despawn.revision <= record.lastRevision
+		then
+			return failure("INVALID_SNAPSHOT", "commitDefeat")
+		end
+		despawns[index] = despawn
+		records[index] = record
+		previousId = despawn.runtimeEnemyId
+	end
+
+	for index, despawn in despawns do
+		commitDespawn(data, records[index], despawn)
+	end
+	table.freeze(despawns)
+	return Result.ok(despawns)
 end
 
 function PublisherMethods.observeCorrection(

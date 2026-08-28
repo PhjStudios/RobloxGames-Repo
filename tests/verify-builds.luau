@@ -151,6 +151,11 @@ local EXPECTED_PRODUCTION_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/shared/match/MatchProtocol.luau",
 	},
 	{
+		dataModelPath = "ReplicatedStorage.Shared.match.BaseProtocol",
+		className = "ModuleScript",
+		sourcePath = "src/shared/match/BaseProtocol.luau",
+	},
+	{
 		dataModelPath = "ReplicatedStorage.Shared.match.EnemyProtocol",
 		className = "ModuleScript",
 		sourcePath = "src/shared/match/EnemyProtocol.luau",
@@ -273,6 +278,23 @@ local EXPECTED_MATCH_SERVER_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/server/match/maps/MapValidator.luau",
 	},
 })
+local EXPECTED_MATCH_BASE_SERVER_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "ServerScriptService.Server.match.base.BaseReplicationPublisher",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/base/BaseReplicationPublisher.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.base.BaseRuntime",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/base/BaseRuntime.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.base.BaseRuntimeService",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/base/BaseRuntimeService.luau",
+	},
+})
 local EXPECTED_MATCH_ENEMY_SERVER_SOURCES: { SourceDefinition } = table.freeze({
 	{
 		dataModelPath = "ServerScriptService.Server.match.enemies.EnemyPath",
@@ -343,6 +365,28 @@ local EXPECTED_MATCH_CLIENT_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/client/match/MatchReadyViewModel.luau",
 	},
 })
+local EXPECTED_MATCH_BASE_CLIENT_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.base.BaseController",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/base/BaseController.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.base.BaseStateReducer",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/base/BaseStateReducer.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.base.BaseViewModel",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/base/BaseViewModel.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.base.BaseWorldView",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/base/BaseWorldView.luau",
+	},
+})
 local EXPECTED_MATCH_ENEMY_CLIENT_SOURCES: { SourceDefinition } = table.freeze({
 	{
 		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.enemies.EnemyController",
@@ -367,6 +411,11 @@ local EXPECTED_MATCH_ENEMY_CLIENT_SOURCES: { SourceDefinition } = table.freeze({
 })
 local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 	{
+		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.BaseFixtures",
+		className = "ModuleScript",
+		sourcePath = "tests/fixtures/BaseFixtures.luau",
+	},
+	{
 		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.ConfigurationFixtures",
 		className = "ModuleScript",
 		sourcePath = "tests/fixtures/ConfigurationFixtures.luau",
@@ -390,6 +439,51 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.Cleanup.spec",
 		className = "ModuleScript",
 		sourcePath = "tests/specs/Cleanup.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.BaseController.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/BaseController.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.BaseDefeatIntegration.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/BaseDefeatIntegration.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.BaseProtocol.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/BaseProtocol.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.BaseReplicationPublisher.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/BaseReplicationPublisher.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.BaseRuntime.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/BaseRuntime.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.BaseRuntimeService.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/BaseRuntimeService.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.BaseStateReducer.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/BaseStateReducer.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.BaseViewModel.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/BaseViewModel.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.BaseWorldView.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/BaseWorldView.spec.luau",
 	},
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.ClientRequestTracker.spec",
@@ -631,7 +725,7 @@ local function normalizeNewlines(value: string): string
 	return string.gsub(value, "\r\n", "\n")
 end
 
-local function verifyPhase09Scope(): boolean
+local function verifyPhase10Scope(): boolean
 	local exactEmptyConfigs = {
 		{
 			path = "src/shared/config/Enemies.luau",
@@ -659,6 +753,48 @@ local function verifyPhase09Scope(): boolean
 				"",
 			}, "\n"),
 		},
+		{
+			path = "src/shared/config/Difficulties.luau",
+			expected = table.concat({
+				"--!strict",
+				"",
+				"local ConfigTypes = require(script.Parent.Parent.types.ConfigTypes)",
+				"",
+				"-- Authored difficulty content is intentionally empty until a content packet.",
+				"local Difficulties: { ConfigTypes.DifficultyDefinition } = {}",
+				"",
+				"return table.freeze(Difficulties)",
+				"",
+			}, "\n"),
+		},
+		{
+			path = "src/shared/config/Maps.luau",
+			expected = table.concat({
+				"--!strict",
+				"",
+				"local ConfigTypes = require(script.Parent.Parent.types.ConfigTypes)",
+				"",
+				"-- Authored map content is intentionally empty until a content packet.",
+				"local Maps: { ConfigTypes.MapDefinition } = {}",
+				"",
+				"return table.freeze(Maps)",
+				"",
+			}, "\n"),
+		},
+		{
+			path = "src/shared/config/Waves.luau",
+			expected = table.concat({
+				"--!strict",
+				"",
+				"local ConfigTypes = require(script.Parent.Parent.types.ConfigTypes)",
+				"",
+				"-- Authored wave schedules are intentionally empty until a content packet.",
+				"local Waves: { ConfigTypes.WaveScheduleDefinition } = {}",
+				"",
+				"return table.freeze(Waves)",
+				"",
+			}, "\n"),
+		},
 	}
 	for _, definition in exactEmptyConfigs do
 		if not fs.isFile(definition.path) then
@@ -672,9 +808,7 @@ local function verifyPhase09Scope(): boolean
 
 	for _, forbiddenDirectory in
 		{
-			"src/server/match/base",
 			"src/server/match/waves",
-			"src/client/match/base",
 			"src/client/match/waves",
 		}
 	do
@@ -691,12 +825,8 @@ local function verifyPhase09Scope(): boolean
 		local lowered = string.lower(source :: string)
 		for _, forbidden in
 			{
-				"basehealth",
 				"pathfindingservice",
-				"prewave",
 				"rbxassetid://",
-				"results",
-				"waveactive",
 			}
 		do
 			if string.find(lowered, forbidden, 1, true) ~= nil then
@@ -707,6 +837,19 @@ local function verifyPhase09Scope(): boolean
 	for _, definition in EXPECTED_MATCH_ENEMY_CLIENT_SOURCES do
 		local readSucceeded, source = pcall(fs.readFile, definition.sourcePath)
 		if not readSucceeded or string.find(string.lower(source :: string), "rbxassetid://", 1, true) ~= nil then
+			return false
+		end
+	end
+	for _, forbiddenOutput in
+		{
+			"build.rbxlx",
+			"build/default.rbxlx",
+			"build/lobby.rbxlx",
+			"build/match.rbxlx",
+			"build/test.rbxlx",
+		}
+	do
+		if fs.isFile(forbiddenOutput) then
 			return false
 		end
 	end
@@ -843,6 +986,9 @@ local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): {
 		for _, source in EXPECTED_MATCH_SERVER_SOURCES do
 			table.insert(expected, source)
 		end
+		for _, source in EXPECTED_MATCH_BASE_SERVER_SOURCES do
+			table.insert(expected, source)
+		end
 		for _, source in EXPECTED_MATCH_ENEMY_SERVER_SOURCES do
 			table.insert(expected, source)
 		end
@@ -856,6 +1002,9 @@ local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): {
 			table.insert(expected, source)
 		end
 		for _, source in EXPECTED_MATCH_CLIENT_SOURCES do
+			table.insert(expected, source)
+		end
+		for _, source in EXPECTED_MATCH_BASE_CLIENT_SOURCES do
 			table.insert(expected, source)
 		end
 		for _, source in EXPECTED_MATCH_ENEMY_CLIENT_SOURCES do
@@ -1103,7 +1252,7 @@ end
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
 	currentStage = `verify_counts_{definition.name}`
 	local modules, scripts, localScripts = countClasses(dataModel)
-	local expectedModules = if definition.role == "Lobby" then 44 else 63
+	local expectedModules = if definition.role == "Lobby" then 45 else 71
 	if modules ~= expectedModules or scripts ~= 1 or localScripts ~= 1 then
 		emit("FAIL", definition.name, `PRODUCTION_CLASS_COUNTS_{modules}_{scripts}_{localScripts}`)
 		return false
@@ -1129,7 +1278,7 @@ end
 
 local function verifyTest(dataModel: DataModel, definition: BuildDefinition): boolean
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 111 then
+	if modules ~= 129 then
 		emit("FAIL", definition.name, `TEST_MODULE_COUNT_{modules}`)
 		return false
 	end
@@ -1148,7 +1297,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			end
 		end
 	end
-	if sharedModules ~= 35 then
+	if sharedModules ~= 36 then
 		emit("FAIL", definition.name, "SHARED_MODULE_COUNT")
 		return false
 	end
@@ -1167,9 +1316,15 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local productionClientEnemies = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionClientEnemies")
+	local productionClientBase = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionClientBase")
 	local productionServerEnemies = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerEnemies")
+	local productionServerBase = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionServerBase")
 	local productionServerMaps = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerMaps")
@@ -1268,6 +1423,16 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	if
 		not verifyMirroredSources(
 			definition,
+			productionServerBase,
+			EXPECTED_MATCH_BASE_SERVER_SOURCES,
+			"TEST_SERVER_BASE"
+		)
+	then
+		return false
+	end
+	if
+		not verifyMirroredSources(
+			definition,
 			productionServerEnemies,
 			EXPECTED_MATCH_ENEMY_SERVER_SOURCES,
 			"TEST_SERVER_ENEMY"
@@ -1313,6 +1478,16 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	if
 		not verifyMirroredSources(
 			definition,
+			productionClientBase,
+			EXPECTED_MATCH_BASE_CLIENT_SOURCES,
+			"TEST_CLIENT_BASE"
+		)
+	then
+		return false
+	end
+	if
+		not verifyMirroredSources(
+			definition,
 			productionClientEnemies,
 			EXPECTED_MATCH_ENEMY_CLIENT_SOURCES,
 			"TEST_CLIENT_ENEMY"
@@ -1321,11 +1496,13 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 		return false
 	end
 	local mapModules = #EXPECTED_MATCH_SERVER_SOURCES
+	local serverBaseModules = #EXPECTED_MATCH_BASE_SERVER_SOURCES
 	local serverEnemyModules = #EXPECTED_MATCH_ENEMY_SERVER_SOURCES
 	local matchLifecycleModules = #EXPECTED_MATCH_LIFECYCLE_SOURCES
 	local matchRosterModules = #EXPECTED_MATCH_ROSTER_SOURCES
 	local matchReadyModules = #EXPECTED_MATCH_READY_SOURCES
 	local clientMatchModules = #EXPECTED_MATCH_CLIENT_SOURCES
+	local clientBaseModules = #EXPECTED_MATCH_BASE_CLIENT_SOURCES
 	local clientEnemyModules = #EXPECTED_MATCH_ENEMY_CLIENT_SOURCES
 	if
 		not verifyTestOwnedSources(dataModel, definition, {
@@ -1333,7 +1510,9 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			productionServerNetworking :: Instance,
 			productionClientNetworking :: Instance,
 			productionClientMatch :: Instance,
+			productionClientBase :: Instance,
 			productionClientEnemies :: Instance,
+			productionServerBase :: Instance,
 			productionServerEnemies :: Instance,
 			productionServerMaps :: Instance,
 			productionServerMatchLifecycle :: Instance,
@@ -1348,15 +1527,15 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	emit(
 		"PASS",
 		definition.name,
-		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_SERVER_ENEMIES_{serverEnemyModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_CLIENT_MATCH_{clientMatchModules}_CLIENT_ENEMIES_{clientEnemyModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
+		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_SERVER_BASE_{serverBaseModules}_SERVER_ENEMIES_{serverEnemyModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_CLIENT_MATCH_{clientMatchModules}_CLIENT_BASE_{clientBaseModules}_CLIENT_ENEMIES_{clientEnemyModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
 	)
 	return true
 end
 
 local function run(): boolean
-	currentStage = "phase09_scope"
-	if not verifyPhase09Scope() then
-		emit("FAIL", "All", "PHASE09_SCOPE_BOUNDARY")
+	currentStage = "phase10_scope"
+	if not verifyPhase10Scope() then
+		emit("FAIL", "All", "PHASE10_SCOPE_BOUNDARY")
 		return false
 	end
 	currentStage = "build_directory"

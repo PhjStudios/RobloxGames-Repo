@@ -8,6 +8,7 @@ local EnvironmentContext = require(Shared.logging.EnvironmentContext)
 local Log = require(Shared.logging.Log)
 local ServiceLifecycle = require(Shared.lifecycle.ServiceLifecycle)
 local Result = require(Shared.util.Result)
+local Validation = require(Shared.util.Validation)
 
 local MatchModules = script.Parent.Parent.ProductionServerMatchLifecycle
 local MatchLifecycleService = require(MatchModules.MatchLifecycleService)
@@ -31,6 +32,7 @@ type FakePlayerSource = MatchLifecycleService.PlayerSource & {
 type FakeLoader = MatchLifecycleService.MapLoaderAdapter & {
 	loadCount: number,
 	cleanupCount: number,
+	snapshotOverride: MatchStateMachine.StateSnapshot?,
 	lastMapId: unknown,
 	loadResult: unknown,
 	cleanupResult: unknown,
@@ -151,6 +153,7 @@ local function fakeLoader(loadResult: unknown, cleanupResult: unknown): FakeLoad
 	local loader = {
 		loadCount = 0,
 		cleanupCount = 0,
+		snapshotOverride = nil,
 		lastMapId = nil,
 		loadResult = loadResult,
 		cleanupResult = cleanupResult,
@@ -291,6 +294,339 @@ local function successSnapshot(
 		error("[ATD_TEST][code=EXPECTED_MATCH_SNAPSHOT]", 0)
 	end
 	return result.value
+end
+
+type DefeatTestEnvironment = {
+	service: MatchLifecycleService.Service?,
+	machine: MatchStateMachine.StateMachine?,
+	commitMode: "success" | "failure" | "throw" | "yield" | "commit-then-throw" | "commit-then-yield",
+	publishMode: "success" | "failure" | "throw" | "yield" | "reenter" | "shutdown",
+	publishCount: number,
+	publishedSnapshots: { MatchLifecycleService.MatchSnapshot },
+	reentryResult: unknown?,
+	reentryToken: MatchLifecycleService.BaseDefeatToken?,
+	cleanupCount: number,
+}
+
+local function newWaveActiveDefeatService(
+	assertions: Assertions
+): (MatchLifecycleService.Service, DefeatTestEnvironment)
+	local environment: DefeatTestEnvironment = {
+		service = nil,
+		machine = nil,
+		commitMode = "success",
+		publishMode = "success",
+		publishCount = 0,
+		publishedSnapshots = {},
+		reentryResult = nil,
+		reentryToken = nil,
+		cleanupCount = 0,
+	}
+
+	local function createMachine(matchId: unknown): unknown
+		local created = MatchStateMachine.new(matchId)
+		if not created.ok then
+			return created
+		end
+		local real = created.value
+		environment.machine = real
+		local adapter = {} :: any
+		function adapter.getSnapshot(_self: unknown): unknown
+			if environment.snapshotOverride ~= nil then
+				return Result.ok(environment.snapshotOverride)
+			end
+			return real:getSnapshot()
+		end
+		function adapter.beginTransition(_self: unknown, target: unknown, revision: unknown): unknown
+			return real:beginTransition(target, revision)
+		end
+		function adapter.commitTransition(_self: unknown, token: unknown): unknown
+			if environment.commitMode == "failure" then
+				return Result.err({ code = PRIVATE_SENTINEL })
+			elseif environment.commitMode == "throw" then
+				error(PRIVATE_SENTINEL, 0)
+			elseif environment.commitMode == "yield" then
+				coroutine.yield()
+			elseif environment.commitMode == "commit-then-throw" then
+				real:commitTransition(token)
+				error(PRIVATE_SENTINEL, 0)
+			elseif environment.commitMode == "commit-then-yield" then
+				real:commitTransition(token)
+				coroutine.yield()
+			end
+			return real:commitTransition(token)
+		end
+		function adapter.rollbackTransition(_self: unknown, token: unknown): unknown
+			return real:rollbackTransition(token)
+		end
+		function adapter.touch(_self: unknown, revision: unknown): unknown
+			return real:touch(revision)
+		end
+		function adapter.cleanup(_self: unknown): unknown
+			return real:cleanup()
+		end
+		return Result.ok(adapter)
+	end
+
+	local function createBroadcaster(dependenciesValue: unknown): unknown
+		local dependencies = dependenciesValue :: any
+		local adapter = {} :: any
+		function adapter.publish(_self: unknown, snapshot: unknown): unknown
+			environment.publishCount += 1
+			if environment.publishMode == "reenter" then
+				local service = environment.service :: MatchLifecycleService.Service
+				environment.reentryResult = service:commitBaseDefeat(environment.reentryToken)
+			elseif environment.publishMode == "shutdown" then
+				invoke((environment.service :: MatchLifecycleService.Service):getServiceDefinition().shutdown)
+			elseif environment.publishMode == "failure" then
+				return Result.err({ code = PRIVATE_SENTINEL })
+			elseif environment.publishMode == "throw" then
+				error(PRIVATE_SENTINEL, 0)
+			elseif environment.publishMode == "yield" then
+				coroutine.yield()
+			end
+			if environment.publishMode == "success" then
+				local recipientsRead, recipients = pcall(dependencies.getRecipients)
+				if not recipientsRead or type(recipients) ~= "table" then
+					return Result.err({ code = PRIVATE_SENTINEL })
+				end
+			end
+			table.insert(environment.publishedSnapshots, snapshot :: MatchLifecycleService.MatchSnapshot)
+			return Result.ok(true)
+		end
+		function adapter.cleanup(_self: unknown): unknown
+			environment.cleanupCount += 1
+			return Result.ok(true)
+		end
+		return Result.ok(adapter)
+	end
+
+	local service = (newForTests :: MatchLifecycleService.TestConstructor)(
+		logger,
+		{
+			mapLoader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)),
+			generateMatchId = function()
+				return MATCH_ID
+			end,
+			createStateMachine = createMachine,
+			roster = newRoster(),
+			playerSource = fakePlayerSource(),
+			createSnapshotBroadcaster = createBroadcaster,
+		} :: any
+	)
+	environment.service = service
+	local definition = service:getServiceDefinition()
+	invoke(definition.initialize)
+	invoke(definition.start)
+
+	local machine = environment.machine :: MatchStateMachine.StateMachine
+	local ready = machine:getSnapshot()
+	assertions.isTrue(ready.ok)
+	if not ready.ok then
+		error("[ATD_TEST][code=DEFEAT_READY_STATE_MISSING]", 0)
+	end
+	local preWave = machine:beginTransition("PreWave", ready.value.revision)
+	assertions.isTrue(preWave.ok)
+	if not preWave.ok then
+		error("[ATD_TEST][code=DEFEAT_PREWAVE_BEGIN_FAILED]", 0)
+	end
+	assertions.isTrue(machine:commitTransition(preWave.value).ok)
+	local beforeWave = machine:getSnapshot()
+	assertions.isTrue(beforeWave.ok)
+	if not beforeWave.ok then
+		error("[ATD_TEST][code=DEFEAT_PREWAVE_STATE_MISSING]", 0)
+	end
+	local wave = machine:beginTransition("WaveActive", beforeWave.value.revision)
+	assertions.isTrue(wave.ok)
+	if not wave.ok then
+		error("[ATD_TEST][code=DEFEAT_WAVE_BEGIN_FAILED]", 0)
+	end
+	assertions.isTrue(machine:commitTransition(wave.value).ok)
+	return service, environment
+end
+
+type StudioTestMode = "success" | "false" | "failure" | "throw" | "yield" | "malformed" | "commit-then-throw"
+
+type StudioPublishMode = "success" | "failure" | "throw" | "yield" | "malformed" | "budget" | "reenter" | "shutdown"
+
+type StudioTestEnvironment = {
+	service: MatchLifecycleService.Service?,
+	machine: MatchStateMachine.StateMachine?,
+	faultsEnabled: boolean,
+	isStudioMode: StudioTestMode,
+	snapshotMode: StudioTestMode,
+	beginMode: StudioTestMode,
+	commitMode: StudioTestMode,
+	publishMode: StudioPublishMode,
+	publishCount: number,
+	publishedSnapshots: { MatchLifecycleService.MatchSnapshot },
+	reentryResult: unknown?,
+	cleanupCount: number,
+}
+
+local function studioFailure(mode: StudioTestMode): unknown
+	if mode == "failure" then
+		return Result.err(table.freeze({ code = PRIVATE_SENTINEL }))
+	elseif mode == "throw" then
+		error(PRIVATE_SENTINEL, 0)
+	elseif mode == "yield" then
+		coroutine.yield()
+	elseif mode == "malformed" then
+		return table.freeze({ ok = true, value = PRIVATE_SENTINEL })
+	end
+	return nil
+end
+
+local function advanceMachine(
+	assertions: Assertions,
+	machine: MatchStateMachine.StateMachine,
+	targetState: MatchStateMachine.MatchState
+)
+	local before = machine:getSnapshot()
+	assertions.isTrue(before.ok)
+	if not before.ok then
+		error("[ATD_TEST][code=STUDIO_STATE_SNAPSHOT_MISSING]", 0)
+	end
+	local began = machine:beginTransition(targetState, before.value.revision)
+	assertions.isTrue(began.ok)
+	if not began.ok then
+		error("[ATD_TEST][code=STUDIO_STATE_BEGIN_FAILED]", 0)
+	end
+	assertions.isTrue(machine:commitTransition(began.value).ok)
+end
+
+local function newStudioEvidenceService(
+	assertions: Assertions,
+	advanceToPreWave: boolean?
+): (MatchLifecycleService.Service, StudioTestEnvironment)
+	local environment: StudioTestEnvironment = {
+		service = nil,
+		machine = nil,
+		faultsEnabled = false,
+		isStudioMode = "success",
+		snapshotMode = "success",
+		beginMode = "success",
+		commitMode = "success",
+		publishMode = "success",
+		publishCount = 0,
+		publishedSnapshots = {},
+		reentryResult = nil,
+		cleanupCount = 0,
+	}
+
+	local function createMachine(matchId: unknown): unknown
+		local created = MatchStateMachine.new(matchId)
+		if not created.ok then
+			return created
+		end
+		local real = created.value
+		environment.machine = real
+		local adapter = {} :: any
+		function adapter.getSnapshot(_self: unknown): unknown
+			if environment.faultsEnabled and environment.snapshotMode ~= "success" then
+				return studioFailure(environment.snapshotMode)
+			end
+			return real:getSnapshot()
+		end
+		function adapter.beginTransition(_self: unknown, target: unknown, revision: unknown): unknown
+			if environment.faultsEnabled and environment.beginMode ~= "success" then
+				return studioFailure(environment.beginMode)
+			end
+			return real:beginTransition(target, revision)
+		end
+		function adapter.commitTransition(_self: unknown, token: unknown): unknown
+			if environment.faultsEnabled and environment.commitMode ~= "success" then
+				if environment.commitMode == "commit-then-throw" then
+					real:commitTransition(token)
+					error(PRIVATE_SENTINEL, 0)
+				elseif environment.commitMode == "malformed" then
+					real:commitTransition(token)
+					return table.freeze({
+						ok = true,
+						value = table.freeze({
+							matchId = MATCH_ID,
+							revision = 1,
+							state = "Loading",
+						}),
+					})
+				end
+				return studioFailure(environment.commitMode)
+			end
+			return real:commitTransition(token)
+		end
+		function adapter.rollbackTransition(_self: unknown, token: unknown): unknown
+			return real:rollbackTransition(token)
+		end
+		function adapter.touch(_self: unknown, revision: unknown): unknown
+			return real:touch(revision)
+		end
+		function adapter.cleanup(_self: unknown): unknown
+			return real:cleanup()
+		end
+		return Result.ok(adapter)
+	end
+
+	local function createBroadcaster(_dependencies: unknown): unknown
+		local adapter = {} :: any
+		function adapter.publish(_self: unknown, snapshot: unknown): unknown
+			environment.publishCount += 1
+			if environment.publishMode == "failure" then
+				return Result.err(table.freeze({ code = PRIVATE_SENTINEL }))
+			elseif environment.publishMode == "throw" then
+				error(PRIVATE_SENTINEL, 0)
+			elseif environment.publishMode == "yield" then
+				coroutine.yield()
+			elseif environment.publishMode == "malformed" then
+				return Result.ok(table.freeze({ kind = "Sent", extra = PRIVATE_SENTINEL }))
+			elseif environment.publishMode == "budget" then
+				return Result.ok(table.freeze({ kind = "BudgetExhausted" }))
+			elseif environment.publishMode == "reenter" then
+				environment.reentryResult = (environment.service :: MatchLifecycleService.Service):activateStudioWaveForEvidence()
+			elseif environment.publishMode == "shutdown" then
+				invoke((environment.service :: MatchLifecycleService.Service):getServiceDefinition().shutdown)
+			end
+			table.insert(environment.publishedSnapshots, snapshot :: MatchLifecycleService.MatchSnapshot)
+			return Result.ok(table.freeze({ kind = "Sent" }))
+		end
+		function adapter.cleanup(_self: unknown): unknown
+			environment.cleanupCount += 1
+			return Result.ok(true)
+		end
+		return Result.ok(adapter)
+	end
+
+	local function isStudio(): unknown
+		if environment.isStudioMode == "success" then
+			return true
+		elseif environment.isStudioMode == "false" then
+			return false
+		end
+		return studioFailure(environment.isStudioMode)
+	end
+
+	local service = (newForTests :: MatchLifecycleService.TestConstructor)(
+		logger,
+		{
+			mapLoader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)),
+			generateMatchId = function()
+				return MATCH_ID
+			end,
+			createStateMachine = createMachine,
+			roster = newRoster(),
+			playerSource = fakePlayerSource(),
+			createSnapshotBroadcaster = createBroadcaster,
+			isStudio = isStudio,
+		} :: any
+	)
+	environment.service = service
+	local definition = service:getServiceDefinition()
+	invoke(definition.initialize)
+	invoke(definition.start)
+	if advanceToPreWave ~= false then
+		advanceMachine(assertions, environment.machine :: MatchStateMachine.StateMachine, "PreWave")
+	end
+	environment.faultsEnabled = true
+	return service, environment
 end
 
 return TestHarness.suite("match lifecycle service", {
@@ -877,6 +1213,459 @@ return TestHarness.suite("match lifecycle service", {
 		assertions.equal(repeatedFailure, firstFailure)
 		assertions.contains(firstFailure, "[code=CLEANUP_FAILED]")
 		assertions.isNil(string.find(firstFailure, PRIVATE_SENTINEL, 1, true))
+	end),
+
+	TestHarness.case("commits one authenticated base defeat and never republishes its token", function(assertions)
+		local service, environment = newWaveActiveDefeatService(assertions)
+		local wrongMatch = service:beginBaseDefeat("match:other-defeat-test")
+		assertions.isFalse(wrongMatch.ok)
+		if not wrongMatch.ok then
+			assertions.equal(wrongMatch.error.code, "NOT_AUTHORIZED")
+			assertions.equal(wrongMatch.error.operation, "beginBaseDefeat")
+			assertDetachedAndFrozen(assertions, wrongMatch.error)
+		end
+
+		local before = successSnapshot(assertions, service)
+		assertions.equal(before.state, "WaveActive")
+		local began = service:beginBaseDefeat(MATCH_ID)
+		assertions.isTrue(began.ok)
+		if not began.ok then
+			error("[ATD_TEST][code=BASE_DEFEAT_BEGIN_REJECTED]", 0)
+		end
+		assertDetachedAndFrozen(assertions, began.value)
+		local secondClaim = service:beginBaseDefeat(MATCH_ID)
+		assertions.isFalse(secondClaim.ok)
+		if not secondClaim.ok then
+			assertions.equal(secondClaim.error.code, "REENTRANT")
+		end
+
+		local publicationsBeforeCommit = environment.publishCount
+		local committed = service:commitBaseDefeat(began.value)
+		assertions.isTrue(committed.ok)
+		if not committed.ok then
+			error("[ATD_TEST][code=BASE_DEFEAT_COMMIT_REJECTED]", 0)
+		end
+		assertions.isTrue(committed.value.committed)
+		assertions.isTrue(committed.value.published)
+		assertions.equal(committed.value.snapshot.matchId, MATCH_ID)
+		assertions.equal(committed.value.snapshot.state, "Results")
+		assertions.equal(committed.value.snapshot.revision, before.revision + 1)
+		assertDetachedAndFrozen(assertions, committed.value)
+		assertions.equal(environment.publishCount, publicationsBeforeCommit + 1)
+
+		local duplicate = service:commitBaseDefeat(began.value)
+		assertions.isTrue(duplicate.ok)
+		if duplicate.ok then
+			assertions.equal(duplicate.value, committed.value)
+		end
+		assertions.equal(environment.publishCount, publicationsBeforeCommit + 1)
+		local lateRollback = service:rollbackBaseDefeat(began.value)
+		assertions.isFalse(lateRollback.ok)
+		if not lateRollback.ok then
+			assertions.equal(lateRollback.error.code, "INVALID_TOKEN")
+		end
+		assertions.equal(successSnapshot(assertions, service).state, "Results")
+		invoke(service:getServiceDefinition().shutdown)
+		assertions.equal(service:getLifecycleState(), "Shutdown")
+	end),
+
+	TestHarness.case("rolls back only a prepared base defeat and clears it during shutdown", function(assertions)
+		local service, _environment = newWaveActiveDefeatService(assertions)
+		local before = successSnapshot(assertions, service)
+		local began = service:beginBaseDefeat(MATCH_ID)
+		assertions.isTrue(began.ok)
+		if not began.ok then
+			error("[ATD_TEST][code=BASE_DEFEAT_BEGIN_REJECTED]", 0)
+		end
+		local rolledBack = service:rollbackBaseDefeat(began.value)
+		assertions.isTrue(rolledBack.ok)
+		if rolledBack.ok then
+			assertions.isTrue(rolledBack.value)
+		end
+		local after = successSnapshot(assertions, service)
+		assertions.equal(after.state, "WaveActive")
+		assertions.equal(after.revision, before.revision)
+		assertions.isFalse(service:rollbackBaseDefeat(began.value).ok)
+		assertions.isFalse(service:commitBaseDefeat(began.value).ok)
+
+		local replacement = service:beginBaseDefeat(MATCH_ID)
+		assertions.isTrue(replacement.ok)
+		if not replacement.ok then
+			error("[ATD_TEST][code=BASE_DEFEAT_REPLACEMENT_REJECTED]", 0)
+		end
+		invoke(service:getServiceDefinition().shutdown)
+		assertions.equal(service:getLifecycleState(), "Shutdown")
+		local afterCleanup = service:commitBaseDefeat(replacement.value)
+		assertions.isFalse(afterCleanup.ok)
+		if not afterCleanup.ok then
+			assertions.equal(afterCleanup.error.code, "UNAVAILABLE")
+		end
+	end),
+
+	TestHarness.case("rejects base defeat outside the exact WaveActive identity", function(assertions)
+		local service = newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil)
+		local beforeStart = service:beginBaseDefeat(MATCH_ID)
+		assertions.isFalse(beforeStart.ok)
+		if not beforeStart.ok then
+			assertions.equal(beforeStart.error.code, "UNAVAILABLE")
+		end
+		local definition = service:getServiceDefinition()
+		invoke(definition.initialize)
+		invoke(definition.start)
+		local readyCheck = service:beginBaseDefeat(MATCH_ID)
+		assertions.isFalse(readyCheck.ok)
+		if not readyCheck.ok then
+			assertions.equal(readyCheck.error.code, "WRONG_STATE")
+		end
+		local hostile = service:beginBaseDefeat(0 / 0)
+		assertions.isFalse(hostile.ok)
+		if not hostile.ok then
+			assertions.equal(hostile.error.code, "NOT_AUTHORIZED")
+		end
+		invoke(definition.shutdown)
+	end),
+
+	TestHarness.case("fails closed before claiming exhausted Results revision space", function(assertions)
+		local service, environment = newWaveActiveDefeatService(assertions)
+		environment.snapshotOverride = table.freeze({
+			matchId = MATCH_ID,
+			revision = Validation.MAX_SAFE_INTEGER,
+			state = "WaveActive",
+		})
+		local exhausted = service:beginBaseDefeat(MATCH_ID)
+		assertions.isFalse(exhausted.ok)
+		if not exhausted.ok then
+			assertions.equal(exhausted.error.code, "INTERNAL_ERROR")
+			assertions.equal(exhausted.error.operation, "beginBaseDefeat")
+		end
+		assertions.isFalse(service:getSnapshot().ok)
+		environment.snapshotOverride = nil
+		invoke(service:getServiceDefinition().shutdown)
+		assertions.equal(service:getLifecycleState(), "Shutdown")
+	end),
+
+	TestHarness.case("fails closed when the Results transition throws fails or yields", function(assertions)
+		for _, mode in { "failure", "throw", "yield" } do
+			local service, environment = newWaveActiveDefeatService(assertions)
+			local began = service:beginBaseDefeat(MATCH_ID)
+			assertions.isTrue(began.ok)
+			if not began.ok then
+				error("[ATD_TEST][code=BASE_DEFEAT_BEGIN_REJECTED]", 0)
+			end
+			environment.commitMode = mode :: any
+			local committed = service:commitBaseDefeat(began.value)
+			assertions.isFalse(committed.ok)
+			if not committed.ok then
+				assertions.equal(committed.error.code, "INTERNAL_ERROR")
+				assertions.equal(committed.error.operation, "commitBaseDefeat")
+			end
+			local machineSnapshot = (environment.machine :: MatchStateMachine.StateMachine):getSnapshot()
+			assertions.isTrue(machineSnapshot.ok)
+			if machineSnapshot.ok then
+				assertions.equal(machineSnapshot.value.state, "WaveActive")
+			end
+			assertions.isFalse(service:getSnapshot().ok)
+			environment.commitMode = "success"
+			invoke(service:getServiceDefinition().shutdown)
+			assertions.equal(service:getLifecycleState(), "Shutdown")
+		end
+	end),
+
+	TestHarness.case("preserves committed Results across publication and reentry faults", function(assertions)
+		for _, mode in { "failure", "throw", "yield", "reenter" } do
+			local service, environment = newWaveActiveDefeatService(assertions)
+			local began = service:beginBaseDefeat(MATCH_ID)
+			assertions.isTrue(began.ok)
+			if not began.ok then
+				error("[ATD_TEST][code=BASE_DEFEAT_BEGIN_REJECTED]", 0)
+			end
+			environment.publishMode = mode :: any
+			environment.reentryToken = began.value
+			local publicationsBeforeCommit = environment.publishCount
+			local committed = service:commitBaseDefeat(began.value)
+			assertions.isTrue(committed.ok)
+			if not committed.ok then
+				error("[ATD_TEST][code=COMMITTED_RESULTS_LOST]", 0)
+			end
+			assertions.isTrue(committed.value.committed)
+			assertions.isFalse(committed.value.published)
+			assertions.equal(committed.value.snapshot.state, "Results")
+			assertions.equal(environment.publishCount, publicationsBeforeCommit + 1)
+			if mode == "reenter" then
+				local reentry = environment.reentryResult :: any
+				assertions.isFalse(reentry.ok)
+				assertions.equal(reentry.error.code, "REENTRANT")
+			end
+			local duplicate = service:commitBaseDefeat(began.value)
+			assertions.isTrue(duplicate.ok)
+			if duplicate.ok then
+				assertions.equal(duplicate.value, committed.value)
+			end
+			assertions.equal(environment.publishCount, publicationsBeforeCommit + 1)
+			assertions.equal(successSnapshot(assertions, service).state, "Results")
+			invoke(service:getServiceDefinition().shutdown)
+		end
+	end),
+
+	TestHarness.case("preserves terminal truth when a commit faults after changing state", function(assertions)
+		for _, mode in { "commit-then-throw", "commit-then-yield" } do
+			local service, environment = newWaveActiveDefeatService(assertions)
+			local began = service:beginBaseDefeat(MATCH_ID)
+			assertions.isTrue(began.ok)
+			if not began.ok then
+				error("[ATD_TEST][code=BASE_DEFEAT_BEGIN_REJECTED]", 0)
+			end
+			environment.commitMode = mode :: any
+			local publicationsBeforeCommit = environment.publishCount
+			local committed = service:commitBaseDefeat(began.value)
+			assertions.isTrue(committed.ok)
+			if not committed.ok then
+				error("[ATD_TEST][code=COMMITTED_RESULTS_LOST]", 0)
+			end
+			assertions.isTrue(committed.value.committed)
+			assertions.isFalse(committed.value.published)
+			assertions.equal(committed.value.snapshot.state, "Results")
+			assertions.equal(environment.publishCount, publicationsBeforeCommit)
+			assertions.equal(successSnapshot(assertions, service).state, "Results")
+			environment.commitMode = "success"
+			invoke(service:getServiceDefinition().shutdown)
+		end
+	end),
+
+	TestHarness.case("defers synchronous shutdown through the committed publication boundary", function(assertions)
+		local service, environment = newWaveActiveDefeatService(assertions)
+		local began = service:beginBaseDefeat(MATCH_ID)
+		assertions.isTrue(began.ok)
+		if not began.ok then
+			error("[ATD_TEST][code=BASE_DEFEAT_BEGIN_REJECTED]", 0)
+		end
+		environment.publishMode = "shutdown"
+		local committed = service:commitBaseDefeat(began.value)
+		assertions.isTrue(committed.ok)
+		if not committed.ok then
+			error("[ATD_TEST][code=COMMITTED_RESULTS_LOST]", 0)
+		end
+		assertions.isTrue(committed.value.committed)
+		assertions.isTrue(committed.value.published)
+		assertions.equal(committed.value.snapshot.state, "Results")
+		assertions.equal(service:getLifecycleState(), "Shutdown")
+		assertions.equal(environment.cleanupCount, 1)
+		local lateCommit = service:commitBaseDefeat(began.value)
+		assertions.isFalse(lateCommit.ok)
+		if not lateCommit.ok then
+			assertions.equal(lateCommit.error.code, "UNAVAILABLE")
+		end
+	end),
+
+	TestHarness.case("rejects foreign defeat tokens without consuming either claim", function(assertions)
+		local first, _firstEnvironment = newWaveActiveDefeatService(assertions)
+		local second, _secondEnvironment = newWaveActiveDefeatService(assertions)
+		local firstToken = first:beginBaseDefeat(MATCH_ID)
+		local secondToken = second:beginBaseDefeat(MATCH_ID)
+		assertions.isTrue(firstToken.ok)
+		assertions.isTrue(secondToken.ok)
+		if not firstToken.ok or not secondToken.ok then
+			error("[ATD_TEST][code=BASE_DEFEAT_CLAIM_MISSING]", 0)
+		end
+		local foreign = second:commitBaseDefeat(firstToken.value)
+		assertions.isFalse(foreign.ok)
+		if not foreign.ok then
+			assertions.equal(foreign.error.code, "INVALID_TOKEN")
+		end
+		assertions.isTrue(first:rollbackBaseDefeat(firstToken.value).ok)
+		assertions.isTrue(second:rollbackBaseDefeat(secondToken.value).ok)
+		invoke(first:getServiceDefinition().shutdown)
+		invoke(second:getServiceDefinition().shutdown)
+	end),
+
+	TestHarness.case(
+		"activates one exact Studio evidence wave and publishes its authoritative snapshot",
+		function(assertions)
+			local service, environment = newStudioEvidenceService(assertions)
+			local before = (environment.machine :: MatchStateMachine.StateMachine):getSnapshot()
+			assertions.isTrue(before.ok)
+			if not before.ok then
+				error("[ATD_TEST][code=STUDIO_PREWAVE_SNAPSHOT_MISSING]", 0)
+			end
+			assertions.equal(before.value.state, "PreWave")
+			local publicationsBefore = environment.publishCount
+
+			local activated = service:activateStudioWaveForEvidence()
+			assertions.isTrue(activated.ok)
+			if not activated.ok then
+				error("[ATD_TEST][code=STUDIO_WAVE_ACTIVATION_FAILED]", 0)
+			end
+			assertions.equal(activated.value.matchId, MATCH_ID)
+			assertions.equal(activated.value.revision, before.value.revision + 1)
+			assertions.equal(activated.value.state, "WaveActive")
+			assertions.isNil(activated.value.deadlineServerTime)
+			assertDetachedAndFrozen(assertions, activated.value)
+			assertions.equal(environment.publishCount, publicationsBefore + 1)
+			assertions.equal(#environment.publishedSnapshots, publicationsBefore + 1)
+			assertions.equal(environment.publishedSnapshots[#environment.publishedSnapshots], activated.value)
+
+			local duplicate = service:activateStudioWaveForEvidence()
+			assertions.isFalse(duplicate.ok)
+			if not duplicate.ok then
+				assertions.equal(duplicate.error.code, "REENTRANT")
+				assertions.equal(duplicate.error.operation, "activateStudioWaveForEvidence")
+				assertions.isNil(string.find(tostring(duplicate.error), PRIVATE_SENTINEL, 1, true))
+			end
+			assertions.equal(environment.publishCount, publicationsBefore + 1)
+
+			invoke(service:getServiceDefinition().shutdown)
+			assertions.equal(environment.cleanupCount, 1)
+			local afterCleanup = service:activateStudioWaveForEvidence()
+			assertions.isFalse(afterCleanup.ok)
+			if not afterCleanup.ok then
+				assertions.equal(afterCleanup.error.code, "UNAVAILABLE")
+			end
+		end
+	),
+
+	TestHarness.case(
+		"keeps the Studio wave seam closed outside Studio and every disallowed lifecycle state",
+		function(assertions)
+			local constructed = newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil)
+			local beforeStart = constructed:activateStudioWaveForEvidence()
+			assertions.isFalse(beforeStart.ok)
+			if not beforeStart.ok then
+				assertions.equal(beforeStart.error.code, "UNAVAILABLE")
+			end
+
+			local readyService, readyEnvironment = newStudioEvidenceService(assertions, false)
+			local readyResult = readyService:activateStudioWaveForEvidence()
+			assertions.isFalse(readyResult.ok)
+			if not readyResult.ok then
+				assertions.equal(readyResult.error.code, "WRONG_STATE")
+			end
+			invoke(readyService:getServiceDefinition().shutdown)
+
+			local nonStudioService, nonStudioEnvironment = newStudioEvidenceService(assertions)
+			nonStudioEnvironment.isStudioMode = "false"
+			local nonStudio = nonStudioService:activateStudioWaveForEvidence()
+			assertions.isFalse(nonStudio.ok)
+			if not nonStudio.ok then
+				assertions.equal(nonStudio.error.code, "NOT_STUDIO")
+			end
+			local stillPreWave = (nonStudioEnvironment.machine :: MatchStateMachine.StateMachine):getSnapshot()
+			assertions.isTrue(stillPreWave.ok)
+			if stillPreWave.ok then
+				assertions.equal(stillPreWave.value.state, "PreWave")
+			end
+			invoke(nonStudioService:getServiceDefinition().shutdown)
+
+			local terminalService, terminalEnvironment = newStudioEvidenceService(assertions)
+			local terminalMachine = terminalEnvironment.machine :: MatchStateMachine.StateMachine
+			advanceMachine(assertions, terminalMachine, "WaveActive")
+			local waveActiveAttempt = terminalService:activateStudioWaveForEvidence()
+			assertions.isFalse(waveActiveAttempt.ok)
+			if not waveActiveAttempt.ok then
+				assertions.equal(waveActiveAttempt.error.code, "WRONG_STATE")
+			end
+			advanceMachine(assertions, terminalMachine, "Results")
+			local resultsAttempt = terminalService:activateStudioWaveForEvidence()
+			assertions.isFalse(resultsAttempt.ok)
+			if not resultsAttempt.ok then
+				assertions.equal(resultsAttempt.error.code, "WRONG_STATE")
+			end
+			advanceMachine(assertions, terminalMachine, "Closing")
+			local closingAttempt = terminalService:activateStudioWaveForEvidence()
+			assertions.isFalse(closingAttempt.ok)
+			if not closingAttempt.ok then
+				assertions.equal(closingAttempt.error.code, "WRONG_STATE")
+			end
+			invoke(terminalService:getServiceDefinition().shutdown)
+
+			local definition = constructed:getServiceDefinition()
+			invoke(definition.initialize)
+			invoke(definition.start)
+			invoke(definition.shutdown)
+			local cleaned = constructed:activateStudioWaveForEvidence()
+			assertions.isFalse(cleaned.ok)
+			if not cleaned.ok then
+				assertions.equal(cleaned.error.code, "UNAVAILABLE")
+			end
+			assertions.equal(readyEnvironment.cleanupCount, 1)
+		end
+	),
+
+	TestHarness.case("contains throwing yielding and malformed Studio predicates", function(assertions)
+		for _, mode in { "throw", "yield", "malformed" } do
+			local service, environment = newStudioEvidenceService(assertions)
+			environment.isStudioMode = mode :: StudioTestMode
+			local activated = service:activateStudioWaveForEvidence()
+			assertions.isFalse(activated.ok)
+			if not activated.ok then
+				assertions.equal(activated.error.code, "INTERNAL_ERROR")
+				assertions.equal(activated.error.operation, "activateStudioWaveForEvidence")
+			end
+			assertions.isFalse(service:getSnapshot().ok)
+			local machineSnapshot = (environment.machine :: MatchStateMachine.StateMachine):getSnapshot()
+			assertions.isTrue(machineSnapshot.ok)
+			if machineSnapshot.ok then
+				assertions.equal(machineSnapshot.value.state, "Closing")
+			end
+			invoke(service:getServiceDefinition().shutdown)
+			assertions.equal(environment.cleanupCount, 1)
+		end
+	end),
+
+	TestHarness.case(
+		"contains Studio wave state transition faults without exposing an active wave",
+		function(assertions)
+			local cases = {
+				{ field = "snapshotMode", mode = "throw" },
+				{ field = "snapshotMode", mode = "yield" },
+				{ field = "snapshotMode", mode = "malformed" },
+				{ field = "beginMode", mode = "failure" },
+				{ field = "beginMode", mode = "throw" },
+				{ field = "beginMode", mode = "yield" },
+				{ field = "beginMode", mode = "malformed" },
+				{ field = "commitMode", mode = "failure" },
+				{ field = "commitMode", mode = "throw" },
+				{ field = "commitMode", mode = "yield" },
+				{ field = "commitMode", mode = "malformed" },
+				{ field = "commitMode", mode = "commit-then-throw" },
+			}
+			for _, case in cases do
+				local service, environment = newStudioEvidenceService(assertions)
+				local mutableEnvironment = environment :: any
+				mutableEnvironment[case.field] = case.mode
+				local activated = service:activateStudioWaveForEvidence()
+				assertions.isFalse(activated.ok)
+				if not activated.ok then
+					assertions.equal(activated.error.code, "INTERNAL_ERROR")
+				end
+				assertions.isFalse(service:getSnapshot().ok)
+				environment.snapshotMode = "success"
+				environment.beginMode = "success"
+				environment.commitMode = "success"
+				invoke(service:getServiceDefinition().shutdown)
+				assertions.equal(environment.cleanupCount, 1)
+			end
+		end
+	),
+
+	TestHarness.case("fails closed across Studio wave publication reentry and shutdown faults", function(assertions)
+		for _, mode in { "failure", "throw", "yield", "malformed", "budget", "reenter", "shutdown" } do
+			local service, environment = newStudioEvidenceService(assertions)
+			environment.publishMode = mode :: StudioPublishMode
+			local activated = service:activateStudioWaveForEvidence()
+			assertions.isFalse(activated.ok)
+			if not activated.ok then
+				assertions.equal(activated.error.code, "INTERNAL_ERROR")
+			end
+			if mode == "reenter" then
+				local reentry = environment.reentryResult :: any
+				assertions.isFalse(reentry.ok)
+				assertions.equal(reentry.error.code, "REENTRANT")
+			end
+			assertions.isFalse(service:getSnapshot().ok)
+			environment.publishMode = "success"
+			invoke(service:getServiceDefinition().shutdown)
+			assertions.equal(environment.cleanupCount, 1)
+		end
 	end),
 
 	TestHarness.case("rejects invalid generated identities without touching the loader", function(assertions)

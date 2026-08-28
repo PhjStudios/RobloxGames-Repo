@@ -63,76 +63,101 @@ local function assertNames(assertions: Assertions, definitions: { RemoteRegistry
 end
 
 return TestHarness.suite("remote registry contract", {
-	TestHarness.case("exports fixed protocol constants and exactly five Match production remotes", function(assertions)
-		assertions.equal(RemoteRegistry.ROOT_NAME, "ATDNetwork")
-		assertions.equal(RemoteRegistry.VERSION_NAME, "v1")
-		assertions.equal(RemoteRegistry.MAX_DEFINITIONS, 128)
-		assertions.equal(RemoteRegistry.MAX_NAME_BYTES, 48)
-		assertions.isTrue(table.isfrozen(RemoteRegistry))
+	TestHarness.case(
+		"exports fixed protocol constants and exactly seven Match production remotes",
+		function(assertions)
+			assertions.equal(RemoteRegistry.ROOT_NAME, "ATDNetwork")
+			assertions.equal(RemoteRegistry.VERSION_NAME, "v1")
+			assertions.equal(RemoteRegistry.MAX_DEFINITIONS, 128)
+			assertions.equal(RemoteRegistry.MAX_NAME_BYTES, 48)
+			assertions.isTrue(table.isfrozen(RemoteRegistry))
 
-		assertions.isTrue(RemoteRegistry.isRegistry(ProductionRemotes))
-		assertions.equal(ProductionRemotes:count(), 5)
-		assertNames(assertions, ProductionRemotes:list(), {
-			"EnemyReplication",
-			"GetEnemySnapshot",
-			"GetMatchSnapshot",
-			"MatchSnapshot",
-			"SubmitReady",
-		})
-		assertNames(assertions, ProductionRemotes:listForRole("Development"), {
-			"EnemyReplication",
-			"GetEnemySnapshot",
-			"GetMatchSnapshot",
-			"MatchSnapshot",
-			"SubmitReady",
-		})
-		assertions.equal(rawlen(ProductionRemotes:listForRole("Lobby")), 0)
-		assertNames(assertions, ProductionRemotes:listForRole("Match"), {
-			"EnemyReplication",
-			"GetEnemySnapshot",
-			"GetMatchSnapshot",
-			"MatchSnapshot",
-			"SubmitReady",
-		})
+			assertions.isTrue(RemoteRegistry.isRegistry(ProductionRemotes))
+			assertions.equal(ProductionRemotes:count(), 7)
+			assertNames(assertions, ProductionRemotes:list(), {
+				"BaseReplication",
+				"EnemyReplication",
+				"GetBaseSnapshot",
+				"GetEnemySnapshot",
+				"GetMatchSnapshot",
+				"MatchSnapshot",
+				"SubmitReady",
+			})
+			assertNames(assertions, ProductionRemotes:listForRole("Development"), {
+				"BaseReplication",
+				"EnemyReplication",
+				"GetBaseSnapshot",
+				"GetEnemySnapshot",
+				"GetMatchSnapshot",
+				"MatchSnapshot",
+				"SubmitReady",
+			})
+			assertions.equal(rawlen(ProductionRemotes:listForRole("Lobby")), 0)
+			assertNames(assertions, ProductionRemotes:listForRole("Match"), {
+				"BaseReplication",
+				"EnemyReplication",
+				"GetBaseSnapshot",
+				"GetEnemySnapshot",
+				"GetMatchSnapshot",
+				"MatchSnapshot",
+				"SubmitReady",
+			})
 
-		local getSnapshot = ProductionRemotes:get("GetMatchSnapshot") :: RemoteRegistry.Definition
-		assertions.equal(getSnapshot.transport, "ReliableRemoteEvent")
-		assertions.equal(getSnapshot.direction, "ClientToServer")
-		assertions.equal(getSnapshot.kind, "Request")
-		assertions.equal(getSnapshot.response, "Required")
-		assertions.equal(rawlen(getSnapshot.placeRoles), 1)
-		assertions.equal(getSnapshot.placeRoles[1], "Match")
+			local getSnapshot = ProductionRemotes:get("GetMatchSnapshot") :: RemoteRegistry.Definition
+			assertions.equal(getSnapshot.transport, "ReliableRemoteEvent")
+			assertions.equal(getSnapshot.direction, "ClientToServer")
+			assertions.equal(getSnapshot.kind, "Request")
+			assertions.equal(getSnapshot.response, "Required")
+			assertions.equal(rawlen(getSnapshot.placeRoles), 1)
+			assertions.equal(getSnapshot.placeRoles[1], "Match")
 
-		local getEnemySnapshot = ProductionRemotes:get("GetEnemySnapshot") :: RemoteRegistry.Definition
-		assertions.equal(getEnemySnapshot.transport, "ReliableRemoteEvent")
-		assertions.equal(getEnemySnapshot.direction, "ClientToServer")
-		assertions.equal(getEnemySnapshot.kind, "Request")
-		assertions.equal(getEnemySnapshot.response, "Required")
-		assertions.equal(rawlen(getEnemySnapshot.placeRoles), 1)
-		assertions.equal(getEnemySnapshot.placeRoles[1], "Match")
+			local getBaseSnapshot = ProductionRemotes:get("GetBaseSnapshot") :: RemoteRegistry.Definition
+			assertions.equal(getBaseSnapshot.transport, "ReliableRemoteEvent")
+			assertions.equal(getBaseSnapshot.direction, "ClientToServer")
+			assertions.equal(getBaseSnapshot.kind, "Request")
+			assertions.equal(getBaseSnapshot.response, "Required")
+			assertions.equal(rawlen(getBaseSnapshot.placeRoles), 1)
+			assertions.equal(getBaseSnapshot.placeRoles[1], "Match")
 
-		local submitReady = ProductionRemotes:get("SubmitReady") :: RemoteRegistry.Definition
-		assertions.equal(submitReady.direction, "ClientToServer")
-		assertions.equal(submitReady.kind, "Request")
-		assertions.equal(submitReady.response, "Required")
-		assertions.equal(rawlen(submitReady.placeRoles), 1)
-		assertions.equal(submitReady.placeRoles[1], "Match")
+			local getEnemySnapshot = ProductionRemotes:get("GetEnemySnapshot") :: RemoteRegistry.Definition
+			assertions.equal(getEnemySnapshot.transport, "ReliableRemoteEvent")
+			assertions.equal(getEnemySnapshot.direction, "ClientToServer")
+			assertions.equal(getEnemySnapshot.kind, "Request")
+			assertions.equal(getEnemySnapshot.response, "Required")
+			assertions.equal(rawlen(getEnemySnapshot.placeRoles), 1)
+			assertions.equal(getEnemySnapshot.placeRoles[1], "Match")
 
-		local snapshotEvent = ProductionRemotes:get("MatchSnapshot") :: RemoteRegistry.Definition
-		assertions.equal(snapshotEvent.direction, "ServerToClient")
-		assertions.equal(snapshotEvent.kind, "Event")
-		assertions.equal(snapshotEvent.response, "None")
-		assertions.equal(rawlen(snapshotEvent.placeRoles), 1)
-		assertions.equal(snapshotEvent.placeRoles[1], "Match")
+			local submitReady = ProductionRemotes:get("SubmitReady") :: RemoteRegistry.Definition
+			assertions.equal(submitReady.direction, "ClientToServer")
+			assertions.equal(submitReady.kind, "Request")
+			assertions.equal(submitReady.response, "Required")
+			assertions.equal(rawlen(submitReady.placeRoles), 1)
+			assertions.equal(submitReady.placeRoles[1], "Match")
 
-		local enemyEvent = ProductionRemotes:get("EnemyReplication") :: RemoteRegistry.Definition
-		assertions.equal(enemyEvent.transport, "ReliableRemoteEvent")
-		assertions.equal(enemyEvent.direction, "ServerToClient")
-		assertions.equal(enemyEvent.kind, "Event")
-		assertions.equal(enemyEvent.response, "None")
-		assertions.equal(rawlen(enemyEvent.placeRoles), 1)
-		assertions.equal(enemyEvent.placeRoles[1], "Match")
-	end),
+			local snapshotEvent = ProductionRemotes:get("MatchSnapshot") :: RemoteRegistry.Definition
+			assertions.equal(snapshotEvent.direction, "ServerToClient")
+			assertions.equal(snapshotEvent.kind, "Event")
+			assertions.equal(snapshotEvent.response, "None")
+			assertions.equal(rawlen(snapshotEvent.placeRoles), 1)
+			assertions.equal(snapshotEvent.placeRoles[1], "Match")
+
+			local enemyEvent = ProductionRemotes:get("EnemyReplication") :: RemoteRegistry.Definition
+			assertions.equal(enemyEvent.transport, "ReliableRemoteEvent")
+			assertions.equal(enemyEvent.direction, "ServerToClient")
+			assertions.equal(enemyEvent.kind, "Event")
+			assertions.equal(enemyEvent.response, "None")
+			assertions.equal(rawlen(enemyEvent.placeRoles), 1)
+			assertions.equal(enemyEvent.placeRoles[1], "Match")
+
+			local baseEvent = ProductionRemotes:get("BaseReplication") :: RemoteRegistry.Definition
+			assertions.equal(baseEvent.transport, "ReliableRemoteEvent")
+			assertions.equal(baseEvent.direction, "ServerToClient")
+			assertions.equal(baseEvent.kind, "Event")
+			assertions.equal(baseEvent.response, "None")
+			assertions.equal(rawlen(baseEvent.placeRoles), 1)
+			assertions.equal(baseEvent.placeRoles[1], "Match")
+		end
+	),
 
 	TestHarness.case("accepts every supported semantic variant and canonicalizes lookup order", function(assertions)
 		local registry = expectRegistry(assertions, NetworkFixtures.validDefinitions())

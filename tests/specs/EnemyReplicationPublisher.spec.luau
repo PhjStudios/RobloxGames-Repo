@@ -81,7 +81,7 @@ local function stateSnapshot(
 	})
 end
 
-local function despawnSnapshot(runtimeEnemyId: number, revision: number, reason: "Manual" | "Endpoint"): any
+local function despawnSnapshot(runtimeEnemyId: number, revision: number, reason: "Manual" | "Endpoint" | "Defeat"): any
 	return table.freeze({
 		runtimeEnemyId = runtimeEnemyId,
 		enemyId = "enemy:publisher-fixture",
@@ -238,6 +238,72 @@ return TestHarness.suite("server enemy replication publisher", {
 
 		success(assertions, publisher:commitManualDespawn(despawnSnapshot(1, 2, "Manual")))
 		success(assertions, publisher:preflightStep(table.freeze({ 2 })))
+	end),
+
+	TestHarness.case("preflights and commits one ordered atomic Defeat terminal set", function(assertions)
+		local environment = newEnvironment(assertions, nil)
+		local publisher = environment.publisher
+		for runtimeEnemyId = 1, 3 do
+			success(assertions, publisher:commitSpawn(stateSnapshot(runtimeEnemyId, 1, 0)))
+			environment.states[runtimeEnemyId] = stateSnapshot(runtimeEnemyId, 1, 0)
+		end
+
+		local activeIds = table.freeze({ 1, 2, 3 })
+		assertions.isTrue(success(assertions, publisher:preflightDefeat(activeIds)))
+		expectError(assertions, publisher:preflightDefeat({ 1, 2, 3 }), "INVALID_ARGUMENT", "preflightDefeat")
+		expectError(
+			assertions,
+			publisher:preflightDefeat(table.freeze({ 1, 3, 2 })),
+			"INVALID_ARGUMENT",
+			"preflightDefeat"
+		)
+		expectError(
+			assertions,
+			publisher:preflightDefeat(table.freeze({ 1, 2 })),
+			"INVALID_ARGUMENT",
+			"preflightDefeat"
+		)
+
+		local malformed = table.freeze({
+			despawnSnapshot(1, 2, "Defeat"),
+			despawnSnapshot(2, 2, "Manual"),
+			despawnSnapshot(3, 2, "Defeat"),
+		})
+		expectError(assertions, publisher:commitDefeat(malformed), "INVALID_SNAPSHOT", "commitDefeat")
+		assertions.equal(publisher:getMetrics().activeRepresentationCount, 3)
+		success(assertions, publisher:observeCorrection(2))
+		environment.states[2] = stateSnapshot(2, 2, 1)
+		assertions.equal(publisher:getMetrics().dirtyCorrectionCount, 1)
+
+		local committed = success(
+			assertions,
+			publisher:commitDefeat(table.freeze({
+				despawnSnapshot(1, 2, "Defeat"),
+				despawnSnapshot(2, 3, "Defeat"),
+				despawnSnapshot(3, 2, "Defeat"),
+			}))
+		)
+		assertions.isTrue(table.isfrozen(committed))
+		assertions.equal(#committed, 3)
+		for index, despawn in committed do
+			assertions.equal(despawn.runtimeEnemyId, index)
+			assertions.equal(despawn.reason, "Defeat")
+			assertions.isTrue(table.isfrozen(despawn))
+		end
+		assertions.equal(publisher:getMetrics().activeRepresentationCount, 0)
+		assertions.equal(publisher:getMetrics().terminalPendingCount, 3)
+		assertions.equal(publisher:getMetrics().dirtyCorrectionCount, 0)
+
+		local flushed = success(assertions, publisher:advance(0.1, environment.provider))
+		assertions.equal(flushed.batchCount, 2)
+		local messages = messagesForRecipient(environment, environment.firstRecipient)
+		assertions.equal(messages[1].kind, EnemyProtocol.SPAWN_BATCH_KIND)
+		assertions.equal(messages[2].kind, EnemyProtocol.DESPAWN_BATCH_KIND)
+		for index, despawn in (messages[2] :: any).entries do
+			assertions.equal(despawn.runtimeEnemyId, index)
+			assertions.equal(despawn.reason, "Defeat")
+		end
+		assertions.equal(publisher:getMetrics().terminalPendingCount, 0)
 	end),
 
 	TestHarness.case(

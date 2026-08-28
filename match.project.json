@@ -56,6 +56,11 @@
           "$className": "Folder",
           "$ignoreUnknownInstances": true,
 
+          "base": {
+            "$path": "src/server/match/base",
+            "$ignoreUnknownInstances": true
+          },
+
           "enemies": {
             "$path": "src/server/match/enemies",
             "$ignoreUnknownInstances": true
@@ -122,6 +127,11 @@
           "match": {
             "$className": "Folder",
             "$ignoreUnknownInstances": true,
+
+            "base": {
+              "$path": "src/client/match/base",
+              "$ignoreUnknownInstances": true
+            },
 
             "enemies": {
               "$path": "src/client/match/enemies",

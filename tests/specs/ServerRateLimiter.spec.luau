@@ -236,9 +236,10 @@ return TestHarness.suite("server authoritative rate limiter", {
 
 	TestHarness.case("binds exact production request rates and no outbound policy", function(assertions)
 		assertions.isTrue(table.isfrozen(ProductionRateLimits))
-		assertions.equal(rawlen(ProductionRateLimits), 3)
+		assertions.equal(rawlen(ProductionRateLimits), 4)
 
 		local expected = {
+			GetBaseSnapshot = { capacity = 2, refillPerSecond = 0.25 },
 			GetEnemySnapshot = { capacity = 2, refillPerSecond = 0.25 },
 			GetMatchSnapshot = { capacity = 2, refillPerSecond = 1 },
 			SubmitReady = { capacity = 2, refillPerSecond = 0.5 },
@@ -252,6 +253,7 @@ return TestHarness.suite("server authoritative rate limiter", {
 				assertions.equal(binding.policy.capacity, policy.capacity)
 				assertions.equal(binding.policy.refillPerSecond, policy.refillPerSecond)
 			end
+			assertions.notEqual(binding.endpoint, "BaseReplication")
 			assertions.notEqual(binding.endpoint, "MatchSnapshot")
 			assertions.notEqual(binding.endpoint, "EnemyReplication")
 		end
@@ -259,17 +261,18 @@ return TestHarness.suite("server authoritative rate limiter", {
 		local matchResult = ServerRateLimiter.createPolicySet(ProductionRemotes, "Match", ProductionRateLimits)
 		assertions.isTrue(matchResult.ok)
 		if matchResult.ok then
-			assertions.equal(matchResult.value:count(), 3)
-			assertions.equal(matchResult.value:activeCount(), 3)
-			assertions.equal(matchResult.value:listActive()[1].endpoint, "GetEnemySnapshot")
-			assertions.equal(matchResult.value:listActive()[2].endpoint, "GetMatchSnapshot")
-			assertions.equal(matchResult.value:listActive()[3].endpoint, "SubmitReady")
+			assertions.equal(matchResult.value:count(), 4)
+			assertions.equal(matchResult.value:activeCount(), 4)
+			assertions.equal(matchResult.value:listActive()[1].endpoint, "GetBaseSnapshot")
+			assertions.equal(matchResult.value:listActive()[2].endpoint, "GetEnemySnapshot")
+			assertions.equal(matchResult.value:listActive()[3].endpoint, "GetMatchSnapshot")
+			assertions.equal(matchResult.value:listActive()[4].endpoint, "SubmitReady")
 		end
 
 		local lobbyResult = ServerRateLimiter.createPolicySet(ProductionRemotes, "Lobby", ProductionRateLimits)
 		assertions.isTrue(lobbyResult.ok)
 		if lobbyResult.ok then
-			assertions.equal(lobbyResult.value:count(), 3)
+			assertions.equal(lobbyResult.value:count(), 4)
 			assertions.equal(lobbyResult.value:activeCount(), 0)
 		end
 	end),

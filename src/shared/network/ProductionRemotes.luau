@@ -4,6 +4,14 @@ local RemoteRegistry = require(script.Parent.RemoteRegistry)
 
 local result = RemoteRegistry.create({
 	{
+		name = "GetBaseSnapshot",
+		transport = "ReliableRemoteEvent",
+		direction = "ClientToServer",
+		kind = "Request",
+		response = "Required",
+		placeRoles = { "Match" },
+	},
+	{
 		name = "GetEnemySnapshot",
 		transport = "ReliableRemoteEvent",
 		direction = "ClientToServer",
@@ -25,6 +33,14 @@ local result = RemoteRegistry.create({
 		direction = "ClientToServer",
 		kind = "Request",
 		response = "Required",
+		placeRoles = { "Match" },
+	},
+	{
+		name = "BaseReplication",
+		transport = "ReliableRemoteEvent",
+		direction = "ServerToClient",
+		kind = "Event",
+		response = "None",
 		placeRoles = { "Match" },
 	},
 	{

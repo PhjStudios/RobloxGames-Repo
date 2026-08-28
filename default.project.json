@@ -37,6 +37,10 @@
         "match": {
           "$className": "Folder",
 
+          "base": {
+            "$path": "src/server/match/base"
+          },
+
           "enemies": {
             "$path": "src/server/match/enemies"
           },
@@ -81,6 +85,10 @@
 
           "match": {
             "$className": "Folder",
+
+            "base": {
+              "$path": "src/client/match/base"
+            },
 
             "enemies": {
               "$path": "src/client/match/enemies"

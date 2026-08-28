@@ -586,6 +586,11 @@ return TestHarness.suite("enemy replication wire contract", {
 		assertions.isTrue(despawnResult.ok)
 		assertions.notEqual((despawnResult :: any).value, authoredDespawn)
 		assertions.isTrue(table.isfrozen((despawnResult :: any).value))
+		local defeatDespawn = despawnEntry(2)
+		defeatDespawn.reason = "Defeat"
+		local defeatResult = EnemyProtocol.validateDespawnEntry(defeatDespawn)
+		assertions.isTrue(defeatResult.ok)
+		assertions.equal((defeatResult :: any).value.reason, "Defeat")
 		assertions.isFalse(EnemyProtocol.validateDespawnEntry({ runtimeEnemyId = 1 }).ok)
 	end),
 

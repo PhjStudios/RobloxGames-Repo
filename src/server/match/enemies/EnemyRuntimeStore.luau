@@ -17,7 +17,7 @@ local EnemyPath = require(script.Parent.EnemyPath)
 export type RuntimeEnemyId = number
 export type EnemyEpoch = number
 export type EnemyLifecycle = "Active" | "EndpointResolved" | "Despawned"
-export type DespawnReason = "Manual" | "Endpoint"
+export type DespawnReason = "Manual" | "Endpoint" | "Defeat"
 
 export type SpeedModifiers = {
 	slowMultiplier: number,
@@ -78,11 +78,23 @@ export type StoreIdentity = {
 	enemyEpoch: EnemyEpoch,
 }
 
+export type AuthenticatedLeakOutcome = {
+	matchId: Ids.MatchId,
+	enemyEpoch: EnemyEpoch,
+	runtimeEnemyId: RuntimeEnemyId,
+	enemyId: Ids.EnemyId,
+	leakDamage: number,
+	serverTime: number,
+}
+
+export type EndpointSink = (outcome: AuthenticatedLeakOutcome) -> ()
+
 export type StoreMetrics = {
 	activeCount: number,
 	lifetimeCount: number,
 	nextRuntimeEnemyId: number,
 	terminalCount: number,
+	retainedLeakOutcomeCount: number,
 	retainedLaneCount: number,
 	retainsCatalog: boolean,
 	retainsClockCallback: boolean,
@@ -101,6 +113,7 @@ export type Operation =
 	| "step"
 	| "resolveEndpoint"
 	| "despawn"
+	| "despawnAllForDefeat"
 	| "getIdentity"
 	| "getMetrics"
 	| "installStudioCatalog"
@@ -180,7 +193,6 @@ type TerminalRecord = {
 	endpoint: RuntimeEnemySnapshot?,
 }
 
-type EndpointSink = (snapshot: RuntimeEnemySnapshot) -> ()
 type Clock = () -> unknown
 
 type TestOptions = {
@@ -200,6 +212,7 @@ type StoreData = {
 	activeById: { [RuntimeEnemyId]: RuntimeEnemyRecord },
 	issuedIds: { [RuntimeEnemyId]: boolean },
 	terminalById: { [RuntimeEnemyId]: TerminalRecord },
+	authenticatedLeakOutcomeById: { [RuntimeEnemyId]: AuthenticatedLeakOutcome },
 	activeCount: number,
 	lifetimeCount: number,
 	terminalCount: number,
@@ -234,6 +247,7 @@ StoreMethods.__index = StoreMethods
 export type Store = typeof(setmetatable({} :: {}, StoreMethods))
 
 local STORE_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: StoreData }
+local AUTHENTICATED_LEAK_OUTCOMES = setmetatable({}, { __mode = "k" }) :: { [AuthenticatedLeakOutcome]: StoreData }
 
 local EnemyRuntimeStore = {
 	MAX_ACTIVE = MAX_ACTIVE,
@@ -487,7 +501,7 @@ local function defaultClock(): unknown
 	return Workspace:GetServerTimeNow()
 end
 
-local function noEndpointOutcome(_snapshot: RuntimeEnemySnapshot) end
+local function noEndpointOutcome(_outcome: AuthenticatedLeakOutcome) end
 
 local function closedClock(): unknown
 	return 0
@@ -558,6 +572,10 @@ local function lookupActive(
 end
 
 local function clearData(data: StoreData)
+	for _, outcome in data.authenticatedLeakOutcomeById do
+		AUTHENTICATED_LEAK_OUTCOMES[outcome] = nil
+	end
+	table.clear(data.authenticatedLeakOutcomeById)
 	table.clear(data.activeById)
 	table.clear(data.issuedIds)
 	table.clear(data.terminalById)
@@ -603,9 +621,9 @@ local function beginTimedMutation(data: StoreData, operation: Operation): (numbe
 	return serverTime, nil
 end
 
-local function invokeEndpointSink(data: StoreData, endpoint: RuntimeEnemySnapshot): boolean
+local function invokeEndpointSink(data: StoreData, outcome: AuthenticatedLeakOutcome): boolean
 	local thread = coroutine.create(function()
-		data.endpointSink(endpoint)
+		data.endpointSink(outcome)
 	end)
 	local resumed = coroutine.resume(thread)
 	if not resumed then
@@ -627,7 +645,17 @@ local function terminalizeEndpoint(data: StoreData, record: RuntimeEnemyRecord, 
 	record.lifecycle = "EndpointResolved"
 	record.revision += 1
 	local endpoint = snapshotRecord(record)
-	local callbackSucceeded = invokeEndpointSink(data, endpoint)
+	local outcome = table.freeze({
+		matchId = data.identity.matchId,
+		enemyEpoch = data.identity.enemyEpoch,
+		runtimeEnemyId = record.runtimeEnemyId,
+		enemyId = record.definition.id,
+		leakDamage = record.definition.leakDamage,
+		serverTime = serverTime,
+	})
+	data.authenticatedLeakOutcomeById[record.runtimeEnemyId] = outcome
+	AUTHENTICATED_LEAK_OUTCOMES[outcome] = data
+	local callbackSucceeded = invokeEndpointSink(data, outcome)
 
 	record.revision += 1
 	local despawn = terminalSnapshot(record, "Endpoint", serverTime)
@@ -675,6 +703,7 @@ local function makeStore(
 		activeById = {},
 		issuedIds = issuedIds,
 		terminalById = {},
+		authenticatedLeakOutcomeById = {},
 		activeCount = 0,
 		lifetimeCount = lifetimeCount,
 		terminalCount = 0,
@@ -1021,6 +1050,86 @@ function StoreMethods.despawn(self: Store, runtimeEnemyIdValue: unknown): Result
 	return Result.ok(despawn)
 end
 
+function StoreMethods.despawnAllForDefeat(
+	self: Store,
+	expectedActiveIdsValue: unknown
+): Result.Result<{ DespawnSnapshot }, StoreError>
+	local operation: Operation = "despawnAllForDefeat"
+	local data = requireData(self)
+	local liveError = validateLive(data, operation, true)
+	if liveError ~= nil then
+		return Result.err(liveError)
+	end
+	if type(expectedActiveIdsValue) ~= "table" or getmetatable(expectedActiveIdsValue :: any) ~= nil then
+		return failure("INVALID_RUNTIME_ID", operation)
+	end
+
+	local expectedActiveIds = expectedActiveIdsValue :: { [any]: unknown }
+	local expectedCount = rawlen(expectedActiveIds :: { unknown })
+	if expectedCount > MAX_ACTIVE then
+		return failure("INVALID_RUNTIME_ID", operation)
+	end
+	local fieldCount = 0
+	for key in next, expectedActiveIds do
+		if type(key) ~= "number" or not Validation.isSafeInteger(key) or key < 1 or key > expectedCount then
+			return failure("INVALID_RUNTIME_ID", operation)
+		end
+		fieldCount += 1
+	end
+	if fieldCount ~= expectedCount then
+		return failure("INVALID_RUNTIME_ID", operation)
+	end
+
+	local records: { RuntimeEnemyRecord } = table.create(expectedCount)
+	local previousRuntimeEnemyId = 0
+	for index = 1, expectedCount do
+		local runtimeEnemyId, idError = validateRuntimeEnemyId(expectedActiveIds[index], operation)
+		if runtimeEnemyId == nil then
+			return Result.err(idError :: StoreError)
+		end
+		if runtimeEnemyId <= previousRuntimeEnemyId then
+			return failure("INVALID_RUNTIME_ID", operation)
+		end
+		local record = data.activeById[runtimeEnemyId]
+		if record == nil then
+			return failure("STALE_RUNTIME_ID", operation)
+		end
+		if record.lifecycle ~= "Active" then
+			return failure("ILLEGAL_LIFECYCLE", operation)
+		end
+		if record.revision >= Validation.MAX_SAFE_INTEGER then
+			return failure("REVISION_EXHAUSTED", operation)
+		end
+		table.insert(records, record)
+		previousRuntimeEnemyId = runtimeEnemyId
+	end
+	if expectedCount ~= data.activeCount then
+		return failure("STALE_RUNTIME_ID", operation)
+	end
+
+	local serverTime, clockError = beginTimedMutation(data, operation)
+	if serverTime == nil then
+		return Result.err(clockError :: StoreError)
+	end
+
+	local despawns: { DespawnSnapshot } = table.create(expectedCount)
+	for _, record in records do
+		record.sampleServerTime = serverTime
+		record.revision += 1
+		local despawn = terminalSnapshot(record, "Defeat", serverTime)
+		data.activeById[record.runtimeEnemyId] = nil
+		data.activeCount -= 1
+		data.terminalById[record.runtimeEnemyId] = {
+			despawn = despawn,
+		}
+		data.terminalCount += 1
+		table.insert(despawns, despawn)
+	end
+	table.freeze(despawns)
+	finishMutation(data)
+	return Result.ok(despawns)
+end
+
 function StoreMethods.step(self: Store, deltaSecondsValue: unknown): Result.Result<StepResult, StoreError>
 	local data = requireData(self)
 	local liveError = validateLive(data, "step", true)
@@ -1156,11 +1265,16 @@ function StoreMethods.getMetrics(self: Store): StoreMetrics
 	for _ in data.laneById do
 		retainedLaneCount += 1
 	end
+	local retainedLeakOutcomeCount = 0
+	for _ in data.authenticatedLeakOutcomeById do
+		retainedLeakOutcomeCount += 1
+	end
 	return table.freeze({
 		activeCount = data.activeCount,
 		lifetimeCount = data.lifetimeCount,
 		nextRuntimeEnemyId = data.nextRuntimeEnemyId,
 		terminalCount = data.terminalCount,
+		retainedLeakOutcomeCount = retainedLeakOutcomeCount,
 		retainedLaneCount = retainedLaneCount,
 		retainsCatalog = data.catalog ~= nil,
 		retainsClockCallback = data.clock ~= closedClock,
@@ -1181,6 +1295,30 @@ function StoreMethods.cleanup(self: Store): Result.Result<boolean, StoreError>
 	end
 	clearData(data)
 	return Result.ok(true)
+end
+
+function StoreMethods.isAuthenticatedLeakOutcome(self: Store, value: unknown): boolean
+	local data = requireData(self)
+	if type(value) ~= "table" then
+		return false
+	end
+	local outcome = value :: AuthenticatedLeakOutcome
+	if AUTHENTICATED_LEAK_OUTCOMES[outcome] ~= data or data.cleaned then
+		return false
+	end
+	return data.authenticatedLeakOutcomeById[outcome.runtimeEnemyId] == outcome
+end
+
+function EnemyRuntimeStore.isAuthenticatedLeakOutcome(value: unknown): boolean
+	if type(value) ~= "table" then
+		return false
+	end
+	local outcome = value :: AuthenticatedLeakOutcome
+	local data = AUTHENTICATED_LEAK_OUTCOMES[outcome]
+	if data == nil or data.cleaned then
+		return false
+	end
+	return data.authenticatedLeakOutcomeById[outcome.runtimeEnemyId] == outcome
 end
 
 local function testModuleIdentityIsExact(): boolean

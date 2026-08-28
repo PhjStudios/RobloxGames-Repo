@@ -3,11 +3,13 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local EnemyProtocol = require(ReplicatedStorage.Shared.match.EnemyProtocol)
+local BaseProtocol = require(ReplicatedStorage.Shared.match.BaseProtocol)
 local MatchProtocol = require(ReplicatedStorage.Shared.match.MatchProtocol)
 local PlaceRoles = require(ReplicatedStorage.Shared.config.PlaceRoles)
 local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
 local ServerBootstrap = require(script.Parent.ServerBootstrap)
 local ServerRequestDispatcher = require(script.Parent.Parent.networking.ServerRequestDispatcher)
+local BaseRuntimeService = require(script.Parent.Parent.Parent.match.base.BaseRuntimeService)
 local EnemySimulationService = require(script.Parent.Parent.Parent.match.enemies.EnemySimulationService)
 local MatchLifecycleService = require(script.Parent.Parent.Parent.match.lifecycle.MatchLifecycleService)
 
@@ -45,6 +47,13 @@ local function rejectEnemySnapshot(code: unknown): ServerRequestDispatcher.Handl
 	return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 end
 
+local function rejectBaseSnapshot(code: unknown): ServerRequestDispatcher.HandlerOutcome
+	if code == "INTERNAL_ERROR" then
+		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.INTERNAL_ERROR)
+	end
+	return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+end
+
 ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 	local network = configuration.serverRemoteRegistry
 	if network == nil then
@@ -55,9 +64,17 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		network:registerServerEvent(MatchProtocol.MATCH_SNAPSHOT_ENDPOINT, MatchProtocol.MatchSnapshotSchema)
 	local sendEnemyReplication =
 		network:registerServerEvent(EnemyProtocol.ENEMY_REPLICATION_ENDPOINT, EnemyProtocol.EnemyReplicationSchema)
+	local sendBaseReplication =
+		network:registerServerEvent(BaseProtocol.BASE_REPLICATION_ENDPOINT, BaseProtocol.BaseReplicationSchema)
 	local matchLifecycle = MatchLifecycleService.new(configuration.log, sendSnapshot)
-	local enemySimulation =
-		EnemySimulationService.new(matchLifecycle, configuration.coreConfiguration.enemies, sendEnemyReplication)
+	local baseRuntime =
+		BaseRuntimeService.new(matchLifecycle, configuration.coreConfiguration.difficulties, sendBaseReplication)
+	local enemySimulation = EnemySimulationService.new(
+		matchLifecycle,
+		baseRuntime,
+		configuration.coreConfiguration.enemies,
+		sendEnemyReplication
+	)
 
 	network:registerRequest(
 		MatchProtocol.GET_MATCH_SNAPSHOT_ENDPOINT,
@@ -88,6 +105,19 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		end
 	)
 	network:registerRequest(
+		BaseProtocol.GET_BASE_SNAPSHOT_ENDPOINT,
+		BaseProtocol.GetBaseSnapshotPayloadSchema,
+		BaseProtocol.BaseSnapshotSchema,
+		authorizeContext,
+		function(_context, _payload)
+			local snapshotResult = baseRuntime:getSnapshot()
+			if snapshotResult.ok then
+				return ServerRequestDispatcher.success(snapshotResult.value)
+			end
+			return rejectBaseSnapshot(snapshotResult.error.code)
+		end
+	)
+	network:registerRequest(
 		EnemyProtocol.GET_ENEMY_SNAPSHOT_ENDPOINT,
 		EnemyProtocol.GetEnemySnapshotPayloadSchema,
 		EnemyProtocol.EnemySnapshotReceiptSchema,
@@ -101,5 +131,6 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		end
 	)
 	configuration.lifecycleRunner:register(matchLifecycle:getServiceDefinition())
+	configuration.lifecycleRunner:register(baseRuntime:getServiceDefinition())
 	configuration.lifecycleRunner:register(enemySimulation:getServiceDefinition())
 end)

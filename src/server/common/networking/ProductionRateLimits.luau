@@ -12,6 +12,10 @@ end
 
 local bindings: { ServerRateLimiter.PolicyBinding } = {
 	table.freeze({
+		endpoint = "GetBaseSnapshot",
+		policy = requirePolicy(2, 0.25),
+	}),
+	table.freeze({
 		endpoint = "GetEnemySnapshot",
 		policy = requirePolicy(2, 0.25),
 	}),

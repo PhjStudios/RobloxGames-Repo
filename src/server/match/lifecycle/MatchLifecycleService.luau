@@ -3,6 +3,7 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
@@ -107,6 +108,36 @@ export type ReadyError = {
 	operation: "submitReady",
 }
 
+export type BaseDefeatOperation = "beginBaseDefeat" | "commitBaseDefeat" | "rollbackBaseDefeat"
+
+export type BaseDefeatErrorCode =
+	"UNAVAILABLE"
+	| "NOT_AUTHORIZED"
+	| "WRONG_STATE"
+	| "INVALID_TOKEN"
+	| "REENTRANT"
+	| "INTERNAL_ERROR"
+
+export type BaseDefeatError = {
+	code: BaseDefeatErrorCode,
+	operation: BaseDefeatOperation,
+}
+
+export type BaseDefeatToken = {}
+
+export type BaseDefeatCommitOutcome = {
+	committed: true,
+	published: boolean,
+	snapshot: MatchSnapshot,
+}
+
+export type StudioWaveErrorCode = "UNAVAILABLE" | "NOT_STUDIO" | "WRONG_STATE" | "REENTRANT" | "INTERNAL_ERROR"
+
+export type StudioWaveError = {
+	code: StudioWaveErrorCode,
+	operation: "activateStudioWaveForEvidence",
+}
+
 export type MapLoaderAdapter = {
 	load: (self: MapLoaderAdapter, mapId: unknown) -> unknown,
 	cleanup: (self: MapLoaderAdapter) -> unknown,
@@ -165,6 +196,7 @@ export type Schedule = (delaySeconds: number, callback: TimerCallback) -> unknow
 export type Cancel = (handle: unknown) -> ()
 export type SnapshotSender = (recipient: unknown, snapshot: MatchSnapshot) -> boolean
 export type AdapterFactory = (dependencies: unknown) -> unknown
+export type IsStudio = () -> unknown
 
 export type TestDependencies = {
 	mapLoader: MapLoaderAdapter,
@@ -178,6 +210,7 @@ export type TestDependencies = {
 	schedule: Schedule?,
 	cancel: Cancel?,
 	snapshotSender: SnapshotSender?,
+	isStudio: IsStudio?,
 }
 
 type ServiceData = {
@@ -196,7 +229,19 @@ type ServiceData = {
 	shutdownFailure: string?,
 	serviceDefinition: ServiceLifecycle.ServiceDefinition?,
 	runtimeMapSnapshot: RuntimeMapSnapshot?,
+	baseDefeatToken: BaseDefeatToken?,
+	baseDefeatOperationActive: boolean,
+	baseDefeatReentryViolation: boolean,
+	baseDefeatCommitted: boolean,
+	baseDefeatShutdownRequested: boolean,
+	isStudio: IsStudio?,
+	studioWaveOperationActive: boolean,
+	studioWaveReentryViolation: boolean,
+	studioWaveActivated: boolean,
+	studioWaveShutdownRequested: boolean,
 }
+
+type BaseDefeatTokenState = "Prepared" | "Committed" | "RolledBack"
 
 type ExistingPlayer = {
 	connection: unknown,
@@ -204,11 +249,25 @@ type ExistingPlayer = {
 	index: number,
 }
 
+type SnapshotRecipientRecord = {
+	recipient: unknown,
+	userId: number,
+}
+
 local ServiceMethods = {}
 ServiceMethods.__index = ServiceMethods
 
 export type Service = typeof(setmetatable({} :: {}, ServiceMethods))
 export type TestConstructor = (logger: Log.Logger, dependencies: TestDependencies) -> Service
+
+type BaseDefeatTokenData = {
+	owner: ServiceData,
+	state: BaseDefeatTokenState,
+	machineToken: unknown?,
+	preparedSnapshot: MatchSnapshot,
+	terminalRecipients: { SnapshotRecipientRecord },
+	outcome: BaseDefeatCommitOutcome?,
+}
 
 local FIXED_MAP_ID = "map:phase07-graybox"
 local SERVICE_NAME = "MatchLifecycle"
@@ -246,6 +305,7 @@ local BENIGN_RESOLVE_ERRORS: { [string]: boolean } = table.freeze({
 })
 
 local SERVICE_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ServiceData }
+local BASE_DEFEAT_TOKEN_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: BaseDefeatTokenData }
 
 local MatchLifecycleService = {
 	FIXED_MAP_ID = FIXED_MAP_ID,
@@ -281,6 +341,27 @@ local function readyFailure(code: ReadyErrorCode): Result.Failure<ReadyError>
 	}))
 end
 
+local function makeBaseDefeatError(code: BaseDefeatErrorCode, operation: BaseDefeatOperation): BaseDefeatError
+	return table.freeze({
+		code = code,
+		operation = operation,
+	})
+end
+
+local function baseDefeatFailure(
+	code: BaseDefeatErrorCode,
+	operation: BaseDefeatOperation
+): Result.Failure<BaseDefeatError>
+	return Result.err(makeBaseDefeatError(code, operation))
+end
+
+local function studioWaveFailure(code: StudioWaveErrorCode): Result.Failure<StudioWaveError>
+	return Result.err(table.freeze({
+		code = code,
+		operation = "activateStudioWaveForEvidence",
+	}))
+end
+
 local function requireData(value: unknown): ServiceData
 	if type(value) ~= "table" then
 		staticError("INVALID_CONTEXT")
@@ -294,6 +375,19 @@ end
 
 local function isSuccess(value: unknown): boolean
 	return type(value) == "table" and (value :: any).ok == true
+end
+
+local function callNonYielding(callback: (...any) -> any, ...: any): (boolean, any)
+	local thread = coroutine.create(callback)
+	local resumed, value = coroutine.resume(thread, ...)
+	if not resumed then
+		return false, nil
+	end
+	if coroutine.status(thread) ~= "dead" then
+		pcall(coroutine.close, thread)
+		return false, nil
+	end
+	return true, value
 end
 
 local function isDetachedFrozenValue(
@@ -486,7 +580,7 @@ local function detachedParticipants(roster: RosterAdapter): { ParticipantSnapsho
 end
 
 local function rollbackToken(machine: StateMachineAdapter, token: unknown): boolean
-	local called, resultValue = pcall(machine.rollbackTransition, machine, token)
+	local called, resultValue = callNonYielding(machine.rollbackTransition, machine, token)
 	return called and isSuccess(resultValue)
 end
 
@@ -496,13 +590,13 @@ local function transition(machine: StateMachineAdapter, targetState: MatchStateM
 		return false
 	end
 
-	local began, beginValue = pcall(machine.beginTransition, machine, targetState, current.revision)
+	local began, beginValue = callNonYielding(machine.beginTransition, machine, targetState, current.revision)
 	if not began or not isSuccess(beginValue) then
 		return false
 	end
 	local token = (beginValue :: any).value
 
-	local committed, commitValue = pcall(machine.commitTransition, machine, token)
+	local committed, commitValue = callNonYielding(machine.commitTransition, machine, token)
 	if committed and isSuccess(commitValue) then
 		return true
 	end
@@ -562,9 +656,47 @@ local function cleanupSnapshotBroadcaster(broadcaster: SnapshotBroadcasterAdapte
 	end
 end
 
+local function clearBaseDefeatClaim(data: ServiceData, rollbackPrepared: boolean): boolean
+	local token = data.baseDefeatToken
+	data.baseDefeatToken = nil
+	data.baseDefeatOperationActive = false
+	data.baseDefeatReentryViolation = false
+	data.baseDefeatShutdownRequested = false
+	if token == nil then
+		return true
+	end
+
+	local tokenData = BASE_DEFEAT_TOKEN_DATA[token]
+	BASE_DEFEAT_TOKEN_DATA[token] = nil
+	if tokenData == nil or tokenData.owner ~= data then
+		return false
+	end
+	if tokenData.state ~= "Prepared" or not rollbackPrepared then
+		tokenData.machineToken = nil
+		return true
+	end
+
+	local machine = data.machine
+	local machineToken = tokenData.machineToken
+	tokenData.machineToken = nil
+	tokenData.state = "RolledBack"
+	if machine == nil or machineToken == nil then
+		return false
+	end
+	local called, resultValue = callNonYielding(machine.rollbackTransition, machine, machineToken)
+	return called and isSuccess(resultValue)
+end
+
 local function releaseOwnedResources(data: ServiceData): (boolean, string?)
 	data.callbacksEnabled = false
 	data.available = false
+	data.isStudio = nil
+	data.studioWaveOperationActive = false
+	data.studioWaveReentryViolation = false
+	data.studioWaveActivated = false
+	data.studioWaveShutdownRequested = false
+	local defeatClaimReleased = clearBaseDefeatClaim(data, true)
+	data.baseDefeatCommitted = false
 	local cleanup = data.cleanup
 	data.cleanup = nil
 	data.mapLoaded = false
@@ -577,7 +709,7 @@ local function releaseOwnedResources(data: ServiceData): (boolean, string?)
 		data.playerSource = nil
 		data.readyCoordinator = nil
 		data.snapshotBroadcaster = nil
-		return true, nil
+		return defeatClaimReleased, if defeatClaimReleased then nil else `{STATIC_ERROR_PREFIX}[code=CLEANUP_FAILED]`
 	end
 
 	local cleaned, failureValue = pcall(function()
@@ -589,7 +721,7 @@ local function releaseOwnedResources(data: ServiceData): (boolean, string?)
 	data.playerSource = nil
 	data.readyCoordinator = nil
 	data.snapshotBroadcaster = nil
-	if cleaned then
+	if cleaned and defeatClaimReleased then
 		return true, nil
 	end
 	if type(failureValue) == "string" then
@@ -613,6 +745,14 @@ local function failClosedAtRuntime(data: ServiceData, code: string)
 		return
 	end
 	data.callbacksEnabled = false
+	if data.baseDefeatCommitted then
+		data.logger:warn("lifecycle", "match_failed_closed", "Match lifecycle failed closed", {
+			code = code,
+			service = SERVICE_NAME,
+			state = data.state,
+		})
+		return
+	end
 	data.available = false
 	local machine = data.machine
 	if machine ~= nil then
@@ -694,7 +834,7 @@ local function publishCurrentSnapshot(data: ServiceData): boolean
 	return true
 end
 
-local function collectRecipients(data: ServiceData): unknown
+local function collectRecipients(data: ServiceData): { SnapshotRecipientRecord }?
 	local playerSource = data.playerSource
 	local roster = data.roster
 	if not data.callbacksEnabled or playerSource == nil or roster == nil then
@@ -705,7 +845,7 @@ local function collectRecipients(data: ServiceData): unknown
 	if not called or not isDenseArray(playersValue) then
 		return nil
 	end
-	local recipients = {}
+	local recipients: { SnapshotRecipientRecord } = {}
 	local seenUserIds: { [number]: boolean } = {}
 	local seenConnections: { [any]: boolean } = {}
 	for _, connection in playersValue :: { unknown } do
@@ -727,10 +867,13 @@ local function collectRecipients(data: ServiceData): unknown
 				end
 				seenUserIds[userId] = true
 				seenConnections[connection :: any] = true
-				table.insert(recipients, {
-					recipient = connection,
-					userId = userId,
-				})
+				table.insert(
+					recipients,
+					table.freeze({
+						recipient = connection,
+						userId = userId,
+					})
+				)
 			else
 				local errorCode = resultErrorCode(resolveResult)
 				if errorCode == nil or BENIGN_RESOLVE_ERRORS[errorCode] ~= true then
@@ -743,7 +886,7 @@ local function collectRecipients(data: ServiceData): unknown
 	table.sort(recipients, function(left, right)
 		return left.userId < right.userId
 	end)
-	return recipients
+	return table.freeze(recipients)
 end
 
 local function afterRosterMutation(data: ServiceData): boolean
@@ -999,10 +1142,20 @@ local function shutdown(data: ServiceData)
 	if data.state ~= "Initialized" and data.state ~= "Started" then
 		staticError("INVALID_STATE")
 	end
+	if data.baseDefeatOperationActive or data.studioWaveOperationActive then
+		data.callbacksEnabled = false
+		if data.baseDefeatOperationActive then
+			data.baseDefeatShutdownRequested = true
+		end
+		if data.studioWaveOperationActive then
+			data.studioWaveShutdownRequested = true
+		end
+		return
+	end
 	data.state = "ShuttingDown"
 	data.callbacksEnabled = false
 
-	local transitionSucceeded = true
+	local transitionSucceeded = clearBaseDefeatClaim(data, true)
 	local machine = data.machine
 	if machine == nil then
 		transitionSucceeded = false
@@ -1010,7 +1163,7 @@ local function shutdown(data: ServiceData)
 		local current = detachedStateSnapshot(machine)
 		if current == nil then
 			transitionSucceeded = false
-		elseif current.state ~= "Closing" then
+		elseif transitionSucceeded and current.state ~= "Closing" then
 			transitionSucceeded = transition(machine, "Closing")
 		end
 	end
@@ -1027,6 +1180,227 @@ local function shutdown(data: ServiceData)
 	end
 
 	data.state = "Shutdown"
+end
+
+local function beginStudioWaveOperation(data: ServiceData): StudioWaveError?
+	if data.studioWaveOperationActive then
+		data.studioWaveReentryViolation = true
+		return table.freeze({
+			code = "REENTRANT",
+			operation = "activateStudioWaveForEvidence",
+		})
+	end
+	if data.baseDefeatOperationActive then
+		data.baseDefeatReentryViolation = true
+		return table.freeze({
+			code = "REENTRANT",
+			operation = "activateStudioWaveForEvidence",
+		})
+	end
+	if data.state ~= "Started" or not data.available or not data.callbacksEnabled then
+		return table.freeze({
+			code = "UNAVAILABLE",
+			operation = "activateStudioWaveForEvidence",
+		})
+	end
+	data.studioWaveOperationActive = true
+	data.studioWaveReentryViolation = false
+	data.studioWaveShutdownRequested = false
+	return nil
+end
+
+local function endStudioWaveOperation(data: ServiceData): boolean
+	data.studioWaveOperationActive = false
+	data.studioWaveReentryViolation = false
+	if not data.studioWaveShutdownRequested then
+		return true
+	end
+	data.studioWaveShutdownRequested = false
+	local shutdownCalled = callNonYielding(shutdown, data)
+	return shutdownCalled
+end
+
+local function failStudioWaveOperation(data: ServiceData, code: string): Result.Failure<StudioWaveError>
+	endStudioWaveOperation(data)
+	callNonYielding(failClosedAtRuntime, data, code)
+	return studioWaveFailure("INTERNAL_ERROR")
+end
+
+local function studioWaveOperationIntact(data: ServiceData): boolean
+	return data.studioWaveOperationActive
+		and not data.studioWaveReentryViolation
+		and not data.studioWaveShutdownRequested
+		and data.state == "Started"
+		and data.available
+		and data.callbacksEnabled
+end
+
+local function matchesStateSnapshot(
+	value: unknown,
+	matchId: Ids.MatchId,
+	revision: number,
+	state: MatchStateMachine.MatchState
+): boolean
+	if type(value) ~= "table" or not table.isfrozen(value :: any) then
+		return false
+	end
+	local snapshot = value :: any
+	local fieldCount = 0
+	for fieldName in next, snapshot do
+		if fieldName ~= "matchId" and fieldName ~= "revision" and fieldName ~= "state" then
+			return false
+		end
+		fieldCount += 1
+	end
+	return fieldCount == 3 and snapshot.matchId == matchId and snapshot.revision == revision and snapshot.state == state
+end
+
+local function isAcceptedSnapshotPublishResult(value: unknown): boolean
+	if type(value) ~= "table" or not table.isfrozen(value :: any) then
+		return false
+	end
+	local resultValue = value :: any
+	local resultFieldCount = 0
+	for fieldName in next, resultValue do
+		if fieldName ~= "ok" and fieldName ~= "value" then
+			return false
+		end
+		resultFieldCount += 1
+	end
+	local outcome = resultValue.value
+	if resultFieldCount ~= 2 or resultValue.ok ~= true or type(outcome) ~= "table" or not table.isfrozen(outcome) then
+		return false
+	end
+	local outcomeFieldCount = 0
+	for fieldName in next, outcome do
+		if fieldName ~= "kind" then
+			return false
+		end
+		outcomeFieldCount += 1
+	end
+	return outcomeFieldCount == 1 and (outcome.kind == "Sent" or outcome.kind == "Queued" or outcome.kind == "Replaced")
+end
+
+function ServiceMethods.activateStudioWaveForEvidence(self: Service): Result.Result<MatchSnapshot, StudioWaveError>
+	local data = requireData(self)
+	local operationError = beginStudioWaveOperation(data)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+
+	local isStudio = data.isStudio
+	if isStudio == nil then
+		return failStudioWaveOperation(data, "STUDIO_WAVE_PREDICATE_MISSING")
+	end
+	local studioCalled, studioValue = callNonYielding(isStudio)
+	if not studioCalled or type(studioValue) ~= "boolean" or not studioWaveOperationIntact(data) then
+		return failStudioWaveOperation(data, "STUDIO_WAVE_PREDICATE_FAILED")
+	end
+	if studioValue ~= true then
+		endStudioWaveOperation(data)
+		return studioWaveFailure("NOT_STUDIO")
+	end
+	if data.studioWaveActivated or data.baseDefeatToken ~= nil or data.baseDefeatCommitted then
+		endStudioWaveOperation(data)
+		return studioWaveFailure("REENTRANT")
+	end
+
+	local machine = data.machine
+	if machine == nil then
+		return failStudioWaveOperation(data, "STUDIO_WAVE_MACHINE_MISSING")
+	end
+	local stateCalled, currentValue = callNonYielding(detachedStateSnapshot, machine)
+	local current = if stateCalled then currentValue :: MatchStateMachine.StateSnapshot? else nil
+	if current == nil or not studioWaveOperationIntact(data) then
+		return failStudioWaveOperation(data, "STUDIO_WAVE_STATE_FAILED")
+	end
+	if current.state ~= "PreWave" then
+		endStudioWaveOperation(data)
+		return studioWaveFailure("WRONG_STATE")
+	end
+	if current.revision >= Validation.MAX_SAFE_INTEGER then
+		return failStudioWaveOperation(data, "STUDIO_WAVE_REVISION_EXHAUSTED")
+	end
+
+	local snapshotCalled, beforeValue = callNonYielding(composeSnapshot, data)
+	local before = if snapshotCalled then beforeValue :: MatchSnapshot? else nil
+	if
+		before == nil
+		or before.matchId ~= current.matchId
+		or before.revision ~= current.revision
+		or before.state ~= "PreWave"
+		or before.deadlineServerTime ~= nil
+		or not studioWaveOperationIntact(data)
+	then
+		return failStudioWaveOperation(data, "STUDIO_WAVE_PREFLIGHT_FAILED")
+	end
+
+	local began, beginResult = callNonYielding(machine.beginTransition, machine, "WaveActive", current.revision)
+	local machineToken = if began and isSuccess(beginResult) then (beginResult :: any).value else nil
+	if
+		not began
+		or not isSuccess(beginResult)
+		or not table.isfrozen(beginResult :: any)
+		or type(machineToken) ~= "table"
+		or not studioWaveOperationIntact(data)
+	then
+		if machineToken ~= nil then
+			callNonYielding(machine.rollbackTransition, machine, machineToken)
+		end
+		return failStudioWaveOperation(data, "STUDIO_WAVE_BEGIN_FAILED")
+	end
+
+	local committed, commitResult = callNonYielding(machine.commitTransition, machine, machineToken)
+	local committedValue = if committed and isSuccess(commitResult) then (commitResult :: any).value else nil
+	local currentCalled, afterStateValue = callNonYielding(detachedStateSnapshot, machine)
+	local afterState = if currentCalled then afterStateValue :: MatchStateMachine.StateSnapshot? else nil
+	local expectedRevision = current.revision + 1
+	if
+		not committed
+		or not isSuccess(commitResult)
+		or not table.isfrozen(commitResult :: any)
+		or not matchesStateSnapshot(committedValue, current.matchId, expectedRevision, "WaveActive")
+		or afterState == nil
+		or afterState.matchId ~= current.matchId
+		or afterState.revision ~= expectedRevision
+		or afterState.state ~= "WaveActive"
+		or not studioWaveOperationIntact(data)
+	then
+		callNonYielding(machine.rollbackTransition, machine, machineToken)
+		return failStudioWaveOperation(data, "STUDIO_WAVE_COMMIT_FAILED")
+	end
+
+	local composed, snapshotValue = callNonYielding(composeSnapshot, data)
+	local snapshot = if composed then snapshotValue :: MatchSnapshot? else nil
+	if
+		snapshot == nil
+		or snapshot.matchId ~= current.matchId
+		or snapshot.revision ~= expectedRevision
+		or snapshot.state ~= "WaveActive"
+		or snapshot.deadlineServerTime ~= nil
+		or not studioWaveOperationIntact(data)
+	then
+		return failStudioWaveOperation(data, "STUDIO_WAVE_POSTCONDITION_FAILED")
+	end
+
+	data.studioWaveActivated = true
+	local broadcaster = data.snapshotBroadcaster
+	if broadcaster == nil then
+		return failStudioWaveOperation(data, "STUDIO_WAVE_PUBLISHER_MISSING")
+	end
+	local publishCalled, publishResult = callNonYielding(broadcaster.publish, broadcaster, snapshot)
+	if
+		not publishCalled
+		or not isAcceptedSnapshotPublishResult(publishResult)
+		or not studioWaveOperationIntact(data)
+	then
+		return failStudioWaveOperation(data, "STUDIO_WAVE_PUBLICATION_FAILED")
+	end
+
+	if not endStudioWaveOperation(data) then
+		return studioWaveFailure("INTERNAL_ERROR")
+	end
+	return Result.ok(snapshot)
 end
 
 function ServiceMethods.getServiceDefinition(self: Service): ServiceLifecycle.ServiceDefinition
@@ -1070,7 +1444,7 @@ function ServiceMethods.submitReady(
 	observedRevision: unknown
 ): Result.Result<MatchSnapshot, ReadyError>
 	local data = requireData(self)
-	if not data.available or data.state ~= "Started" then
+	if not data.available or not data.callbacksEnabled or data.state ~= "Started" then
 		return readyFailure("UNAVAILABLE")
 	end
 	local coordinator = data.readyCoordinator
@@ -1101,6 +1475,255 @@ function ServiceMethods.submitReady(
 		return readyFailure("INTERNAL_ERROR")
 	end
 	return Result.ok(snapshot)
+end
+
+local function beginBaseDefeatOperation(data: ServiceData, operation: BaseDefeatOperation): BaseDefeatError?
+	if data.studioWaveOperationActive then
+		data.studioWaveReentryViolation = true
+		return makeBaseDefeatError("REENTRANT", operation)
+	end
+	if data.baseDefeatOperationActive then
+		data.baseDefeatReentryViolation = true
+		return makeBaseDefeatError("REENTRANT", operation)
+	end
+	if data.state ~= "Started" or not data.available then
+		return makeBaseDefeatError("UNAVAILABLE", operation)
+	end
+	data.baseDefeatOperationActive = true
+	data.baseDefeatReentryViolation = false
+	return nil
+end
+
+local function endBaseDefeatOperation(data: ServiceData)
+	data.baseDefeatOperationActive = false
+	if data.baseDefeatShutdownRequested then
+		data.baseDefeatShutdownRequested = false
+		shutdown(data)
+	end
+end
+
+local function failBaseDefeatOperation(
+	data: ServiceData,
+	operation: BaseDefeatOperation,
+	code: string
+): Result.Failure<BaseDefeatError>
+	endBaseDefeatOperation(data)
+	failClosedAtRuntime(data, code)
+	return baseDefeatFailure("INTERNAL_ERROR", operation)
+end
+
+local function prepareResultsSnapshot(data: ServiceData, stateSnapshot: MatchStateMachine.StateSnapshot): MatchSnapshot?
+	if stateSnapshot.revision >= Validation.MAX_SAFE_INTEGER then
+		return nil
+	end
+	local current = composeSnapshot(data)
+	if
+		current == nil
+		or current.matchId ~= stateSnapshot.matchId
+		or current.revision ~= stateSnapshot.revision
+		or current.state ~= "WaveActive"
+		or current.deadlineServerTime ~= nil
+	then
+		return nil
+	end
+	local validated = MatchProtocol.validateMatchSnapshot({
+		matchId = current.matchId,
+		revision = current.revision + 1,
+		state = "Results",
+		deadlineServerTime = nil,
+		participants = current.participants,
+	})
+	return if validated.ok then validated.value else nil
+end
+
+local function tokenDataFor(data: ServiceData, tokenValue: unknown): BaseDefeatTokenData?
+	if type(tokenValue) ~= "table" then
+		return nil
+	end
+	local tokenData = BASE_DEFEAT_TOKEN_DATA[tokenValue :: any]
+	if tokenData == nil or tokenData.owner ~= data or data.baseDefeatToken ~= tokenValue then
+		return nil
+	end
+	return tokenData
+end
+
+function ServiceMethods.beginBaseDefeat(
+	self: Service,
+	matchIdValue: unknown
+): Result.Result<BaseDefeatToken, BaseDefeatError>
+	local data = requireData(self)
+	local operation: BaseDefeatOperation = "beginBaseDefeat"
+	local operationError = beginBaseDefeatOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	if data.baseDefeatToken ~= nil or data.baseDefeatCommitted or not data.callbacksEnabled then
+		endBaseDefeatOperation(data)
+		return baseDefeatFailure("REENTRANT", operation)
+	end
+
+	local matchIdResult = Ids.validateMatchId(matchIdValue)
+	local machine = data.machine
+	if not matchIdResult.ok or machine == nil then
+		endBaseDefeatOperation(data)
+		return baseDefeatFailure(if machine == nil then "UNAVAILABLE" else "NOT_AUTHORIZED", operation)
+	end
+	local current = detachedStateSnapshot(machine)
+	if current == nil then
+		return failBaseDefeatOperation(data, operation, "BASE_DEFEAT_SNAPSHOT_FAILED")
+	end
+	if current.matchId ~= matchIdResult.value then
+		endBaseDefeatOperation(data)
+		return baseDefeatFailure("NOT_AUTHORIZED", operation)
+	end
+	if current.state ~= "WaveActive" then
+		endBaseDefeatOperation(data)
+		return baseDefeatFailure("WRONG_STATE", operation)
+	end
+
+	local terminalRecipients = collectRecipients(data)
+	if terminalRecipients == nil then
+		return failBaseDefeatOperation(data, operation, "BASE_DEFEAT_RECIPIENTS_FAILED")
+	end
+	data.callbacksEnabled = false
+	local preparedSnapshot = prepareResultsSnapshot(data, current)
+	if preparedSnapshot == nil then
+		return failBaseDefeatOperation(data, operation, "BASE_DEFEAT_PREFLIGHT_FAILED")
+	end
+	local began, beginResult = callNonYielding(machine.beginTransition, machine, "Results", current.revision)
+	if not began or not isSuccess(beginResult) or data.baseDefeatReentryViolation then
+		local machineToken = if began and isSuccess(beginResult) then (beginResult :: any).value else nil
+		if machineToken ~= nil then
+			callNonYielding(machine.rollbackTransition, machine, machineToken)
+		end
+		return failBaseDefeatOperation(data, operation, "BASE_DEFEAT_BEGIN_FAILED")
+	end
+
+	local token = table.freeze({}) :: BaseDefeatToken
+	BASE_DEFEAT_TOKEN_DATA[token] = {
+		owner = data,
+		state = "Prepared",
+		machineToken = (beginResult :: any).value,
+		preparedSnapshot = preparedSnapshot,
+		terminalRecipients = terminalRecipients,
+		outcome = nil,
+	}
+	data.baseDefeatToken = token
+	endBaseDefeatOperation(data)
+	return Result.ok(token)
+end
+
+function ServiceMethods.commitBaseDefeat(
+	self: Service,
+	tokenValue: unknown
+): Result.Result<BaseDefeatCommitOutcome, BaseDefeatError>
+	local data = requireData(self)
+	local operation: BaseDefeatOperation = "commitBaseDefeat"
+	local operationError = beginBaseDefeatOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	local tokenData = tokenDataFor(data, tokenValue)
+	if tokenData == nil then
+		endBaseDefeatOperation(data)
+		return baseDefeatFailure("INVALID_TOKEN", operation)
+	end
+	if tokenData.state == "Committed" then
+		local outcome = tokenData.outcome
+		endBaseDefeatOperation(data)
+		if outcome == nil then
+			return baseDefeatFailure("INTERNAL_ERROR", operation)
+		end
+		return Result.ok(outcome)
+	elseif tokenData.state ~= "Prepared" then
+		endBaseDefeatOperation(data)
+		return baseDefeatFailure("INVALID_TOKEN", operation)
+	end
+
+	local machine = data.machine
+	local machineToken = tokenData.machineToken
+	if machine == nil or machineToken == nil then
+		return failBaseDefeatOperation(data, operation, "BASE_DEFEAT_COMMIT_MISSING")
+	end
+	local committedCall, commitResult = callNonYielding(machine.commitTransition, machine, machineToken)
+	local current = detachedStateSnapshot(machine)
+	local expected = tokenData.preparedSnapshot
+	local transitionCommitted = current ~= nil
+		and current.matchId == expected.matchId
+		and current.revision == expected.revision
+		and current.state == "Results"
+	if not transitionCommitted then
+		callNonYielding(machine.rollbackTransition, machine, machineToken)
+		tokenData.machineToken = nil
+		tokenData.state = "RolledBack"
+		BASE_DEFEAT_TOKEN_DATA[tokenValue :: any] = nil
+		data.baseDefeatToken = nil
+		return failBaseDefeatOperation(data, operation, "BASE_DEFEAT_COMMIT_FAILED")
+	end
+
+	tokenData.machineToken = nil
+	tokenData.state = "Committed"
+	data.baseDefeatCommitted = true
+	data.callbacksEnabled = false
+	local published = false
+	local broadcaster = data.snapshotBroadcaster
+	if committedCall and isSuccess(commitResult) and not data.baseDefeatReentryViolation and broadcaster ~= nil then
+		local publishCalled, publishResult = callNonYielding(broadcaster.publish, broadcaster, expected)
+		published = publishCalled
+			and isSuccess(publishResult)
+			and not data.baseDefeatReentryViolation
+			and data.available
+	end
+	local outcome: BaseDefeatCommitOutcome = table.freeze({
+		committed = true,
+		published = published,
+		snapshot = expected,
+	})
+	tokenData.outcome = outcome
+	endBaseDefeatOperation(data)
+	return Result.ok(outcome)
+end
+
+function ServiceMethods.rollbackBaseDefeat(self: Service, tokenValue: unknown): Result.Result<boolean, BaseDefeatError>
+	local data = requireData(self)
+	local operation: BaseDefeatOperation = "rollbackBaseDefeat"
+	local operationError = beginBaseDefeatOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	local tokenData = tokenDataFor(data, tokenValue)
+	if tokenData == nil or tokenData.state ~= "Prepared" then
+		endBaseDefeatOperation(data)
+		return baseDefeatFailure("INVALID_TOKEN", operation)
+	end
+
+	local machine = data.machine
+	local machineToken = tokenData.machineToken
+	if machine == nil or machineToken == nil then
+		return failBaseDefeatOperation(data, operation, "BASE_DEFEAT_ROLLBACK_MISSING")
+	end
+	local rolledBack, rollbackResult = callNonYielding(machine.rollbackTransition, machine, machineToken)
+	local current = detachedStateSnapshot(machine)
+	local expectedRevision = tokenData.preparedSnapshot.revision - 1
+	local rollbackConfirmed = current ~= nil
+		and current.matchId == tokenData.preparedSnapshot.matchId
+		and current.revision == expectedRevision
+		and current.state == "WaveActive"
+	if not rolledBack or not isSuccess(rollbackResult) or not rollbackConfirmed or data.baseDefeatReentryViolation then
+		tokenData.machineToken = nil
+		tokenData.state = "RolledBack"
+		BASE_DEFEAT_TOKEN_DATA[tokenValue :: any] = nil
+		data.baseDefeatToken = nil
+		return failBaseDefeatOperation(data, operation, "BASE_DEFEAT_ROLLBACK_FAILED")
+	end
+
+	tokenData.machineToken = nil
+	tokenData.state = "RolledBack"
+	BASE_DEFEAT_TOKEN_DATA[tokenValue :: any] = nil
+	data.baseDefeatToken = nil
+	data.callbacksEnabled = true
+	endBaseDefeatOperation(data)
+	return Result.ok(true)
 end
 
 local function defaultMatchIdGenerator(): unknown
@@ -1154,7 +1777,8 @@ local function construct(
 	clock: Clock,
 	schedule: Schedule,
 	cancel: Cancel,
-	snapshotSender: SnapshotSender
+	snapshotSender: SnapshotSender,
+	isStudio: IsStudio
 ): Service
 	if not Log.isLogger(logger) then
 		staticError("INVALID_LOGGER")
@@ -1171,6 +1795,7 @@ local function construct(
 		or type(schedule) ~= "function"
 		or type(cancel) ~= "function"
 		or type(snapshotSender) ~= "function"
+		or type(isStudio) ~= "function"
 	then
 		staticError("INVALID_DEPENDENCIES")
 	end
@@ -1235,6 +1860,16 @@ local function construct(
 		shutdownFailure = nil,
 		serviceDefinition = nil,
 		runtimeMapSnapshot = nil,
+		baseDefeatToken = nil,
+		baseDefeatOperationActive = false,
+		baseDefeatReentryViolation = false,
+		baseDefeatCommitted = false,
+		baseDefeatShutdownRequested = false,
+		isStudio = isStudio,
+		studioWaveOperationActive = false,
+		studioWaveReentryViolation = false,
+		studioWaveActivated = false,
+		studioWaveShutdownRequested = false,
 	}
 
 	local coordinatorCreated, coordinatorResult = pcall(createReadyCoordinator, {
@@ -1276,7 +1911,20 @@ local function construct(
 			end
 		end,
 		getRecipients = function()
-			return collectRecipients(data)
+			if data.callbacksEnabled then
+				return collectRecipients(data)
+			end
+			local token = data.baseDefeatToken
+			local tokenData = if token == nil then nil else BASE_DEFEAT_TOKEN_DATA[token]
+			if
+				data.baseDefeatCommitted
+				and tokenData ~= nil
+				and tokenData.owner == data
+				and tokenData.state == "Committed"
+			then
+				return tokenData.terminalRecipients
+			end
+			return nil
 		end,
 		onFault = function()
 			failClosedAtRuntime(data, "SNAPSHOT_BROADCAST_FAULT")
@@ -1362,6 +2010,14 @@ local function inertTestSnapshotSender(_recipient: unknown, _snapshot: MatchSnap
 	return true
 end
 
+local function inertTestIsStudio(): unknown
+	return false
+end
+
+local function productionIsStudio(): unknown
+	return RunService:IsStudio()
+end
+
 function MatchLifecycleService.new(logger: Log.Logger, snapshotSender: SnapshotSender): Service
 	local mapLoaderModule = require(script.Parent.Parent.maps.MapLoader)
 	local rosterModule = require(script.Parent.Parent.roster.ParticipantRoster)
@@ -1384,7 +2040,8 @@ function MatchLifecycleService.new(logger: Log.Logger, snapshotSender: SnapshotS
 		productionClock,
 		productionSchedule,
 		productionCancel,
-		snapshotSender
+		snapshotSender,
+		productionIsStudio
 	)
 end
 
@@ -1405,6 +2062,7 @@ if isExactTestModule() then
 			schedule = true,
 			cancel = true,
 			snapshotSender = true,
+			isStudio = true,
 		}
 		for key in next, dependencies :: any do
 			if type(key) ~= "string" or allowedFields[key] ~= true then
@@ -1441,7 +2099,8 @@ if isExactTestModule() then
 			dependencyValue.clock or inertTestClock,
 			dependencyValue.schedule or inertTestSchedule,
 			dependencyValue.cancel or inertTestCancel,
-			dependencyValue.snapshotSender or inertTestSnapshotSender
+			dependencyValue.snapshotSender or inertTestSnapshotSender,
+			dependencyValue.isStudio or inertTestIsStudio
 		)
 	end
 end

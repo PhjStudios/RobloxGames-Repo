@@ -434,7 +434,7 @@ return TestHarness.suite("enemy replication client controller", {
 			assertions.equal(rig.controller:getState(), "Started")
 			assertions.equal(rig.definition.name, "EnemyController")
 			assertions.equal(#rig.definition.dependencies, 1)
-			assertions.equal(rig.definition.dependencies[1], "MatchReadyController")
+			assertions.equal(rig.definition.dependencies[1], "BaseController")
 			assertions.equal(
 				table.concat(rig.order, ","),
 				"replication-event,snapshot-response,pre-render,fire-snapshot"

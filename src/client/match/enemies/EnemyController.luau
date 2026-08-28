@@ -142,7 +142,7 @@ export type TestConstructor = (logger: Log.Logger, dependencies: Dependencies) -
 local activeStudioController: Controller? = nil
 
 local SERVICE_NAME = "EnemyController"
-local MATCH_READY_SERVICE_NAME = "MatchReadyController"
+local BASE_CONTROLLER_SERVICE_NAME = "BaseController"
 local LOOKUP_TIMEOUT_SECONDS = 5
 local MAX_RENDER_DURATION_SAMPLES = 1_024
 local STUDIO_DIAGNOSTICS_BRIDGE_NAME = "_ATDPhase09EnemyDiagnostics"
@@ -888,7 +888,7 @@ function ControllerMethods.getServiceDefinition(self: Controller)
 	local data = requireData(self)
 	return table.freeze({
 		name = SERVICE_NAME,
-		dependencies = table.freeze({ MATCH_READY_SERVICE_NAME }),
+		dependencies = table.freeze({ BASE_CONTROLLER_SERVICE_NAME }),
 		initialize = function()
 			initialize(data)
 		end,

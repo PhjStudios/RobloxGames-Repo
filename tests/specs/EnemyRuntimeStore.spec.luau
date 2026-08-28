@@ -402,38 +402,92 @@ return TestHarness.suite("server enemy runtime store", {
 		assertions.equal(success(assertions, store:get(spawned.runtimeEnemyId)).currentHealth, 100)
 	end),
 
-	TestHarness.case("resolves endpoint and despawn exactly once without base behavior", function(assertions)
-		local endpointCount = 0
-		local endpointSnapshot: any = nil
-		local store, clock = newStore(assertions, {
-			endpointSink = function(snapshot: any)
-				endpointCount += 1
-				endpointSnapshot = snapshot
-			end,
-		})
-		local spawned = success(assertions, store:spawn(EnemyFixtures.FAST_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
-		clock.now = 104
-		local resolution = success(assertions, store:resolveEndpoint(spawned.runtimeEnemyId))
-		assertions.isTrue(resolution.callbackSucceeded)
-		assertions.equal(endpointCount, 1)
-		assertions.equal(endpointSnapshot, resolution.endpoint)
-		assertions.equal(resolution.endpoint.lifecycle, "EndpointResolved")
-		assertions.equal(resolution.endpoint.pathProgress, EnemyFixtures.BENT_LANE_TOTAL_DISTANCE)
-		assertions.equal(resolution.endpoint.revision, 2)
-		assertions.equal(resolution.despawn.lifecycle, "Despawned")
-		assertions.equal(resolution.despawn.reason, "Endpoint")
-		assertions.equal(resolution.despawn.revision, 3)
-		assertVectorClose(assertions, resolution.endpoint.worldCFrame.Position, Vector3.new(20, 5, 20), 1e-6)
-		assertVectorClose(assertions, resolution.endpoint.worldCFrame.LookVector, Vector3.xAxis, 1e-6)
-		assertDetachedFrozen(assertions, resolution)
-		assertions.isNil((resolution :: any).baseDamage)
-		assertions.isNil((resolution :: any).matchState)
-		assertions.equal(success(assertions, store:queryTerminal(spawned.runtimeEnemyId)), resolution.despawn)
-		expectError(assertions, store:get(spawned.runtimeEnemyId), "STALE_RUNTIME_ID", "get")
-		expectError(assertions, store:resolveEndpoint(spawned.runtimeEnemyId), "STALE_RUNTIME_ID", "resolveEndpoint")
-		expectError(assertions, store:despawn(spawned.runtimeEnemyId), "STALE_RUNTIME_ID", "despawn")
-		assertions.equal(endpointCount, 1)
-	end),
+	TestHarness.case(
+		"issues one authenticated definition-derived leak outcome before terminal despawn",
+		function(assertions)
+			local endpointCount = 0
+			local endpointOutcome: any = nil
+			local clock = { now = 100 }
+			local rawEnemies = EnemyFixtures.rawEnemies()
+			rawEnemies[2].leakDamage = 37
+			local catalog = EnemyFixtures.authenticateCatalog(EnemyFixtures.rawAssets(), rawEnemies).catalog
+			local store: any = nil
+			store = success(
+				assertions,
+				EnemyRuntimeStore.newForTests(MATCH_ID, 1, catalog, EnemyFixtures.createRuntimeMapSnapshot(), {
+					clock = function()
+						return clock.now
+					end,
+					endpointSink = function(outcome: any)
+						endpointCount += 1
+						endpointOutcome = outcome
+						assertions.isTrue(store:isAuthenticatedLeakOutcome(outcome))
+						assertions.isTrue(EnemyRuntimeStore.isAuthenticatedLeakOutcome(outcome))
+					end,
+				})
+			)
+			rawEnemies[2].leakDamage = 9_999
+			local spawned = success(assertions, store:spawn(EnemyFixtures.FAST_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+			clock.now = 104
+			local resolution = success(assertions, store:resolveEndpoint(spawned.runtimeEnemyId))
+			assertions.isTrue(resolution.callbackSucceeded)
+			assertions.equal(endpointCount, 1)
+			assertions.equal(endpointOutcome.matchId, MATCH_ID)
+			assertions.equal(endpointOutcome.enemyEpoch, 1)
+			assertions.equal(endpointOutcome.runtimeEnemyId, spawned.runtimeEnemyId)
+			assertions.equal(endpointOutcome.enemyId, EnemyFixtures.FAST_ENEMY_ID)
+			assertions.equal(endpointOutcome.leakDamage, 37)
+			assertions.equal(endpointOutcome.serverTime, 104)
+			local outcomeFieldCount = 0
+			for _ in endpointOutcome do
+				outcomeFieldCount += 1
+			end
+			assertions.equal(outcomeFieldCount, 6)
+			assertDetachedFrozen(assertions, endpointOutcome)
+			assertions.isNil(endpointOutcome.lifecycle)
+			assertions.isNil(endpointOutcome.laneId)
+			assertions.isNil(endpointOutcome.definition)
+			assertions.equal(resolution.endpoint.lifecycle, "EndpointResolved")
+			assertions.equal(resolution.endpoint.pathProgress, EnemyFixtures.BENT_LANE_TOTAL_DISTANCE)
+			assertions.equal(resolution.endpoint.revision, 2)
+			assertions.equal(resolution.despawn.lifecycle, "Despawned")
+			assertions.equal(resolution.despawn.reason, "Endpoint")
+			assertions.equal(resolution.despawn.revision, 3)
+			assertVectorClose(assertions, resolution.endpoint.worldCFrame.Position, Vector3.new(20, 5, 20), 1e-6)
+			assertVectorClose(assertions, resolution.endpoint.worldCFrame.LookVector, Vector3.xAxis, 1e-6)
+			assertDetachedFrozen(assertions, resolution)
+			assertions.isNil((resolution :: any).baseDamage)
+			assertions.isNil((resolution :: any).matchState)
+			assertions.equal(store:getMetrics().retainedLeakOutcomeCount, 1)
+			local forgedOutcome = table.freeze({
+				matchId = endpointOutcome.matchId,
+				enemyEpoch = endpointOutcome.enemyEpoch,
+				runtimeEnemyId = endpointOutcome.runtimeEnemyId,
+				enemyId = endpointOutcome.enemyId,
+				leakDamage = endpointOutcome.leakDamage,
+				serverTime = endpointOutcome.serverTime,
+			})
+			assertions.isFalse(store:isAuthenticatedLeakOutcome(forgedOutcome))
+			assertions.isFalse(EnemyRuntimeStore.isAuthenticatedLeakOutcome(forgedOutcome))
+			local otherStore = newStore(assertions)
+			assertions.isFalse(otherStore:isAuthenticatedLeakOutcome(endpointOutcome))
+			assertions.isTrue(success(assertions, otherStore:cleanup()))
+			assertions.equal(success(assertions, store:queryTerminal(spawned.runtimeEnemyId)), resolution.despawn)
+			expectError(assertions, store:get(spawned.runtimeEnemyId), "STALE_RUNTIME_ID", "get")
+			expectError(
+				assertions,
+				store:resolveEndpoint(spawned.runtimeEnemyId),
+				"STALE_RUNTIME_ID",
+				"resolveEndpoint"
+			)
+			expectError(assertions, store:despawn(spawned.runtimeEnemyId), "STALE_RUNTIME_ID", "despawn")
+			assertions.equal(endpointCount, 1)
+			assertions.isTrue(success(assertions, store:cleanup()))
+			assertions.isFalse(store:isAuthenticatedLeakOutcome(endpointOutcome))
+			assertions.isFalse(EnemyRuntimeStore.isAuthenticatedLeakOutcome(endpointOutcome))
+			assertions.equal(store:getMetrics().retainedLeakOutcomeCount, 0)
+		end
+	),
 
 	TestHarness.case(
 		"contains callback errors yields and forbidden mutation reentry after terminalizing",
@@ -488,9 +542,13 @@ return TestHarness.suite("server enemy runtime store", {
 
 	TestHarness.case("defers cleanup requested inside an endpoint callback to a safe boundary", function(assertions)
 		local cleanupResult: any = nil
+		local endpointOutcome: any = nil
+		local authenticDuringCallback = false
 		local store: any = nil
 		store = newStore(assertions, {
-			endpointSink = function()
+			endpointSink = function(outcome: any)
+				endpointOutcome = outcome
+				authenticDuringCallback = store:isAuthenticatedLeakOutcome(outcome)
 				cleanupResult = store:cleanup()
 			end,
 		})
@@ -499,11 +557,15 @@ return TestHarness.suite("server enemy runtime store", {
 		assertions.equal(resolution.despawn.reason, "Endpoint")
 		assertions.isTrue(cleanupResult.ok)
 		assertions.isFalse(cleanupResult.value)
+		assertions.isTrue(authenticDuringCallback)
+		assertions.isFalse(store:isAuthenticatedLeakOutcome(endpointOutcome))
+		assertions.isFalse(EnemyRuntimeStore.isAuthenticatedLeakOutcome(endpointOutcome))
 		local metrics = store:getMetrics()
 		assertions.isTrue(metrics.cleaned)
 		assertions.equal(metrics.activeCount, 0)
 		assertions.equal(metrics.lifetimeCount, 0)
 		assertions.equal(metrics.terminalCount, 0)
+		assertions.equal(metrics.retainedLeakOutcomeCount, 0)
 		expectError(assertions, store:get(spawned.runtimeEnemyId), "CLEANED", "get")
 		assertions.isFalse(success(assertions, store:cleanup()))
 	end),
@@ -607,6 +669,287 @@ return TestHarness.suite("server enemy runtime store", {
 		assertions.equal(cleanupMetrics.nextRuntimeEnemyId, 1)
 	end),
 
+	TestHarness.case(
+		"terminalizes the exact active snapshot for defeat in ascending order with one clock sample and no leaks",
+		function(assertions)
+			local clockState = { now = 100, reads = 0 }
+			local endpointCalls = 0
+			local store = success(
+				assertions,
+				EnemyRuntimeStore.newForTests(
+					MATCH_ID,
+					1,
+					EnemyFixtures.createAuthenticatedCatalog(),
+					EnemyFixtures.createRuntimeMapSnapshot(),
+					{
+						clock = function()
+							clockState.reads += 1
+							return clockState.now
+						end,
+						endpointSink = function()
+							endpointCalls += 1
+						end,
+					}
+				)
+			)
+			local first = success(assertions, store:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+			local removed = success(assertions, store:spawn(EnemyFixtures.FAST_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+			local third = success(assertions, store:spawn(EnemyFixtures.SLOW_ENEMY_ID, EnemyFixtures.STRAIGHT_LANE_ID))
+			clockState.now = 101
+			success(assertions, store:despawn(removed.runtimeEnemyId))
+			local fourth = success(assertions, store:spawn(EnemyFixtures.FAST_ENEMY_ID, EnemyFixtures.STRAIGHT_LANE_ID))
+
+			clockState.now = 250
+			local readsBefore = clockState.reads
+			local despawns = success(
+				assertions,
+				store:despawnAllForDefeat(table.freeze({
+					first.runtimeEnemyId,
+					third.runtimeEnemyId,
+					fourth.runtimeEnemyId,
+				}))
+			)
+			assertions.equal(clockState.reads, readsBefore + 1)
+			assertions.equal(endpointCalls, 0)
+			assertions.equal(#despawns, 3)
+			assertDetachedFrozen(assertions, despawns)
+			for index, expectedId in { first.runtimeEnemyId, third.runtimeEnemyId, fourth.runtimeEnemyId } do
+				local despawn = despawns[index]
+				assertions.equal(despawn.runtimeEnemyId, expectedId)
+				assertions.equal(despawn.reason, "Defeat")
+				assertions.equal(despawn.lifecycle, "Despawned")
+				assertions.equal(despawn.revision, 2)
+				assertions.equal(despawn.sampleServerTime, 250)
+				assertions.equal(success(assertions, store:queryTerminal(expectedId)), despawn)
+			end
+			local metrics = store:getMetrics()
+			assertions.equal(metrics.activeCount, 0)
+			assertions.equal(metrics.terminalCount, 4)
+			assertions.equal(metrics.retainedLeakOutcomeCount, 0)
+			assertions.isFalse(metrics.cleaned)
+			assertions.isFalse(metrics.faulted)
+
+			clockState.now = 251
+			local postDefeatSpawn =
+				success(assertions, store:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+			assertions.equal(postDefeatSpawn.runtimeEnemyId, 5)
+			assertions.equal(endpointCalls, 0)
+		end
+	),
+
+	TestHarness.case("accepts an exact empty defeat snapshot and samples its clock once", function(assertions)
+		local clockReads = 0
+		local store = success(
+			assertions,
+			EnemyRuntimeStore.newForTests(
+				MATCH_ID,
+				1,
+				EnemyFixtures.createAuthenticatedCatalog(),
+				EnemyFixtures.createRuntimeMapSnapshot(),
+				{
+					clock = function()
+						clockReads += 1
+						return 100
+					end,
+				}
+			)
+		)
+		local readsBefore = clockReads
+		local despawns = success(assertions, store:despawnAllForDefeat(table.freeze({})))
+		assertions.equal(clockReads, readsBefore + 1)
+		assertions.equal(#despawns, 0)
+		assertDetachedFrozen(assertions, despawns)
+		assertions.equal(store:getMetrics().activeCount, 0)
+		assertions.isFalse(store:getMetrics().cleaned)
+	end),
+
+	TestHarness.case("rejects malformed or stale defeat snapshots before time or mutation", function(assertions)
+		local clockState = { now = 100, reads = 0 }
+		local store = success(
+			assertions,
+			EnemyRuntimeStore.newForTests(
+				MATCH_ID,
+				1,
+				EnemyFixtures.createAuthenticatedCatalog(),
+				EnemyFixtures.createRuntimeMapSnapshot(),
+				{
+					clock = function()
+						clockState.reads += 1
+						return clockState.now
+					end,
+				}
+			)
+		)
+		for _ = 1, 3 do
+			success(assertions, store:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+		end
+		local readsBefore = clockState.reads
+		local hostileIndexReads = 0
+		local hostile = setmetatable({}, {
+			__index = function()
+				hostileIndexReads += 1
+				return 1
+			end,
+		})
+		local extraField = { 1, 2, 3 }
+		(extraField :: any).extra = true
+		local malformed: { { value: any, code: string } } = {
+			{ value = "1,2,3", code = "INVALID_RUNTIME_ID" },
+			{ value = hostile, code = "INVALID_RUNTIME_ID" },
+			{ value = { [1] = 1, [3] = 3 }, code = "INVALID_RUNTIME_ID" },
+			{ value = extraField, code = "INVALID_RUNTIME_ID" },
+			{ value = { 1, 1, 3 }, code = "INVALID_RUNTIME_ID" },
+			{ value = { 2, 1, 3 }, code = "INVALID_RUNTIME_ID" },
+			{ value = { 0, 2, 3 }, code = "INVALID_RUNTIME_ID" },
+			{ value = { 1, 2, math.huge }, code = "INVALID_RUNTIME_ID" },
+			{ value = { 1, 2 }, code = "STALE_RUNTIME_ID" },
+			{ value = { 1, 2, 4 }, code = "STALE_RUNTIME_ID" },
+			{ value = { 1, 2, 3, 4 }, code = "STALE_RUNTIME_ID" },
+		}
+		for _, fixture in malformed do
+			expectError(assertions, store:despawnAllForDefeat(fixture.value), fixture.code, "despawnAllForDefeat")
+			assertions.equal(store:getMetrics().activeCount, 3)
+			assertions.equal(store:getMetrics().terminalCount, 0)
+		end
+		assertions.equal(hostileIndexReads, 0)
+		assertions.equal(clockState.reads, readsBefore)
+
+		clockState.now = 101
+		success(assertions, store:despawn(2))
+		local postDespawnReads = clockState.reads
+		expectError(
+			assertions,
+			store:despawnAllForDefeat(table.freeze({ 1, 2, 3 })),
+			"STALE_RUNTIME_ID",
+			"despawnAllForDefeat"
+		)
+		assertions.equal(clockState.reads, postDespawnReads)
+		assertions.equal(store:getMetrics().activeCount, 2)
+		assertions.equal(store:getMetrics().terminalCount, 1)
+	end),
+
+	TestHarness.case(
+		"fails defeat time callbacks without partial terminalization and guards reentry",
+		function(assertions)
+			local clockState = { now = 100, yieldOnRead = false }
+			local yieldingStore = success(
+				assertions,
+				EnemyRuntimeStore.newForTests(
+					MATCH_ID,
+					1,
+					EnemyFixtures.createAuthenticatedCatalog(),
+					EnemyFixtures.createRuntimeMapSnapshot(),
+					{
+						clock = function()
+							if clockState.yieldOnRead then
+								coroutine.yield()
+							end
+							return clockState.now
+						end,
+					}
+				)
+			)
+			success(assertions, yieldingStore:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+			success(assertions, yieldingStore:spawn(EnemyFixtures.FAST_ENEMY_ID, EnemyFixtures.STRAIGHT_LANE_ID))
+			clockState.yieldOnRead = true
+			expectError(
+				assertions,
+				yieldingStore:despawnAllForDefeat(table.freeze({ 1, 2 })),
+				"CLOCK_FAILED",
+				"despawnAllForDefeat"
+			)
+			assertions.equal(yieldingStore:getMetrics().activeCount, 2)
+			assertions.equal(yieldingStore:getMetrics().terminalCount, 0)
+			assertions.isTrue(yieldingStore:getMetrics().faulted)
+
+			local reentryResult: any = nil
+			local reentryStore: any = nil
+			reentryStore = newStore(assertions, {
+				endpointSink = function()
+					reentryResult = reentryStore:despawnAllForDefeat(table.freeze({ 1, 2 }))
+				end,
+			})
+			success(assertions, reentryStore:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+			success(assertions, reentryStore:spawn(EnemyFixtures.FAST_ENEMY_ID, EnemyFixtures.STRAIGHT_LANE_ID))
+			local endpoint = success(assertions, reentryStore:resolveEndpoint(1))
+			assertions.isFalse(endpoint.callbackSucceeded)
+			expectError(assertions, reentryResult, "REENTRANT", "despawnAllForDefeat")
+			assertions.equal(reentryStore:getMetrics().activeCount, 1)
+			assertions.equal(reentryStore:getMetrics().terminalCount, 1)
+			assertions.equal(reentryStore:getMetrics().retainedLeakOutcomeCount, 1)
+			assertions.isTrue(success(assertions, reentryStore:cleanup()))
+			assertions.isFalse(success(assertions, reentryStore:cleanup()))
+
+			local cleanupStore: any = nil
+			local cleanupResult: any = nil
+			local cleanupArmed = false
+			cleanupStore = success(
+				assertions,
+				EnemyRuntimeStore.newForTests(
+					MATCH_ID,
+					1,
+					EnemyFixtures.createAuthenticatedCatalog(),
+					EnemyFixtures.createRuntimeMapSnapshot(),
+					{
+						clock = function()
+							if cleanupArmed then
+								cleanupResult = cleanupStore:cleanup()
+							end
+							return 100
+						end,
+					}
+				)
+			)
+			success(assertions, cleanupStore:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+			success(assertions, cleanupStore:spawn(EnemyFixtures.FAST_ENEMY_ID, EnemyFixtures.STRAIGHT_LANE_ID))
+			cleanupArmed = true
+			expectError(
+				assertions,
+				cleanupStore:despawnAllForDefeat(table.freeze({ 1, 2 })),
+				"CLEANED",
+				"despawnAllForDefeat"
+			)
+			assertions.isTrue(cleanupResult.ok)
+			assertions.isFalse(cleanupResult.value)
+			assertions.isTrue(cleanupStore:getMetrics().cleaned)
+			assertions.equal(cleanupStore:getMetrics().activeCount, 0)
+			assertions.equal(cleanupStore:getMetrics().terminalCount, 0)
+		end
+	),
+
+	TestHarness.case(
+		"terminalizes the maximum active defeat batch and cleanup releases every record",
+		function(assertions)
+			local endpointCalls = 0
+			local store, clock = newStore(assertions, {
+				endpointSink = function()
+					endpointCalls += 1
+				end,
+			})
+			local expectedIds: { number } = table.create(EnemyRuntimeStore.MAX_ACTIVE)
+			for runtimeEnemyId = 1, EnemyRuntimeStore.MAX_ACTIVE do
+				success(assertions, store:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+				table.insert(expectedIds, runtimeEnemyId)
+			end
+			clock.now = 500
+			table.freeze(expectedIds)
+			local despawns = success(assertions, store:despawnAllForDefeat(expectedIds))
+			assertions.equal(#despawns, EnemyRuntimeStore.MAX_ACTIVE)
+			assertions.equal(despawns[1].runtimeEnemyId, 1)
+			assertions.equal(despawns[#despawns].runtimeEnemyId, EnemyRuntimeStore.MAX_ACTIVE)
+			assertions.equal(endpointCalls, 0)
+			assertions.equal(store:getMetrics().activeCount, 0)
+			assertions.equal(store:getMetrics().terminalCount, EnemyRuntimeStore.MAX_ACTIVE)
+			assertions.isTrue(success(assertions, store:cleanup()))
+			local cleaned = store:getMetrics()
+			assertions.equal(cleaned.activeCount, 0)
+			assertions.equal(cleaned.terminalCount, 0)
+			assertions.equal(cleaned.lifetimeCount, 0)
+			assertions.equal(cleaned.retainedLeakOutcomeCount, 0)
+			assertions.isFalse(success(assertions, store:cleanup()))
+		end
+	),
+
 	TestHarness.case("mass cleanup is exact idempotent and releases all bounded state", function(assertions)
 		local store = newStore(assertions, {
 			endpointSink = function() end,
@@ -618,6 +961,7 @@ return TestHarness.suite("server enemy runtime store", {
 		local before = store:getMetrics()
 		assertions.equal(before.activeCount, 32)
 		assertions.equal(before.lifetimeCount, 32)
+		assertions.equal(before.retainedLeakOutcomeCount, 0)
 		assertions.equal(before.retainedLaneCount, 2)
 		assertions.isTrue(before.retainsCatalog)
 		assertions.isTrue(before.retainsClockCallback)
@@ -629,6 +973,7 @@ return TestHarness.suite("server enemy runtime store", {
 		assertions.equal(after.activeCount, 0)
 		assertions.equal(after.lifetimeCount, 0)
 		assertions.equal(after.terminalCount, 0)
+		assertions.equal(after.retainedLeakOutcomeCount, 0)
 		assertions.equal(after.nextRuntimeEnemyId, 1)
 		assertions.equal(after.retainedLaneCount, 0)
 		assertions.isFalse(after.retainsCatalog)
