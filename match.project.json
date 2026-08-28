@@ -84,6 +84,11 @@
           "ready": {
             "$path": "src/server/match/ready",
             "$ignoreUnknownInstances": true
+          },
+
+          "waves": {
+            "$path": "src/server/match/waves",
+            "$ignoreUnknownInstances": true
           }
         }
       }
@@ -135,6 +140,11 @@
 
             "enemies": {
               "$path": "src/client/match/enemies",
+              "$ignoreUnknownInstances": true
+            },
+
+            "waves": {
+              "$path": "src/client/match/waves",
               "$ignoreUnknownInstances": true
             },
 

@@ -1,13 +1,45 @@
 --!strict
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 
+local AssetSchema = require(ReplicatedStorage.Shared.config.AssetSchema)
+local DifficultySchema = require(ReplicatedStorage.Shared.config.DifficultySchema)
+
+local ConfigurationFixtures = require(script.Parent.Parent.Fixtures.ConfigurationFixtures)
 local EnemyFixtures = require(script.Parent.Parent.Fixtures.EnemyFixtures)
 local EnemyRuntimeStore = require(script.Parent.Parent.ProductionServerEnemies.EnemyRuntimeStore)
 
 type Assertions = TestHarness.Assertions
 
 local MATCH_ID = "match:phase09-runtime-store"
+
+local function createDifficultyFixture(healthMultiplier: number?, speedMultiplier: number?): { [string]: any }
+	local rawSources = ConfigurationFixtures.validSources()
+	rawSources.difficulties[1].modifiers.enemyHealthMultiplier = healthMultiplier or 1.5
+	rawSources.difficulties[1].modifiers.enemyMoveSpeedMultiplier = speedMultiplier or 1.25
+	local manifestResult = AssetSchema.validateManifest(rawSources.assets)
+	if not manifestResult.ok then
+		error("expected difficulty fixture assets to authenticate", 0)
+	end
+	local catalogResult = DifficultySchema.validateCatalog(rawSources.difficulties, manifestResult.value)
+	if not catalogResult.ok then
+		error("expected difficulty fixture catalog to authenticate", 0)
+	end
+	local catalog = catalogResult.value
+	local finite = catalog.byId["difficulty:normal"]
+	local endless = catalog.byId["difficulty:endless"]
+	if finite == nil or endless == nil then
+		error("expected difficulty fixture definitions", 0)
+	end
+	return {
+		catalog = catalog,
+		finite = finite,
+		endless = endless,
+		rawSources = rawSources,
+	}
+end
 
 local function expectError(assertions: Assertions, result: any, code: string, operation: string)
 	assertions.isFalse(result.ok)
@@ -278,6 +310,262 @@ return TestHarness.suite("server enemy runtime store", {
 		)
 	end),
 
+	TestHarness.case("binds one exact authenticated finite difficulty before runtime mutation", function(assertions)
+		local difficulty = createDifficultyFixture(1.5, 1.25)
+		difficulty.rawSources.difficulties[1].modifiers.enemyHealthMultiplier = 999
+		difficulty.rawSources.difficulties[1].modifiers.enemyMoveSpeedMultiplier = 999
+		local store = newStore(assertions)
+		assertions.isTrue(success(assertions, store:bindDifficulty(difficulty.catalog, difficulty.finite)))
+		local metrics = store:getMetrics()
+		assertions.isTrue(metrics.difficultyBound)
+		assertions.equal(metrics.boundDifficultyId, "difficulty:normal")
+		assertions.isFalse(metrics.schedulerSampleActive)
+		expectError(
+			assertions,
+			store:bindDifficulty(difficulty.catalog, difficulty.finite),
+			"ILLEGAL_LIFECYCLE",
+			"bindDifficulty"
+		)
+		expectError(
+			assertions,
+			store:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID),
+			"SCHEDULER_ONLY",
+			"spawn"
+		)
+
+		local rawCatalogStore = newStore(assertions)
+		expectError(
+			assertions,
+			rawCatalogStore:bindDifficulty(difficulty.rawSources.difficulties, difficulty.finite),
+			"UNAUTHENTICATED_CATALOG",
+			"bindDifficulty"
+		)
+		local copiedDefinition = table.freeze({
+			id = difficulty.finite.id,
+			kind = difficulty.finite.kind,
+			modifiers = difficulty.finite.modifiers,
+		})
+		expectError(
+			assertions,
+			rawCatalogStore:bindDifficulty(difficulty.catalog, copiedDefinition),
+			"INVALID_DIFFICULTY_DEFINITION",
+			"bindDifficulty"
+		)
+		expectError(
+			assertions,
+			rawCatalogStore:bindDifficulty(difficulty.catalog, difficulty.endless),
+			"INVALID_DIFFICULTY_DEFINITION",
+			"bindDifficulty"
+		)
+
+		local mutatedStore = newStore(assertions)
+		success(assertions, mutatedStore:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+		expectError(
+			assertions,
+			mutatedStore:bindDifficulty(difficulty.catalog, difficulty.finite),
+			"ILLEGAL_LIFECYCLE",
+			"bindDifficulty"
+		)
+	end),
+
+	TestHarness.case(
+		"uses one authenticated scheduler sample for exact once modifiers without extra clock reads",
+		function(assertions)
+			local difficulty = createDifficultyFixture(1.5, 1.25)
+			local rawEnemies = EnemyFixtures.rawEnemies()
+			rawEnemies[1].leakDamage = 17
+			local enemyCatalog = EnemyFixtures.authenticateCatalog(EnemyFixtures.rawAssets(), rawEnemies).catalog
+			local clockState = { now = 100, reads = 0 }
+			local leakOutcome: any = nil
+			local store = success(
+				assertions,
+				EnemyRuntimeStore.newForTests(MATCH_ID, 1, enemyCatalog, EnemyFixtures.createRuntimeMapSnapshot(), {
+					clock = function()
+						clockState.reads += 1
+						return clockState.now
+					end,
+					endpointSink = function(outcome: any)
+						leakOutcome = outcome
+					end,
+				})
+			)
+			assertions.equal(clockState.reads, 1)
+			assertions.isTrue(success(assertions, store:bindDifficulty(difficulty.catalog, difficulty.finite)))
+			clockState.now = 125
+			local stepResult = success(assertions, store:step(0))
+			local token = stepResult.schedulerSampleToken
+			assertions.equal(stepResult.sampleServerTime, 125)
+			assertions.equal(clockState.reads, 2)
+			assertions.isTrue(store:isAuthenticatedSchedulerSample(token))
+			assertions.isTrue(EnemyRuntimeStore.isAuthenticatedSchedulerSample(token))
+
+			local first = success(
+				assertions,
+				store:spawnScheduled(token, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID)
+			)
+			local second = success(
+				assertions,
+				store:spawnScheduled(token, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.STRAIGHT_LANE_ID)
+			)
+			assertions.equal(clockState.reads, 2)
+			assertions.equal(first.spawnServerTime, 125)
+			assertions.equal(second.spawnServerTime, 125)
+			assertions.equal(first.sampleServerTime, 125)
+			assertions.equal(first.currentHealth, 150)
+			assertions.equal(first.maximumHealth, 150)
+			assertions.equal(first.effectiveSpeed, 12.5)
+			assertions.equal(second.effectiveSpeed, 12.5)
+			assertions.equal(first.speedModifiers.slowMultiplier, 1)
+
+			clockState.now = 126
+			local slowed = success(assertions, store:setSlowMultiplier(first.runtimeEnemyId, 0.2))
+			assertions.equal(slowed.effectiveSpeed, 2.5)
+			assertions.equal(slowed.currentHealth, 150)
+			assertions.equal(slowed.maximumHealth, 150)
+			assertions.isFalse(store:isAuthenticatedSchedulerSample(token))
+			expectError(
+				assertions,
+				store:spawnScheduled(token, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID),
+				"INVALID_SCHEDULER_SAMPLE",
+				"spawnScheduled"
+			)
+			clockState.now = 130
+			success(assertions, store:resolveEndpoint(first.runtimeEnemyId))
+			assertions.equal(leakOutcome.leakDamage, 17)
+			assertions.equal(leakOutcome.serverTime, 130)
+		end
+	),
+
+	TestHarness.case("rejects wrong forged stale and explicitly finished scheduler samples", function(assertions)
+		local difficulty = createDifficultyFixture()
+		local firstStore, firstClock = newStore(assertions)
+		local secondStore, secondClock = newStore(assertions)
+		success(assertions, firstStore:bindDifficulty(difficulty.catalog, difficulty.finite))
+		success(assertions, secondStore:bindDifficulty(difficulty.catalog, difficulty.finite))
+		firstClock.now = 101
+		local firstToken = success(assertions, firstStore:step(0)).schedulerSampleToken
+		local forgedToken = table.freeze({
+			matchId = firstToken.matchId,
+			enemyEpoch = firstToken.enemyEpoch,
+			sampleServerTime = firstToken.sampleServerTime,
+		})
+		assertions.isFalse(firstStore:isAuthenticatedSchedulerSample(forgedToken))
+		expectError(
+			assertions,
+			firstStore:spawnScheduled(forgedToken, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID),
+			"INVALID_SCHEDULER_SAMPLE",
+			"spawnScheduled"
+		)
+		expectError(
+			assertions,
+			secondStore:spawnScheduled(firstToken, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID),
+			"INVALID_SCHEDULER_SAMPLE",
+			"spawnScheduled"
+		)
+
+		firstClock.now = 102
+		local replacementToken = success(assertions, firstStore:step(0)).schedulerSampleToken
+		assertions.isFalse(firstStore:isAuthenticatedSchedulerSample(firstToken))
+		assertions.isTrue(firstStore:isAuthenticatedSchedulerSample(replacementToken))
+		expectError(
+			assertions,
+			firstStore:finishSchedulerSample(firstToken),
+			"INVALID_SCHEDULER_SAMPLE",
+			"finishSchedulerSample"
+		)
+		assertions.isTrue(success(assertions, firstStore:finishSchedulerSample(replacementToken)))
+		assertions.isFalse(firstStore:isAuthenticatedSchedulerSample(replacementToken))
+		expectError(
+			assertions,
+			firstStore:spawnScheduled(replacementToken, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID),
+			"INVALID_SCHEDULER_SAMPLE",
+			"spawnScheduled"
+		)
+
+		secondClock.now = 101
+		local cleanupToken = success(assertions, secondStore:step(0)).schedulerSampleToken
+		assertions.isTrue(success(assertions, secondStore:cleanup()))
+		assertions.isFalse(EnemyRuntimeStore.isAuthenticatedSchedulerSample(cleanupToken))
+		local cleanedMetrics = secondStore:getMetrics()
+		assertions.isFalse(cleanedMetrics.difficultyBound)
+		assertions.isFalse(cleanedMetrics.schedulerSampleActive)
+
+		local faultStore, faultClock = newStore(assertions)
+		success(assertions, faultStore:bindDifficulty(difficulty.catalog, difficulty.finite))
+		faultClock.now = 101
+		local faultToken = success(assertions, faultStore:step(0)).schedulerSampleToken
+		faultClock.now = 99
+		expectError(assertions, faultStore:step(0), "CLOCK_FAILED", "step")
+		assertions.isFalse(faultStore:isAuthenticatedSchedulerSample(faultToken))
+		assertions.isTrue(faultStore:getMetrics().faulted)
+		assertions.isTrue(success(assertions, faultStore:cleanup()))
+	end),
+
+	TestHarness.case(
+		"uses the exact live scheduler sample for bound defeat removal without another clock read",
+		function(assertions)
+			local difficulty = createDifficultyFixture()
+			local clockState = { now = 100, reads = 0 }
+			local store = newStore(assertions, {
+				clock = function()
+					clockState.reads += 1
+					return clockState.now
+				end,
+			})
+			success(assertions, store:bindDifficulty(difficulty.catalog, difficulty.finite))
+			clockState.now = 125
+			local token = success(assertions, store:step(0)).schedulerSampleToken
+			local first = success(
+				assertions,
+				store:spawnScheduled(token, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID)
+			)
+			local second = success(
+				assertions,
+				store:spawnScheduled(token, EnemyFixtures.FAST_ENEMY_ID, EnemyFixtures.STRAIGHT_LANE_ID)
+			)
+			local readsBeforeDefeat = clockState.reads
+			local expectedIds = table.freeze({ first.runtimeEnemyId, second.runtimeEnemyId })
+			expectError(
+				assertions,
+				store:despawnAllForDefeat(expectedIds),
+				"INVALID_SCHEDULER_SAMPLE",
+				"despawnAllForDefeat"
+			)
+			local forgedToken = table.freeze({
+				matchId = token.matchId,
+				enemyEpoch = token.enemyEpoch,
+				sampleServerTime = token.sampleServerTime,
+			})
+			expectError(
+				assertions,
+				store:despawnAllForDefeat(expectedIds, forgedToken),
+				"INVALID_SCHEDULER_SAMPLE",
+				"despawnAllForDefeat"
+			)
+			assertions.equal(clockState.reads, readsBeforeDefeat)
+			assertions.equal(store:getMetrics().activeCount, 2)
+
+			local despawns = success(assertions, store:despawnAllForDefeat(expectedIds, token))
+			assertions.equal(clockState.reads, readsBeforeDefeat)
+			assertions.equal(#despawns, 2)
+			for _, despawn in despawns do
+				assertions.equal(despawn.reason, "Defeat")
+				assertions.equal(despawn.sampleServerTime, 125)
+			end
+			local outcomes = success(assertions, store:drainTerminalOutcomes())
+			assertions.equal(#outcomes, 2)
+			for _, outcome in outcomes do
+				assertions.equal(outcome.reason, "Defeat")
+				assertions.equal(outcome.serverTime, 125)
+				assertions.isTrue(store:isAuthenticatedTerminalOutcome(outcome))
+			end
+			assertions.isTrue(store:isAuthenticatedSchedulerSample(token))
+			assertions.isTrue(store:getMetrics().schedulerSampleActive)
+			assertions.isTrue(success(assertions, store:finishSchedulerSample(token)))
+			assertions.isFalse(store:isAuthenticatedSchedulerSample(token))
+		end
+	),
+
 	TestHarness.case("rejects frozen lanes with zero mismatched or oversized geometric segments", function(assertions)
 		local catalog = EnemyFixtures.createAuthenticatedCatalog()
 		local malformedLanes = {
@@ -490,6 +778,108 @@ return TestHarness.suite("server enemy runtime store", {
 	),
 
 	TestHarness.case(
+		"queues ordered separately authenticated endpoint manual and defeat terminal outcomes",
+		function(assertions)
+			local clockState = { now = 100 }
+			local endpointLeak: any = nil
+			local store = success(
+				assertions,
+				EnemyRuntimeStore.newForTests(
+					MATCH_ID,
+					7,
+					EnemyFixtures.createAuthenticatedCatalog(),
+					EnemyFixtures.createRuntimeMapSnapshot(),
+					{
+						clock = function()
+							return clockState.now
+						end,
+						endpointSink = function(outcome: any)
+							endpointLeak = outcome
+						end,
+					}
+				)
+			)
+			local first = success(assertions, store:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+			local second = success(assertions, store:spawn(EnemyFixtures.FAST_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+			local third = success(assertions, store:spawn(EnemyFixtures.SLOW_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+			local fourth =
+				success(assertions, store:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.STRAIGHT_LANE_ID))
+			clockState.now = 101
+			success(assertions, store:resolveEndpoint(first.runtimeEnemyId))
+			clockState.now = 102
+			success(assertions, store:despawn(second.runtimeEnemyId))
+			clockState.now = 103
+			success(
+				assertions,
+				store:despawnAllForDefeat(table.freeze({ third.runtimeEnemyId, fourth.runtimeEnemyId }))
+			)
+
+			local beforeDrain = store:getMetrics()
+			assertions.equal(beforeDrain.queuedTerminalOutcomeCount, 4)
+			assertions.equal(beforeDrain.retainedTerminalOutcomeCount, 4)
+			local outcomes = success(assertions, store:drainTerminalOutcomes())
+			assertDetachedFrozen(assertions, outcomes)
+			assertions.equal(#outcomes, 4)
+			local expectedReasons = { "Endpoint", "Manual", "Defeat", "Defeat" }
+			local expectedTimes = { 101, 102, 103, 103 }
+			local expectedIds = {
+				first.runtimeEnemyId,
+				second.runtimeEnemyId,
+				third.runtimeEnemyId,
+				fourth.runtimeEnemyId,
+			}
+			for index, outcome in outcomes do
+				assertions.equal(outcome.matchId, MATCH_ID)
+				assertions.equal(outcome.enemyEpoch, 7)
+				assertions.equal(outcome.runtimeEnemyId, expectedIds[index])
+				assertions.equal(outcome.reason, expectedReasons[index])
+				assertions.equal(outcome.serverTime, expectedTimes[index])
+				assertions.isTrue(store:isAuthenticatedTerminalOutcome(outcome))
+				assertions.isTrue(EnemyRuntimeStore.isAuthenticatedTerminalOutcome(outcome))
+				local fieldCount = 0
+				for _ in outcome do
+					fieldCount += 1
+				end
+				assertions.equal(fieldCount, 6)
+				assertions.isNil((outcome :: any).leakDamage)
+				assertions.isNil((outcome :: any).laneId)
+			end
+			assertions.isTrue(endpointLeak ~= outcomes[1])
+			assertions.isTrue(store:isAuthenticatedLeakOutcome(endpointLeak))
+			assertions.isFalse(store:isAuthenticatedTerminalOutcome(endpointLeak))
+			assertions.isFalse(EnemyRuntimeStore.isAuthenticatedTerminalOutcome(endpointLeak))
+
+			local forged = table.freeze({
+				matchId = outcomes[1].matchId,
+				enemyEpoch = outcomes[1].enemyEpoch,
+				runtimeEnemyId = outcomes[1].runtimeEnemyId,
+				enemyId = outcomes[1].enemyId,
+				reason = outcomes[1].reason,
+				serverTime = outcomes[1].serverTime,
+			})
+			assertions.isFalse(store:isAuthenticatedTerminalOutcome(forged))
+			assertions.isFalse(EnemyRuntimeStore.isAuthenticatedTerminalOutcome(forged))
+			local otherStore = newStore(assertions)
+			assertions.isFalse(otherStore:isAuthenticatedTerminalOutcome(outcomes[1]))
+			success(assertions, otherStore:cleanup())
+
+			local afterDrain = store:getMetrics()
+			assertions.equal(afterDrain.queuedTerminalOutcomeCount, 0)
+			assertions.equal(afterDrain.retainedTerminalOutcomeCount, 4)
+			assertions.equal(#success(assertions, store:drainTerminalOutcomes()), 0)
+			for _, outcome in outcomes do
+				assertions.isTrue(store:isAuthenticatedTerminalOutcome(outcome))
+			end
+			assertions.isTrue(success(assertions, store:cleanup()))
+			for _, outcome in outcomes do
+				assertions.isFalse(store:isAuthenticatedTerminalOutcome(outcome))
+				assertions.isFalse(EnemyRuntimeStore.isAuthenticatedTerminalOutcome(outcome))
+			end
+			assertions.equal(store:getMetrics().retainedTerminalOutcomeCount, 0)
+		end
+	),
+
+	TestHarness.case(
 		"contains callback errors yields and forbidden mutation reentry after terminalizing",
 		function(assertions)
 			local reentryResult: any = nil
@@ -537,6 +927,62 @@ return TestHarness.suite("server enemy runtime store", {
 			assertions.isFalse(throwingResolution.callbackSucceeded)
 			assertions.equal(throwingResolution.endpoint.lifecycle, "EndpointResolved")
 			assertions.equal(throwingResolution.despawn.reason, "Endpoint")
+		end
+	),
+
+	TestHarness.case(
+		"bounds scheduler capacity revokes on timed mutation and faults terminal drain reentry",
+		function(assertions)
+			local difficulty = createDifficultyFixture()
+			local store, clock = newStore(assertions, {
+				maxActive = 1,
+				maxLifetime = 1,
+			})
+			success(assertions, store:bindDifficulty(difficulty.catalog, difficulty.finite))
+			clock.now = 101
+			local token = success(assertions, store:step(0)).schedulerSampleToken
+			local spawned = success(
+				assertions,
+				store:spawnScheduled(token, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID)
+			)
+			expectError(
+				assertions,
+				store:spawnScheduled(token, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID),
+				"CAPACITY_EXCEEDED",
+				"spawnScheduled"
+			)
+			clock.now = 102
+			success(assertions, store:despawn(spawned.runtimeEnemyId))
+			assertions.isFalse(store:isAuthenticatedSchedulerSample(token))
+			assertions.equal(store:getMetrics().queuedTerminalOutcomeCount, 1)
+			clock.now = 103
+			local exhaustedToken = success(assertions, store:step(0)).schedulerSampleToken
+			expectError(
+				assertions,
+				store:spawnScheduled(exhaustedToken, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID),
+				"ID_EXHAUSTED",
+				"spawnScheduled"
+			)
+			success(assertions, store:finishSchedulerSample(exhaustedToken))
+
+			local drainReentryResult: any = nil
+			local reentryStore: any = nil
+			reentryStore = newStore(assertions, {
+				endpointSink = function()
+					drainReentryResult = reentryStore:drainTerminalOutcomes()
+				end,
+			})
+			local reentryEnemy =
+				success(assertions, reentryStore:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+			local resolution = success(assertions, reentryStore:resolveEndpoint(reentryEnemy.runtimeEnemyId))
+			assertions.isFalse(resolution.callbackSucceeded)
+			expectError(assertions, drainReentryResult, "REENTRANT", "drainTerminalOutcomes")
+			local reentryMetrics = reentryStore:getMetrics()
+			assertions.isTrue(reentryMetrics.faulted)
+			assertions.equal(reentryMetrics.queuedTerminalOutcomeCount, 1)
+			assertions.equal(reentryMetrics.retainedTerminalOutcomeCount, 1)
+			assertions.isTrue(success(assertions, reentryStore:cleanup()))
+			assertions.equal(reentryStore:getMetrics().queuedTerminalOutcomeCount, 0)
 		end
 	),
 
@@ -610,6 +1056,40 @@ return TestHarness.suite("server enemy runtime store", {
 				"new"
 			)
 		end
+	end),
+
+	TestHarness.case("preserves unbound zero-step and repeated legacy step behavior", function(assertions)
+		local clockState = { now = 100, reads = 0 }
+		local store = success(
+			assertions,
+			EnemyRuntimeStore.newForTests(
+				MATCH_ID,
+				1,
+				EnemyFixtures.createAuthenticatedCatalog(),
+				EnemyFixtures.createRuntimeMapSnapshot(),
+				{
+					clock = function()
+						clockState.reads += 1
+						return clockState.now
+					end,
+				}
+			)
+		)
+		assertions.equal(clockState.reads, 1)
+		local noOp = success(assertions, store:step(0))
+		assertions.equal(clockState.reads, 1)
+		assertions.isNil(noOp.sampleServerTime)
+		assertions.isNil(noOp.schedulerSampleToken)
+		local spawned = success(assertions, store:spawn(EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID))
+		assertions.equal(spawned.currentHealth, 100)
+		assertions.equal(spawned.effectiveSpeed, 10)
+		clockState.now = 101
+		local firstStep = success(assertions, store:step(0.1))
+		clockState.now = 102
+		local secondStep = success(assertions, store:step(0.1))
+		assertions.isNil(firstStep.schedulerSampleToken)
+		assertions.isNil(secondStep.schedulerSampleToken)
+		assertions.equal(clockState.reads, 4)
 	end),
 
 	TestHarness.case("guards clock callbacks against recursive mutation and deferred cleanup", function(assertions)

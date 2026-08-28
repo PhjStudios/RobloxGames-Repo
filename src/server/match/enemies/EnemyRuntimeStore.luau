@@ -6,6 +6,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 
+local DifficultySchema = require(ReplicatedStorage.Shared.config.DifficultySchema)
 local EnemySchema = require(ReplicatedStorage.Shared.config.EnemySchema)
 local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
 local Ids = require(ReplicatedStorage.Shared.util.Ids)
@@ -60,9 +61,16 @@ export type EndpointResolution = {
 	callbackSucceeded: boolean,
 }
 
+export type SchedulerSampleToken = {
+	matchId: Ids.MatchId,
+	enemyEpoch: EnemyEpoch,
+	sampleServerTime: number,
+}
+
 export type StepResult = {
 	deltaSeconds: number,
 	sampleServerTime: number?,
+	schedulerSampleToken: SchedulerSampleToken?,
 	visitedCount: number,
 	updatedCount: number,
 	endpointCount: number,
@@ -87,6 +95,15 @@ export type AuthenticatedLeakOutcome = {
 	serverTime: number,
 }
 
+export type AuthenticatedTerminalOutcome = {
+	matchId: Ids.MatchId,
+	enemyEpoch: EnemyEpoch,
+	runtimeEnemyId: RuntimeEnemyId,
+	enemyId: Ids.EnemyId,
+	reason: DespawnReason,
+	serverTime: number,
+}
+
 export type EndpointSink = (outcome: AuthenticatedLeakOutcome) -> ()
 
 export type StoreMetrics = {
@@ -95,8 +112,13 @@ export type StoreMetrics = {
 	nextRuntimeEnemyId: number,
 	terminalCount: number,
 	retainedLeakOutcomeCount: number,
+	queuedTerminalOutcomeCount: number,
+	retainedTerminalOutcomeCount: number,
 	retainedLaneCount: number,
 	retainsCatalog: boolean,
+	difficultyBound: boolean,
+	boundDifficultyId: Ids.DifficultyId?,
+	schedulerSampleActive: boolean,
 	retainsClockCallback: boolean,
 	retainsEndpointCallback: boolean,
 	cleaned: boolean,
@@ -117,7 +139,11 @@ export type Operation =
 	| "getIdentity"
 	| "getMetrics"
 	| "installStudioCatalog"
+	| "bindDifficulty"
 	| "listLaneIds"
+	| "spawnScheduled"
+	| "finishSchedulerSample"
+	| "drainTerminalOutcomes"
 	| "cleanup"
 
 export type ErrorCode =
@@ -141,6 +167,9 @@ export type ErrorCode =
 	| "ILLEGAL_LIFECYCLE"
 	| "CLOCK_FAILED"
 	| "CALLBACK_FAILED"
+	| "INVALID_DIFFICULTY_DEFINITION"
+	| "SCHEDULER_ONLY"
+	| "INVALID_SCHEDULER_SAMPLE"
 	| "STUDIO_ONLY"
 	| "REENTRANT"
 	| "FAULTED"
@@ -184,8 +213,15 @@ type RuntimeEnemyRecord = {
 	revision: number,
 	worldCFrame: CFrame,
 	segmentIndex: number,
+	baseMoveSpeedStudsPerSecond: number,
 	definition: ConfigTypes.EnemyDefinition,
 	lane: RuntimeLaneSnapshot,
+}
+
+type DifficultyBinding = {
+	difficultyId: Ids.DifficultyId,
+	enemyHealthMultiplier: number,
+	enemyMoveSpeedMultiplier: number,
 }
 
 type TerminalRecord = {
@@ -213,6 +249,10 @@ type StoreData = {
 	issuedIds: { [RuntimeEnemyId]: boolean },
 	terminalById: { [RuntimeEnemyId]: TerminalRecord },
 	authenticatedLeakOutcomeById: { [RuntimeEnemyId]: AuthenticatedLeakOutcome },
+	authenticatedTerminalOutcomeById: { [RuntimeEnemyId]: AuthenticatedTerminalOutcome },
+	pendingTerminalOutcomes: { AuthenticatedTerminalOutcome },
+	difficultyBinding: DifficultyBinding?,
+	activeSchedulerSample: SchedulerSampleToken?,
 	activeCount: number,
 	lifetimeCount: number,
 	terminalCount: number,
@@ -248,6 +288,10 @@ export type Store = typeof(setmetatable({} :: {}, StoreMethods))
 
 local STORE_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: StoreData }
 local AUTHENTICATED_LEAK_OUTCOMES = setmetatable({}, { __mode = "k" }) :: { [AuthenticatedLeakOutcome]: StoreData }
+local AUTHENTICATED_TERMINAL_OUTCOMES = setmetatable({}, { __mode = "k" }) :: {
+	[AuthenticatedTerminalOutcome]: StoreData,
+}
+local AUTHENTICATED_SCHEDULER_SAMPLES = setmetatable({}, { __mode = "k" }) :: { [SchedulerSampleToken]: StoreData }
 
 local EnemyRuntimeStore = {
 	MAX_ACTIVE = MAX_ACTIVE,
@@ -451,7 +495,7 @@ local function validateRuntimeMap(value: unknown): { [string]: RuntimeLaneSnapsh
 end
 
 local function effectiveSpeed(record: RuntimeEnemyRecord): number
-	return record.definition.moveSpeedStudsPerSecond * record.slowMultiplier
+	return record.baseMoveSpeedStudsPerSecond * record.slowMultiplier
 end
 
 local function snapshotRecord(record: RuntimeEnemyRecord): RuntimeEnemySnapshot
@@ -495,6 +539,67 @@ local function terminalSnapshot(
 		reason = reason,
 		sampleServerTime = sampleServerTime,
 	})
+end
+
+local function revokeSchedulerSample(data: StoreData)
+	local token = data.activeSchedulerSample
+	if token ~= nil then
+		AUTHENTICATED_SCHEDULER_SAMPLES[token] = nil
+		data.activeSchedulerSample = nil
+	end
+end
+
+local function issueSchedulerSample(data: StoreData, sampleServerTime: number): SchedulerSampleToken
+	revokeSchedulerSample(data)
+	local token: SchedulerSampleToken = table.freeze({
+		matchId = data.identity.matchId,
+		enemyEpoch = data.identity.enemyEpoch,
+		sampleServerTime = sampleServerTime,
+	})
+	data.activeSchedulerSample = token
+	AUTHENTICATED_SCHEDULER_SAMPLES[token] = data
+	return token
+end
+
+local function isAuthenticatedSchedulerSampleForData(data: StoreData, value: unknown): boolean
+	if type(value) ~= "table" then
+		return false
+	end
+	local token = value :: SchedulerSampleToken
+	return not data.cleaned
+		and data.activeSchedulerSample == token
+		and AUTHENTICATED_SCHEDULER_SAMPLES[token] == data
+		and token.matchId == data.identity.matchId
+		and token.enemyEpoch == data.identity.enemyEpoch
+		and token.sampleServerTime == data.lastServerTime
+end
+
+local function retainTerminalOutcome(
+	data: StoreData,
+	record: RuntimeEnemyRecord,
+	reason: DespawnReason,
+	serverTime: number
+): boolean
+	if
+		data.authenticatedTerminalOutcomeById[record.runtimeEnemyId] ~= nil
+		or data.terminalCount >= data.maxLifetime
+		or #data.pendingTerminalOutcomes >= MAX_LIFETIME
+	then
+		data.faulted = true
+		return false
+	end
+	local outcome: AuthenticatedTerminalOutcome = table.freeze({
+		matchId = data.identity.matchId,
+		enemyEpoch = data.identity.enemyEpoch,
+		runtimeEnemyId = record.runtimeEnemyId,
+		enemyId = record.enemyId,
+		reason = reason,
+		serverTime = serverTime,
+	})
+	data.authenticatedTerminalOutcomeById[record.runtimeEnemyId] = outcome
+	table.insert(data.pendingTerminalOutcomes, outcome)
+	AUTHENTICATED_TERMINAL_OUTCOMES[outcome] = data
+	return true
 end
 
 local function defaultClock(): unknown
@@ -572,15 +677,22 @@ local function lookupActive(
 end
 
 local function clearData(data: StoreData)
+	revokeSchedulerSample(data)
 	for _, outcome in data.authenticatedLeakOutcomeById do
 		AUTHENTICATED_LEAK_OUTCOMES[outcome] = nil
 	end
 	table.clear(data.authenticatedLeakOutcomeById)
+	for _, outcome in data.authenticatedTerminalOutcomeById do
+		AUTHENTICATED_TERMINAL_OUTCOMES[outcome] = nil
+	end
+	table.clear(data.authenticatedTerminalOutcomeById)
+	table.clear(data.pendingTerminalOutcomes)
 	table.clear(data.activeById)
 	table.clear(data.issuedIds)
 	table.clear(data.terminalById)
 	table.clear(data.laneById)
 	data.catalog = nil
+	data.difficultyBinding = nil
 	data.clock = closedClock
 	data.endpointSink = noEndpointOutcome
 	data.activeCount = 0
@@ -601,6 +713,7 @@ local function finishMutation(data: StoreData)
 end
 
 local function beginTimedMutation(data: StoreData, operation: Operation): (number?, StoreError?)
+	revokeSchedulerSample(data)
 	data.mutating = true
 	data.reentryViolation = false
 	local serverTime, clockError = readClock(data, operation)
@@ -665,6 +778,7 @@ local function terminalizeEndpoint(data: StoreData, record: RuntimeEnemyRecord, 
 		endpoint = endpoint,
 		despawn = despawn,
 	}
+	retainTerminalOutcome(data, record, "Endpoint", serverTime)
 	data.terminalCount += 1
 	if not callbackSucceeded then
 		data.faulted = true
@@ -704,6 +818,10 @@ local function makeStore(
 		issuedIds = issuedIds,
 		terminalById = {},
 		authenticatedLeakOutcomeById = {},
+		authenticatedTerminalOutcomeById = {},
+		pendingTerminalOutcomes = {},
+		difficultyBinding = nil,
+		activeSchedulerSample = nil,
 		activeCount = 0,
 		lifetimeCount = lifetimeCount,
 		terminalCount = 0,
@@ -801,12 +919,78 @@ function StoreMethods.installStudioCatalog(self: Store, catalogValue: unknown): 
 		or data.terminalCount ~= 0
 		or data.nextRuntimeEnemyId ~= 1
 		or next(data.issuedIds) ~= nil
+		or data.difficultyBinding ~= nil
 	then
 		return failure("ILLEGAL_LIFECYCLE", "installStudioCatalog")
 	end
 	data.mutating = true
 	data.catalog = catalogValue :: ConfigTypes.EnemyCatalog
 	data.studioCatalogInstallEnabled = false
+	finishMutation(data)
+	return Result.ok(true)
+end
+
+function StoreMethods.bindDifficulty(
+	self: Store,
+	difficultyCatalogValue: unknown,
+	difficultyDefinitionValue: unknown
+): Result.Result<boolean, StoreError>
+	local operation: Operation = "bindDifficulty"
+	local data = requireData(self)
+	local liveError = validateLive(data, operation, true)
+	if liveError ~= nil then
+		return Result.err(liveError)
+	end
+	if
+		data.difficultyBinding ~= nil
+		or data.activeCount ~= 0
+		or data.lifetimeCount ~= 0
+		or data.terminalCount ~= 0
+		or data.nextRuntimeEnemyId ~= 1
+		or next(data.issuedIds) ~= nil
+		or next(data.authenticatedTerminalOutcomeById) ~= nil
+		or #data.pendingTerminalOutcomes ~= 0
+	then
+		return failure("ILLEGAL_LIFECYCLE", operation)
+	end
+	if not DifficultySchema.isValidatedCatalog(difficultyCatalogValue) then
+		return failure("UNAUTHENTICATED_CATALOG", operation)
+	end
+	if
+		type(difficultyDefinitionValue) ~= "table"
+		or not table.isfrozen(difficultyDefinitionValue :: any)
+		or getmetatable(difficultyDefinitionValue :: any) ~= nil
+	then
+		return failure("INVALID_DIFFICULTY_DEFINITION", operation)
+	end
+	local difficultyCatalog = difficultyCatalogValue :: ConfigTypes.DifficultyCatalog
+	local difficultyRecord = difficultyDefinitionValue :: { [any]: unknown }
+	local difficultyId = rawget(difficultyRecord, "id")
+	local difficultyKind = rawget(difficultyRecord, "kind")
+	if difficultyKind ~= "Finite" or type(difficultyId) ~= "string" then
+		return failure("INVALID_DIFFICULTY_DEFINITION", operation)
+	end
+	if difficultyCatalog.byId[difficultyId] ~= difficultyDefinitionValue then
+		return failure("INVALID_DIFFICULTY_DEFINITION", operation)
+	end
+	local difficultyDefinition = difficultyDefinitionValue :: ConfigTypes.FiniteDifficultyDefinition
+	local healthMultiplier = difficultyDefinition.modifiers.enemyHealthMultiplier
+	local moveSpeedMultiplier = difficultyDefinition.modifiers.enemyMoveSpeedMultiplier
+	if
+		not isFiniteNumber(healthMultiplier)
+		or (healthMultiplier :: number) <= 0
+		or not isFiniteNumber(moveSpeedMultiplier)
+		or (moveSpeedMultiplier :: number) <= 0
+	then
+		return failure("INVALID_DIFFICULTY_DEFINITION", operation)
+	end
+
+	data.mutating = true
+	data.difficultyBinding = table.freeze({
+		difficultyId = difficultyId,
+		enemyHealthMultiplier = healthMultiplier :: number,
+		enemyMoveSpeedMultiplier = moveSpeedMultiplier :: number,
+	})
 	finishMutation(data)
 	return Result.ok(true)
 end
@@ -834,6 +1018,9 @@ function StoreMethods.spawn(
 	local liveError = validateLive(data, "spawn", true)
 	if liveError ~= nil then
 		return Result.err(liveError)
+	end
+	if data.difficultyBinding ~= nil then
+		return failure("SCHEDULER_ONLY", "spawn")
 	end
 	local enemyIdResult = Ids.validateEnemyId(enemyIdValue)
 	if not enemyIdResult.ok then
@@ -884,6 +1071,7 @@ function StoreMethods.spawn(
 		revision = 1,
 		worldCFrame = worldCFrame,
 		segmentIndex = segmentIndex,
+		baseMoveSpeedStudsPerSecond = definition.moveSpeedStudsPerSecond,
 		definition = definition,
 		lane = lane,
 	}
@@ -895,6 +1083,116 @@ function StoreMethods.spawn(
 	local result = snapshotRecord(record)
 	finishMutation(data)
 	return Result.ok(result)
+end
+
+function StoreMethods.spawnScheduled(
+	self: Store,
+	schedulerSampleTokenValue: unknown,
+	enemyIdValue: unknown,
+	laneIdValue: unknown
+): Result.Result<RuntimeEnemySnapshot, StoreError>
+	local operation: Operation = "spawnScheduled"
+	local data = requireData(self)
+	local liveError = validateLive(data, operation, true)
+	if liveError ~= nil then
+		return Result.err(liveError)
+	end
+	local binding = data.difficultyBinding
+	if binding == nil then
+		return failure("SCHEDULER_ONLY", operation)
+	end
+	if not isAuthenticatedSchedulerSampleForData(data, schedulerSampleTokenValue) then
+		return failure("INVALID_SCHEDULER_SAMPLE", operation)
+	end
+	local schedulerSampleToken = schedulerSampleTokenValue :: SchedulerSampleToken
+	local enemyIdResult = Ids.validateEnemyId(enemyIdValue)
+	if not enemyIdResult.ok then
+		return failure("INVALID_ENEMY_ID", operation)
+	end
+	if type(laneIdValue) ~= "string" or not Validation.isSymbolicKey(laneIdValue) then
+		return failure("INVALID_LANE_ID", operation)
+	end
+	local catalog = data.catalog
+	if catalog == nil then
+		return failure("CLEANED", operation)
+	end
+	local definition = catalog.byId[enemyIdResult.value]
+	if definition == nil then
+		return failure("DEFINITION_NOT_FOUND", operation)
+	end
+	local lane = data.laneById[laneIdValue]
+	if lane == nil then
+		return failure("LANE_NOT_FOUND", operation)
+	end
+	if data.activeCount >= data.maxActive then
+		return failure("CAPACITY_EXCEEDED", operation)
+	end
+	if data.lifetimeCount >= data.maxLifetime or data.nextRuntimeEnemyId > data.maxLifetime then
+		return failure("ID_EXHAUSTED", operation)
+	end
+	if data.issuedIds[data.nextRuntimeEnemyId] then
+		return failure("ID_COLLISION", operation)
+	end
+	local maximumHealth = definition.maxHealth * binding.enemyHealthMultiplier
+	local baseMoveSpeed = definition.moveSpeedStudsPerSecond * binding.enemyMoveSpeedMultiplier
+	if
+		not isFiniteNumber(maximumHealth)
+		or maximumHealth <= 0
+		or not isFiniteNumber(baseMoveSpeed)
+		or baseMoveSpeed <= 0
+	then
+		return failure("INVALID_DIFFICULTY_DEFINITION", operation)
+	end
+
+	data.mutating = true
+	data.reentryViolation = false
+	local runtimeEnemyId = data.nextRuntimeEnemyId
+	local worldCFrame, segmentIndex = EnemyPath.sampleTrusted(lane, 0)
+	local record: RuntimeEnemyRecord = {
+		runtimeEnemyId = runtimeEnemyId,
+		enemyId = definition.id,
+		laneId = lane.id,
+		pathProgress = 0,
+		currentHealth = maximumHealth,
+		maximumHealth = maximumHealth,
+		slowMultiplier = 1,
+		spawnServerTime = schedulerSampleToken.sampleServerTime,
+		sampleServerTime = schedulerSampleToken.sampleServerTime,
+		lifecycle = "Active",
+		revision = 1,
+		worldCFrame = worldCFrame,
+		segmentIndex = segmentIndex,
+		baseMoveSpeedStudsPerSecond = baseMoveSpeed,
+		definition = definition,
+		lane = lane,
+	}
+	data.activeById[runtimeEnemyId] = record
+	data.issuedIds[runtimeEnemyId] = true
+	data.activeCount += 1
+	data.lifetimeCount += 1
+	data.nextRuntimeEnemyId += 1
+	local result = snapshotRecord(record)
+	finishMutation(data)
+	return Result.ok(result)
+end
+
+function StoreMethods.finishSchedulerSample(
+	self: Store,
+	schedulerSampleTokenValue: unknown
+): Result.Result<boolean, StoreError>
+	local operation: Operation = "finishSchedulerSample"
+	local data = requireData(self)
+	local liveError = validateLive(data, operation, true)
+	if liveError ~= nil then
+		return Result.err(liveError)
+	end
+	if not isAuthenticatedSchedulerSampleForData(data, schedulerSampleTokenValue) then
+		return failure("INVALID_SCHEDULER_SAMPLE", operation)
+	end
+	data.mutating = true
+	revokeSchedulerSample(data)
+	finishMutation(data)
+	return Result.ok(true)
 end
 
 function StoreMethods.get(self: Store, runtimeEnemyIdValue: unknown): Result.Result<RuntimeEnemySnapshot, StoreError>
@@ -1045,6 +1343,7 @@ function StoreMethods.despawn(self: Store, runtimeEnemyIdValue: unknown): Result
 	data.terminalById[record.runtimeEnemyId] = {
 		despawn = despawn,
 	}
+	retainTerminalOutcome(data, record, "Manual", serverTime)
 	data.terminalCount += 1
 	finishMutation(data)
 	return Result.ok(despawn)
@@ -1052,7 +1351,8 @@ end
 
 function StoreMethods.despawnAllForDefeat(
 	self: Store,
-	expectedActiveIdsValue: unknown
+	expectedActiveIdsValue: unknown,
+	schedulerSampleTokenValue: unknown?
 ): Result.Result<{ DespawnSnapshot }, StoreError>
 	local operation: Operation = "despawnAllForDefeat"
 	local data = requireData(self)
@@ -1107,9 +1407,20 @@ function StoreMethods.despawnAllForDefeat(
 		return failure("STALE_RUNTIME_ID", operation)
 	end
 
-	local serverTime, clockError = beginTimedMutation(data, operation)
-	if serverTime == nil then
-		return Result.err(clockError :: StoreError)
+	local serverTime: number
+	if data.difficultyBinding ~= nil then
+		if not isAuthenticatedSchedulerSampleForData(data, schedulerSampleTokenValue) then
+			return failure("INVALID_SCHEDULER_SAMPLE", operation)
+		end
+		serverTime = (schedulerSampleTokenValue :: SchedulerSampleToken).sampleServerTime
+		data.mutating = true
+		data.reentryViolation = false
+	else
+		local sampledServerTime, clockError = beginTimedMutation(data, operation)
+		if sampledServerTime == nil then
+			return Result.err(clockError :: StoreError)
+		end
+		serverTime = sampledServerTime
 	end
 
 	local despawns: { DespawnSnapshot } = table.create(expectedCount)
@@ -1122,6 +1433,7 @@ function StoreMethods.despawnAllForDefeat(
 		data.terminalById[record.runtimeEnemyId] = {
 			despawn = despawn,
 		}
+		retainTerminalOutcome(data, record, "Defeat", serverTime)
 		data.terminalCount += 1
 		table.insert(despawns, despawn)
 	end
@@ -1144,15 +1456,39 @@ function StoreMethods.step(self: Store, deltaSecondsValue: unknown): Result.Resu
 		return failure("INVALID_DELTA", "step")
 	end
 	local deltaSeconds = deltaSecondsValue :: number
-	if deltaSeconds == 0 then
+	if deltaSeconds == 0 and data.difficultyBinding == nil then
 		return Result.ok(table.freeze({
 			deltaSeconds = 0,
 			sampleServerTime = nil,
+			schedulerSampleToken = nil,
 			visitedCount = 0,
 			updatedCount = 0,
 			endpointCount = 0,
 			activeCountAfter = data.activeCount,
 			cleaned = false,
+			faulted = data.faulted,
+			updatedRuntimeEnemyIds = table.freeze({}),
+			endpointResolutions = table.freeze({}),
+		}))
+	end
+	if deltaSeconds == 0 then
+		local serverTime, clockError = beginTimedMutation(data, "step")
+		if serverTime == nil then
+			return Result.err(clockError :: StoreError)
+		end
+		finishMutation(data)
+		local schedulerSampleToken = if not data.cleaned and not data.faulted
+			then issueSchedulerSample(data, serverTime)
+			else nil
+		return Result.ok(table.freeze({
+			deltaSeconds = 0,
+			sampleServerTime = serverTime,
+			schedulerSampleToken = schedulerSampleToken,
+			visitedCount = 0,
+			updatedCount = 0,
+			endpointCount = 0,
+			activeCountAfter = data.activeCount,
+			cleaned = data.cleaned,
 			faulted = data.faulted,
 			updatedRuntimeEnemyIds = table.freeze({}),
 			endpointResolutions = table.freeze({}),
@@ -1236,9 +1572,15 @@ function StoreMethods.step(self: Store, deltaSecondsValue: unknown): Result.Resu
 	table.freeze(updatedRuntimeEnemyIds)
 	table.freeze(endpointResolutions)
 	finishMutation(data)
+	local schedulerSampleToken = if data.difficultyBinding ~= nil
+			and not data.cleaned
+			and not data.faulted
+		then issueSchedulerSample(data, serverTime)
+		else nil
 	return Result.ok(table.freeze({
 		deltaSeconds = deltaSeconds,
 		sampleServerTime = serverTime,
+		schedulerSampleToken = schedulerSampleToken,
 		visitedCount = visitedCount,
 		updatedCount = updatedCount,
 		endpointCount = #endpointResolutions,
@@ -1248,6 +1590,24 @@ function StoreMethods.step(self: Store, deltaSecondsValue: unknown): Result.Resu
 		updatedRuntimeEnemyIds = updatedRuntimeEnemyIds,
 		endpointResolutions = endpointResolutions,
 	}))
+end
+
+function StoreMethods.drainTerminalOutcomes(self: Store): Result.Result<{ AuthenticatedTerminalOutcome }, StoreError>
+	local operation: Operation = "drainTerminalOutcomes"
+	local data = requireData(self)
+	local liveError = validateLive(data, operation, true)
+	if liveError ~= nil then
+		return Result.err(liveError)
+	end
+	data.mutating = true
+	local outcomes: { AuthenticatedTerminalOutcome } = table.create(#data.pendingTerminalOutcomes)
+	for _, outcome in data.pendingTerminalOutcomes do
+		table.insert(outcomes, outcome)
+	end
+	table.clear(data.pendingTerminalOutcomes)
+	table.freeze(outcomes)
+	finishMutation(data)
+	return Result.ok(outcomes)
 end
 
 function StoreMethods.getIdentity(self: Store): Result.Result<StoreIdentity, StoreError>
@@ -1269,14 +1629,24 @@ function StoreMethods.getMetrics(self: Store): StoreMetrics
 	for _ in data.authenticatedLeakOutcomeById do
 		retainedLeakOutcomeCount += 1
 	end
+	local retainedTerminalOutcomeCount = 0
+	for _ in data.authenticatedTerminalOutcomeById do
+		retainedTerminalOutcomeCount += 1
+	end
+	local binding = data.difficultyBinding
 	return table.freeze({
 		activeCount = data.activeCount,
 		lifetimeCount = data.lifetimeCount,
 		nextRuntimeEnemyId = data.nextRuntimeEnemyId,
 		terminalCount = data.terminalCount,
 		retainedLeakOutcomeCount = retainedLeakOutcomeCount,
+		queuedTerminalOutcomeCount = #data.pendingTerminalOutcomes,
+		retainedTerminalOutcomeCount = retainedTerminalOutcomeCount,
 		retainedLaneCount = retainedLaneCount,
 		retainsCatalog = data.catalog ~= nil,
+		difficultyBound = binding ~= nil,
+		boundDifficultyId = if binding == nil then nil else binding.difficultyId,
+		schedulerSampleActive = data.activeSchedulerSample ~= nil,
 		retainsClockCallback = data.clock ~= closedClock,
 		retainsEndpointCallback = data.endpointSink ~= noEndpointOutcome,
 		cleaned = data.cleaned,
@@ -1319,6 +1689,43 @@ function EnemyRuntimeStore.isAuthenticatedLeakOutcome(value: unknown): boolean
 		return false
 	end
 	return data.authenticatedLeakOutcomeById[outcome.runtimeEnemyId] == outcome
+end
+
+function StoreMethods.isAuthenticatedTerminalOutcome(self: Store, value: unknown): boolean
+	local data = requireData(self)
+	if type(value) ~= "table" then
+		return false
+	end
+	local outcome = value :: AuthenticatedTerminalOutcome
+	if AUTHENTICATED_TERMINAL_OUTCOMES[outcome] ~= data or data.cleaned then
+		return false
+	end
+	return data.authenticatedTerminalOutcomeById[outcome.runtimeEnemyId] == outcome
+end
+
+function EnemyRuntimeStore.isAuthenticatedTerminalOutcome(value: unknown): boolean
+	if type(value) ~= "table" then
+		return false
+	end
+	local outcome = value :: AuthenticatedTerminalOutcome
+	local data = AUTHENTICATED_TERMINAL_OUTCOMES[outcome]
+	if data == nil or data.cleaned then
+		return false
+	end
+	return data.authenticatedTerminalOutcomeById[outcome.runtimeEnemyId] == outcome
+end
+
+function StoreMethods.isAuthenticatedSchedulerSample(self: Store, value: unknown): boolean
+	return isAuthenticatedSchedulerSampleForData(requireData(self), value)
+end
+
+function EnemyRuntimeStore.isAuthenticatedSchedulerSample(value: unknown): boolean
+	if type(value) ~= "table" then
+		return false
+	end
+	local token = value :: SchedulerSampleToken
+	local data = AUTHENTICATED_SCHEDULER_SAMPLES[token]
+	return data ~= nil and isAuthenticatedSchedulerSampleForData(data, token)
 end
 
 local function testModuleIdentityIsExact(): boolean

@@ -59,6 +59,10 @@
 
           "ready": {
             "$path": "src/server/match/ready"
+          },
+
+          "waves": {
+            "$path": "src/server/match/waves"
           }
         }
       }
@@ -92,6 +96,10 @@
 
             "enemies": {
               "$path": "src/client/match/enemies"
+            },
+
+            "waves": {
+              "$path": "src/client/match/waves"
             },
 
             "MatchReadyController": {

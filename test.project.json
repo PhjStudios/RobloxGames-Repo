@@ -45,6 +45,10 @@
           "$path": "src/client/match/base"
         },
 
+        "ProductionClientWaves": {
+          "$path": "src/client/match/waves"
+        },
+
         "ProductionClientMatch": {
           "$className": "Folder",
 
@@ -71,6 +75,10 @@
 
         "ProductionServerEnemies": {
           "$path": "src/server/match/enemies"
+        },
+
+        "ProductionServerWaves": {
+          "$path": "src/server/match/waves"
         },
 
         "ProductionServerMatchLifecycle": {

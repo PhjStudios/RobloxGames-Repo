@@ -7,11 +7,13 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local AssetSchema = require(ReplicatedStorage.Shared.config.AssetSchema)
+local ConfigurationValidator = require(ReplicatedStorage.Shared.config.ConfigurationValidator)
 local DifficultySchema = require(ReplicatedStorage.Shared.config.DifficultySchema)
 local EnemySchema = require(ReplicatedStorage.Shared.config.EnemySchema)
 local EnemyProtocol = require(ReplicatedStorage.Shared.match.EnemyProtocol)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
 local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
+local Ids = require(ReplicatedStorage.Shared.util.Ids)
 local Result = require(ReplicatedStorage.Shared.util.Result)
 local Validation = require(ReplicatedStorage.Shared.util.Validation)
 local EnemyReplicationPublisher = require(script.Parent.EnemyReplicationPublisher)
@@ -40,6 +42,12 @@ export type Operation =
 	| "installStudioFixtures"
 	| "initializeStudioBase"
 	| "activateStudioWave"
+	| "installWaveBoundary"
+	| "prepareWaveBinding"
+	| "commitWaveBinding"
+	| "detachWaveBoundary"
+	| "getWaveBoundaryStatus"
+	| "isAuthenticatedTerminalOutcome"
 	| "runtimeTrigger"
 
 export type ErrorCode = "UNAVAILABLE" | "REENTRANT" | "INTERNAL_ERROR" | "INVALID_ARGUMENT" | "STUDIO_ONLY"
@@ -73,17 +81,32 @@ export type BaseRuntimeAdapter = {
 
 export type RuntimeStoreAdapter = {
 	spawn: (self: RuntimeStoreAdapter, enemyId: unknown, laneId: unknown) -> unknown,
+	spawnScheduled: (
+		self: RuntimeStoreAdapter,
+		schedulerSampleToken: unknown,
+		enemyId: unknown,
+		laneId: unknown
+	) -> unknown,
 	get: (self: RuntimeStoreAdapter, runtimeEnemyId: unknown) -> unknown,
 	list: (self: RuntimeStoreAdapter) -> unknown,
 	queryTerminal: (self: RuntimeStoreAdapter, runtimeEnemyId: unknown) -> unknown,
 	setSlowMultiplier: (self: RuntimeStoreAdapter, runtimeEnemyId: unknown, multiplier: unknown) -> unknown,
 	resolveEndpoint: (self: RuntimeStoreAdapter, runtimeEnemyId: unknown) -> unknown,
 	despawn: (self: RuntimeStoreAdapter, runtimeEnemyId: unknown) -> unknown,
-	despawnAllForDefeat: (self: RuntimeStoreAdapter, runtimeEnemyIds: unknown) -> unknown,
+	despawnAllForDefeat: (
+		self: RuntimeStoreAdapter,
+		runtimeEnemyIds: unknown,
+		schedulerSampleToken: unknown?
+	) -> unknown,
 	step: (self: RuntimeStoreAdapter, deltaSeconds: unknown) -> unknown,
+	finishSchedulerSample: (self: RuntimeStoreAdapter, schedulerSampleToken: unknown) -> unknown,
+	drainTerminalOutcomes: (self: RuntimeStoreAdapter) -> unknown,
+	isAuthenticatedTerminalOutcome: (self: RuntimeStoreAdapter, outcome: unknown) -> boolean,
+	isAuthenticatedSchedulerSample: (self: RuntimeStoreAdapter, sample: unknown) -> boolean,
 	getIdentity: (self: RuntimeStoreAdapter) -> unknown,
 	getMetrics: (self: RuntimeStoreAdapter) -> unknown,
 	installStudioCatalog: (self: RuntimeStoreAdapter, catalog: unknown) -> unknown,
+	bindDifficulty: (self: RuntimeStoreAdapter, catalog: unknown, definition: unknown) -> unknown,
 	listLaneIds: (self: RuntimeStoreAdapter) -> unknown,
 	cleanup: (self: RuntimeStoreAdapter) -> unknown,
 }
@@ -126,6 +149,43 @@ export type PassClock = () -> unknown
 export type RuntimeTriggerHandler = (request: unknown) -> unknown
 export type CreateRuntimeTrigger = (handler: RuntimeTriggerHandler) -> unknown
 
+export type WavePassDisposition = "Healthy" | "DefeatCommitted" | "DependencyFault" | "Shutdown"
+
+export type WaveSpawnEvent = {
+	originatingWaveIndex: number,
+	waveId: string,
+	groupIndex: number,
+	spawnOrdinal: number,
+	scheduledServerTime: number,
+	enemyId: string,
+	laneId: string,
+}
+
+export type WavePassFrame = {
+	disposition: WavePassDisposition,
+	matchId: string,
+	enemyEpoch: number,
+	passOrdinal: number,
+	sampleServerTime: number,
+	terminalOutcomes: { unknown },
+	spawn: ((event: WaveSpawnEvent) -> unknown)?,
+}
+
+export type WaveBoundaryAdapter = {
+	onEnemyPass: (self: WaveBoundaryAdapter, frame: WavePassFrame) -> unknown,
+	flushEnemyPass: (self: WaveBoundaryAdapter, passOrdinal: unknown) -> unknown,
+	close: (self: WaveBoundaryAdapter, context: unknown) -> unknown,
+}
+
+export type WaveBoundaryStatus =
+	"Installed"
+	| "Active"
+	| "FiniteComplete"
+	| "DefeatClosed"
+	| "Faulted"
+	| "ShutdownClosed"
+	| "Detached"
+
 export type TestDependencies = {
 	matchLifecycle: MatchLifecycleAdapter,
 	baseRuntime: BaseRuntimeAdapter,
@@ -140,6 +200,7 @@ export type TestDependencies = {
 	passClock: PassClock?,
 	createRuntimeTrigger: CreateRuntimeTrigger?,
 	initialEnemyPassOrdinal: number?,
+	initialSpawnAdmissionClosed: boolean?,
 }
 
 export type PassTimingMetrics = {
@@ -172,6 +233,10 @@ export type ServiceMetrics = {
 	nextEnemyPassOrdinal: number,
 	defeatCount: number,
 	resultsCommitCount: number,
+	waveBoundaryStatus: WaveBoundaryStatus?,
+	waveBoundaryGeneration: number,
+	waveBoundaryPassCount: number,
+	waveBoundaryFlushCount: number,
 	passTiming: PassTimingMetrics,
 }
 
@@ -180,6 +245,7 @@ type ServiceData = {
 	matchLifecycle: MatchLifecycleAdapter?,
 	baseRuntime: BaseRuntimeAdapter?,
 	catalog: unknown,
+	currentCatalog: unknown,
 	createStore: RuntimeStoreFactory?,
 	createPublisher: PublisherFactory?,
 	connectStep: ConnectStep?,
@@ -214,6 +280,22 @@ type ServiceData = {
 	nextEnemyPassOrdinal: number,
 	defeatCount: number,
 	resultsCommitCount: number,
+	storeIdentity: any?,
+	waveBoundary: WaveBoundaryAdapter?,
+	waveBoundaryHandle: any?,
+	waveBindingToken: any?,
+	waveBindingConfiguration: ConfigTypes.CoreConfiguration?,
+	waveBindingDifficulty: ConfigTypes.FiniteDifficultyDefinition?,
+	waveBoundaryStatus: WaveBoundaryStatus?,
+	waveBoundaryGeneration: number,
+	waveBoundaryPassCount: number,
+	waveBoundaryFlushCount: number,
+	waveBindingActive: boolean,
+	legacySpawnClosed: boolean,
+	lastWaveSampleServerTime: number,
+	lastWavePassOrdinal: number,
+	activeSchedulerCapabilityGeneration: number,
+	lastCommittedSchedulerSpawn: unknown?,
 	passDurationSamples: { number },
 	nextPassDurationIndex: number,
 	totalPassDurationCount: number,
@@ -225,6 +307,8 @@ type ServiceData = {
 
 type CommittedStepResult = {
 	deltaSeconds: number,
+	sampleServerTime: number?,
+	schedulerSampleToken: unknown?,
 	visitedCount: number,
 	updatedCount: number,
 	endpointCount: number,
@@ -271,6 +355,7 @@ local STUDIO_ENEMY_IDS = table.freeze({
 })
 local PASS_DURATION_CAPACITY = 1_024
 local MAX_STUDIO_LANES = 32
+local MAX_WAVE_TERMINAL_OUTCOMES = 128
 
 local ServiceMethods = {}
 ServiceMethods.__index = ServiceMethods
@@ -279,6 +364,8 @@ export type Service = typeof(setmetatable({} :: {}, ServiceMethods))
 export type TestConstructor = (dependencies: TestDependencies) -> Service
 
 local SERVICE_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ServiceData }
+local AUTHENTICATED_WAVE_BOUNDARY_HANDLES = setmetatable({}, { __mode = "k" }) :: { [any]: ServiceData }
+local AUTHENTICATED_WAVE_BINDING_TOKENS = setmetatable({}, { __mode = "k" }) :: { [any]: ServiceData }
 
 local EnemySimulationService = {
 	newForTests = nil :: TestConstructor?,
@@ -363,6 +450,7 @@ end
 
 local STORE_METHODS = table.freeze({
 	"spawn",
+	"spawnScheduled",
 	"get",
 	"list",
 	"queryTerminal",
@@ -371,9 +459,14 @@ local STORE_METHODS = table.freeze({
 	"despawn",
 	"despawnAllForDefeat",
 	"step",
+	"finishSchedulerSample",
+	"drainTerminalOutcomes",
+	"isAuthenticatedTerminalOutcome",
+	"isAuthenticatedSchedulerSample",
 	"getIdentity",
 	"getMetrics",
 	"installStudioCatalog",
+	"bindDifficulty",
 	"listLaneIds",
 	"cleanup",
 })
@@ -432,6 +525,13 @@ local function isPublisherAdapter(value: unknown): boolean
 	return hasMethods(value, PUBLISHER_METHODS)
 end
 
+local function isWaveBoundaryAdapter(value: unknown): boolean
+	return type(value) == "table"
+		and type((value :: any).onEnemyPass) == "function"
+		and type((value :: any).flushEnemyPass) == "function"
+		and type((value :: any).close) == "function"
+end
+
 local function isConnectionAdapter(value: unknown): boolean
 	return typeof(value) == "RBXScriptConnection"
 		or (type(value) == "table" and type((value :: any).Disconnect) == "function")
@@ -470,6 +570,85 @@ local function disconnectPlayerRemoving(data: ServiceData): boolean
 	return disconnectConnection(connection)
 end
 
+local function revokeWaveBindingToken(data: ServiceData)
+	local token = data.waveBindingToken
+	if token ~= nil then
+		AUTHENTICATED_WAVE_BINDING_TOKENS[token] = nil
+		data.waveBindingToken = nil
+	end
+	data.waveBindingConfiguration = nil
+	data.waveBindingDifficulty = nil
+end
+
+local function invalidateSchedulerCapability(data: ServiceData)
+	if data.activeSchedulerCapabilityGeneration < Validation.MAX_SAFE_INTEGER then
+		data.activeSchedulerCapabilityGeneration += 1
+	else
+		data.activeSchedulerCapabilityGeneration = 0
+	end
+end
+
+local function closeWaveBoundary(
+	data: ServiceData,
+	disposition: "DependencyFault" | "Shutdown",
+	passOrdinalValue: number?,
+	sampleServerTimeValue: number?
+): boolean
+	local adapter = data.waveBoundary
+	if adapter == nil or not data.waveBindingActive then
+		return true
+	end
+	if
+		data.waveBoundaryStatus == "ShutdownClosed"
+		or data.waveBoundaryStatus == "Detached"
+		or (
+			disposition == "DependencyFault"
+			and (data.waveBoundaryStatus == "Faulted" or data.waveBoundaryStatus == "DefeatClosed")
+		)
+	then
+		return true
+	end
+	invalidateSchedulerCapability(data)
+	local passOrdinal = passOrdinalValue or data.lastWavePassOrdinal
+	if not Validation.isSafeInteger(passOrdinal) or passOrdinal < 0 then
+		passOrdinal = 0
+	end
+	local sampleServerTime = sampleServerTimeValue or data.lastWaveSampleServerTime
+	if not Validation.isFiniteNumber(sampleServerTime) or sampleServerTime < 0 then
+		sampleServerTime = 0
+	end
+	local context: { [string]: unknown } = {
+		disposition = disposition,
+		matchId = if data.storeIdentity == nil then "" else data.storeIdentity.matchId,
+		enemyEpoch = if data.storeIdentity == nil then 0 else data.storeIdentity.enemyEpoch,
+		passOrdinal = passOrdinal,
+		sampleServerTime = sampleServerTime,
+	}
+	if data.lastCommittedSchedulerSpawn ~= nil then
+		context.committedSpawn = data.lastCommittedSchedulerSpawn
+	end
+	table.freeze(context)
+	local called, resultValue = callResult(adapter.close, adapter, context)
+	data.lastCommittedSchedulerSpawn = nil
+	data.waveBoundaryStatus = if disposition == "Shutdown" then "ShutdownClosed" else "Faulted"
+	return called and isSuccess(resultValue) and (resultValue :: any).value == true
+end
+
+local function revokeWaveBoundary(data: ServiceData)
+	revokeWaveBindingToken(data)
+	invalidateSchedulerCapability(data)
+	local handle = data.waveBoundaryHandle
+	if handle ~= nil then
+		AUTHENTICATED_WAVE_BOUNDARY_HANDLES[handle] = nil
+	end
+	data.waveBoundary = nil
+	data.waveBoundaryHandle = nil
+	data.waveBoundaryStatus = if data.waveBoundaryStatus == nil then nil else "Detached"
+	data.waveBindingActive = false
+	data.legacySpawnClosed = true
+	data.lastCommittedSchedulerSpawn = nil
+end
+
 local function cleanupPublisher(data: ServiceData): boolean
 	local publisher = data.publisher
 	data.publisher = nil
@@ -477,7 +656,7 @@ local function cleanupPublisher(data: ServiceData): boolean
 		return true
 	end
 	local called, resultValue = callResult(publisher.cleanup, publisher)
-	return called and isSuccess(resultValue)
+	return called and isSuccess(resultValue) and (resultValue :: any).value == true
 end
 
 local function cleanupStore(data: ServiceData): boolean
@@ -487,7 +666,7 @@ local function cleanupStore(data: ServiceData): boolean
 		return true
 	end
 	local called, resultValue = callResult(store.cleanup, store)
-	return called and isSuccess(resultValue)
+	return called and isSuccess(resultValue) and (resultValue :: any).value == true
 end
 
 local function destroyRuntimeTrigger(data: ServiceData): boolean
@@ -538,6 +717,8 @@ local function releaseOwnedResources(data: ServiceData): boolean
 	data.faultDrainActive = false
 	data.connectStep = nil
 	data.connectPlayerRemoving = nil
+	local waveClosed = closeWaveBoundary(data, "Shutdown", nil, nil)
+	revokeWaveBoundary(data)
 	local stepDisconnected = disconnectStep(data)
 	local removalDisconnected = disconnectPlayerRemoving(data)
 	local triggerDestroyed = destroyRuntimeTrigger(data)
@@ -549,17 +730,34 @@ local function releaseOwnedResources(data: ServiceData): boolean
 	clearConstructionDependencies(data)
 	data.matchLifecycle = nil
 	data.baseRuntime = nil
+	data.currentCatalog = nil
+	data.storeIdentity = nil
+	data.waveBoundaryStatus = nil
+	data.waveBoundaryGeneration = 0
+	data.waveBoundaryPassCount = 0
+	data.waveBoundaryFlushCount = 0
+	data.waveBindingActive = false
+	data.legacySpawnClosed = true
+	data.lastWaveSampleServerTime = 0
+	data.lastWavePassOrdinal = 0
+	data.activeSchedulerCapabilityGeneration = 0
 	data.spawnAdmissionClosed = true
 	data.nextEnemyPassOrdinal = 1
 	data.defeatCount = 0
 	data.resultsCommitCount = 0
 	data.releasing = false
-	return stepDisconnected and removalDisconnected and triggerDestroyed and publisherCleaned and storeCleaned
+	return waveClosed
+		and stepDisconnected
+		and removalDisconnected
+		and triggerDestroyed
+		and publisherCleaned
+		and storeCleaned
 end
 
 local function requestShutdownDuringOperation(data: ServiceData)
 	data.shutdownRequested = true
 	data.callbacksEnabled = false
+	invalidateSchedulerCapability(data)
 	data.connectStep = nil
 	data.connectPlayerRemoving = nil
 	if not disconnectStep(data) then
@@ -644,6 +842,7 @@ end
 
 local function beginRuntimeFault(data: ServiceData)
 	data.faultRequested = false
+	closeWaveBoundary(data, "DependencyFault", nil, nil)
 	data.state = "Failed"
 	local metrics = publisherMetrics(data)
 	if
@@ -830,7 +1029,35 @@ local function validateEndpointResolutions(value: unknown): { any }?
 	return value :: { any }
 end
 
-local function getCommittedStepResult(value: unknown, deltaSeconds: number, activeIds: { number }): CommittedStepResult?
+local STEP_RESULT_FIELDS = table.freeze({
+	deltaSeconds = true,
+	sampleServerTime = true,
+	schedulerSampleToken = true,
+	visitedCount = true,
+	updatedCount = true,
+	endpointCount = true,
+	activeCountAfter = true,
+	cleaned = true,
+	faulted = true,
+	updatedRuntimeEnemyIds = true,
+	endpointResolutions = true,
+})
+
+local function hasOnlyStepResultFields(value: { [any]: unknown }): boolean
+	for key in next, value do
+		if type(key) ~= "string" or STEP_RESULT_FIELDS[key] ~= true then
+			return false
+		end
+	end
+	return true
+end
+
+local function getCommittedStepResult(
+	data: ServiceData,
+	value: unknown,
+	deltaSeconds: number,
+	activeIds: { number }
+): CommittedStepResult?
 	if not isSuccess(value) then
 		return nil
 	end
@@ -839,11 +1066,62 @@ local function getCommittedStepResult(value: unknown, deltaSeconds: number, acti
 		type(stepResult) ~= "table"
 		or not table.isfrozen(stepResult :: any)
 		or getmetatable(stepResult :: any) ~= nil
+		or not hasOnlyStepResultFields(stepResult :: { [any]: unknown })
 		or (stepResult :: any).deltaSeconds ~= deltaSeconds
 		or type((stepResult :: any).cleaned) ~= "boolean"
 		or type((stepResult :: any).faulted) ~= "boolean"
 	then
 		return nil
+	end
+	local sampleServerTime = (stepResult :: any).sampleServerTime
+	local schedulerSampleToken = (stepResult :: any).schedulerSampleToken
+	if data.waveBindingActive then
+		if
+			type(sampleServerTime) ~= "number"
+			or not Validation.isFiniteNumber(sampleServerTime)
+			or sampleServerTime < data.lastWaveSampleServerTime
+		then
+			return nil
+		end
+		if (stepResult :: any).cleaned or (stepResult :: any).faulted then
+			if schedulerSampleToken ~= nil then
+				return nil
+			end
+		else
+			local store = data.store
+			if store == nil then
+				return nil
+			end
+			local authenticated, authentic =
+				callNonYielding(store.isAuthenticatedSchedulerSample, store, schedulerSampleToken)
+			local identity = data.storeIdentity
+			if
+				not authenticated
+				or authentic ~= true
+				or type(schedulerSampleToken) ~= "table"
+				or not table.isfrozen(schedulerSampleToken :: any)
+				or identity == nil
+				or (schedulerSampleToken :: any).matchId ~= identity.matchId
+				or (schedulerSampleToken :: any).enemyEpoch ~= identity.enemyEpoch
+				or (schedulerSampleToken :: any).sampleServerTime ~= sampleServerTime
+			then
+				return nil
+			end
+		end
+	else
+		if schedulerSampleToken ~= nil then
+			return nil
+		end
+		if
+			sampleServerTime ~= nil
+			and (
+				type(sampleServerTime) ~= "number"
+				or not Validation.isFiniteNumber(sampleServerTime)
+				or sampleServerTime < 0
+			)
+		then
+			return nil
+		end
 	end
 	for _, fieldName in { "visitedCount", "updatedCount", "endpointCount", "activeCountAfter" } do
 		local fieldValue = (stepResult :: any)[fieldName]
@@ -913,7 +1191,7 @@ local function commitStepResult(data: ServiceData, activeIds: { number }, stepRe
 		if resolution ~= nil and resolution.endpoint.runtimeEnemyId == runtimeEnemyId then
 			local called, resultValue =
 				callResult(publisher.commitEndpoint, publisher, resolution.endpoint, resolution.despawn)
-			if not called or not isSuccess(resultValue) then
+			if not called or not isSuccess(resultValue) or (resultValue :: any).value ~= true then
 				abortCurrentBasePass(data)
 				return false
 			end
@@ -921,7 +1199,7 @@ local function commitStepResult(data: ServiceData, activeIds: { number }, stepRe
 		elseif stepResult.updatedRuntimeEnemyIds[updatedIndex] == runtimeEnemyId then
 			if not stepResult.cleaned then
 				local called, resultValue = callResult(publisher.observeCorrection, publisher, runtimeEnemyId)
-				if not called or not isSuccess(resultValue) then
+				if not called or not isSuccess(resultValue) or (resultValue :: any).value ~= true then
 					abortCurrentBasePass(data)
 					return false
 				end
@@ -948,7 +1226,7 @@ local function failPreparedDefeat(data: ServiceData, lifecycleToken: unknown?, b
 	data.spawnAdmissionClosed = true
 end
 
-local function coordinateDefeat(data: ServiceData, boundary: any): boolean
+local function coordinateDefeat(data: ServiceData, boundary: any, schedulerSampleToken: unknown?): boolean
 	local store = data.store
 	local publisher = data.publisher
 	local lifecycle = data.matchLifecycle
@@ -976,7 +1254,7 @@ local function coordinateDefeat(data: ServiceData, boundary: any): boolean
 		return false
 	end
 	local preflighted, preflightResult = callResult(publisher.preflightDefeat, publisher, activeIds)
-	if not preflighted or not isSuccess(preflightResult) then
+	if not preflighted or not isSuccess(preflightResult) or (preflightResult :: any).value ~= true then
 		failPreparedDefeat(data, nil, baseToken)
 		return false
 	end
@@ -1001,7 +1279,7 @@ local function coordinateDefeat(data: ServiceData, boundary: any): boolean
 	-- This is the first irreversible gameplay closure. Every preflight above is
 	-- complete, and no public mutation can re-enter the active service operation.
 	data.spawnAdmissionClosed = true
-	local despawned, despawnResult = callResult(store.despawnAllForDefeat, store, activeIds)
+	local despawned, despawnResult = callResult(store.despawnAllForDefeat, store, activeIds, schedulerSampleToken)
 	if not despawned or not isSuccess(despawnResult) then
 		failPreparedDefeat(data, lifecycleToken, baseToken)
 		return false
@@ -1047,16 +1325,16 @@ local function coordinateDefeat(data: ServiceData, boundary: any): boolean
 		and type(baseOutcome.published) == "boolean"
 end
 
-local function finishBasePass(data: ServiceData): boolean
+local function finishBasePass(data: ServiceData, schedulerSampleToken: unknown?): (boolean, boolean)
 	local baseRuntime = data.baseRuntime
 	local passOrdinal = data.nextEnemyPassOrdinal
 	if baseRuntime == nil or passOrdinal > Validation.MAX_SAFE_INTEGER then
-		return false
+		return false, false
 	end
 	local called, boundaryResult = callResult(baseRuntime.finishEnemyPass, baseRuntime, passOrdinal)
 	if not called or not isSuccess(boundaryResult) then
 		callResult(baseRuntime.fault, baseRuntime)
-		return false
+		return false, false
 	end
 	local boundary = (boundaryResult :: any).value
 	if
@@ -1066,7 +1344,7 @@ local function finishBasePass(data: ServiceData): boolean
 		or (boundary.kind ~= "Noop" and boundary.kind ~= "Damage" and boundary.kind ~= "DefeatPending")
 	then
 		callResult(baseRuntime.fault, baseRuntime)
-		return false
+		return false, false
 	end
 	if passOrdinal < Validation.MAX_SAFE_INTEGER then
 		data.nextEnemyPassOrdinal = passOrdinal + 1
@@ -1077,13 +1355,14 @@ local function finishBasePass(data: ServiceData): boolean
 		data.nextEnemyPassOrdinal = Validation.MAX_SAFE_INTEGER
 	end
 	if boundary.kind == "DefeatPending" then
-		return coordinateDefeat(data, boundary)
+		local coordinated = coordinateDefeat(data, boundary, schedulerSampleToken)
+		return coordinated, data.resultsCommitCount == 1
 	end
 	if passOrdinal == Validation.MAX_SAFE_INTEGER then
 		abortCurrentBasePass(data)
-		return false
+		return false, false
 	end
-	return true
+	return true, false
 end
 
 local function advancePublisher(data: ServiceData, deltaSeconds: number): boolean
@@ -1096,6 +1375,281 @@ local function advancePublisher(data: ServiceData, deltaSeconds: number): boolea
 	end
 	local called, resultValue = callResult(publisher.advance, publisher, deltaSeconds, provider)
 	return called and isSuccess(resultValue)
+end
+
+local WAVE_SPAWN_EVENT_FIELDS = table.freeze({
+	originatingWaveIndex = true,
+	waveId = true,
+	groupIndex = true,
+	spawnOrdinal = true,
+	scheduledServerTime = true,
+	enemyId = true,
+	laneId = true,
+})
+
+local TERMINAL_OUTCOME_FIELDS = table.freeze({
+	matchId = true,
+	enemyEpoch = true,
+	runtimeEnemyId = true,
+	enemyId = true,
+	reason = true,
+	serverTime = true,
+})
+
+type SchedulerCapabilityState = {
+	generation: number,
+	rejected: boolean,
+	publisherFailed: boolean,
+}
+
+local function validateWaveSpawnEvent(value: unknown, sampleServerTime: number): WaveSpawnEvent?
+	if
+		type(value) ~= "table"
+		or not table.isfrozen(value :: any)
+		or getmetatable(value :: any) ~= nil
+		or not hasExactFields(value :: { [any]: unknown }, WAVE_SPAWN_EVENT_FIELDS)
+	then
+		return nil
+	end
+	local event = value :: any
+	if
+		type(event.originatingWaveIndex) ~= "number"
+		or not Validation.isSafeInteger(event.originatingWaveIndex)
+		or event.originatingWaveIndex < 1
+		or type(event.groupIndex) ~= "number"
+		or not Validation.isSafeInteger(event.groupIndex)
+		or event.groupIndex < 1
+		or type(event.spawnOrdinal) ~= "number"
+		or not Validation.isSafeInteger(event.spawnOrdinal)
+		or event.spawnOrdinal < 0
+		or type(event.scheduledServerTime) ~= "number"
+		or not Validation.isFiniteNumber(event.scheduledServerTime)
+		or event.scheduledServerTime < 0
+		or event.scheduledServerTime > sampleServerTime
+		or not Ids.validateWaveId(event.waveId).ok
+		or not Ids.validateEnemyId(event.enemyId).ok
+		or type(event.laneId) ~= "string"
+		or not Validation.isSymbolicKey(event.laneId)
+	then
+		return nil
+	end
+	return value :: WaveSpawnEvent
+end
+
+local function makeSchedulerCapability(
+	data: ServiceData,
+	schedulerSampleToken: unknown,
+	passOrdinal: number,
+	sampleServerTime: number
+): ((WaveSpawnEvent) -> unknown, SchedulerCapabilityState)
+	invalidateSchedulerCapability(data)
+	local state: SchedulerCapabilityState = {
+		generation = data.activeSchedulerCapabilityGeneration,
+		rejected = false,
+		publisherFailed = false,
+	}
+	local capability = function(eventValue: WaveSpawnEvent): unknown
+		if
+			data.waveBoundaryStatus ~= "Active"
+			or not data.waveBindingActive
+			or not data.operationActive
+			or state.generation ~= data.activeSchedulerCapabilityGeneration
+			or data.lastWavePassOrdinal ~= passOrdinal
+			or data.lastWaveSampleServerTime ~= sampleServerTime
+		then
+			state.rejected = true
+			return table.freeze({ committed = false })
+		end
+		local event = validateWaveSpawnEvent(eventValue, sampleServerTime)
+		local store = data.store
+		local publisher = data.publisher
+		if event == nil or store == nil or publisher == nil then
+			state.rejected = true
+			return table.freeze({ committed = false })
+		end
+		local preflighted, preflightResult = callResult(publisher.preflightSpawn, publisher)
+		if not preflighted or not isSuccess(preflightResult) or (preflightResult :: any).value ~= true then
+			state.rejected = true
+			return table.freeze({ committed = false })
+		end
+		local spawned, spawnResult =
+			callResult(store.spawnScheduled, store, schedulerSampleToken, event.enemyId, event.laneId)
+		if not spawned or not isSuccess(spawnResult) then
+			state.rejected = true
+			return table.freeze({ committed = false })
+		end
+		local snapshotValue = (spawnResult :: any).value
+		local committed, commitResult = callResult(publisher.commitSpawn, publisher, snapshotValue)
+		local replicationCommitted = committed and isSuccess(commitResult)
+		local outcome = table.freeze({
+			committed = true,
+			replicationCommitted = replicationCommitted,
+			snapshot = snapshotValue,
+		})
+		data.lastCommittedSchedulerSpawn = outcome
+		if not replicationCommitted then
+			state.publisherFailed = true
+		end
+		return outcome
+	end
+	return capability, state
+end
+
+local function finishSchedulerSample(data: ServiceData, schedulerSampleToken: unknown?): boolean
+	invalidateSchedulerCapability(data)
+	if schedulerSampleToken == nil then
+		return true
+	end
+	local store = data.store
+	if store == nil then
+		return false
+	end
+	local called, resultValue = callResult(store.finishSchedulerSample, store, schedulerSampleToken)
+	return called and isSuccess(resultValue) and (resultValue :: any).value == true
+end
+
+local function drainWaveTerminalOutcomes(data: ServiceData, sampleServerTime: number): { unknown }?
+	local store = data.store
+	local identity = data.storeIdentity
+	if store == nil or identity == nil then
+		return nil
+	end
+	local called, resultValue = callResult(store.drainTerminalOutcomes, store)
+	if not called or not isSuccess(resultValue) then
+		return nil
+	end
+	local outcomesValue = (resultValue :: any).value
+	if
+		type(outcomesValue) ~= "table"
+		or not table.isfrozen(outcomesValue :: any)
+		or getmetatable(outcomesValue :: any) ~= nil
+		or #outcomesValue > MAX_WAVE_TERMINAL_OUTCOMES
+	then
+		return nil
+	end
+	local count = 0
+	for key in next, outcomesValue :: any do
+		count += 1
+		if type(key) ~= "number" or not Validation.isSafeInteger(key) or key < 1 or key > #outcomesValue then
+			return nil
+		end
+	end
+	if count ~= #outcomesValue then
+		return nil
+	end
+	for _, outcomeValue in outcomesValue :: { unknown } do
+		if
+			type(outcomeValue) ~= "table"
+			or not table.isfrozen(outcomeValue :: any)
+			or getmetatable(outcomeValue :: any) ~= nil
+			or not hasExactFields(outcomeValue :: { [any]: unknown }, TERMINAL_OUTCOME_FIELDS)
+		then
+			return nil
+		end
+		local outcome = outcomeValue :: any
+		local authenticated, authentic = callNonYielding(store.isAuthenticatedTerminalOutcome, store, outcome)
+		if
+			not authenticated
+			or authentic ~= true
+			or outcome.matchId ~= identity.matchId
+			or outcome.enemyEpoch ~= identity.enemyEpoch
+			or type(outcome.runtimeEnemyId) ~= "number"
+			or not Validation.isSafeInteger(outcome.runtimeEnemyId)
+			or outcome.runtimeEnemyId < 1
+			or not Ids.validateEnemyId(outcome.enemyId).ok
+			or (outcome.reason ~= "Endpoint" and outcome.reason ~= "Manual" and outcome.reason ~= "Defeat")
+			or type(outcome.serverTime) ~= "number"
+			or not Validation.isFiniteNumber(outcome.serverTime)
+			or outcome.serverTime < 0
+			or outcome.serverTime > sampleServerTime
+		then
+			return nil
+		end
+	end
+	return outcomesValue :: { unknown }
+end
+
+local function deliverWavePass(
+	data: ServiceData,
+	disposition: WavePassDisposition,
+	passOrdinal: number,
+	sampleServerTime: number,
+	terminalOutcomes: { unknown },
+	schedulerSampleToken: unknown?
+): (boolean, SchedulerCapabilityState?)
+	local adapter = data.waveBoundary
+	local identity = data.storeIdentity
+	local boundaryStatus = data.waveBoundaryStatus
+	if adapter == nil or identity == nil or (boundaryStatus ~= "Active" and boundaryStatus ~= "FiniteComplete") then
+		finishSchedulerSample(data, schedulerSampleToken)
+		return false, nil
+	end
+	local terminalNoop = boundaryStatus == "FiniteComplete"
+	local spawn: ((WaveSpawnEvent) -> unknown)? = nil
+	local capabilityState: SchedulerCapabilityState? = nil
+	if disposition == "Healthy" and not terminalNoop then
+		if schedulerSampleToken == nil then
+			return false, nil
+		end
+		spawn, capabilityState = makeSchedulerCapability(data, schedulerSampleToken, passOrdinal, sampleServerTime)
+	elseif not finishSchedulerSample(data, schedulerSampleToken) then
+		return false, nil
+	end
+	local frameValue: { [string]: unknown } = {
+		disposition = disposition,
+		matchId = identity.matchId,
+		enemyEpoch = identity.enemyEpoch,
+		passOrdinal = passOrdinal,
+		sampleServerTime = sampleServerTime,
+		terminalOutcomes = terminalOutcomes,
+	}
+	if spawn ~= nil then
+		frameValue.spawn = spawn
+	end
+	table.freeze(frameValue)
+	local called, resultValue = callResult(adapter.onEnemyPass, adapter, frameValue :: any)
+	local sampleFinished = if disposition == "Healthy" and not terminalNoop
+		then finishSchedulerSample(data, schedulerSampleToken)
+		else true
+	data.waveBoundaryPassCount = math.min(data.waveBoundaryPassCount + 1, Validation.MAX_SAFE_INTEGER)
+	local consumedValue = if isSuccess(resultValue) then (resultValue :: any).value else nil
+	if not called or type(consumedValue) ~= "boolean" or not sampleFinished then
+		closeWaveBoundary(data, "DependencyFault", passOrdinal, sampleServerTime)
+		return false, capabilityState
+	end
+	if capabilityState == nil or (not capabilityState.rejected and not capabilityState.publisherFailed) then
+		data.lastCommittedSchedulerSpawn = nil
+	end
+	if disposition == "DefeatCommitted" then
+		data.waveBoundaryStatus = "DefeatClosed"
+	elseif disposition == "DependencyFault" then
+		data.waveBoundaryStatus = "Faulted"
+	elseif disposition == "Shutdown" then
+		data.waveBoundaryStatus = "ShutdownClosed"
+	elseif consumedValue == false then
+		data.waveBoundaryStatus = "FiniteComplete"
+	end
+	return true, capabilityState
+end
+
+local function flushWavePass(data: ServiceData, passOrdinal: number, sampleServerTime: number): boolean
+	local adapter = data.waveBoundary
+	if adapter == nil then
+		return false
+	end
+	local called, resultValue = callResult(adapter.flushEnemyPass, adapter, passOrdinal)
+	local flushedValue = if called and isSuccess(resultValue) then (resultValue :: any).value else nil
+	if type(flushedValue) ~= "boolean" then
+		closeWaveBoundary(data, "DependencyFault", passOrdinal, sampleServerTime)
+		return false
+	end
+	data.waveBoundaryFlushCount = math.min(data.waveBoundaryFlushCount + 1, Validation.MAX_SAFE_INTEGER)
+	if flushedValue == false then
+		local closed = closeWaveBoundary(data, "Shutdown", passOrdinal, sampleServerTime)
+		revokeWaveBoundary(data)
+		return closed
+	end
+	return true
 end
 
 local function drainFault(data: ServiceData, deltaSeconds: number)
@@ -1121,7 +1675,7 @@ local function drainFault(data: ServiceData, deltaSeconds: number)
 	end
 end
 
-local function update(data: ServiceData, deltaSeconds: number)
+local function updateLegacy(data: ServiceData, deltaSeconds: number)
 	if not data.callbacksEnabled then
 		return
 	end
@@ -1158,11 +1712,13 @@ local function update(data: ServiceData, deltaSeconds: number)
 		data.faultRequested = true
 	else
 		local preflightCalled, preflightResult = callResult(publisher.preflightStep, publisher, activeIds)
-		if not preflightCalled or not isSuccess(preflightResult) then
+		if not preflightCalled or not isSuccess(preflightResult) or (preflightResult :: any).value ~= true then
 			data.faultRequested = true
 		else
 			local stepped, stepResultValue = callResult(store.step, store, deltaSeconds)
-			local stepResult = if stepped then getCommittedStepResult(stepResultValue, deltaSeconds, activeIds) else nil
+			local stepResult = if stepped
+				then getCommittedStepResult(data, stepResultValue, deltaSeconds, activeIds)
+				else nil
 			if stepResult == nil or not commitStepResult(data, activeIds, stepResult) then
 				data.faultRequested = true
 			else
@@ -1175,6 +1731,148 @@ local function update(data: ServiceData, deltaSeconds: number)
 		end
 	end
 	finishOperation(data)
+end
+
+local function updateWaveBound(data: ServiceData, deltaSeconds: number)
+	if not data.callbacksEnabled then
+		return
+	end
+	if data.state == "Failed" and data.faultDrainActive then
+		closeWaveBoundary(data, "DependencyFault", nil, nil)
+		drainFault(data, deltaSeconds)
+		return
+	end
+	if data.state ~= "Started" then
+		return
+	end
+	if data.operationActive or not Validation.isFiniteNumber(deltaSeconds) or deltaSeconds < 0 then
+		closeWaveBoundary(data, "DependencyFault", nil, nil)
+		beginRuntimeFault(data)
+		return
+	end
+	local store = data.store
+	local publisher = data.publisher
+	if store == nil or publisher == nil then
+		closeWaveBoundary(data, "DependencyFault", nil, nil)
+		beginRuntimeFault(data)
+		return
+	end
+
+	data.operationActive = true
+	local passOrdinal = data.nextEnemyPassOrdinal
+	if data.spawnAdmissionClosed then
+		local boundarySucceeded = false
+		local disposition: WavePassDisposition? = nil
+		local closedPassOrdinal = math.max(passOrdinal, 1)
+		local sampleServerTime = data.lastWaveSampleServerTime
+		if data.waveBoundaryStatus == "Active" then
+			disposition = if data.resultsCommitCount == 1 then "DefeatCommitted" else "DependencyFault"
+			local empty = table.freeze({})
+			boundarySucceeded = deliverWavePass(
+				data,
+				disposition :: WavePassDisposition,
+				closedPassOrdinal,
+				sampleServerTime,
+				empty,
+				nil
+			)
+		end
+		local advanced = advancePublisher(data, deltaSeconds)
+		local flushed = not boundarySucceeded or (advanced and flushWavePass(data, closedPassOrdinal, sampleServerTime))
+		if boundarySucceeded and not advanced then
+			closeWaveBoundary(data, "DependencyFault", closedPassOrdinal, sampleServerTime)
+		end
+		data.faultRequested = if disposition == nil
+			then not advanced and data.resultsCommitCount == 0
+			else disposition == "DependencyFault" or not boundarySucceeded or not advanced or not flushed
+		finishOperation(data)
+		return
+	end
+
+	local listed, listResult = callResult(store.list, store)
+	local activeIds = if listed and isSuccess(listResult)
+		then denseFrozenAscendingIdsFromSnapshots((listResult :: any).value)
+		else nil
+	if activeIds == nil then
+		closeWaveBoundary(data, "DependencyFault", passOrdinal, nil)
+		data.faultRequested = true
+		finishOperation(data)
+		return
+	end
+	local preflightCalled, preflightResult = callResult(publisher.preflightStep, publisher, activeIds)
+	if not preflightCalled or not isSuccess(preflightResult) or (preflightResult :: any).value ~= true then
+		closeWaveBoundary(data, "DependencyFault", passOrdinal, nil)
+		data.faultRequested = true
+		finishOperation(data)
+		return
+	end
+	local stepped, stepResultValue = callResult(store.step, store, deltaSeconds)
+	local stepResult = if stepped then getCommittedStepResult(data, stepResultValue, deltaSeconds, activeIds) else nil
+	if stepResult == nil then
+		closeWaveBoundary(data, "DependencyFault", passOrdinal, nil)
+		data.faultRequested = true
+		finishOperation(data)
+		return
+	end
+	local sampleServerTime = stepResult.sampleServerTime :: number
+	local schedulerSampleToken = stepResult.schedulerSampleToken
+	data.lastWavePassOrdinal = passOrdinal
+	data.lastWaveSampleServerTime = sampleServerTime
+
+	local committedStep = commitStepResult(data, activeIds, stepResult)
+	local baseFinished = false
+	local defeatCommitted = false
+	if committedStep then
+		baseFinished, defeatCommitted = finishBasePass(data, schedulerSampleToken)
+	end
+	local terminalOutcomes = drainWaveTerminalOutcomes(data, sampleServerTime)
+	local terminalDrainSucceeded = terminalOutcomes ~= nil
+	if terminalOutcomes == nil then
+		terminalOutcomes = table.freeze({})
+	end
+	local requestedShutdown = data.shutdownRequested or stepResult.cleaned
+	local disposition: WavePassDisposition
+	if defeatCommitted then
+		disposition = "DefeatCommitted"
+	elseif requestedShutdown then
+		disposition = "Shutdown"
+	elseif not committedStep or not baseFinished or not terminalDrainSucceeded or stepResult.faulted then
+		disposition = "DependencyFault"
+	else
+		disposition = "Healthy"
+	end
+
+	local boundarySucceeded, capabilityState =
+		deliverWavePass(data, disposition, passOrdinal, sampleServerTime, terminalOutcomes, schedulerSampleToken)
+	local advanced = requestedShutdown or advancePublisher(data, deltaSeconds)
+	local flushed = requestedShutdown
+		or (boundarySucceeded and advanced and flushWavePass(data, passOrdinal, sampleServerTime))
+	local capabilityFault = capabilityState ~= nil
+		and (
+			(capabilityState :: SchedulerCapabilityState).rejected
+			or (capabilityState :: SchedulerCapabilityState).publisherFailed
+		)
+	if capabilityFault or (boundarySucceeded and not advanced) then
+		closeWaveBoundary(data, "DependencyFault", passOrdinal, sampleServerTime)
+	end
+	data.shutdownRequested = requestedShutdown
+	data.faultRequested = not requestedShutdown
+		and (
+			disposition == "DependencyFault"
+			or not boundarySucceeded
+			or not advanced
+			or not flushed
+			or capabilityFault
+		)
+	finishOperation(data)
+end
+
+local function update(data: ServiceData, deltaSeconds: number)
+	if data.waveBindingActive then
+		updateWaveBound(data, deltaSeconds)
+	else
+		updateLegacy(data, deltaSeconds)
+	end
 end
 
 local function profiledUpdate(data: ServiceData, deltaSeconds: number)
@@ -1618,6 +2316,7 @@ local function initialize(data: ServiceData)
 	then
 		failInitialize(data, "STORE_IDENTITY_INVALID")
 	end
+	data.storeIdentity = identity
 
 	local publisherCalled, publisherResult = callResult(
 		createPublisher :: PublisherFactory,
@@ -1675,7 +2374,7 @@ local function start(data: ServiceData)
 		staticError("CONNECTION_FAILED")
 	end
 	data.stepConnection = stepConnection
-	if not installRuntimeTrigger(data) then
+	if data.waveBoundary == nil and not installRuntimeTrigger(data) then
 		data.state = "Failed"
 		releaseOwnedResources(data)
 		staticError("RUNTIME_TRIGGER_CREATION_FAILED")
@@ -1721,6 +2420,262 @@ local function finishAndReturn(data: ServiceData, resultValue: any): any
 	return resultValue
 end
 
+local function boundaryHandleMatches(data: ServiceData, value: unknown): boolean
+	return type(value) == "table"
+		and data.waveBoundaryHandle == value
+		and AUTHENTICATED_WAVE_BOUNDARY_HANDLES[value :: any] == data
+end
+
+local function beginWaveServiceOperation(
+	data: ServiceData,
+	operation: Operation,
+	allowedStates: { [LifecycleState]: boolean }
+): ServiceError?
+	if data.operationActive then
+		return makeServiceError("REENTRANT", operation)
+	end
+	if allowedStates[data.state] ~= true then
+		return makeServiceError("UNAVAILABLE", operation)
+	end
+	data.operationActive = true
+	return nil
+end
+
+local function isPristineWaveBindingStore(data: ServiceData): boolean
+	local store = data.store
+	if store == nil then
+		return false
+	end
+	local metricsCalled, metricsValue = callNonYielding(store.getMetrics, store)
+	return metricsCalled
+		and type(metricsValue) == "table"
+		and table.isfrozen(metricsValue :: any)
+		and (metricsValue :: any).cleaned == false
+		and (metricsValue :: any).faulted == false
+		and (metricsValue :: any).activeCount == 0
+		and (metricsValue :: any).lifetimeCount == 0
+		and (metricsValue :: any).terminalCount == 0
+		and (metricsValue :: any).queuedTerminalOutcomeCount == 0
+		and (metricsValue :: any).retainedTerminalOutcomeCount == 0
+		and (metricsValue :: any).difficultyBound == false
+		and (metricsValue :: any).schedulerSampleActive == false
+end
+
+function ServiceMethods.installWaveBoundary(self: Service, adapterValue: unknown): unknown
+	local data = requireData(self)
+	local operation: Operation = "installWaveBoundary"
+	local operationError = beginWaveServiceOperation(data, operation, { Initialized = true, Started = true })
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	if data.state == "Started" and (data.studioTrigger == nil or not isPristineWaveBindingStore(data)) then
+		return finishAndReturn(data, serviceFailure("UNAVAILABLE", operation))
+	end
+	if
+		not isWaveBoundaryAdapter(adapterValue)
+		or data.waveBoundary ~= nil
+		or data.waveBoundaryHandle ~= nil
+		or data.waveBoundaryGeneration >= Validation.MAX_SAFE_INTEGER
+		or data.storeIdentity == nil
+	then
+		return finishAndReturn(data, serviceFailure("INVALID_ARGUMENT", operation))
+	end
+	local handle = table.freeze({})
+	data.waveBoundary = adapterValue :: WaveBoundaryAdapter
+	data.waveBoundaryHandle = handle
+	data.waveBoundaryGeneration += 1
+	data.waveBoundaryStatus = "Installed"
+	AUTHENTICATED_WAVE_BOUNDARY_HANDLES[handle] = data
+	return finishAndReturn(data, Result.ok(handle))
+end
+
+function ServiceMethods.prepareWaveBinding(
+	self: Service,
+	handleValue: unknown,
+	configurationValue: unknown,
+	difficultyValue: unknown
+): unknown
+	local data = requireData(self)
+	local operation: Operation = "prepareWaveBinding"
+	local operationError = beginWaveServiceOperation(data, operation, { Initialized = true, Started = true })
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	if
+		not boundaryHandleMatches(data, handleValue)
+		or data.waveBoundaryStatus ~= "Installed"
+		or data.waveBindingToken ~= nil
+		or data.waveBindingActive
+		or not ConfigurationValidator.isValidatedConfiguration(configurationValue)
+	then
+		return finishAndReturn(data, serviceFailure("INVALID_ARGUMENT", operation))
+	end
+	local configuration = configurationValue :: ConfigTypes.CoreConfiguration
+	if
+		type(difficultyValue) ~= "table"
+		or not table.isfrozen(difficultyValue :: any)
+		or getmetatable(difficultyValue :: any) ~= nil
+		or (difficultyValue :: any).kind ~= "Finite"
+		or type((difficultyValue :: any).id) ~= "string"
+		or configuration.difficulties.byId[(difficultyValue :: any).id] ~= difficultyValue
+	then
+		return finishAndReturn(data, serviceFailure("INVALID_ARGUMENT", operation))
+	end
+	if data.store == nil then
+		return finishAndReturn(data, serviceFailure("UNAVAILABLE", operation))
+	end
+	if not isPristineWaveBindingStore(data) then
+		return finishAndReturn(data, serviceFailure("UNAVAILABLE", operation))
+	end
+	local currentCatalog = data.currentCatalog
+	if currentCatalog ~= configuration.enemies then
+		if
+			data.studioTrigger == nil
+			or not EnemySchema.isValidatedCatalog(currentCatalog)
+			or #(currentCatalog :: ConfigTypes.EnemyCatalog).ordered ~= 0
+		then
+			return finishAndReturn(data, serviceFailure("INVALID_ARGUMENT", operation))
+		end
+	end
+	local token = table.freeze({})
+	data.waveBindingToken = token
+	data.waveBindingConfiguration = configuration
+	data.waveBindingDifficulty = difficultyValue :: ConfigTypes.FiniteDifficultyDefinition
+	AUTHENTICATED_WAVE_BINDING_TOKENS[token] = data
+	return finishAndReturn(data, Result.ok(token))
+end
+
+function ServiceMethods.commitWaveBinding(self: Service, tokenValue: unknown): unknown
+	local data = requireData(self)
+	local operation: Operation = "commitWaveBinding"
+	local operationError = beginWaveServiceOperation(data, operation, { Initialized = true, Started = true })
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	if
+		type(tokenValue) ~= "table"
+		or data.waveBindingToken ~= tokenValue
+		or AUTHENTICATED_WAVE_BINDING_TOKENS[tokenValue :: any] ~= data
+		or data.waveBoundaryStatus ~= "Installed"
+		or data.waveBindingActive
+	then
+		return finishAndReturn(data, serviceFailure("INVALID_ARGUMENT", operation))
+	end
+	local configuration = data.waveBindingConfiguration
+	local difficulty = data.waveBindingDifficulty
+	local store = data.store
+	AUTHENTICATED_WAVE_BINDING_TOKENS[tokenValue :: any] = nil
+	data.waveBindingToken = nil
+	data.waveBindingConfiguration = nil
+	data.waveBindingDifficulty = nil
+	if configuration == nil or difficulty == nil or store == nil then
+		data.waveBoundaryStatus = "Faulted"
+		data.faultRequested = true
+		return finishAndReturn(data, serviceFailure("INTERNAL_ERROR", operation))
+	end
+	if data.currentCatalog ~= configuration.enemies then
+		local installed, installResult =
+			callResult((data.store :: RuntimeStoreAdapter).installStudioCatalog, data.store, configuration.enemies)
+		if not installed or not isSuccess(installResult) or (installResult :: any).value ~= true then
+			data.waveBoundaryStatus = "Faulted"
+			data.faultRequested = true
+			return finishAndReturn(data, serviceFailure("INTERNAL_ERROR", operation))
+		end
+		data.currentCatalog = configuration.enemies
+	end
+	local bound, bindResult = callResult(
+		(data.store :: RuntimeStoreAdapter).bindDifficulty,
+		data.store,
+		configuration.difficulties,
+		difficulty
+	)
+	if not bound or not isSuccess(bindResult) or (bindResult :: any).value ~= true then
+		data.waveBoundaryStatus = "Faulted"
+		data.faultRequested = true
+		return finishAndReturn(data, serviceFailure("INTERNAL_ERROR", operation))
+	end
+	if data.studioTrigger ~= nil and not destroyRuntimeTrigger(data) then
+		data.waveBoundaryStatus = "Faulted"
+		data.faultRequested = true
+		return finishAndReturn(data, serviceFailure("INTERNAL_ERROR", operation))
+	end
+	data.waveBindingActive = true
+	data.legacySpawnClosed = true
+	data.waveBoundaryStatus = "Active"
+	local identity = data.storeIdentity
+	local receipt = table.freeze({
+		matchId = identity.matchId,
+		enemyEpoch = identity.enemyEpoch,
+		difficultyId = difficulty.id,
+		generation = data.waveBoundaryGeneration,
+		status = "Active",
+	})
+	return finishAndReturn(data, Result.ok(receipt))
+end
+
+function ServiceMethods.detachWaveBoundary(self: Service, handleValue: unknown): unknown
+	local data = requireData(self)
+	local operation: Operation = "detachWaveBoundary"
+	local operationError =
+		beginWaveServiceOperation(data, operation, { Initialized = true, Started = true, Failed = true })
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	if not boundaryHandleMatches(data, handleValue) then
+		return finishAndReturn(data, serviceFailure("INVALID_ARGUMENT", operation))
+	end
+	if data.waveBoundaryStatus == "Detached" then
+		return finishAndReturn(data, Result.ok(false))
+	end
+	local wasActive = data.waveBindingActive
+	revokeWaveBindingToken(data)
+	invalidateSchedulerCapability(data)
+	data.waveBoundary = nil
+	data.waveBindingActive = false
+	data.waveBoundaryStatus = "Detached"
+	data.legacySpawnClosed = data.legacySpawnClosed or wasActive
+	data.lastCommittedSchedulerSpawn = nil
+	return finishAndReturn(data, Result.ok(true))
+end
+
+function ServiceMethods.getWaveBoundaryStatus(self: Service, handleValue: unknown): unknown
+	local data = requireData(self)
+	local operation: Operation = "getWaveBoundaryStatus"
+	if not boundaryHandleMatches(data, handleValue) or data.storeIdentity == nil or data.waveBoundaryStatus == nil then
+		return serviceFailure("UNAVAILABLE", operation)
+	end
+	local value: { [string]: unknown } = {
+		matchId = data.storeIdentity.matchId,
+		enemyEpoch = data.storeIdentity.enemyEpoch,
+		generation = data.waveBoundaryGeneration,
+		status = data.waveBoundaryStatus,
+	}
+	if data.waveBindingDifficulty ~= nil then
+		value.difficultyId = data.waveBindingDifficulty.id
+	elseif data.waveBindingActive and data.store ~= nil then
+		local called, metrics = callNonYielding((data.store :: RuntimeStoreAdapter).getMetrics, data.store)
+		if called and type(metrics) == "table" and type((metrics :: any).boundDifficultyId) == "string" then
+			value.difficultyId = (metrics :: any).boundDifficultyId
+		end
+	end
+	table.freeze(value)
+	return Result.ok(value)
+end
+
+function ServiceMethods.isAuthenticatedTerminalOutcome(
+	self: Service,
+	handleValue: unknown,
+	outcomeValue: unknown
+): boolean
+	local data = requireData(self)
+	if not boundaryHandleMatches(data, handleValue) or not data.waveBindingActive or data.store == nil then
+		return false
+	end
+	local called, authenticated =
+		callNonYielding((data.store :: RuntimeStoreAdapter).isAuthenticatedTerminalOutcome, data.store, outcomeValue)
+	return called and authenticated == true
+end
+
 function ServiceMethods.installStudioFixtures(self: Service): unknown
 	local data = requireData(self)
 	local operation: Operation = "installStudioFixtures"
@@ -1745,12 +2700,18 @@ function ServiceMethods.installStudioFixtures(self: Service): unknown
 	if not isSuccess(baseInstallResult) then
 		return finishAndReturn(data, baseInstallResult)
 	end
+	if (baseInstallResult :: any).value ~= true then
+		data.faultRequested = true
+		return finishAndReturn(data, serviceFailure("INTERNAL_ERROR", operation))
+	end
 	local enemyInstalled, enemyInstallResult = callResult(store.installStudioCatalog, store, fixtures.enemyCatalog)
-	if not enemyInstalled or not isSuccess(enemyInstallResult) then
+	if not enemyInstalled or not isSuccess(enemyInstallResult) or (enemyInstallResult :: any).value ~= true then
 		data.faultRequested = true
 		return finishAndReturn(
 			data,
-			if enemyInstalled then enemyInstallResult else serviceFailure("INTERNAL_ERROR", operation)
+			if enemyInstalled and not isSuccess(enemyInstallResult)
+				then enemyInstallResult
+				else serviceFailure("INTERNAL_ERROR", operation)
 		)
 	end
 	local listed, laneResult = callResult(store.listLaneIds, store)
@@ -1960,6 +2921,9 @@ function ServiceMethods.spawn(self: Service, enemyId: unknown, laneId: unknown):
 	if unavailable ~= nil then
 		return unavailable
 	end
+	if data.legacySpawnClosed then
+		return finishAndReturn(data, serviceFailure("UNAVAILABLE", "spawn"))
+	end
 	local publisher = data.publisher :: PublisherAdapter
 	local store = data.store :: RuntimeStoreAdapter
 	local preflightCalled, preflightResult = callResult(publisher.preflightSpawn, publisher)
@@ -1968,6 +2932,9 @@ function ServiceMethods.spawn(self: Service, enemyId: unknown, laneId: unknown):
 	end
 	if not isSuccess(preflightResult) then
 		return finishAndReturn(data, preflightResult)
+	end
+	if (preflightResult :: any).value ~= true then
+		return finishAndReturn(data, serviceFailure("INTERNAL_ERROR", "spawn"))
 	end
 	local storeCalled, storeResult = callResult(store.spawn, store, enemyId, laneId)
 	if not storeCalled then
@@ -2010,7 +2977,11 @@ function ServiceMethods.queryTerminal(self: Service, runtimeEnemyId: unknown): u
 end
 
 function ServiceMethods.getIdentity(self: Service): unknown
-	return readStore(requireData(self), "getIdentity", "getIdentity")
+	local data = requireData(self)
+	if data.state == "Initialized" and not data.operationActive and data.storeIdentity ~= nil then
+		return Result.ok(data.storeIdentity)
+	end
+	return readStore(data, "getIdentity", "getIdentity")
 end
 
 function ServiceMethods.setSlowMultiplier(self: Service, runtimeEnemyId: unknown, multiplier: unknown): unknown
@@ -2040,6 +3011,9 @@ function ServiceMethods.setSlowMultiplier(self: Service, runtimeEnemyId: unknown
 		if not isSuccess(preflightResult) then
 			return finishAndReturn(data, preflightResult)
 		end
+		if (preflightResult :: any).value ~= true then
+			return finishAndReturn(data, serviceFailure("INTERNAL_ERROR", "setSlowMultiplier"))
+		end
 	end
 	local storeCalled, storeResult = callResult(store.setSlowMultiplier, store, runtimeEnemyId, multiplier)
 	if not storeCalled then
@@ -2065,6 +3039,9 @@ function ServiceMethods.resolveEndpoint(self: Service, runtimeEnemyId: unknown):
 	if unavailable ~= nil then
 		return unavailable
 	end
+	if data.waveBindingActive then
+		return finishAndReturn(data, serviceFailure("UNAVAILABLE", "resolveEndpoint"))
+	end
 	local publisher = data.publisher :: PublisherAdapter
 	local store = data.store :: RuntimeStoreAdapter
 	local preflightCalled, preflightResult = callResult(publisher.preflightEndpoint, publisher, runtimeEnemyId)
@@ -2073,6 +3050,9 @@ function ServiceMethods.resolveEndpoint(self: Service, runtimeEnemyId: unknown):
 	end
 	if not isSuccess(preflightResult) then
 		return finishAndReturn(data, preflightResult)
+	end
+	if (preflightResult :: any).value ~= true then
+		return finishAndReturn(data, serviceFailure("INTERNAL_ERROR", "resolveEndpoint"))
 	end
 	local storeCalled, storeResult = callResult(store.resolveEndpoint, store, runtimeEnemyId)
 	if not storeCalled then
@@ -2084,11 +3064,13 @@ function ServiceMethods.resolveEndpoint(self: Service, runtimeEnemyId: unknown):
 	local resolution = (storeResult :: any).value
 	local commitCalled, commitResult =
 		callResult(publisher.commitEndpoint, publisher, (resolution :: any).endpoint, (resolution :: any).despawn)
-	if not commitCalled or not isSuccess(commitResult) then
+	if not commitCalled or not isSuccess(commitResult) or (commitResult :: any).value ~= true then
 		abortCurrentBasePass(data)
 		return finishAndReturn(
 			data,
-			if commitCalled then commitResult else serviceFailure("INTERNAL_ERROR", "resolveEndpoint")
+			if commitCalled and not isSuccess(commitResult)
+				then commitResult
+				else serviceFailure("INTERNAL_ERROR", "resolveEndpoint")
 		)
 	end
 	local baseFinished = finishBasePass(data)
@@ -2112,6 +3094,9 @@ function ServiceMethods.despawn(self: Service, runtimeEnemyId: unknown): unknown
 	end
 	if not isSuccess(preflightResult) then
 		return finishAndReturn(data, preflightResult)
+	end
+	if (preflightResult :: any).value ~= true then
+		return finishAndReturn(data, serviceFailure("INTERNAL_ERROR", "despawn"))
 	end
 	local storeCalled, storeResult = callResult(store.despawn, store, runtimeEnemyId)
 	if not storeCalled then
@@ -2203,6 +3188,10 @@ function ServiceMethods.getMetrics(self: Service): ServiceMetrics
 		nextEnemyPassOrdinal = data.nextEnemyPassOrdinal,
 		defeatCount = data.defeatCount,
 		resultsCommitCount = data.resultsCommitCount,
+		waveBoundaryStatus = data.waveBoundaryStatus,
+		waveBoundaryGeneration = data.waveBoundaryGeneration,
+		waveBoundaryPassCount = data.waveBoundaryPassCount,
+		waveBoundaryFlushCount = data.waveBoundaryFlushCount,
 		passTiming = passTiming,
 	})
 end
@@ -2220,7 +3209,8 @@ local function construct(
 	isStudioValue: unknown,
 	passClockValue: unknown,
 	createRuntimeTriggerValue: unknown,
-	initialEnemyPassOrdinalValue: unknown
+	initialEnemyPassOrdinalValue: unknown,
+	initialSpawnAdmissionClosedValue: unknown
 ): Service
 	if
 		not isMatchLifecycleAdapter(matchLifecycleValue)
@@ -2234,14 +3224,10 @@ local function construct(
 		or type(isStudioValue) ~= "function"
 		or type(passClockValue) ~= "function"
 		or type(createRuntimeTriggerValue) ~= "function"
-		or not (
-			initialEnemyPassOrdinalValue == nil
-			or (
-				type(initialEnemyPassOrdinalValue) == "number"
-				and Validation.isSafeInteger(initialEnemyPassOrdinalValue :: number)
-				and (initialEnemyPassOrdinalValue :: number) >= 1
-			)
-		)
+		or not (initialEnemyPassOrdinalValue == nil or (type(initialEnemyPassOrdinalValue) == "number" and Validation.isSafeInteger(
+			initialEnemyPassOrdinalValue :: number
+		) and (initialEnemyPassOrdinalValue :: number) >= 1))
+		or not (initialSpawnAdmissionClosedValue == nil or type(initialSpawnAdmissionClosedValue) == "boolean")
 	then
 		staticError("INVALID_DEPENDENCIES")
 	end
@@ -2251,6 +3237,7 @@ local function construct(
 		matchLifecycle = matchLifecycleValue :: MatchLifecycleAdapter,
 		baseRuntime = baseRuntimeValue :: BaseRuntimeAdapter,
 		catalog = catalog,
+		currentCatalog = catalog,
 		createStore = createStoreValue :: RuntimeStoreFactory,
 		createPublisher = createPublisherValue :: PublisherFactory,
 		connectStep = connectStepValue :: ConnectStep,
@@ -2281,12 +3268,28 @@ local function construct(
 		studioWaveActivated = false,
 		studioSpawnCount = 0,
 		studioBatchCount = 0,
-		spawnAdmissionClosed = false,
+		spawnAdmissionClosed = initialSpawnAdmissionClosedValue == true,
 		nextEnemyPassOrdinal = if initialEnemyPassOrdinalValue == nil
 			then 1
 			else initialEnemyPassOrdinalValue :: number,
 		defeatCount = 0,
 		resultsCommitCount = 0,
+		storeIdentity = nil,
+		waveBoundary = nil,
+		waveBoundaryHandle = nil,
+		waveBindingToken = nil,
+		waveBindingConfiguration = nil,
+		waveBindingDifficulty = nil,
+		waveBoundaryStatus = nil,
+		waveBoundaryGeneration = 0,
+		waveBoundaryPassCount = 0,
+		waveBoundaryFlushCount = 0,
+		waveBindingActive = false,
+		legacySpawnClosed = false,
+		lastWaveSampleServerTime = 0,
+		lastWavePassOrdinal = 0,
+		activeSchedulerCapabilityGeneration = 0,
+		lastCommittedSchedulerSpawn = nil,
 		passDurationSamples = {},
 		nextPassDurationIndex = 1,
 		totalPassDurationCount = 0,
@@ -2394,6 +3397,7 @@ function EnemySimulationService.new(
 		productionIsStudio,
 		productionPassClock,
 		productionCreateRuntimeTrigger,
+		nil,
 		nil
 	)
 end
@@ -2443,6 +3447,7 @@ if testModuleIdentityIsExact() then
 			passClock = true,
 			createRuntimeTrigger = true,
 			initialEnemyPassOrdinal = true,
+			initialSpawnAdmissionClosed = true,
 		}
 		for key in next, dependencies :: any do
 			if type(key) ~= "string" or allowedFields[key] ~= true then
@@ -2481,7 +3486,8 @@ if testModuleIdentityIsExact() then
 			isStudio,
 			passClock,
 			createRuntimeTrigger,
-			dependencyValue.initialEnemyPassOrdinal
+			dependencyValue.initialEnemyPassOrdinal,
+			dependencyValue.initialSpawnAdmissionClosed
 		)
 	end
 end

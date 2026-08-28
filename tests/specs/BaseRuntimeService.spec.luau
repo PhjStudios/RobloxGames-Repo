@@ -303,6 +303,8 @@ local function makeEnvironment(): any
 			table.insert(environment.trace, "cleanup:runtime")
 			if environment.runtimeCleanupMode == "failure" then
 				return Result.err(table.freeze({ code = "CLEANUP_FAILED" }))
+			elseif environment.runtimeCleanupMode == "false" then
+				return Result.ok(false)
 			end
 			return Result.ok(environment.runtimeCleanupCalls == 1)
 		end,
@@ -384,6 +386,8 @@ local function makeEnvironment(): any
 			table.insert(environment.trace, "cleanup:publisher")
 			if environment.publisherCleanupMode == "failure" then
 				return Result.err(table.freeze({ code = "CLEANUP_FAILED" }))
+			elseif environment.publisherCleanupMode == "false" then
+				return Result.ok(false)
 			end
 			return Result.ok(environment.publisherCleanupCalls == 1)
 		end,
@@ -952,6 +956,25 @@ return TestHarness.suite("server base runtime service", {
 		assertions.equal(cleanupFailure.publisherCleanupCalls, 1)
 		assertions.equal(cleanupFailure.runtimeCleanupCalls, 1)
 		assertions.equal(cleanupService:getLifecycleState(), "Failed")
+
+		local falseSuccessModeFields = table.freeze({ "publisherCleanupMode", "runtimeCleanupMode" })
+		for _, modeField in falseSuccessModeFields do
+			local falseSuccess = makeEnvironment()
+			falseSuccess[modeField] = "false"
+			local falseSuccessService, falseSuccessDefinition = startService(falseSuccess)
+			expectStaticFailure(assertions, function()
+				invoke(falseSuccessDefinition.shutdown)
+			end, "CLEANUP_FAILED")
+			assertions.equal(falseSuccess.publisherCleanupCalls, 1)
+			assertions.equal(falseSuccess.runtimeCleanupCalls, 1)
+			assertions.isTrue(
+				indexOf(falseSuccess.trace, "cleanup:publisher") < indexOf(falseSuccess.trace, "cleanup:runtime")
+			)
+			assertions.equal(falseSuccessService:getLifecycleState(), "Failed")
+			local metrics = falseSuccessService:getMetrics()
+			assertions.isFalse(metrics.retainsPublisher)
+			assertions.isFalse(metrics.retainsRuntime)
+		end
 	end),
 
 	TestHarness.case("rejects malformed factories dependencies and lifecycle order", function(assertions)

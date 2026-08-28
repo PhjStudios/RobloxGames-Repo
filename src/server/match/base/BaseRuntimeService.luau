@@ -334,7 +334,7 @@ local function cleanupPublisher(data: ServiceData): boolean
 		return true
 	end
 	local called, cleanupResult = callResult(publisher.cleanup, publisher)
-	return called and isSuccess(cleanupResult)
+	return called and isSuccess(cleanupResult) and (cleanupResult :: any).value == true
 end
 
 local function cleanupRuntime(data: ServiceData): boolean
@@ -344,7 +344,7 @@ local function cleanupRuntime(data: ServiceData): boolean
 		return true
 	end
 	local called, cleanupResult = callResult(runtime.cleanup, runtime)
-	return called and isSuccess(cleanupResult)
+	return called and isSuccess(cleanupResult) and (cleanupResult :: any).value == true
 end
 
 local function releaseOwnedResources(data: ServiceData): boolean

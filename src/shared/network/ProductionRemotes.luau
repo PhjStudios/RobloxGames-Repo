@@ -28,7 +28,23 @@ local result = RemoteRegistry.create({
 		placeRoles = { "Match" },
 	},
 	{
+		name = "GetWaveSnapshot",
+		transport = "ReliableRemoteEvent",
+		direction = "ClientToServer",
+		kind = "Request",
+		response = "Required",
+		placeRoles = { "Match" },
+	},
+	{
 		name = "SubmitReady",
+		transport = "ReliableRemoteEvent",
+		direction = "ClientToServer",
+		kind = "Request",
+		response = "Required",
+		placeRoles = { "Match" },
+	},
+	{
+		name = "SubmitSkipVote",
 		transport = "ReliableRemoteEvent",
 		direction = "ClientToServer",
 		kind = "Request",
@@ -53,6 +69,14 @@ local result = RemoteRegistry.create({
 	},
 	{
 		name = "EnemyReplication",
+		transport = "ReliableRemoteEvent",
+		direction = "ServerToClient",
+		kind = "Event",
+		response = "None",
+		placeRoles = { "Match" },
+	},
+	{
+		name = "WaveReplication",
 		transport = "ReliableRemoteEvent",
 		direction = "ServerToClient",
 		kind = "Event",

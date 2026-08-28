@@ -101,6 +101,16 @@ export type RuntimeMapSnapshotError = {
 	operation: "getRuntimeMapSnapshot",
 }
 
+export type ConnectedRecipient = {
+	recipient: unknown,
+	userId: number,
+}
+
+export type ConnectedRecipientsError = {
+	code: SnapshotErrorCode,
+	operation: "getConnectedRecipients",
+}
+
 export type ReadyErrorCode = "STALE_REQUEST" | "DUPLICATE_REQUEST" | "NOT_AUTHORIZED" | "UNAVAILABLE" | "INTERNAL_ERROR"
 
 export type ReadyError = {
@@ -126,6 +136,29 @@ export type BaseDefeatError = {
 export type BaseDefeatToken = {}
 
 export type BaseDefeatCommitOutcome = {
+	committed: true,
+	published: boolean,
+	snapshot: MatchSnapshot,
+}
+
+export type WaveActivationOperation = "beginWaveActivation" | "commitWaveActivation" | "rollbackWaveActivation"
+
+export type WaveActivationErrorCode =
+	"UNAVAILABLE"
+	| "NOT_AUTHORIZED"
+	| "WRONG_STATE"
+	| "INVALID_TOKEN"
+	| "REENTRANT"
+	| "INTERNAL_ERROR"
+
+export type WaveActivationError = {
+	code: WaveActivationErrorCode,
+	operation: WaveActivationOperation,
+}
+
+export type WaveActivationToken = {}
+
+export type WaveActivationCommitOutcome = {
 	committed: true,
 	published: boolean,
 	snapshot: MatchSnapshot,
@@ -229,6 +262,11 @@ type ServiceData = {
 	shutdownFailure: string?,
 	serviceDefinition: ServiceLifecycle.ServiceDefinition?,
 	runtimeMapSnapshot: RuntimeMapSnapshot?,
+	waveActivationToken: WaveActivationToken?,
+	waveActivationOperationActive: boolean,
+	waveActivationReentryViolation: boolean,
+	waveActivationCommitted: boolean,
+	waveActivationShutdownRequested: boolean,
 	baseDefeatToken: BaseDefeatToken?,
 	baseDefeatOperationActive: boolean,
 	baseDefeatReentryViolation: boolean,
@@ -242,6 +280,7 @@ type ServiceData = {
 }
 
 type BaseDefeatTokenState = "Prepared" | "Committed" | "RolledBack"
+type WaveActivationTokenState = "Prepared" | "Committed" | "RolledBack"
 
 type ExistingPlayer = {
 	connection: unknown,
@@ -249,10 +288,7 @@ type ExistingPlayer = {
 	index: number,
 }
 
-type SnapshotRecipientRecord = {
-	recipient: unknown,
-	userId: number,
-}
+type SnapshotRecipientRecord = ConnectedRecipient
 
 local ServiceMethods = {}
 ServiceMethods.__index = ServiceMethods
@@ -267,6 +303,15 @@ type BaseDefeatTokenData = {
 	preparedSnapshot: MatchSnapshot,
 	terminalRecipients: { SnapshotRecipientRecord },
 	outcome: BaseDefeatCommitOutcome?,
+}
+
+type WaveActivationTokenData = {
+	owner: ServiceData,
+	state: WaveActivationTokenState,
+	machineToken: unknown?,
+	preparedSnapshot: MatchSnapshot,
+	preparedRevision: number,
+	outcome: WaveActivationCommitOutcome?,
 }
 
 local FIXED_MAP_ID = "map:phase07-graybox"
@@ -306,6 +351,7 @@ local BENIGN_RESOLVE_ERRORS: { [string]: boolean } = table.freeze({
 
 local SERVICE_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ServiceData }
 local BASE_DEFEAT_TOKEN_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: BaseDefeatTokenData }
+local WAVE_ACTIVATION_TOKEN_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: WaveActivationTokenData }
 
 local MatchLifecycleService = {
 	FIXED_MAP_ID = FIXED_MAP_ID,
@@ -334,6 +380,13 @@ local function runtimeMapSnapshotFailure(code: SnapshotErrorCode): Result.Failur
 	}))
 end
 
+local function connectedRecipientsFailure(code: SnapshotErrorCode): Result.Failure<ConnectedRecipientsError>
+	return Result.err(table.freeze({
+		code = code,
+		operation = "getConnectedRecipients",
+	}))
+end
+
 local function readyFailure(code: ReadyErrorCode): Result.Failure<ReadyError>
 	return Result.err(table.freeze({
 		code = code,
@@ -353,6 +406,23 @@ local function baseDefeatFailure(
 	operation: BaseDefeatOperation
 ): Result.Failure<BaseDefeatError>
 	return Result.err(makeBaseDefeatError(code, operation))
+end
+
+local function makeWaveActivationError(
+	code: WaveActivationErrorCode,
+	operation: WaveActivationOperation
+): WaveActivationError
+	return table.freeze({
+		code = code,
+		operation = operation,
+	})
+end
+
+local function waveActivationFailure(
+	code: WaveActivationErrorCode,
+	operation: WaveActivationOperation
+): Result.Failure<WaveActivationError>
+	return Result.err(makeWaveActivationError(code, operation))
 end
 
 local function studioWaveFailure(code: StudioWaveErrorCode): Result.Failure<StudioWaveError>
@@ -687,6 +757,37 @@ local function clearBaseDefeatClaim(data: ServiceData, rollbackPrepared: boolean
 	return called and isSuccess(resultValue)
 end
 
+local function clearWaveActivationClaim(data: ServiceData, rollbackPrepared: boolean): boolean
+	local token = data.waveActivationToken
+	data.waveActivationToken = nil
+	data.waveActivationOperationActive = false
+	data.waveActivationReentryViolation = false
+	data.waveActivationShutdownRequested = false
+	if token == nil then
+		return true
+	end
+
+	local tokenData = WAVE_ACTIVATION_TOKEN_DATA[token]
+	WAVE_ACTIVATION_TOKEN_DATA[token] = nil
+	if tokenData == nil or tokenData.owner ~= data then
+		return false
+	end
+	if tokenData.state ~= "Prepared" or not rollbackPrepared then
+		tokenData.machineToken = nil
+		return true
+	end
+
+	local machine = data.machine
+	local machineToken = tokenData.machineToken
+	tokenData.machineToken = nil
+	tokenData.state = "RolledBack"
+	if machine == nil or machineToken == nil then
+		return false
+	end
+	local called, resultValue = callNonYielding(machine.rollbackTransition, machine, machineToken)
+	return called and isSuccess(resultValue)
+end
+
 local function releaseOwnedResources(data: ServiceData): (boolean, string?)
 	data.callbacksEnabled = false
 	data.available = false
@@ -695,6 +796,8 @@ local function releaseOwnedResources(data: ServiceData): (boolean, string?)
 	data.studioWaveReentryViolation = false
 	data.studioWaveActivated = false
 	data.studioWaveShutdownRequested = false
+	local waveActivationClaimReleased = clearWaveActivationClaim(data, true)
+	data.waveActivationCommitted = false
 	local defeatClaimReleased = clearBaseDefeatClaim(data, true)
 	data.baseDefeatCommitted = false
 	local cleanup = data.cleanup
@@ -709,7 +812,8 @@ local function releaseOwnedResources(data: ServiceData): (boolean, string?)
 		data.playerSource = nil
 		data.readyCoordinator = nil
 		data.snapshotBroadcaster = nil
-		return defeatClaimReleased, if defeatClaimReleased then nil else `{STATIC_ERROR_PREFIX}[code=CLEANUP_FAILED]`
+		local claimsReleased = waveActivationClaimReleased and defeatClaimReleased
+		return claimsReleased, if claimsReleased then nil else `{STATIC_ERROR_PREFIX}[code=CLEANUP_FAILED]`
 	end
 
 	local cleaned, failureValue = pcall(function()
@@ -721,7 +825,7 @@ local function releaseOwnedResources(data: ServiceData): (boolean, string?)
 	data.playerSource = nil
 	data.readyCoordinator = nil
 	data.snapshotBroadcaster = nil
-	if cleaned and defeatClaimReleased then
+	if cleaned and waveActivationClaimReleased and defeatClaimReleased then
 		return true, nil
 	end
 	if type(failureValue) == "string" then
@@ -745,7 +849,7 @@ local function failClosedAtRuntime(data: ServiceData, code: string)
 		return
 	end
 	data.callbacksEnabled = false
-	if data.baseDefeatCommitted then
+	if data.baseDefeatCommitted or data.waveActivationCommitted then
 		data.logger:warn("lifecycle", "match_failed_closed", "Match lifecycle failed closed", {
 			code = code,
 			service = SERVICE_NAME,
@@ -1142,8 +1246,11 @@ local function shutdown(data: ServiceData)
 	if data.state ~= "Initialized" and data.state ~= "Started" then
 		staticError("INVALID_STATE")
 	end
-	if data.baseDefeatOperationActive or data.studioWaveOperationActive then
+	if data.waveActivationOperationActive or data.baseDefeatOperationActive or data.studioWaveOperationActive then
 		data.callbacksEnabled = false
+		if data.waveActivationOperationActive then
+			data.waveActivationShutdownRequested = true
+		end
 		if data.baseDefeatOperationActive then
 			data.baseDefeatShutdownRequested = true
 		end
@@ -1155,7 +1262,10 @@ local function shutdown(data: ServiceData)
 	data.state = "ShuttingDown"
 	data.callbacksEnabled = false
 
-	local transitionSucceeded = clearBaseDefeatClaim(data, true)
+	local transitionSucceeded = clearWaveActivationClaim(data, true)
+	if not clearBaseDefeatClaim(data, true) then
+		transitionSucceeded = false
+	end
 	local machine = data.machine
 	if machine == nil then
 		transitionSucceeded = false
@@ -1183,6 +1293,13 @@ local function shutdown(data: ServiceData)
 end
 
 local function beginStudioWaveOperation(data: ServiceData): StudioWaveError?
+	if data.waveActivationOperationActive then
+		data.waveActivationReentryViolation = true
+		return table.freeze({
+			code = "REENTRANT",
+			operation = "activateStudioWaveForEvidence",
+		})
+	end
 	if data.studioWaveOperationActive then
 		data.studioWaveReentryViolation = true
 		return table.freeze({
@@ -1300,7 +1417,13 @@ function ServiceMethods.activateStudioWaveForEvidence(self: Service): Result.Res
 		endStudioWaveOperation(data)
 		return studioWaveFailure("NOT_STUDIO")
 	end
-	if data.studioWaveActivated or data.baseDefeatToken ~= nil or data.baseDefeatCommitted then
+	if
+		data.studioWaveActivated
+		or data.waveActivationToken ~= nil
+		or data.waveActivationCommitted
+		or data.baseDefeatToken ~= nil
+		or data.baseDefeatCommitted
+	then
 		endStudioWaveOperation(data)
 		return studioWaveFailure("REENTRANT")
 	end
@@ -1437,6 +1560,27 @@ function ServiceMethods.getRuntimeMapSnapshot(self: Service): Result.Result<Runt
 	return Result.ok(snapshot)
 end
 
+function ServiceMethods.isRuntimeMapSnapshot(self: Service, value: unknown): boolean
+	local data = requireData(self)
+	local retained = data.runtimeMapSnapshot
+	return data.available and data.mapLoaded and retained ~= nil and value == retained
+end
+
+function ServiceMethods.getConnectedRecipients(
+	self: Service
+): Result.Result<{ ConnectedRecipient }, ConnectedRecipientsError>
+	local data = requireData(self)
+	if not data.available or not data.callbacksEnabled or (data.state ~= "Initialized" and data.state ~= "Started") then
+		return connectedRecipientsFailure("UNAVAILABLE")
+	end
+
+	local recipients = collectRecipients(data)
+	if recipients == nil then
+		return connectedRecipientsFailure("INTERNAL_ERROR")
+	end
+	return Result.ok(recipients)
+end
+
 function ServiceMethods.submitReady(
 	self: Service,
 	connection: unknown,
@@ -1477,7 +1621,321 @@ function ServiceMethods.submitReady(
 	return Result.ok(snapshot)
 end
 
+local function beginWaveActivationOperation(data: ServiceData, operation: WaveActivationOperation): WaveActivationError?
+	if data.waveActivationOperationActive then
+		data.waveActivationReentryViolation = true
+		return makeWaveActivationError("REENTRANT", operation)
+	end
+	if data.studioWaveOperationActive then
+		data.studioWaveReentryViolation = true
+		return makeWaveActivationError("REENTRANT", operation)
+	end
+	if data.baseDefeatOperationActive then
+		data.baseDefeatReentryViolation = true
+		return makeWaveActivationError("REENTRANT", operation)
+	end
+	if data.state ~= "Started" or not data.available then
+		return makeWaveActivationError("UNAVAILABLE", operation)
+	end
+	data.waveActivationOperationActive = true
+	data.waveActivationReentryViolation = false
+	return nil
+end
+
+local function endWaveActivationOperation(data: ServiceData)
+	data.waveActivationOperationActive = false
+	data.waveActivationReentryViolation = false
+	if data.waveActivationShutdownRequested then
+		data.waveActivationShutdownRequested = false
+		shutdown(data)
+	end
+end
+
+local function failWaveActivationOperation(
+	data: ServiceData,
+	operation: WaveActivationOperation,
+	code: string
+): Result.Failure<WaveActivationError>
+	endWaveActivationOperation(data)
+	failClosedAtRuntime(data, code)
+	return waveActivationFailure("INTERNAL_ERROR", operation)
+end
+
+local function waveActivationOperationIntact(data: ServiceData): boolean
+	return data.waveActivationOperationActive
+		and not data.waveActivationReentryViolation
+		and not data.waveActivationShutdownRequested
+		and data.state == "Started"
+		and data.available
+		and data.callbacksEnabled
+end
+
+local function prepareWaveActiveSnapshot(
+	data: ServiceData,
+	stateSnapshot: MatchStateMachine.StateSnapshot
+): MatchSnapshot?
+	if stateSnapshot.revision >= Validation.MAX_SAFE_INTEGER then
+		return nil
+	end
+	local current = composeSnapshot(data)
+	if
+		current == nil
+		or current.matchId ~= stateSnapshot.matchId
+		or current.revision ~= stateSnapshot.revision
+		or current.state ~= "PreWave"
+		or current.deadlineServerTime ~= nil
+	then
+		return nil
+	end
+	local validated = MatchProtocol.validateMatchSnapshot({
+		matchId = current.matchId,
+		revision = current.revision + 1,
+		state = "WaveActive",
+		deadlineServerTime = nil,
+		participants = current.participants,
+	})
+	return if validated.ok then validated.value else nil
+end
+
+local function waveActivationTokenDataFor(data: ServiceData, tokenValue: unknown): WaveActivationTokenData?
+	if type(tokenValue) ~= "table" then
+		return nil
+	end
+	local tokenData = WAVE_ACTIVATION_TOKEN_DATA[tokenValue :: any]
+	if tokenData == nil or tokenData.owner ~= data or data.waveActivationToken ~= tokenValue then
+		return nil
+	end
+	return tokenData
+end
+
+local function revokeWaveActivationToken(data: ServiceData, tokenValue: unknown, tokenData: WaveActivationTokenData)
+	tokenData.machineToken = nil
+	tokenData.state = "RolledBack"
+	WAVE_ACTIVATION_TOKEN_DATA[tokenValue :: any] = nil
+	data.waveActivationToken = nil
+end
+
+function ServiceMethods.beginWaveActivation(
+	self: Service,
+	matchIdValue: unknown
+): Result.Result<WaveActivationToken, WaveActivationError>
+	local data = requireData(self)
+	local operation: WaveActivationOperation = "beginWaveActivation"
+	local operationError = beginWaveActivationOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	if
+		data.waveActivationToken ~= nil
+		or data.waveActivationCommitted
+		or data.studioWaveActivated
+		or data.baseDefeatToken ~= nil
+		or data.baseDefeatCommitted
+	then
+		endWaveActivationOperation(data)
+		return waveActivationFailure("REENTRANT", operation)
+	end
+	if not data.callbacksEnabled then
+		endWaveActivationOperation(data)
+		return waveActivationFailure("UNAVAILABLE", operation)
+	end
+
+	local matchIdResult = Ids.validateMatchId(matchIdValue)
+	local machine = data.machine
+	if not matchIdResult.ok or machine == nil then
+		endWaveActivationOperation(data)
+		return waveActivationFailure(if machine == nil then "UNAVAILABLE" else "NOT_AUTHORIZED", operation)
+	end
+	local current = detachedStateSnapshot(machine)
+	if current == nil or not waveActivationOperationIntact(data) then
+		return failWaveActivationOperation(data, operation, "WAVE_ACTIVATION_SNAPSHOT_FAILED")
+	end
+	if current.matchId ~= matchIdResult.value then
+		endWaveActivationOperation(data)
+		return waveActivationFailure("NOT_AUTHORIZED", operation)
+	end
+	if current.state ~= "PreWave" then
+		endWaveActivationOperation(data)
+		return waveActivationFailure("WRONG_STATE", operation)
+	end
+
+	local preparedSnapshot = prepareWaveActiveSnapshot(data, current)
+	if preparedSnapshot == nil or not waveActivationOperationIntact(data) then
+		return failWaveActivationOperation(data, operation, "WAVE_ACTIVATION_PREFLIGHT_FAILED")
+	end
+	local began, beginResult = callNonYielding(machine.beginTransition, machine, "WaveActive", current.revision)
+	local machineToken = if began and isSuccess(beginResult) then (beginResult :: any).value else nil
+	local afterBegin = detachedStateSnapshot(machine)
+	if
+		not began
+		or not isSuccess(beginResult)
+		or type(machineToken) ~= "table"
+		or afterBegin == nil
+		or afterBegin.matchId ~= current.matchId
+		or afterBegin.revision ~= current.revision
+		or afterBegin.state ~= "PreWave"
+		or not waveActivationOperationIntact(data)
+	then
+		if machineToken ~= nil then
+			callNonYielding(machine.rollbackTransition, machine, machineToken)
+		end
+		return failWaveActivationOperation(data, operation, "WAVE_ACTIVATION_BEGIN_FAILED")
+	end
+
+	local token = table.freeze({}) :: WaveActivationToken
+	WAVE_ACTIVATION_TOKEN_DATA[token] = {
+		owner = data,
+		state = "Prepared",
+		machineToken = machineToken,
+		preparedSnapshot = preparedSnapshot,
+		preparedRevision = current.revision,
+		outcome = nil,
+	}
+	data.waveActivationToken = token
+	endWaveActivationOperation(data)
+	return Result.ok(token)
+end
+
+function ServiceMethods.commitWaveActivation(
+	self: Service,
+	tokenValue: unknown
+): Result.Result<WaveActivationCommitOutcome, WaveActivationError>
+	local data = requireData(self)
+	local operation: WaveActivationOperation = "commitWaveActivation"
+	local operationError = beginWaveActivationOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	local tokenData = waveActivationTokenDataFor(data, tokenValue)
+	if tokenData == nil then
+		endWaveActivationOperation(data)
+		return waveActivationFailure("INVALID_TOKEN", operation)
+	end
+	if tokenData.state == "Committed" then
+		local outcome = tokenData.outcome
+		endWaveActivationOperation(data)
+		if outcome == nil then
+			return waveActivationFailure("INTERNAL_ERROR", operation)
+		end
+		return Result.ok(outcome)
+	elseif tokenData.state ~= "Prepared" then
+		endWaveActivationOperation(data)
+		return waveActivationFailure("INVALID_TOKEN", operation)
+	end
+
+	local machine = data.machine
+	local machineToken = tokenData.machineToken
+	if machine == nil or machineToken == nil then
+		return failWaveActivationOperation(data, operation, "WAVE_ACTIVATION_COMMIT_MISSING")
+	end
+	local before = detachedStateSnapshot(machine)
+	if
+		before == nil
+		or before.matchId ~= tokenData.preparedSnapshot.matchId
+		or before.revision ~= tokenData.preparedRevision
+		or before.state ~= "PreWave"
+		or not waveActivationOperationIntact(data)
+	then
+		callNonYielding(machine.rollbackTransition, machine, machineToken)
+		revokeWaveActivationToken(data, tokenValue, tokenData)
+		return failWaveActivationOperation(data, operation, "WAVE_ACTIVATION_STALE_PREPARE")
+	end
+
+	local committedCall, commitResult = callNonYielding(machine.commitTransition, machine, machineToken)
+	local committedValue = if committedCall and isSuccess(commitResult) then (commitResult :: any).value else nil
+	local current = detachedStateSnapshot(machine)
+	local expected = tokenData.preparedSnapshot
+	local transitionCommitted = current ~= nil
+		and current.matchId == expected.matchId
+		and current.revision == expected.revision
+		and current.state == "WaveActive"
+	if not transitionCommitted then
+		callNonYielding(machine.rollbackTransition, machine, machineToken)
+		revokeWaveActivationToken(data, tokenValue, tokenData)
+		return failWaveActivationOperation(data, operation, "WAVE_ACTIVATION_COMMIT_FAILED")
+	end
+
+	tokenData.machineToken = nil
+	tokenData.state = "Committed"
+	data.waveActivationCommitted = true
+	local composed = composeSnapshot(data)
+	local snapshotMatches = composed ~= nil
+		and composed.matchId == expected.matchId
+		and composed.revision == expected.revision
+		and composed.state == "WaveActive"
+		and composed.deadlineServerTime == nil
+	local published = false
+	local broadcaster = data.snapshotBroadcaster
+	if
+		committedCall
+		and isSuccess(commitResult)
+		and matchesStateSnapshot(committedValue, expected.matchId, expected.revision, "WaveActive")
+		and snapshotMatches
+		and waveActivationOperationIntact(data)
+		and broadcaster ~= nil
+	then
+		local publishCalled, publishResult = callNonYielding(broadcaster.publish, broadcaster, expected)
+		published = publishCalled
+			and isAcceptedSnapshotPublishResult(publishResult)
+			and waveActivationOperationIntact(data)
+	end
+	local outcome: WaveActivationCommitOutcome = table.freeze({
+		committed = true,
+		published = published,
+		snapshot = expected,
+	})
+	tokenData.outcome = outcome
+	endWaveActivationOperation(data)
+	return Result.ok(outcome)
+end
+
+function ServiceMethods.rollbackWaveActivation(
+	self: Service,
+	tokenValue: unknown
+): Result.Result<boolean, WaveActivationError>
+	local data = requireData(self)
+	local operation: WaveActivationOperation = "rollbackWaveActivation"
+	local operationError = beginWaveActivationOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	local tokenData = waveActivationTokenDataFor(data, tokenValue)
+	if tokenData == nil or tokenData.state ~= "Prepared" then
+		endWaveActivationOperation(data)
+		return waveActivationFailure("INVALID_TOKEN", operation)
+	end
+
+	local machine = data.machine
+	local machineToken = tokenData.machineToken
+	if machine == nil or machineToken == nil then
+		return failWaveActivationOperation(data, operation, "WAVE_ACTIVATION_ROLLBACK_MISSING")
+	end
+	local rolledBack, rollbackResult = callNonYielding(machine.rollbackTransition, machine, machineToken)
+	local current = detachedStateSnapshot(machine)
+	local rollbackConfirmed = current ~= nil
+		and current.matchId == tokenData.preparedSnapshot.matchId
+		and current.revision == tokenData.preparedRevision
+		and current.state == "PreWave"
+	if
+		not rolledBack
+		or not isSuccess(rollbackResult)
+		or not rollbackConfirmed
+		or data.waveActivationReentryViolation
+	then
+		revokeWaveActivationToken(data, tokenValue, tokenData)
+		return failWaveActivationOperation(data, operation, "WAVE_ACTIVATION_ROLLBACK_FAILED")
+	end
+
+	revokeWaveActivationToken(data, tokenValue, tokenData)
+	endWaveActivationOperation(data)
+	return Result.ok(true)
+end
+
 local function beginBaseDefeatOperation(data: ServiceData, operation: BaseDefeatOperation): BaseDefeatError?
+	if data.waveActivationOperationActive then
+		data.waveActivationReentryViolation = true
+		return makeBaseDefeatError("REENTRANT", operation)
+	end
 	if data.studioWaveOperationActive then
 		data.studioWaveReentryViolation = true
 		return makeBaseDefeatError("REENTRANT", operation)
@@ -1860,6 +2318,11 @@ local function construct(
 		shutdownFailure = nil,
 		serviceDefinition = nil,
 		runtimeMapSnapshot = nil,
+		waveActivationToken = nil,
+		waveActivationOperationActive = false,
+		waveActivationReentryViolation = false,
+		waveActivationCommitted = false,
+		waveActivationShutdownRequested = false,
 		baseDefeatToken = nil,
 		baseDefeatOperationActive = false,
 		baseDefeatReentryViolation = false,

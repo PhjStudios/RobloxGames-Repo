@@ -24,7 +24,15 @@ local bindings: { ServerRateLimiter.PolicyBinding } = {
 		policy = requirePolicy(2, 1),
 	}),
 	table.freeze({
+		endpoint = "GetWaveSnapshot",
+		policy = requirePolicy(2, 0.25),
+	}),
+	table.freeze({
 		endpoint = "SubmitReady",
+		policy = requirePolicy(2, 0.5),
+	}),
+	table.freeze({
+		endpoint = "SubmitSkipVote",
 		policy = requirePolicy(2, 0.5),
 	}),
 }

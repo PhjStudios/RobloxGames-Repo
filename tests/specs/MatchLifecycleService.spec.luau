@@ -277,6 +277,24 @@ local function assertDetachedAndFrozen(assertions: Assertions, value: unknown, s
 	end
 end
 
+local function frozenClone(value: any, seen: { [any]: any }?): any
+	if type(value) ~= "table" then
+		return value
+	end
+	local visited = seen or {}
+	local existing = visited[value]
+	if existing ~= nil then
+		return existing
+	end
+
+	local copy = {}
+	visited[value] = copy
+	for key, child in next, value do
+		copy[frozenClone(key, visited)] = frozenClone(child, visited)
+	end
+	return table.freeze(copy)
+end
+
 local function invoke(method: (() -> ())?)
 	if method == nil then
 		error("[ATD_TEST][code=LIFECYCLE_METHOD_MISSING]", 0)
@@ -454,7 +472,16 @@ end
 
 type StudioTestMode = "success" | "false" | "failure" | "throw" | "yield" | "malformed" | "commit-then-throw"
 
-type StudioPublishMode = "success" | "failure" | "throw" | "yield" | "malformed" | "budget" | "reenter" | "shutdown"
+type StudioPublishMode =
+	"success"
+	| "failure"
+	| "throw"
+	| "yield"
+	| "malformed"
+	| "budget"
+	| "reenter"
+	| "shutdown"
+	| "wave-reenter"
 
 type StudioTestEnvironment = {
 	service: MatchLifecycleService.Service?,
@@ -468,6 +495,12 @@ type StudioTestEnvironment = {
 	publishCount: number,
 	publishedSnapshots: { MatchLifecycleService.MatchSnapshot },
 	reentryResult: unknown?,
+	waveReentryToken: MatchLifecycleService.WaveActivationToken?,
+	waveCommitReentryResult: unknown?,
+	waveBeginReentryResult: unknown?,
+	waveBaseReentryResult: unknown?,
+	waveStudioReentryResult: unknown?,
+	operationOrder: { string },
 	cleanupCount: number,
 }
 
@@ -518,6 +551,12 @@ local function newStudioEvidenceService(
 		publishCount = 0,
 		publishedSnapshots = {},
 		reentryResult = nil,
+		waveReentryToken = nil,
+		waveCommitReentryResult = nil,
+		waveBeginReentryResult = nil,
+		waveBaseReentryResult = nil,
+		waveStudioReentryResult = nil,
+		operationOrder = {},
 		cleanupCount = 0,
 	}
 
@@ -536,12 +575,14 @@ local function newStudioEvidenceService(
 			return real:getSnapshot()
 		end
 		function adapter.beginTransition(_self: unknown, target: unknown, revision: unknown): unknown
+			table.insert(environment.operationOrder, `begin-{target :: any}`)
 			if environment.faultsEnabled and environment.beginMode ~= "success" then
 				return studioFailure(environment.beginMode)
 			end
 			return real:beginTransition(target, revision)
 		end
 		function adapter.commitTransition(_self: unknown, token: unknown): unknown
+			table.insert(environment.operationOrder, "commit")
 			if environment.faultsEnabled and environment.commitMode ~= "success" then
 				if environment.commitMode == "commit-then-throw" then
 					real:commitTransition(token)
@@ -562,6 +603,7 @@ local function newStudioEvidenceService(
 			return real:commitTransition(token)
 		end
 		function adapter.rollbackTransition(_self: unknown, token: unknown): unknown
+			table.insert(environment.operationOrder, "rollback")
 			return real:rollbackTransition(token)
 		end
 		function adapter.touch(_self: unknown, revision: unknown): unknown
@@ -576,6 +618,7 @@ local function newStudioEvidenceService(
 	local function createBroadcaster(_dependencies: unknown): unknown
 		local adapter = {} :: any
 		function adapter.publish(_self: unknown, snapshot: unknown): unknown
+			table.insert(environment.operationOrder, "publish")
 			environment.publishCount += 1
 			if environment.publishMode == "failure" then
 				return Result.err(table.freeze({ code = PRIVATE_SENTINEL }))
@@ -591,6 +634,12 @@ local function newStudioEvidenceService(
 				environment.reentryResult = (environment.service :: MatchLifecycleService.Service):activateStudioWaveForEvidence()
 			elseif environment.publishMode == "shutdown" then
 				invoke((environment.service :: MatchLifecycleService.Service):getServiceDefinition().shutdown)
+			elseif environment.publishMode == "wave-reenter" then
+				local service = environment.service :: MatchLifecycleService.Service
+				environment.waveCommitReentryResult = service:commitWaveActivation(environment.waveReentryToken)
+				environment.waveBeginReentryResult = service:beginWaveActivation(MATCH_ID)
+				environment.waveBaseReentryResult = service:beginBaseDefeat(MATCH_ID)
+				environment.waveStudioReentryResult = service:activateStudioWaveForEvidence()
 			end
 			table.insert(environment.publishedSnapshots, snapshot :: MatchLifecycleService.MatchSnapshot)
 			return Result.ok(table.freeze({ kind = "Sent" }))
@@ -1486,6 +1535,365 @@ return TestHarness.suite("match lifecycle service", {
 		assertions.isTrue(second:rollbackBaseDefeat(secondToken.value).ok)
 		invoke(first:getServiceDefinition().shutdown)
 		invoke(second:getServiceDefinition().shutdown)
+	end),
+
+	TestHarness.case("commits one opaque PreWave activation in guarded operation order", function(assertions)
+		local service, environment = newStudioEvidenceService(assertions)
+		local machine = environment.machine :: MatchStateMachine.StateMachine
+		local before = machine:getSnapshot()
+		assertions.isTrue(before.ok)
+		if not before.ok then
+			error("[ATD_TEST][code=WAVE_ACTIVATION_PREWAVE_MISSING]", 0)
+		end
+		table.clear(environment.operationOrder)
+		local publicationsBefore = environment.publishCount
+
+		local began = service:beginWaveActivation(MATCH_ID)
+		assertions.isTrue(began.ok)
+		if not began.ok then
+			error("[ATD_TEST][code=WAVE_ACTIVATION_BEGIN_REJECTED]", 0)
+		end
+		assertions.isTrue(table.isfrozen(began.value))
+		assertions.isNil(next(began.value))
+		assertions.equal(table.concat(environment.operationOrder, ","), "begin-WaveActive")
+		local prepared = machine:getSnapshot()
+		assertions.isTrue(prepared.ok)
+		if prepared.ok then
+			assertions.equal(prepared.value.matchId, before.value.matchId)
+			assertions.equal(prepared.value.revision, before.value.revision)
+			assertions.equal(prepared.value.state, "PreWave")
+		end
+
+		local committed = service:commitWaveActivation(began.value)
+		assertions.isTrue(committed.ok)
+		if not committed.ok then
+			error("[ATD_TEST][code=WAVE_ACTIVATION_COMMIT_REJECTED]", 0)
+		end
+		assertions.isTrue(committed.value.committed)
+		assertions.isTrue(committed.value.published)
+		assertions.equal(committed.value.snapshot.matchId, MATCH_ID)
+		assertions.equal(committed.value.snapshot.revision, before.value.revision + 1)
+		assertions.equal(committed.value.snapshot.state, "WaveActive")
+		assertions.isNil(committed.value.snapshot.deadlineServerTime)
+		assertDetachedAndFrozen(assertions, committed.value)
+		assertions.equal(table.concat(environment.operationOrder, ","), "begin-WaveActive,commit,publish")
+		assertions.equal(environment.publishCount, publicationsBefore + 1)
+
+		local duplicate = service:commitWaveActivation(began.value)
+		assertions.isTrue(duplicate.ok)
+		if duplicate.ok then
+			assertions.equal(duplicate.value, committed.value)
+		end
+		assertions.equal(environment.publishCount, publicationsBefore + 1)
+		local lateRollback = service:rollbackWaveActivation(began.value)
+		assertions.isFalse(lateRollback.ok)
+		if not lateRollback.ok then
+			assertions.equal(lateRollback.error.code, "INVALID_TOKEN")
+		end
+		invoke(service:getServiceDefinition().shutdown)
+	end),
+
+	TestHarness.case("rejects wrong Match state and unauthenticated activation tokens", function(assertions)
+		local first, _firstEnvironment = newStudioEvidenceService(assertions)
+		local wrongMatch = first:beginWaveActivation("match:other-wave-activation")
+		assertions.isFalse(wrongMatch.ok)
+		if not wrongMatch.ok then
+			assertions.equal(wrongMatch.error.code, "NOT_AUTHORIZED")
+			assertions.equal(wrongMatch.error.operation, "beginWaveActivation")
+		end
+		local hostileMatch = first:beginWaveActivation(0 / 0)
+		assertions.isFalse(hostileMatch.ok)
+		if not hostileMatch.ok then
+			assertions.equal(hostileMatch.error.code, "NOT_AUTHORIZED")
+		end
+
+		local forgedToken = table.freeze({})
+		local forgedCommit = first:commitWaveActivation(forgedToken)
+		assertions.isFalse(forgedCommit.ok)
+		if not forgedCommit.ok then
+			assertions.equal(forgedCommit.error.code, "INVALID_TOKEN")
+		end
+		local forgedRollback = first:rollbackWaveActivation(forgedToken)
+		assertions.isFalse(forgedRollback.ok)
+		if not forgedRollback.ok then
+			assertions.equal(forgedRollback.error.code, "INVALID_TOKEN")
+		end
+
+		local readyCheck, _readyEnvironment = newStudioEvidenceService(assertions, false)
+		local wrongState = readyCheck:beginWaveActivation(MATCH_ID)
+		assertions.isFalse(wrongState.ok)
+		if not wrongState.ok then
+			assertions.equal(wrongState.error.code, "WRONG_STATE")
+		end
+
+		local second, _secondEnvironment = newStudioEvidenceService(assertions)
+		local firstToken = first:beginWaveActivation(MATCH_ID)
+		local secondToken = second:beginWaveActivation(MATCH_ID)
+		assertions.isTrue(firstToken.ok)
+		assertions.isTrue(secondToken.ok)
+		if not firstToken.ok or not secondToken.ok then
+			error("[ATD_TEST][code=WAVE_ACTIVATION_FOREIGN_SETUP_FAILED]", 0)
+		end
+		local foreign = second:commitWaveActivation(firstToken.value)
+		assertions.isFalse(foreign.ok)
+		if not foreign.ok then
+			assertions.equal(foreign.error.code, "INVALID_TOKEN")
+		end
+		assertions.isTrue(first:rollbackWaveActivation(firstToken.value).ok)
+		assertions.isTrue(second:rollbackWaveActivation(secondToken.value).ok)
+		invoke(first:getServiceDefinition().shutdown)
+		invoke(second:getServiceDefinition().shutdown)
+		invoke(readyCheck:getServiceDefinition().shutdown)
+	end),
+
+	TestHarness.case("blocks duplicate Studio BaseDefeat and self reentry during activation", function(assertions)
+		local service, environment = newStudioEvidenceService(assertions)
+		local began = service:beginWaveActivation(MATCH_ID)
+		assertions.isTrue(began.ok)
+		if not began.ok then
+			error("[ATD_TEST][code=WAVE_ACTIVATION_BEGIN_REJECTED]", 0)
+		end
+
+		local duplicateBegin = service:beginWaveActivation(MATCH_ID)
+		assertions.isFalse(duplicateBegin.ok)
+		if not duplicateBegin.ok then
+			assertions.equal(duplicateBegin.error.code, "REENTRANT")
+		end
+		local studioAgainstPrepared = service:activateStudioWaveForEvidence()
+		assertions.isFalse(studioAgainstPrepared.ok)
+		if not studioAgainstPrepared.ok then
+			assertions.equal(studioAgainstPrepared.error.code, "REENTRANT")
+		end
+
+		environment.publishMode = "wave-reenter"
+		environment.waveReentryToken = began.value
+		local committed = service:commitWaveActivation(began.value)
+		assertions.isTrue(committed.ok)
+		if not committed.ok then
+			error("[ATD_TEST][code=WAVE_ACTIVATION_REENTRY_LOST_COMMIT]", 0)
+		end
+		assertions.isTrue(committed.value.committed)
+		assertions.isFalse(committed.value.published)
+		for _, resultValue in
+			{
+				environment.waveCommitReentryResult,
+				environment.waveBeginReentryResult,
+				environment.waveBaseReentryResult,
+				environment.waveStudioReentryResult,
+			}
+		do
+			local reentry = resultValue :: any
+			assertions.equal(type(reentry), "table")
+			assertions.isFalse(reentry.ok)
+			assertions.equal(reentry.error.code, "REENTRANT")
+		end
+		assertions.equal(successSnapshot(assertions, service).state, "WaveActive")
+		invoke(service:getServiceDefinition().shutdown)
+	end),
+
+	TestHarness.case("preserves irreversible WaveActive truth when publication fails", function(assertions)
+		local service, environment = newStudioEvidenceService(assertions)
+		environment.publishMode = "failure"
+		local began = service:beginWaveActivation(MATCH_ID)
+		assertions.isTrue(began.ok)
+		if not began.ok then
+			error("[ATD_TEST][code=WAVE_ACTIVATION_BEGIN_REJECTED]", 0)
+		end
+		local publicationsBefore = environment.publishCount
+		local committed = service:commitWaveActivation(began.value)
+		assertions.isTrue(committed.ok)
+		if not committed.ok then
+			error("[ATD_TEST][code=WAVE_ACTIVATION_COMMITTED_TRUTH_LOST]", 0)
+		end
+		assertions.isTrue(committed.value.committed)
+		assertions.isFalse(committed.value.published)
+		assertions.equal(committed.value.snapshot.state, "WaveActive")
+		assertions.equal(environment.publishCount, publicationsBefore + 1)
+		assertions.equal(successSnapshot(assertions, service).state, "WaveActive")
+
+		local duplicate = service:commitWaveActivation(began.value)
+		assertions.isTrue(duplicate.ok)
+		if duplicate.ok then
+			assertions.equal(duplicate.value, committed.value)
+		end
+		assertions.equal(environment.publishCount, publicationsBefore + 1)
+		assertions.isFalse(service:rollbackWaveActivation(began.value).ok)
+		invoke(service:getServiceDefinition().shutdown)
+	end),
+
+	TestHarness.case("rolls back only prepared activation tokens at the original revision", function(assertions)
+		local service, environment = newStudioEvidenceService(assertions)
+		local before = (environment.machine :: MatchStateMachine.StateMachine):getSnapshot()
+		assertions.isTrue(before.ok)
+		if not before.ok then
+			error("[ATD_TEST][code=WAVE_ACTIVATION_PREWAVE_MISSING]", 0)
+		end
+		local began = service:beginWaveActivation(MATCH_ID)
+		assertions.isTrue(began.ok)
+		if not began.ok then
+			error("[ATD_TEST][code=WAVE_ACTIVATION_BEGIN_REJECTED]", 0)
+		end
+		local rolledBack = service:rollbackWaveActivation(began.value)
+		assertions.isTrue(rolledBack.ok)
+		if rolledBack.ok then
+			assertions.isTrue(rolledBack.value)
+		end
+		local after = (environment.machine :: MatchStateMachine.StateMachine):getSnapshot()
+		assertions.isTrue(after.ok)
+		if after.ok then
+			assertions.equal(after.value.matchId, before.value.matchId)
+			assertions.equal(after.value.revision, before.value.revision)
+			assertions.equal(after.value.state, "PreWave")
+		end
+		assertions.isFalse(service:rollbackWaveActivation(began.value).ok)
+		assertions.isFalse(service:commitWaveActivation(began.value).ok)
+
+		local replacement = service:beginWaveActivation(MATCH_ID)
+		assertions.isTrue(replacement.ok)
+		if replacement.ok then
+			assertions.isTrue(service:rollbackWaveActivation(replacement.value).ok)
+		end
+		invoke(service:getServiceDefinition().shutdown)
+	end),
+
+	TestHarness.case("authenticates only the exact retained runtime map object", function(assertions)
+		local service = newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil)
+		assertions.isFalse(service:isRuntimeMapSnapshot(RUNTIME_MAP_SNAPSHOT))
+		local definition = service:getServiceDefinition()
+		invoke(definition.initialize)
+
+		local retained = service:getRuntimeMapSnapshot()
+		assertions.isTrue(retained.ok)
+		if not retained.ok then
+			error("[ATD_TEST][code=RUNTIME_MAP_SNAPSHOT_MISSING]", 0)
+		end
+		assertions.equal(retained.value, RUNTIME_MAP_SNAPSHOT)
+		assertions.isTrue(service:isRuntimeMapSnapshot(retained.value))
+		local forged = frozenClone(retained.value)
+		assertions.notEqual(forged, retained.value)
+		assertions.isTrue(table.isfrozen(forged))
+		assertions.isFalse(service:isRuntimeMapSnapshot(forged))
+		assertions.isFalse(service:isRuntimeMapSnapshot(table.freeze({})))
+
+		invoke(definition.start)
+		assertions.isTrue(service:isRuntimeMapSnapshot(retained.value))
+		invoke(definition.shutdown)
+		assertions.isFalse(service:isRuntimeMapSnapshot(retained.value))
+	end),
+
+	TestHarness.case("returns fresh sorted bounded recipients and observes disconnects", function(assertions)
+		local forty = { userId = 40 }
+		local minusSeven = { userId = -7 }
+		local ten = { userId = 10 }
+		local twenty = { userId = 20 }
+		local excess = { userId = 99 }
+		local source = fakePlayerSource({ forty, excess, ten, minusSeven, twenty })
+		local service = newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil, nil, source)
+		local definition = service:getServiceDefinition()
+		invoke(definition.initialize)
+		invoke(definition.start)
+
+		local first = service:getConnectedRecipients()
+		local second = service:getConnectedRecipients()
+		assertions.isTrue(first.ok)
+		assertions.isTrue(second.ok)
+		if not first.ok or not second.ok then
+			error("[ATD_TEST][code=CONNECTED_RECIPIENTS_MISSING]", 0)
+		end
+		assertions.equal(#first.value, 4)
+		assertions.isTrue(#first.value <= 4)
+		assertions.equal(first.value[1].userId, -7)
+		assertions.equal(first.value[2].userId, 10)
+		assertions.equal(first.value[3].userId, 20)
+		assertions.equal(first.value[4].userId, 40)
+		assertions.equal(first.value[1].recipient, minusSeven)
+		assertions.equal(first.value[4].recipient, forty)
+		assertions.isTrue(table.isfrozen(first.value))
+		assertions.isTrue(table.isfrozen(first.value[1]))
+		assertions.notEqual(first.value, second.value)
+		assertions.notEqual(first.value[1], second.value[1])
+
+		source.existing = { forty, excess, minusSeven, twenty }
+		local removing = source.removingListener :: MatchLifecycleService.PlayerListener
+		removing(ten)
+		local afterDisconnect = service:getConnectedRecipients()
+		assertions.isTrue(afterDisconnect.ok)
+		if afterDisconnect.ok then
+			assertions.equal(#afterDisconnect.value, 3)
+			assertions.equal(afterDisconnect.value[1].userId, -7)
+			assertions.equal(afterDisconnect.value[2].userId, 20)
+			assertions.equal(afterDisconnect.value[3].userId, 40)
+		end
+
+		invoke(definition.shutdown)
+		local afterCleanup = service:getConnectedRecipients()
+		assertions.isFalse(afterCleanup.ok)
+		if not afterCleanup.ok then
+			assertions.equal(afterCleanup.error.code, "UNAVAILABLE")
+			assertions.equal(afterCleanup.error.operation, "getConnectedRecipients")
+		end
+	end),
+
+	TestHarness.case("closes transient recipient reads across BaseDefeat ownership", function(assertions)
+		local service, _environment = newWaveActiveDefeatService(assertions)
+		local before = service:getConnectedRecipients()
+		assertions.isTrue(before.ok)
+		if before.ok then
+			assertions.equal(#before.value, 0)
+		end
+
+		local began = service:beginBaseDefeat(MATCH_ID)
+		assertions.isTrue(began.ok)
+		if not began.ok then
+			error("[ATD_TEST][code=BASE_DEFEAT_BEGIN_REJECTED]", 0)
+		end
+		local preparedRead = service:getConnectedRecipients()
+		assertions.isFalse(preparedRead.ok)
+		if not preparedRead.ok then
+			assertions.equal(preparedRead.error.code, "UNAVAILABLE")
+		end
+		assertions.isTrue(service:rollbackBaseDefeat(began.value).ok)
+		assertions.isTrue(service:getConnectedRecipients().ok)
+
+		local replacement = service:beginBaseDefeat(MATCH_ID)
+		assertions.isTrue(replacement.ok)
+		if not replacement.ok then
+			error("[ATD_TEST][code=BASE_DEFEAT_REPLACEMENT_REJECTED]", 0)
+		end
+		assertions.isTrue(service:commitBaseDefeat(replacement.value).ok)
+		local committedRead = service:getConnectedRecipients()
+		assertions.isFalse(committedRead.ok)
+		if not committedRead.ok then
+			assertions.equal(committedRead.error.code, "UNAVAILABLE")
+		end
+		invoke(service:getServiceDefinition().shutdown)
+	end),
+
+	TestHarness.case("revokes prepared activation map and recipient capabilities on cleanup", function(assertions)
+		local service, _environment = newStudioEvidenceService(assertions)
+		local began = service:beginWaveActivation(MATCH_ID)
+		assertions.isTrue(began.ok)
+		if not began.ok then
+			error("[ATD_TEST][code=WAVE_ACTIVATION_BEGIN_REJECTED]", 0)
+		end
+		assertions.isTrue(service:isRuntimeMapSnapshot(RUNTIME_MAP_SNAPSHOT))
+		assertions.isTrue(service:getConnectedRecipients().ok)
+
+		invoke(service:getServiceDefinition().shutdown)
+		assertions.equal(service:getLifecycleState(), "Shutdown")
+		assertions.isFalse(service:isRuntimeMapSnapshot(RUNTIME_MAP_SNAPSHOT))
+		assertions.isFalse(service:getRuntimeMapSnapshot().ok)
+		assertions.isFalse(service:getConnectedRecipients().ok)
+		local lateCommit = service:commitWaveActivation(began.value)
+		assertions.isFalse(lateCommit.ok)
+		if not lateCommit.ok then
+			assertions.equal(lateCommit.error.code, "UNAVAILABLE")
+		end
+		local lateRollback = service:rollbackWaveActivation(began.value)
+		assertions.isFalse(lateRollback.ok)
+		if not lateRollback.ok then
+			assertions.equal(lateRollback.error.code, "UNAVAILABLE")
+		end
 	end),
 
 	TestHarness.case(

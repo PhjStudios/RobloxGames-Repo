@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local EnemyProtocol = require(ReplicatedStorage.Shared.match.EnemyProtocol)
 local BaseProtocol = require(ReplicatedStorage.Shared.match.BaseProtocol)
 local MatchProtocol = require(ReplicatedStorage.Shared.match.MatchProtocol)
+local WaveProtocol = require(ReplicatedStorage.Shared.match.WaveProtocol)
 local PlaceRoles = require(ReplicatedStorage.Shared.config.PlaceRoles)
 local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
 local ServerBootstrap = require(script.Parent.ServerBootstrap)
@@ -12,6 +13,7 @@ local ServerRequestDispatcher = require(script.Parent.Parent.networking.ServerRe
 local BaseRuntimeService = require(script.Parent.Parent.Parent.match.base.BaseRuntimeService)
 local EnemySimulationService = require(script.Parent.Parent.Parent.match.enemies.EnemySimulationService)
 local MatchLifecycleService = require(script.Parent.Parent.Parent.match.lifecycle.MatchLifecycleService)
+local WaveRuntimeService = require(script.Parent.Parent.Parent.match.waves.WaveRuntimeService)
 
 local function publicError(code: RequestProtocol.PublicErrorCode): RequestProtocol.PublicError
 	local result = RequestProtocol.createPublicError(code, nil)
@@ -66,6 +68,8 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		network:registerServerEvent(EnemyProtocol.ENEMY_REPLICATION_ENDPOINT, EnemyProtocol.EnemyReplicationSchema)
 	local sendBaseReplication =
 		network:registerServerEvent(BaseProtocol.BASE_REPLICATION_ENDPOINT, BaseProtocol.BaseReplicationSchema)
+	local sendWaveReplication =
+		network:registerServerEvent(WaveProtocol.WAVE_REPLICATION_ENDPOINT, WaveProtocol.WaveSnapshotSchema)
 	local matchLifecycle = MatchLifecycleService.new(configuration.log, sendSnapshot)
 	local baseRuntime =
 		BaseRuntimeService.new(matchLifecycle, configuration.coreConfiguration.difficulties, sendBaseReplication)
@@ -74,6 +78,14 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		baseRuntime,
 		configuration.coreConfiguration.enemies,
 		sendEnemyReplication
+	)
+	local waveRuntime = WaveRuntimeService.new(
+		matchLifecycle,
+		baseRuntime,
+		enemySimulation,
+		configuration.coreConfiguration,
+		nil,
+		sendWaveReplication
 	)
 
 	network:registerRequest(
@@ -130,7 +142,36 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			return rejectEnemySnapshot(snapshotResult.error.code)
 		end
 	)
+	network:registerRequest(
+		WaveProtocol.GET_WAVE_SNAPSHOT_ENDPOINT,
+		WaveProtocol.GetWaveSnapshotPayloadSchema,
+		WaveProtocol.WaveSnapshotSchema,
+		authorizeContext,
+		function(_context, _payload)
+			local snapshotResult = waveRuntime:getSnapshot()
+			if snapshotResult.ok then
+				return ServerRequestDispatcher.success(snapshotResult.value)
+			end
+			return rejectCode(snapshotResult.error.code)
+		end
+	)
+	network:registerRequest(
+		WaveProtocol.SUBMIT_SKIP_VOTE_ENDPOINT,
+		WaveProtocol.SubmitSkipVotePayloadSchema,
+		WaveProtocol.WaveSnapshotSchema,
+		authorizeContext,
+		function(context, payload)
+			local canonicalPayload = payload :: WaveProtocol.SubmitSkipVotePayload
+			local voteResult =
+				waveRuntime:submitSkipVote(context.player.UserId, canonicalPayload.matchId, canonicalPayload.waveNumber)
+			if voteResult.ok then
+				return ServerRequestDispatcher.success(voteResult.value)
+			end
+			return rejectCode(voteResult.error.code)
+		end
+	)
 	configuration.lifecycleRunner:register(matchLifecycle:getServiceDefinition())
 	configuration.lifecycleRunner:register(baseRuntime:getServiceDefinition())
 	configuration.lifecycleRunner:register(enemySimulation:getServiceDefinition())
+	configuration.lifecycleRunner:register(waveRuntime:getServiceDefinition())
 end)
