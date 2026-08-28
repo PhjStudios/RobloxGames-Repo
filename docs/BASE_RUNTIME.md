@@ -13,6 +13,15 @@ authentication resolutions are incorporated below. The same reviewer confirmed
 all ten resolutions in the same review round; no blocking finding remains and
 the pre-implementation architecture gate is cleared.
 
+Packets 10.1–10.4 implement this decision. Their focused deterministic checks,
+exact unsaved two-client Match Studio gate, consolidated final review,
+`593`-case/`48`-suite local gate, and all four structural builds passed on
+2026-08-28. The final review found one P1 terminal-publication classification
+defect and one P2 Studio-count documentation gap; both were fixed and covered by
+the focused regression/evidence replay. Exact-final-SHA CI is cited at handoff
+rather than through a self-referential evidence commit. Phase 10 is complete;
+Phase 11 remains unbegun.
+
 Phase 10 adds one match-scoped server-owned defender-base runtime, its bounded
 reliable replication, a minimal client-owned world bar, and the narrow defeat
 coordination required to move an already active match to Results. Production
@@ -711,6 +720,82 @@ tweens; marker/UI removal followed by recreation without server-state change;
 future spawn rejection; ascending Defeat cleanup without extra leak damage; zero
 Phase 10 console errors; and zero runtime residue after End Session.
 
+## Executed Studio evidence — 2026-08-28
+
+The accepted runs used only the exact connected Match place: PlaceId
+`136401514513678`, GameId `10757629094`, CreatorType `Group`, CreatorId
+`35420107`, owner `PHJGAMES`, and `ATDPlaceRole = Match`. The task-owned
+`match.project.json` connection synchronized only mapped current-branch source.
+Every run began and ended in Edit mode; no map, marker, terrain, model, setting,
+unmapped instance, Team Create content, save, or publication changed.
+
+The non-defeat measurement initialized authenticated synthetic health at
+`1,000,000 / 1,000,000`. The predeclared endpoint ladder converged on both
+clients at these exact `(baseRevision, currentHealth)` checkpoints:
+
+| Outcomes | Base revision | Current health |
+| ---: | ---: | ---: |
+| 1 | 2 | 999999 |
+| 32 | 34 | 999967 |
+| 64 | 98 | 999903 |
+| 128 | 226 | 999775 |
+
+The ladder used five base publications including initialization. A zero-damage
+endpoint left revision `226`, health `999775`, and publication count `5`
+unchanged. The ordinary fixture produced revision `227`; the low-health fixture
+produced revision `228`, current health `249750`, and publication count `7`,
+with one low-health crossing, a persistent textual `LOW` state, and visible
+damage feedback. The later
+stale, duplicate, skipped, out-of-order, and recovery probe ended at revision
+`231`, current health `249675`, and publication count `9` without rollback. No
+simulation pass emitted more than one coalesced base-state publication.
+
+The measurement run's maximum ordinary client convergence was `0.030816`
+seconds. The established delayed-bootstrap active-session fallback recovered
+the suspended second client in `0.049293` seconds; this fallback was used because
+adding a true late Studio client terminates the local multiplayer server on the
+tested Studio build. Both values are below the `0.5`-second requirement. Each
+accepted checkpoint had zero MatchId, epoch, map/difficulty identity, health, or
+revision mismatches between the server and either client. Each client retained
+constant BaseController/BaseWorldView connection ownership of `2/38`; the one
+temporary measurement probe was disconnected and did not remain after the
+checkpoint. Lifetime BaseWorldView tween creation totals were `8` for Player1
+and `7` for Player2. Owned active tweens were `0` while idle and after UI
+recreation, bounded at `1` during visible damage feedback, and `0` after client
+cleanup; no connection or tween count grew with the `231` processed outcomes.
+The world bar used the real
+`Workspace.ATDRuntimeMap.Markers.DefenderBase` Part only as Adornee, hid and
+rebound across marker removal/restoration, and recreated after GUI deletion
+without changing server health or revision.
+
+The measured server simulation-pass maximum was `0.007418` seconds, with p50
+approximately `0.0000271` seconds and p95 approximately `0.0000360` seconds.
+Exact, overkill, and high-damage defeat scenarios each reached base revision
+`3` and Match Results revision `9`, with one defeat, one Results commit, and
+closed spawn admission. Each scenario recorded exactly `2` base publications:
+the initialized full state and the single coalesced terminal full state. In the
+exact scenario, one pre-existing survivor was
+the second terminal enemy while only the endpoint enemy leaked; the corrected
+run's maximum client convergence was `0.033782` seconds. Post-defeat spawn was
+rejected and active-enemy cleanup did not add leak damage.
+
+An earlier instrumented exact-defeat probe exposed one terminal MatchSnapshot
+recipient-capture seam: callback admission was already closed before the
+broadcaster asked for recipients. The implementation now captures and freezes
+the authenticated terminal recipient set during defeat preflight and permits
+only that set for the committed terminal snapshot. The focused regression and
+corrected exact/overkill/high Studio runs passed. The diagnostic warning from
+the discarded probe is not represented as an accepted-run console error.
+
+An offline replay over the immutable accepted Studio MCP response records
+executed `804` explicit identity, authority, arithmetic, ordering, convergence,
+publication, UI, connection/tween, console, and cleanup assertions with `0`
+failures. The discarded diagnostic probe was excluded from that ledger. The
+accepted measurement and defeat runs had zero console errors. End Session
+removed base state, outcome ledger, result seed, request/recovery state,
+feedback, listeners, tween, GUI, trigger, enemies, runtime map, network root, and
+caches; no runtime residue remained.
+
 ## Cleanup and residue contract
 
 EnemySimulation shutdown first closes all mutation/callback admission,
@@ -753,5 +838,8 @@ build and zero runnable Test scripts, exclude every spec/fixture/Studio harness
 from production, keep Lobby free of Match source and Match free of Lobby source,
 prove production `Difficulties`, `Maps`, `Waves`, `Enemies`, and `Assets` remain
 empty, reject generated output, and prove no Phase 11 source or behavior began.
-Final suite/module/runnable/endpoint/rate-policy counts are recorded only from
-the actual final gate.
+The actual final gate passed `593` cases across `48` suites. Default, Lobby,
+Match, and Test contain `71/45/71/129` ModuleScripts respectively; production
+builds each retain exactly one Script and one LocalScript, while Test has zero
+runnable scripts. The registry contains `7` reliable Match-only endpoints
+(`4` requests and `3` events) and `4` inbound rate policies.

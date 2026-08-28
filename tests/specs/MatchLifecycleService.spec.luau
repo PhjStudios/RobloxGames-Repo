@@ -300,9 +300,10 @@ type DefeatTestEnvironment = {
 	service: MatchLifecycleService.Service?,
 	machine: MatchStateMachine.StateMachine?,
 	commitMode: "success" | "failure" | "throw" | "yield" | "commit-then-throw" | "commit-then-yield",
-	publishMode: "success" | "failure" | "throw" | "yield" | "reenter" | "shutdown",
+	publishMode: "success" | "failure" | "throw" | "yield" | "malformed" | "budget" | "reenter" | "shutdown",
 	publishCount: number,
 	publishedSnapshots: { MatchLifecycleService.MatchSnapshot },
+	readRecipients: (() -> unknown)?,
 	reentryResult: unknown?,
 	reentryToken: MatchLifecycleService.BaseDefeatToken?,
 	cleanupCount: number,
@@ -318,6 +319,7 @@ local function newWaveActiveDefeatService(
 		publishMode = "success",
 		publishCount = 0,
 		publishedSnapshots = {},
+		readRecipients = nil,
 		reentryResult = nil,
 		reentryToken = nil,
 		cleanupCount = 0,
@@ -370,6 +372,7 @@ local function newWaveActiveDefeatService(
 
 	local function createBroadcaster(dependenciesValue: unknown): unknown
 		local dependencies = dependenciesValue :: any
+		environment.readRecipients = dependencies.getRecipients
 		local adapter = {} :: any
 		function adapter.publish(_self: unknown, snapshot: unknown): unknown
 			environment.publishCount += 1
@@ -384,6 +387,10 @@ local function newWaveActiveDefeatService(
 				error(PRIVATE_SENTINEL, 0)
 			elseif environment.publishMode == "yield" then
 				coroutine.yield()
+			elseif environment.publishMode == "malformed" then
+				return Result.ok(table.freeze({ kind = "Sent", extra = PRIVATE_SENTINEL }))
+			elseif environment.publishMode == "budget" then
+				return Result.ok(table.freeze({ kind = "BudgetExhausted" }))
 			end
 			if environment.publishMode == "success" then
 				local recipientsRead, recipients = pcall(dependencies.getRecipients)
@@ -392,7 +399,7 @@ local function newWaveActiveDefeatService(
 				end
 			end
 			table.insert(environment.publishedSnapshots, snapshot :: MatchLifecycleService.MatchSnapshot)
-			return Result.ok(true)
+			return Result.ok(table.freeze({ kind = "Sent" }))
 		end
 		function adapter.cleanup(_self: unknown): unknown
 			environment.cleanupCount += 1
@@ -1252,6 +1259,9 @@ return TestHarness.suite("match lifecycle service", {
 		assertions.equal(committed.value.snapshot.revision, before.revision + 1)
 		assertDetachedAndFrozen(assertions, committed.value)
 		assertions.equal(environment.publishCount, publicationsBeforeCommit + 1)
+		local terminalRecipients = (environment.readRecipients :: () -> unknown)()
+		assertions.equal(type(terminalRecipients), "table")
+		assertions.isTrue(table.isfrozen(terminalRecipients :: any))
 
 		local duplicate = service:commitBaseDefeat(began.value)
 		assertions.isTrue(duplicate.ok)
@@ -1372,7 +1382,7 @@ return TestHarness.suite("match lifecycle service", {
 	end),
 
 	TestHarness.case("preserves committed Results across publication and reentry faults", function(assertions)
-		for _, mode in { "failure", "throw", "yield", "reenter" } do
+		for _, mode in { "failure", "throw", "yield", "malformed", "budget", "reenter" } do
 			local service, environment = newWaveActiveDefeatService(assertions)
 			local began = service:beginBaseDefeat(MATCH_ID)
 			assertions.isTrue(began.ok)

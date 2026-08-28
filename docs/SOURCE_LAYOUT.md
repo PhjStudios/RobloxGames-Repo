@@ -17,7 +17,12 @@ place-isolated mappings recorded in `docs/ROJO_PROJECTS.md`.
 - Studio-authored content changed: no
 - Place saved or published: no
 
-## Current Phase 09-relevant source tree excerpt
+Those fields record Packet 02.1. The current Phase 10 extension adds only
+ModuleScripts beneath the established shared/server-Match/client-Match layers
+and test-only mirrors/specs; it adds no runnable entrypoint. Focused and exact
+Studio checks passed on 2026-08-28. Phase 11 remains unbegun.
+
+## Current Phase 10-relevant source tree excerpt
 
 ```text
 src/
@@ -50,6 +55,7 @@ src/
       EnvironmentContext.luau
       Log.luau
     match/
+      BaseProtocol.luau
       EnemyProtocol.luau
       MatchProtocol.luau
     network/
@@ -80,6 +86,10 @@ src/
     match/
       bootstrap/
         Main.server.luau
+      base/
+        BaseReplicationPublisher.luau
+        BaseRuntime.luau
+        BaseRuntimeService.luau
       enemies/
         EnemyPath.luau
         EnemyReplicationPublisher.luau
@@ -111,6 +121,11 @@ src/
     match/
       bootstrap/
         Main.client.luau
+      base/
+        BaseController.luau
+        BaseStateReducer.luau
+        BaseViewModel.luau
+        BaseWorldView.luau
       enemies/
         EnemyController.luau
         EnemyPresentation.luau
@@ -122,11 +137,21 @@ src/
       .gitkeep
 tests/
   fixtures/
+    BaseFixtures.luau
     EnemyFixtures.luau
     MapFixtures.luau
     NetworkFixtures.luau
   negative/
   specs/
+    BaseController.spec.luau
+    BaseDefeatIntegration.spec.luau
+    BaseProtocol.spec.luau
+    BaseReplicationPublisher.spec.luau
+    BaseRuntime.spec.luau
+    BaseRuntimeService.spec.luau
+    BaseStateReducer.spec.luau
+    BaseViewModel.spec.luau
+    BaseWorldView.spec.luau
     ClientRequestTracker.spec.luau
     EnemyController.spec.luau
     EnemyMovement.spec.luau
@@ -166,16 +191,17 @@ tests/
   support/
 ```
 
-This excerpt shows every production source and the Phase 06–09 test areas
-relevant to the network, map, lifecycle, roster, ready, enemy simulation, and
-client-presentation boundaries. It intentionally omits unrelated
+This excerpt shows every production source and the Phase 06–10 test areas
+relevant to the network, map, lifecycle, roster, ready, enemy simulation,
+defender-base, and client-presentation boundaries. It intentionally omits unrelated
 test fixtures, negative controls, older specs, support modules, and runner
 entrypoints; it is not a complete tracked-file inventory.
 
 Any remaining `.gitkeep` markers preserve otherwise empty architecture
 directories. They are not Luau modules or runnable scripts and create no Roblox
 Instance. Match now contains the Phase 07 map modules, the Phase 08
-server/client composition, and the Phase 09 enemy modules shown above.
+server/client composition, the Phase 09 enemy modules, and the Phase 10 base
+modules shown above.
 
 `src/shared` remains the location for code that is safe and useful across both
 execution contexts and both place roles. Packet 02.3 added the typed place-role
@@ -275,16 +301,24 @@ normal shared mapping into every project. Default and Match map the eight
 role-specific enemy modules, Lobby maps none of those eight, and no new Script
 or LocalScript was added.
 
-The lasting production registry now contains exactly five reliable Match-only
-endpoints: `GetMatchSnapshot`, `SubmitReady`, `MatchSnapshot`,
+At Phase 09 completion the production registry contained exactly five reliable
+Match-only endpoints: `GetMatchSnapshot`, `SubmitReady`, `MatchSnapshot`,
 `GetEnemySnapshot`, and `EnemyReplication`. Exactly three production rate
 policies cover the three client-to-server requests. The frozen production
 `Enemies` and `Assets` catalogs remain empty, so enemy simulation is dormant
 without test/Studio-only injected content. Packets 09.1–09.5, focused
 executable coverage, Match Studio evidence, consolidated review, 467-case local
 gate, and all four structural builds passed on 2026-08-27. Phase 09 is complete.
-Phase 10 is next but its base/leak behavior has not begun, and Phase 11 wave
-scheduling has not begun.
+Phase 10 adds exactly eight production modules: shared `match/BaseProtocol.luau`;
+server-Match `base/BaseRuntime.luau`, `BaseRuntimeService.luau`, and
+`BaseReplicationPublisher.luau`; and client-Match `base/BaseController.luau`,
+`BaseStateReducer.luau`, `BaseViewModel.luau`, and `BaseWorldView.luau`. The
+existing Match entrypoints compose BaseRuntime between MatchLifecycle and
+EnemySimulation and BaseController between MatchReadyController and
+EnemyController; no Script or LocalScript is added. Two Match-only reliable
+definitions and one request-rate policy are added. Production `Difficulties`,
+`Maps`, `Waves`, `Enemies`, and `Assets` remain empty, so runtime initialization
+is dormant outside Studio/test injection. Phase 11 remains unbegun.
 
 ## Bootstrap move manifest
 
@@ -505,9 +539,9 @@ local exit gate passed.
 Phase 08 is complete; at that historical checkpoint, Phase 09 was next and had
 not begun.
 
-### Current Phase 09 source layout
+### Historical Phase 09 source layout
 
-The current structural contract expects 63 ModuleScripts in Default and Match,
+The Phase 09 structural contract expected 63 ModuleScripts in Default and Match,
 44 in Lobby, and exactly one Script plus one LocalScript in every production
 build. The common production inventory contains 35 shared modules, six
 server-only common modules, and three client-only common modules, for 44
@@ -542,13 +576,42 @@ shared tree. The exact Phase 09 specs are `EnemyProtocol`, `EnemyPath`,
 `EnemyFixtures` is the one new Test-owned fixture. These 11 suites contain 120
 focused cases. The complete local run passes 39 suites and 467 cases in total.
 
-The current production network catalog contains five reliable Match-only
-endpoints and the production rate catalog contains three policies. Production
-`Enemies` and `Assets` remain frozen empty arrays. Tests, fixtures, support,
+At Phase 09 completion the production network catalog contained five reliable
+Match-only endpoints and the production rate catalog contained three policies.
+Production `Enemies` and `Assets` remained frozen empty arrays. Tests, fixtures, support,
 negative controls, and Studio tools occur in no production build. Packets
 09.1–09.5, the exact Match Studio gate, consolidated review, complete local
 gate, and exact structural inventory passed on 2026-08-27. Phase 09 is complete;
-Phase 10 is next but has not begun, and Phase 11 has not begun.
+that dated inventory remains historical. The current Phase 10 extension follows.
+
+### Current Phase 10 source and Test boundary
+
+`BaseProtocol` is mapped once through the normal authoritative shared tree.
+Default and Match map the three `src/server/match/base` modules and four
+`src/client/match/base` modules; Lobby maps none of those seven role-specific
+modules. Match still substitutes only its two existing role entrypoints at the
+stable common Main paths, so no new runnable source is introduced.
+
+Test mirrors the exact three server modules beneath `ProductionServerBase` and
+the exact four client modules beneath `ProductionClientBase`. `BaseFixtures` and
+the nine Base specs shown in the source excerpt are Test-owned. No bootstrap,
+Studio trigger/harness source, role entrypoint, Script, or LocalScript is mapped
+into Test, and no test source is mapped into a production project.
+
+The verifier authenticates every Phase 10 path, class, authoritative file, and
+source byte; checks Lobby/Match isolation; keeps exactly one Script and one
+LocalScript in each production build and zero Test runnables; rejects generated
+output and Phase 11 markers; and proves production `Difficulties`, `Maps`,
+`Waves`, `Enemies`, and `Assets` remain empty. The current registry has exactly
+seven reliable Match-only endpoints and four inbound request-rate policies. The
+complete gate passed `593` cases across `48` suites; Default/Lobby/Match/Test
+contain `71/45/71/129` ModuleScripts and Script/LocalScript counts `1/1`, `1/1`,
+`1/1`, and `0/0` respectively.
+
+Phase 10 focused and exact Match Studio checks, consolidated review, complete
+local gate, and all four structural builds passed on 2026-08-28. Phase 10 is
+complete; exact-final-SHA CI is cited at handoff. Phase 11 is next and remains
+unbegun.
 
 ## Historical Packet 02 Roblox Studio verification
 
@@ -634,13 +697,16 @@ Match-ready client mirrors listed in its historical section above.
 Phase 09 adds only eight exact place-specific production mirrors under
 `ServerStorage.AutomatedTests`: four beneath `ProductionServerEnemies` and four
 beneath `ProductionClientEnemies`. Its eleven specs and `EnemyFixtures` remain
+Test-owned. Phase 10 adds the exact three `ProductionServerBase` and four
+`ProductionClientBase` mirrors; its nine specs and `BaseFixtures` remain
 Test-owned. The Test project still maps no bootstrap, shutdown hook, role
 entrypoint, Script, or LocalScript. Production code must never import a test
 module, and fixtures and intentional negative controls stay under test-only
 directories. The frozen production `src/shared/config/Enemies.luau` and
-`src/shared/config/Assets.luau` catalogs remain empty. The production remote
-registry contains only the five reliable Match endpoints, and only its three
-client-to-server requests have production rate policies.
+`src/shared/config/Assets.luau` catalogs remain empty, as do `Difficulties`,
+`Maps`, and `Waves`. The production remote registry contains only the seven
+reliable Match endpoints, and only its four client-to-server requests have
+production rate policies.
 
 `test.project.json` creates no runnable Script or LocalScript. Conversely,
 Default, Lobby, and Match map no test directory.
@@ -651,18 +717,20 @@ modules and three production map modules, and an exact positive
 path/class/source map for all 30 Test-owned ModuleScripts. Those counts are
 historical.
 
-The current Phase 09 verifier enforces both mapping directions across the
-complete generated DataModels: all 65 Default/Match and 46 Lobby production Lua
-containers, all 35 authoritative shared modules, all 25 exact production
-mirrors, and all 51 Test-owned ModuleScripts. It authenticates exact DataModel
-path, class, authoritative file, and byte-for-byte source, rejects unlisted
-Test-owned source, proves zero Test runnables, excludes all tests and Studio
-tools from production, and rejects Phase 10/11 source markers.
+The current Phase 10 verifier enforces both mapping directions across the
+complete generated DataModels and its exact allowlists of authoritative shared,
+production-mirror, and Test-owned modules. It authenticates DataModel path,
+class, authoritative file, and byte-for-byte source, rejects unlisted Test-owned
+source, proves zero Test runnables, excludes all tests and Studio tools from
+production, and rejects Phase 11 source or behavior. The final Phase 10
+inventory is `71/45/71/129` ModuleScripts across Default/Lobby/Match/Test, with
+no Test runnable source.
 
 This headless boundary and every environment-specific follow-up are indexed in
 `docs/TEST_MATRIX.md`; passing it does not substitute for published-client or
 device evidence. Packet 06.5's specific unsaved Studio and two-client regression
 is recorded above. Phase 09's exact two-client Match Studio evidence,
 consolidated review, 467-case local gate, and four current structural builds
-passed on 2026-08-27 and are recorded in `docs/ENEMY_SIMULATION.md`. The
+passed on 2026-08-27 and are recorded in `docs/ENEMY_SIMULATION.md`. Phase 10's
+focused and exact Studio evidence is recorded in `docs/BASE_RUNTIME.md`. The
 exact-final-SHA CI evidence is cited at handoff.

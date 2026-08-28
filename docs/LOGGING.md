@@ -35,6 +35,15 @@ Packet 06.4 adds only `protocolRejectionCount` and
 add request IDs, Players, payloads, handler errors, or response contents to the
 logging vocabulary.
 
+Phases 08–10 reuse this closed vocabulary without adding a gameplay telemetry
+subsystem or high-frequency record. Phase 10 base arithmetic, endpoint outcomes,
+health, revisions, recipients, map markers, result seeds, and UI state are never
+logged. A fail-closed MatchLifecycle diagnostic uses only the existing
+`lifecycle` subsystem plus static event/message, stable `code`, static `service`,
+and typed `state` fields. Sender, transition, callback, validation, and cleanup
+errors discard caught values and client data. Studio timings, assertion totals,
+and connection counts are bounded test diagnostics, not production log records.
+
 ## Architecture boundary
 
 `EnvironmentContext` creates validated runtime identity records. `Log` binds
@@ -314,12 +323,13 @@ The common server and client bootstraps now follow the same sequence:
 7. On validation failure, raise a production-visible static error containing
    only first code, issue count, and canonical path; create no lifecycle,
    cleanup, or shutdown resource.
-8. On success, emit a Studio-only `configuration/validated` record. The client
-   creates an empty lifecycle runner; the server constructs the fixed network
-   owner from the empty production registry and empty production rate-policy
-   list and registers its one `NetworkRegistry` service before lifecycle
-   initialization. Both create a `bootstrap` cleanup container with the same
-   logger.
+8. On success, emit a Studio-only `configuration/validated` record. At the
+   Packet 03.3 checkpoint the client runner and production registry were empty.
+   The current Match composition constructs the fixed network owner from the
+   reviewed production registry/rate catalogs, registers NetworkRegistry first,
+   and then registers MatchLifecycle, BaseRuntime, and EnemySimulation; the
+   client registers MatchReadyController, BaseController, and EnemyController.
+   Both bootstraps create a `bootstrap` cleanup container with the same logger.
 9. Emit one Studio-only `ready` record containing resolved context, lifecycle
    state/count, and cleanup state/count.
 
@@ -463,9 +473,12 @@ Phase 04 packet to extend the public vocabulary, narrowly adding the
 report, privacy, bootstrap, and Studio evidence is recorded in
 `docs/CONFIGURATION_VALIDATION.md`.
 
-Packets 06.1–06.5 make and test the narrow `network` vocabulary and aggregate-field
-extensions recorded above. The lasting production registry and rate-policy list
-remain empty, and no gameplay endpoint was created. Packet 06.5 and the fresh
-Phase 06/Gate A audit pass, including clean workflow run `33022784985`. Phase 06
-is complete and Gate A passed. The architecture and privacy boundary are
-recorded in `docs/NETWORK_PROTOCOL.md`.
+Packets 06.1–06.5 make and test the narrow `network` vocabulary and
+aggregate-field extensions recorded above. Their registry-empty statement is a
+historical Phase 06 checkpoint; the current reviewed Match-only definitions are
+recorded in `docs/NETWORK_PROTOCOL.md`. Phases 08–10 add no log sink or
+client-authored logging path. Phase 10 focused and exact Studio checks had zero
+accepted-run console errors on 2026-08-28; its consolidated review and complete
+local/structural gate also passed, and its base/defeat logging boundary is
+recorded in `docs/BASE_RUNTIME.md`. Phase 10 is complete and Phase 11 remains
+unbegun.

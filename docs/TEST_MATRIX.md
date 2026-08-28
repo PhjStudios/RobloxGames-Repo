@@ -14,18 +14,22 @@ Packets 08.1–08.5, exact four-client Match Studio gate, consolidated final
 review, 347-case local suite, and all four then-current structural builds passed
 on 2026-08-27. Phase 09 Packets 09.1–09.5, their exact Match Studio gate,
 consolidated final review, 467-case local gate, and all four structural builds
-also passed on 2026-08-27. Phase 09 is complete; Phase 10 is next but has not
-begun.
+  also passed on 2026-08-27. Phase 09 is complete. Phase 10 Packets 10.1–10.4,
+  their focused deterministic and exact unsaved Match Studio checks,
+  consolidated final review, `593`-case/`48`-suite local gate, and all four
+  structural builds passed on 2026-08-28. Phase 10 is complete; exact-final-SHA
+  CI is cited at handoff. Phase 11 remains unbegun.
 
 The current repository has a fixed remote-registry/network-ownership foundation,
 strict shared payload validators, a server-authoritative token-bucket limiter,
 and bounded asynchronous request/correlation/error contracts. Production now
-contains five Match-only reliable endpoints and three exact client-request rate
+contains seven Match-only reliable endpoints and four exact client-request rate
 policies. It has the Phase 08 lifecycle/roster/Ready system and minimal Ready UI,
 plus the Phase 09 server-owned enemy runtime, fixed-lane simulation, bounded
-replication, and client-created placeholder renderer. It still has no base
-health or leak damage, defeat/Results behavior, waves or production spawn
-cadence, combat, towers, placement, rewards, persistence, matchmaking,
+replication, and client-created placeholder renderer, plus the Phase 10
+server-owned base/leak runtime, bounded base recovery/world bar, and one defeat
+transition into Results. It still has no waves or production spawn cadence,
+combat, towers, placement, results screen, rewards, persistence, matchmaking,
 teleports, or external-service implementation. A separate private test universe
 has not been created or configured. Later tests remain `Deferred`, `Unavailable`,
 or `Prohibited` when their exact systems or environments do not exist; they are
@@ -83,9 +87,10 @@ linked historical document for the original Studio evidence.
 - **System or contract:** repository-owned deterministic runner, discovery,
   stable ordering, module loading, assertion reporting, privacy, and exit codes.
 - **Test category:** automated headless unit/runner test.
-- **Current status:** `Passed` for the complete Phase 09 exit run on Windows x64
-  on 2026-08-27: `467` cases across `39` suites. The Phase 09 focused subset is
-  `120` cases across `11` suites.
+- **Current status:** `Passed` for the complete Phase 10 exit run on Windows x64
+  on 2026-08-28: `593` cases across `48` suites. The nine dedicated Phase 10 base
+  suites contain `97` focused cases; the review-fix MatchLifecycle suite passes
+  `29/29`.
 - **Environment:** repository checkout with the versions pinned by `rokit.toml`;
   no Roblox Studio, network, publication, or external Roblox service.
 - **Command or procedure:** run `lune run tests/run.luau`. For isolated failure
@@ -98,7 +103,7 @@ linked historical document for the original Studio evidence.
   H-06 separately records the required current GitHub Actions exit evidence.
 - **Destructive-data risk:** none; the runner uses only deterministic fixtures
   and an exact ignored build path that it removes.
-- **Expected evidence:** 39 suites and 467 tests pass in stable path and
+- **Expected Phase 09 evidence:** 39 suites and 467 tests pass in stable path and
   declaration order; zero discovery, module-load, malformed-root/discovery, and
   runner-crash controls return their documented nonzero exit classes; output
   contains stable suite, case, assertion, code, and path context without private
@@ -108,7 +113,7 @@ linked historical document for the original Studio evidence.
 - **Phase or prerequisite:** available now; Packet 05.1 established the runner,
   Packet 05.2 established the initial contract suite, Packets 06.1–06.5 added
   the networking foundation, and Phases 07–09 added the current map, Match, and
-  enemy suites.
+  enemy suites. Phase 10 adds the focused base suites indexed in H-12.
 
 ### H-02 — Cleanup contract
 
@@ -190,9 +195,11 @@ linked historical document for the original Studio evidence.
   Lua source map, production runnable-entrypoint counts, place-role isolation,
   and absence of tests/test-only dependencies from production.
 - **Test category:** automated headless build and structural integration test.
-- **Current status:** `Passed` for the current Phase 09 inventory on 2026-08-27.
-  The Phase 06 audit-content run `33022784985` and the Phase 07/08 structures
-  remain historical evidence; exact-final-SHA Phase 09 CI is cited at handoff.
+- **Current status:** `Passed` for the Phase 10 inventory on 2026-08-28. The
+  current Default/Lobby/Match/Test builds contain `71/45/71/129` ModuleScripts;
+  each production build has one Script and one LocalScript and Test has no
+  runnable source. The Phase 06 audit-content run and earlier inventories remain
+  historical evidence.
 - **Environment:** current local Windows x64 plus the GitHub Actions
   `windows-2025` runner using pinned Rojo and Lune.
 - **Command or procedure:** run `lune run tests/verify-builds.luau`.
@@ -202,7 +209,7 @@ linked historical document for the original Studio evidence.
   for the current exit evidence; no Roblox service or publication is required.
 - **Destructive-data risk:** none; generated builds are ignored and exact-path
   temporary outputs are removed.
-- **Expected evidence:** Default and Match each contain exactly 63
+- **Expected Phase 09 evidence:** Default and Match each contain exactly 63
   ModuleScripts, Lobby contains 44, and each has one Script and one LocalScript;
   Test contains 35 authoritative shared ModuleScripts, 25 exact production
   mirrors, and 51 test-owned ModuleScripts, with no runnable Script or
@@ -226,10 +233,11 @@ linked historical document for the original Studio evidence.
   generated-output residue, least-privilege workflow, and unambiguous negative
   controls.
 - **Test category:** automated local quality gate and GitHub Actions CI.
-- **Current status:** `Passed` for the complete Phase 09 local gate on
-  2026-08-27. Phase 05's negative controls and Phase 06 audit-content run
-  `33022784985` remain valid historical workflow evidence; exact-final-SHA Phase
-  09 Repository Verification is cited at handoff.
+- **Current status:** `Passed` for the complete Phase 10 local gate on
+  2026-08-28: formatting, lint, `593` tests across `48` suites, all four
+  structural builds, diff/scope/generated-output/test-exclusion/catalog/remote/
+  rate/role-isolation checks. Exact-final-SHA Repository Verification is cited
+  at handoff.
 - **Environment:** local Windows x64 or GitHub-hosted `windows-2025`; tools and
   action pins are repository-controlled.
 - **Command or procedure:** locally run, in order, `stylua src tests`, `stylua
@@ -429,6 +437,43 @@ linked historical document for the original Studio evidence.
 - **Phase or prerequisite:** Packets 09.1–09.5; authoritative contract is
   [Enemy Simulation and Replication](ENEMY_SIMULATION.md). Headless evidence does
   not claim engine rendering smoothness; M-07 records that separate Studio gate.
+
+### H-12 — Phase 10 base runtime, replication, presentation adapters, and defeat
+
+- **System or contract:** authenticated match-scoped base initialization,
+  exact-once endpoint outcomes and safe-integer arithmetic, independent revision
+  ordering, bounded reliable recovery/coalescing, world-view adapter behavior,
+  one safe-boundary defeat, Results commit, result seed, and cleanup.
+- **Test category:** deterministic headless unit, integration, protocol,
+  controller, and fault-injection tests with injected clocks/schedulers/senders.
+- **Current status:** `Passed` on 2026-08-28: `97` focused cases across the `9`
+  dedicated Phase 10 base suites, with `593` cases across `48` suites in the
+  complete repository run.
+- **Environment:** isolated Rojo Test DataModel under Lune. Production base,
+  enemy, lifecycle, and client modules are mapped at exact Test-only mirror
+  paths; definitions, outcomes, clocks, remotes, players, marker/view adapters,
+  and senders are test-owned.
+- **Command or procedure:** run `lune run tests/run.luau`; while iterating use
+  `--spec` for `BaseRuntime`, `BaseRuntimeService`, `BaseProtocol`,
+  `BaseReplicationPublisher`, `BaseStateReducer`, `BaseViewModel`,
+  `BaseWorldView`, `BaseController`, or `BaseDefeatIntegration`, plus directly
+  affected enemy/lifecycle/network suites.
+- **Required players or devices:** zero.
+- **Authorization/external/destructive risk:** none; no wall-clock wait, Roblox
+  service, publication, production content, or Studio asset is used.
+- **Expected evidence:** authentic configuration/provenance and mutation
+  isolation; every lifecycle state; zero/exact/overkill/high/simultaneous leaks;
+  duplicate/stale/foreign/revoked rejection; low crossing; replication races,
+  gaps, recovery, and sender faults; UI calculation/recreation adapters; one
+  defeat/Results transition; spawn closure; ordered active-enemy cleanup;
+  transition/publication/callback/shutdown faults; and residue-free idempotent
+  cleanup.
+- **Cleanup procedure:** each case clears test-owned state/Instances and the
+  runner removes its exact generated Test build.
+- **Phase or prerequisite:** Packets 10.1–10.4; authoritative contract is
+  [Defender Base Runtime and Replication](BASE_RUNTIME.md). Headless evidence
+  does not claim engine BillboardGui, Adornee, streaming, tween, or visual
+  behavior; M-08 records that separate Studio gate.
 
 ## Local Studio solo tests
 
@@ -910,8 +955,73 @@ linked historical document for the original Studio evidence.
   task-owned Rojo server; reset emulation/profiling; verify no runtime enemy,
   network, map, UI, test, timer, queue, or cache residue; leave Studio in Edit
   mode without save or publish.
-- **Phase or prerequisite:** Packets 09.1–09.5. This evidence does not implement
-  or approve Phase 10 base health/damage/Results or Phase 11 waves/cadence.
+- **Phase or prerequisite:** Packets 09.1–09.5. At that dated checkpoint this
+  evidence did not implement or approve Phase 10 base health/damage/Results or
+  Phase 11 waves/cadence; the later Phase 10 gate is M-08.
+
+### M-08 — Phase 10 defender base, recovery, world presentation, and defeat
+
+- **System or contract:** authenticated base identity/health, exact-once endpoint
+  leak damage through the real Phase 09 seam, coalesced reliable full-state
+  convergence, late recovery, marker-bound BillboardGui feedback, one defeat and
+  Results transition, spawn closure, ordered enemy cleanup, and residue-free
+  shutdown.
+- **Test category:** unsaved Match Studio Server & Clients correctness,
+  delayed-bootstrap, world-UI, profiling/statistics, fault, and cleanup gate.
+- **Current status:** `Passed` on 2026-08-28 for the exact Phase 10 Studio gate.
+  The consolidated final review and complete local/structural gate also pass;
+  exact-final-SHA CI is cited at handoff.
+- **Environment:** exact connected Match place, PlaceId `136401514513678`, GameId
+  `10757629094`, CreatorType `Group`, CreatorId `35420107`, owner `PHJGAMES`,
+  `ATDPlaceRole = Match`; one local server and exactly two simulated desktop
+  clients with only `match.project.json` synchronized. Every session began and
+  ended in Edit mode.
+- **Command or procedure:** use the fixed Studio-only server trigger and bounded
+  client diagnostics described in
+  [Defender Base Runtime and Replication](BASE_RUNTIME.md#executed-studio-evidence--2026-08-28).
+  Direct Studio MCP Luau performs assertions/inspection. Because adding a true
+  late client terminates the local server in this Studio build, use the already
+  established active-session delayed-bootstrap fallback: suspend one existing
+  client before initialization, then resume its one-shot bounded recovery.
+- **Authorization requirement:** current-branch Match Rojo synchronization and
+  runtime-only triggers were authorized. No manual Script.Source edit, Script
+  Sync, map/marker/asset mutation, save, publish, setting, Lobby, or unrelated
+  content change is permitted.
+- **External service or publication requirement:** none.
+- **Destructive-data risk:** low and bounded to synchronized repository-owned
+  source; pre/post persistent inventory protects Studio/Team Create content.
+- **Expected evidence:** measurement health began at `1,000,000`. The
+  `1/32/64/128` ladder reached revision/health `2/999999`, `34/999967`,
+  `98/999903`, and `226/999775`; zero damage held revision `226` and publication
+  count `5`; ordinary and low fixtures reached revisions `227` and `228`, with
+  low current health `249750` and publication count `7`. Measurement convergence
+  maxed at `0.030816` seconds and delayed recovery at `0.049293` seconds. The
+  final protocol/recovery checkpoint was revision `231`, health `249675`, and
+  publication count `9`. BaseController/BaseWorldView connections stayed
+  constant at `2/38` per client; lifetime tween creation totals were `8/7`,
+  active owned tweens stayed bounded at `0` idle and `1` during feedback, and
+  cleanup returned them to `0`. One temporary evidence probe was cleaned. The
+  server pass max was `0.007418` seconds, p50 approximately `0.0000271`, and p95
+  approximately `0.0000360` seconds. The bar remained attached to the real
+  DefenderBase marker and survived marker/UI removal and recreation without
+  server-state change. Replay of the immutable accepted MCP responses executed
+  `804` explicit evidence assertions with `0` failures; the discarded fault
+  probe was excluded.
+- **Defeat evidence:** separate exact, overkill, and high-damage runs each
+  reached base revision `3` and Results revision `9`, with one defeat, one
+  Results commit, exactly `2` base publications, closed spawns, and both clients
+  converged. The exact survivor
+  produced two terminal enemies but only the endpoint enemy leaked; corrected
+  maximum client convergence was `0.033782` seconds. A Studio-discovered
+  terminal MatchSnapshot recipient-capture seam was fixed by freezing recipients
+  during defeat preflight; the corrected reruns passed. The discarded diagnostic
+  warning is not counted as an accepted-run console error.
+- **Cleanup procedure:** end every client/server, remove trigger/base/enemy/map/
+  network/UI/request/tween/cache state, disconnect the task-owned Rojo process,
+  reset emulation/profiling, and leave Studio in Edit mode without save or
+  publish. Accepted runs had zero console errors and zero runtime residue.
+- **Phase or prerequisite:** Packets 10.1–10.4. This evidence starts no Phase 11
+  wave definition, scheduler, cadence, or production difficulty selection.
 
 ## Published-client and private-version tests
 

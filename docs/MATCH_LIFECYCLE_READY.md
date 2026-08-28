@@ -11,6 +11,9 @@
 - Phase 09 status: the enemy simulation/replication consumer now uses this
   lifecycle unchanged; its executable, Studio, consolidated-review, complete
   local, and structural gates passed on 2026-08-27; Phase 09 is complete
+- Phase 10 status: complete on 2026-08-28; the base runtime uses one narrow
+  server-only defeat API, and its executable, exact unsaved Match Studio,
+  consolidated-review, complete-local, and structural gates passed
 
 This is the authoritative Phase 08 lifecycle, roster, ready-protocol, minimal-UI,
 and four-client test decision. Phase 08 adds no enemies, waves, combat, towers,
@@ -19,11 +22,13 @@ monetization, production content, art, audio, effects, or unrelated interface.
 `PreWave` and `WaveActive` are contract states only; Phase 08 never starts wave
 or combat behavior.
 
-Phase 09 does not revise this Phase 08 decision. Its separate authoritative
+Phase 09 did not revise this Phase 08 decision. Its separate authoritative
 [Enemy Simulation and Replication](ENEMY_SIMULATION.md) contract consumes the
-same MatchId and already-loaded detached map snapshot while adding no base
-health/damage, Results transition, wave scheduler, or automatic state
-progression. Phase 10 and Phase 11 remain unbegun.
+same MatchId and already-loaded detached map snapshot. Phase 10 now adds only
+the reviewed `WaveActive -> Results` base-defeat seam described in
+[Defender Base Runtime and Replication](BASE_RUNTIME.md); it does not add a
+general transition API, production PreWave progression, or wave scheduler.
+Phase 11 remains unbegun.
 
 ## Official Roblox behavior that constrains the decision
 
@@ -78,18 +83,20 @@ never replace it. Phase 08 has no match reset or service re-entry.
 
 The strict state union and complete legal transition table are fixed:
 
-| Current state | Legal next states | Phase 08 cause |
+| Current state | Legal next states | Current implemented cause |
 | --- | --- | --- |
 | `Loading` | `ReadyCheck`, `Closing` | Fixed graybox loaded, or load/start failure |
 | `ReadyCheck` | `PreWave`, `Closing` | All active ready/mixed timeout, or zero-ready cancellation/shutdown |
-| `PreWave` | `WaveActive`, `Closing` | Contract-only future progression, or shutdown |
-| `WaveActive` | `Results`, `Closing` | Contract-only future result, or shutdown |
+| `PreWave` | `WaveActive`, `Closing` | Studio-only Phase 10 evidence activation, future production progression, or shutdown |
+| `WaveActive` | `Results`, `Closing` | Authenticated Phase 10 base defeat, or shutdown |
 | `Results` | `Closing` | Shutdown/close |
 | `Closing` | none | Terminal |
 
 Phase 08 production code invokes only `Loading -> ReadyCheck`,
 `ReadyCheck -> PreWave`, and a nonterminal state to `Closing`. It never invokes
-`PreWave -> WaveActive`.
+`PreWave -> WaveActive`. Phase 10 preserves that production rule: only its
+Studio-gated evidence operation activates a wave while the production catalogs
+are empty.
 
 Transitions use an authenticated begin/commit token. `beginTransition` checks an
 exact expected revision, rejects an illegal or duplicate target, locks re-entry,
@@ -346,17 +353,41 @@ converted to one static privacy-safe thrown failure so the established Cleanup
 aggregate and lifecycle shutdown cannot report success while a runtime root may
 remain. No loader error payload or Instance enters that failure.
 
-Phase 09 extends the current Match service graph to
-`NetworkRegistry -> MatchLifecycle -> EnemySimulation`. The enemy service
-depends on both earlier services, reads the same detached frozen snapshot through
-`MatchLifecycle:getRuntimeMapSnapshot()`, and never constructs a second
-MapLoader. Reverse shutdown stops enemy spawning, simulation, publication,
-snapshot handling, and replication state before MatchLifecycle clears its
-roster and MapLoader; networking shuts down last. The current client graph is
-`MatchReadyController -> EnemyController`, so the one enemy render connection,
-replication listeners, request tracker, state, visuals, and visual root clean
-before the Ready controller. This supplement changes no Phase 08 roster, Ready,
-deadline, state-machine, or UI behavior.
+Phase 09 historically extended the Match graph with EnemySimulation and
+EnemyController. Phase 10 now resolves the production service order to:
+
+```text
+server initialize/start: NetworkRegistry -> MatchLifecycle -> BaseRuntime -> EnemySimulation
+server shutdown:         EnemySimulation -> BaseRuntime -> MatchLifecycle -> NetworkRegistry
+client initialize/start: MatchReadyController -> BaseController -> EnemyController
+client shutdown:         EnemyController -> BaseController -> MatchReadyController
+```
+
+BaseRuntime and EnemySimulation read the same detached frozen runtime map through
+`MatchLifecycle`; neither constructs a second MapLoader. Enemy shutdown closes
+spawn/simulation and clears active enemies before BaseRuntime releases health,
+ledger, publication, and result-seed state; MatchLifecycle then releases roster
+and map, and networking shuts down last. On clients, enemy visuals clean before
+the base event/response listeners, request state, marker watchers, tween, and
+world GUI; Ready state cleans last.
+
+`MatchLifecycle` exposes only `beginBaseDefeat`, `commitBaseDefeat`, and
+`rollbackBaseDefeat` to trusted server composition. Begin authenticates the
+MatchId and `WaveActive` state, preflights the exact Results snapshot, freezes
+the current authenticated recipient set, and reserves the transition with an
+opaque token. Commit advances to Results once; rollback is accepted only before
+commit. Throwing, yielding, re-entry, revision exhaustion, forged tokens, wrong
+identity/state, and shutdown races fail closed.
+
+An instrumented Studio defeat probe exposed that closing callback admission
+before the broadcaster collected recipients could suppress the terminal
+MatchSnapshot. The corrected implementation captures recipients during begin
+and permits only that frozen set after commit. Focused tests and fresh exact,
+overkill, and high-damage Studio runs each reached Results revision `9` with one
+transition and both clients converged. The discarded diagnostic was a warning,
+not an accepted-run console error. Phase 10 changes no Phase 08 roster, Ready,
+deadline, or general state-machine behavior and adds no Results UI or Phase 11
+wave scheduling.
 
 ## Minimal client controller and UI
 
@@ -506,6 +537,9 @@ checks. Studio ended in Edit mode with the bounded persistent inventory intact
 and no runtime residue. Phase 08 is complete on 2026-08-27. Phase 09 subsequently
 implemented the separate enemy contract and passed its exact unsaved Studio,
 consolidated-review, 467-case local, and four-project structural gates. Phase 09
-is complete; Phase 10 is next but unbegun, and Phase 11 is unbegun. The
+is complete. Phase 10 subsequently implemented the narrow base-defeat extension
+above and passed its focused, exact Studio, consolidated-review,
+`593`-case/`48`-suite local, and four-project structural gates on 2026-08-28.
+Phase 10 is complete and Phase 11 is unbegun. The
 exact-SHA Repository Verification runs are cited at task handoff rather than
 copied into this tracked record by self-referential evidence commits.

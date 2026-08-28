@@ -1670,7 +1670,7 @@ function ServiceMethods.commitBaseDefeat(
 	if committedCall and isSuccess(commitResult) and not data.baseDefeatReentryViolation and broadcaster ~= nil then
 		local publishCalled, publishResult = callNonYielding(broadcaster.publish, broadcaster, expected)
 		published = publishCalled
-			and isSuccess(publishResult)
+			and isAcceptedSnapshotPublishResult(publishResult)
 			and not data.baseDefeatReentryViolation
 			and data.available
 	end

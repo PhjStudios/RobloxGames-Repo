@@ -8,18 +8,20 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phases 00–09 are complete; Gate A passed on 2026-08-26 and the Phase
-07–09 exit gates passed on 2026-08-27. Phase 09's exact two-client Match Studio
-gate, consolidated review, 467-case local suite, and all four structural builds
-pass. Phase 09 adds a server-owned,
-match-scoped enemy runtime; deterministic distance movement over the detached
-Phase 07 lane; bounded reliable replication and snapshot recovery; and one
-client render loop with programmatic placeholder ants. Production networking
-contains five Match-only endpoints and three client-request rate policies.
-`Enemies`, `Assets`, `Maps`, `Difficulties`, and `Waves` remain empty production
-catalogs. Phase 10 is next but has not begun, and no Phase 11 wave behavior has
-begun. The final exact-SHA Repository Verification run is cited outside this
-tracked tree to avoid a self-referential evidence commit.
+order. Phases 00–10 are complete; Gate A passed on 2026-08-26 and the Phase
+07–09 exit gates passed on 2026-08-27. Phase 10 Packets 10.1–10.4 implement
+the server-owned defender-base runtime, exact-once leak damage, bounded reliable
+recovery, world-space base presentation, and one fail-closed defeat path into
+Results. The exact unsaved two-client Match Studio gate, consolidated review,
+`593`-case/`48`-suite local gate, and all four structural builds passed on
+2026-08-28. Both material review findings were resolved. Exact-final-SHA CI is
+cited at handoff rather than through a self-referential evidence commit.
+
+Production networking contains seven Match-only reliable endpoints and four
+client-request rate policies. `Enemies`, `Assets`, `Maps`, `Difficulties`, and
+`Waves` remain empty production catalogs, so the new base runtime remains
+dormant until a future server-owned caller supplies a validated difficulty.
+Phase 11 is next and remains unbegun.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -41,6 +43,7 @@ tracked tree to avoid a self-referential evidence commit.
 - [Studio map contract, validator, loader, and authoring procedure](docs/MAP_RUNTIME_CONTRACT.md)
 - [Match lifecycle, roster, Ready protocol, UI, and four-client evidence](docs/MATCH_LIFECYCLE_READY.md)
 - [Phase 09 enemy simulation, replication, rendering, and Studio evidence](docs/ENEMY_SIMULATION.md)
+- [Phase 10 defender-base runtime, replication, defeat, and Studio evidence](docs/BASE_RUNTIME.md)
 - [Economy, banner, and default-settings schemas](docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md)
 - [Whole-configuration validation and bootstrap gate](docs/CONFIGURATION_VALIDATION.md)
 - [Phase 04 exit-gate audit](docs/PHASE_04_EXIT_AUDIT.md)

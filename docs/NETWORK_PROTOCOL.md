@@ -14,9 +14,9 @@
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Phase 06 checkpoint endpoints: none; that completed checkpoint used an empty
   authenticated registry
-- Current Phase 09 endpoints: `GetMatchSnapshot`, `SubmitReady`,
-  `MatchSnapshot`, `GetEnemySnapshot`, and `EnemyReplication`, all Match-only
-  reliable `RemoteEvent` contracts
+- Current Phase 10 endpoints: `GetMatchSnapshot`, `SubmitReady`,
+  `MatchSnapshot`, `GetEnemySnapshot`, `EnemyReplication`, `GetBaseSnapshot`,
+  and `BaseReplication`, all Match-only reliable `RemoteEvent` contracts
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
   decision
 - Generic remote bus, client-selected action, service, handler, or path: prohibited
@@ -27,12 +27,15 @@ This is the authoritative Phase 06 network-boundary document. The decision
 section was recorded before implementation. The sections below also record the
 completed Packet 06.1–06.5 implementations and evidence. Statements that the
 production registry or rate-policy catalog was empty describe those historical
-checkpoints. The current Phase 09 extension is recorded below and uses the same
+checkpoints. The current Phase 10 extension is recorded below and uses the same
 authenticated registry, validation, dispatcher, limiter, correlation, logging,
 and cleanup boundary. Phase 08 is complete. Phase 09 implementation, exact
 Studio gate, consolidated review, 467-case local gate, and all four structural
 builds pass on 2026-08-27. Phase 09 is complete; exact-final-SHA CI evidence is
-cited at handoff.
+cited at handoff. Phase 10 focused and exact Match Studio checks, consolidated
+review, `593`-case local gate, and all four structural builds passed on
+2026-08-28. Phase 10 is complete; exact-final-SHA CI is cited at handoff. Phase
+11 remains unbegun.
 
 ## Official Roblox behavior that shapes the design
 
@@ -188,8 +191,9 @@ The following combinations are invalid:
 - two definitions that claim the same physical identity.
 
 At the Phase 06 checkpoint the production registry was empty. Phase 08 later
-added only the three Match-ready definitions below, and Phase 09 adds the two
-enemy definitions recorded in its current extension. The Phase 06 tests continue
+added only the three Match-ready definitions below, Phase 09 added two enemy
+definitions, and Phase 10 adds the two base definitions recorded in its current
+extension. The Phase 06 tests continue
 to use deterministic test-only definitions; they do not populate any additional
 production endpoint.
 
@@ -208,8 +212,8 @@ server-to-client definitions, non-function handlers, late binding, and duplicate
 binding fail closed. Initialization refuses to publish if any active inbound
 definition is unbound. At Packet 06.1 completion the production registry was
 empty, so that historical checkpoint published only `ATDNetwork/v1`. The
-current Match composition binds the three Phase 08/09 inbound requests and
-captures the two outbound events before network initialization.
+current Match composition binds the four Phase 08–10 inbound requests and
+captures the three outbound events before network initialization.
 
 The service-owned `Cleanup` container registers the root before connection
 objects. Its LIFO sweep therefore disconnects all listeners before destroying
@@ -271,6 +275,7 @@ non-yielding protected handler. The current production rate bindings are:
 
 | Endpoint | Capacity | Refill per second |
 | --- | ---: | ---: |
+| `GetBaseSnapshot` | 2 | 0.25 |
 | `GetEnemySnapshot` | 2 | 0.25 |
 | `GetMatchSnapshot` | 2 | 1 |
 | `SubmitReady` | 2 | 0.5 |
@@ -306,7 +311,7 @@ Network therefore initializes first and shuts down last. Phase 08 and its
 four-client Studio, consolidated-review, and complete-local-gate evidence pass.
 The enemy extension below does not change this ready protocol.
 
-## Phase 09 enemy protocol (current)
+## Phase 09 enemy protocol (historical current-at-completion extension)
 
 Phase 09 adds exactly two production definitions under the same reliable Match
 registry:
@@ -316,7 +321,8 @@ registry:
 | `GetEnemySnapshot` | client-to-server Request | exact empty record `{}` | required bounded snapshot receipt |
 | `EnemyReplication` | server-to-client Event | strict tagged enemy message | none |
 
-`GetEnemySnapshot` has the third and only new production request-rate binding:
+At Phase 09 completion, `GetEnemySnapshot` was the third production
+request-rate binding:
 capacity `2`, refill `0.25` per second. The service independently accepts at most
 two requests per actual Player connection through a weak-key counter cleared by
 one service-level `PlayerRemoving` connection. The dispatcher still supplies the
@@ -351,9 +357,55 @@ The server composition registers `EnemySimulation` after `MatchLifecycle` and
 `NetworkRegistry`; reverse shutdown disables simulation/publication and clears
 enemy queues/store before the map loader and remote tree. The client registers
 `EnemyController` after `MatchReadyController`; reverse shutdown stops its one
-render connection/listeners and destroys placeholder visuals first. No
-client-to-server spawn or movement endpoint, unreliable transport, generic bus,
-Phase 10 base-health behavior, or Phase 11 scheduler was added.
+render connection/listeners and destroys placeholder visuals first. At that
+checkpoint Phase 09 had added no client-to-server spawn/movement endpoint,
+unreliable transport, generic bus, base-health behavior, or Phase 11 scheduler.
+Phase 10's separate base extension follows.
+
+## Phase 10 base protocol (current)
+
+Phase 10 adds exactly two definitions beneath the same reliable Match registry:
+
+| Endpoint | Direction/kind | Exact payload | Response |
+| --- | --- | --- | --- |
+| `GetBaseSnapshot` | client-to-server Request | exact empty record `{}` | required bounded full `BaseSnapshot` |
+| `BaseReplication` | server-to-client Event | strict tagged full-state/feedback message | none |
+
+`GetBaseSnapshot` has exact token-bucket capacity `2` and refill `0.25` per
+second. The dispatcher still derives the actual Player from `OnServerEvent`,
+validates the exact request and response, runs the handler synchronously, and
+responds only to that origin. The empty payload cannot select health, damage,
+enemy, difficulty, map, marker, revision, recipient, result, defeat, or
+transition data.
+
+Every base snapshot contains the authenticated MatchId and enemy epoch, map and
+difficulty IDs, detached base position, independent positive `baseRevision`,
+`Active`/`Defeated`/`Faulted` status, safe-integer current/maximum health, the
+exact low-health boolean, and ordered server timestamps. `baseRevision` is not
+the Match state-machine revision or enemy replication sequence. The
+`BaseReplication` union is either `State { snapshot }` or
+`Damage { snapshot, appliedDamage, leakCount, lowHealthCrossed }`; every message
+contains a full snapshot sufficient to converge independently. Zero damage emits
+no event. One enemy simulation pass coalesces all changing leaks into at most one
+event, with clamped applied damage and a bounded leak count.
+
+The publisher has one latest-state slot and one bounded feedback aggregate, no
+retry queue, and no delivery ledger. It validates and UserId-sorts at most four
+live authenticated recipients and attempts each send once. A sender failure is
+isolated; a later event or direct snapshot recovers state. The client registers
+the BaseReplication listener before requesting a snapshot, locks to the first
+valid MatchId/epoch, accepts only a newer base revision, and treats equal/lower,
+foreign, malformed, hostile, or out-of-order traffic as non-mutating. Studio's
+active-session delayed-bootstrap fallback has its own one-shot bounded recovery
+allowance after the normal bounded bootstrap attempts; it creates no unbounded
+retry loop.
+
+The current server composition registers BaseRuntime between MatchLifecycle and
+EnemySimulation; the current client composition registers BaseController
+between MatchReadyController and EnemyController. Reverse shutdown clears enemy
+traffic first, then base response/event state and presentation, then Match/map,
+and destroys the one network root last. There is no `RemoteFunction`, unreliable
+transport, generic bus, or client-to-server base mutation.
 
 ## Payload-validation architecture decision
 
@@ -719,10 +771,11 @@ is added.
 
 Lobby and the combined Development composition retain the common network-only
 behavior described by the historical Phase 06 records. In Match, the server
-runner contains `NetworkRegistry` followed by dependent `MatchLifecycle`, and
-the client runner contains `MatchReadyController`. Client lookup and request
-tracking remain fixed utilities owned and cleared by that controller rather than
-becoming separate lifecycle services.
+runner resolves `NetworkRegistry -> MatchLifecycle -> BaseRuntime ->
+EnemySimulation`; the client resolves `MatchReadyController -> BaseController ->
+EnemyController`. Client lookup and request tracking remain fixed utilities
+owned and cleared by their controllers rather than becoming separate lifecycle
+services.
 
 ## Logging boundary
 

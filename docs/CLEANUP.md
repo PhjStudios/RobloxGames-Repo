@@ -23,12 +23,16 @@ Those fields describe Packet 03.2 at completion. Packet 06.1 later reused this
 utility inside the common server network service; it did not add a second
 cleanup implementation. Phase 08 applied the same one-owner/idempotent rules to
 the Match lifecycle, roster, deadline, snapshot broadcaster, MapLoader, request
-tracker, input bindings, and Ready GUI. Phase 09 now extends the ownership model
-to enemy simulation, replication queues and ledgers, client recovery state, and
-programmatic visuals. Phase 08 is complete. Phase 09 code, exact Match Studio
+tracker, input bindings, and Ready GUI. Phase 09 extended the ownership model to
+enemy simulation, replication queues and ledgers, client recovery state, and
+programmatic visuals. Phase 10 extends it to base state/outcome ledgers,
+coalesced publication, defeat coordination, marker watchers, a cancellable
+tween, and the world GUI. Phase 08 is complete. Phase 09 code, exact Match Studio
 gate, consolidated review, 467-case local gate, and all four structural builds
-passed on 2026-08-27. Phase 09 is complete; Phase 10 is next but has not begun,
-and Phase 11 has not begun.
+passed on 2026-08-27. Phase 09 is complete. Phase 10 focused and exact Studio
+cleanup checks, consolidated review, `593`-case local gate, and all four
+structural builds passed on 2026-08-28. Phase 10 is complete; exact-final-SHA CI
+is cited at handoff. Phase 11 remains unbegun.
 
 ## Public contract
 
@@ -150,7 +154,10 @@ remote/render/GUI connections, request state, input binding, view model, and
 ScreenGui through its idempotent lifecycle shutdown. Phase 09's
 `EnemyController` independently owns its enemy endpoint listeners, one shared
 `PreRender` connection, tracker/state buffers, renderer, placeholder Models, and
-client-created visual root through the same reverse lifecycle path.
+client-created visual root through the same reverse lifecycle path. Phase 10's
+`BaseController` independently owns its two endpoint listeners, tracker and
+bounded recovery state, marker/UI watchers, one cancellable feedback tween, and
+client-created BillboardGui.
 
 Packet 06.1's `NetworkRegistry` lifecycle service creates one internal
 `network-registry` cleanup container during initialization. Packet 06.4 preserves
@@ -235,9 +242,9 @@ map or ready UI residue and returned Studio to Edit mode. The consolidated
 review and complete local exit gate pass; Phase 08 is complete and Phase 09 is
 next but has not begun at that dated checkpoint. The current extension follows.
 
-## Phase 09 enemy ownership and release order (current)
+## Phase 09 enemy ownership and release order (historical current-at-completion extension)
 
-The current Match lifecycle order is:
+At Phase 09 completion the Match lifecycle order was:
 
 ```text
 server initialize/start: NetworkRegistry -> MatchLifecycle -> EnemySimulation
@@ -286,8 +293,44 @@ The exact two-client Match Studio gate passed this ownership boundary on
 per client, and no enemy record, request ledger, queue, buffer, trigger, visual,
 runtime map, remote root, Ready UI, or service connection after End Session.
 The consolidated review and complete local/structural gates also pass. Phase 09
-is complete; Phase 10 is next but no Phase 10 or Phase 11 ownership has been
-introduced.
+is complete. The current Phase 10 ownership extension follows; no Phase 11
+ownership has been introduced.
+
+## Phase 10 base ownership and release order (current)
+
+The current order is:
+
+```text
+server shutdown: EnemySimulation -> BaseRuntime -> MatchLifecycle -> NetworkRegistry
+client shutdown: EnemyController -> BaseController -> MatchReadyController
+```
+
+EnemySimulation first closes spawn, endpoint callbacks, snapshot requests,
+updates, and publication; disconnects its shared connections; destroys the sole
+Studio trigger; revokes issued outcome provenance; and clears active/terminal
+enemy state and publisher queues. Only then may BaseRuntime disable its
+snapshot/record/boundary callbacks and clear its copied outcome ledger,
+feedback aggregate, publication state, health, independent revision, identity,
+result seed, clocks, provenance predicate, callbacks, and detached
+map/difficulty references. MatchLifecycle subsequently clears terminal-recipient
+capture, roster/state, and the exact runtime map, and NetworkRegistry destroys
+the one remote root last.
+
+On clients, EnemyController releases its render connection and visuals before
+BaseController disconnects `BaseReplication` and `GetBaseSnapshot` response,
+cancels/clears request correlation, releases marker and UI ancestry watchers,
+cancels its active damage tween, clears locked snapshots/feedback/recovery
+state, and destroys the exact `ATDDefenderBaseGui` from PlayerGui. The later
+Ready cleanup remains unchanged. Deleted UI can recreate only while the
+controller is live; captured callbacks after cleanup cannot send, bind, tween,
+or recreate.
+
+The exact Studio gate retained constant BaseController/BaseWorldView ownership
+of `2/38` connections per client; one temporary evidence probe was explicitly
+disconnected. End Session left no base state, outcome ledger, result seed,
+publication queue, listener, UI, tween, trigger, enemy, network root, runtime
+map, request record, visual, or cache. Cleanup remained idempotent and Studio
+returned to Edit mode without save or publish.
 
 ## Focused Studio Edit-mode validation
 
@@ -415,8 +458,10 @@ hardening, test-only adversarial fixtures, and unsaved Studio evidence. The
 fresh Phase 06/Gate A audit and clean workflow run `33022784985` pass. Phase 06
 is complete and Gate A passed. Phase 08 is also complete. Phase 09 code, exact
 Match Studio cleanup evidence, consolidated review, 467-case local gate, and all
-four structural builds pass on 2026-08-27. Phase 09 is complete; Phase 10 is
-next but has not begun, and Phase 11 has not begun. The current enemy cleanup evidence is in
-`docs/ENEMY_SIMULATION.md`.
+four structural builds pass on 2026-08-27. Phase 09 is complete. Phase 10's
+focused and exact Studio cleanup evidence, consolidated review, complete local
+gate, and all four structural builds passed on 2026-08-28. Phase 10 is complete;
+exact-final-SHA CI is cited at handoff. Phase 11 remains unbegun. Current
+cleanup evidence is in `docs/ENEMY_SIMULATION.md` and `docs/BASE_RUNTIME.md`.
 Configuration evidence is in
 `docs/CONFIGURATION_VALIDATION.md`.

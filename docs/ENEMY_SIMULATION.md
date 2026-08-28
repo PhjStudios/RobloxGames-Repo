@@ -9,13 +9,15 @@ and programmatic client presentation. It was recorded before executable Phase
 approved implementation after the recorded epoch, capacity, ordering, terminal
 delivery, renderer, and measurable-stress corrections were resolved.
 
-Phase 09 owns only placeholder enemy runtime records, deterministic movement on
-the Phase 07 detached lane snapshot, endpoint outcomes without base damage,
-replication and recovery, client-created placeholder visuals, deterministic
-tests, and an unsaved Match Studio stress sample. It does not add base health,
-leak damage, defeat, Results transitions, waves, automatic match-state
-progression, combat, towers, placement, rewards, persistence, production enemy
-content, production art, asset IDs, animation, audio, effects, or Lobby source.
+At its completed checkpoint, Phase 09 owned only placeholder enemy runtime
+records, deterministic movement on the Phase 07 detached lane snapshot, endpoint
+outcomes without base damage, replication and recovery, client-created
+placeholder visuals, deterministic tests, and an unsaved Match Studio stress
+sample. Phase 10 now consumes the existing endpoint seam through the separate
+authoritative [Defender Base Runtime and Replication](BASE_RUNTIME.md) contract;
+it does not change Phase 09 movement, client enemy replication, or production
+enemy content. Waves, automatic production state progression, combat, towers,
+placement, rewards, persistence, production art, and Lobby source remain absent.
 
 `src/shared/config/Enemies.luau` and `src/shared/config/Assets.luau` remain frozen
 empty arrays. `docs/TOWER_ENEMY_SCHEMAS.md` is the repository's existing enemy
@@ -289,11 +291,16 @@ Endpoint arrival performs one atomic terminal sequence:
    remains enabled, so a callback fault cannot strand or resurrect the client
    visual.
 
-The Phase 09 production callback is a no-op success. It does not read
-`leakDamage`, change base health, defeat the match, transition state, publish a
-Results outcome, or create world UI. Phase 10 can replace this callback through
-a later reviewed server-only composition without changing enemy identity or
-replaying old outcomes.
+At Phase 09 completion the production callback was a no-op success. Phase 10
+replaces that composition seam with one synchronous, non-yielding BaseRuntime
+sink. `EnemyRuntimeStore` creates a detached frozen authenticated outcome only
+after an immutable validated definition reaches the endpoint; it contains the
+bound MatchId, enemy epoch, runtime enemy ID, EnemyId, copied server-derived
+`leakDamage`, and server time. No damage field enters client enemy replication.
+The store issues and authenticates the outcome before invoking the sink, then
+always finishes the current enemy's terminal transaction before
+EnemySimulation processes any defeat work at its next safe boundary. Duplicate,
+stale, foreign, revoked, or unauthenticated outcomes cannot replay base damage.
 
 Spawn, slow, manual despawn, endpoint resolution, and nested step operations
 reject mutation re-entry. Cleanup is the sole exception: a cleanup request made
@@ -747,7 +754,7 @@ The structural verifier authenticates all mappings/source bytes, retains
 exactly one Script and one LocalScript per production build and zero runnable
 Test scripts, exclude every spec/fixture/Studio harness from production, keep
 Lobby free of Match source and Match free of Lobby source, prove production
-`Enemies`/`Assets` remain empty, and reject Phase 10/11 source markers. Final
+`Enemies`/`Assets` remain empty, and reject Phase 11 source or behavior. Final
 module/suite/test counts are recorded only from the actual final run.
 
 The consolidated independent review found no P0, one P1, and one P2. The P1
@@ -763,9 +770,12 @@ subset is `120` cases across `11` suites. Structural verification passes Default
 authoritative shared modules, 25 exact production mirrors, and 51 test-owned
 modules. Formatting, lint, diff, scope, generated-output, exact remote/rate
 catalogs, production-test exclusion, Lobby/Match isolation, empty production
-`Enemies`/`Assets`, and the Phase 10/11 boundary all pass.
+`Enemies`/`Assets`, and the then-unbegun Phase 10/11 boundary all pass.
 
 Packets 09.1–09.5, Studio, review, local, and structural gates are complete on
 2026-08-27. The exact-final-SHA Repository Verification run and zero-artifact
 result are cited at handoff rather than through a self-referential evidence
-commit. Phase 09 is complete; Phase 10 is next and remains not begun.
+commit. Phase 09 is complete. Phase 10 subsequently implemented its separately
+reviewed endpoint consumer and passed focused and exact Studio checks on
+2026-08-28; its final all-repository/CI record is maintained in
+`docs/BASE_RUNTIME.md`. Phase 11 remains unbegun.

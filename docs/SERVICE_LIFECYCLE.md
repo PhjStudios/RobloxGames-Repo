@@ -23,13 +23,15 @@ automatic shutdown hook.
 Those fields record Packet 03.1 at completion. Packet 06.1 later registered one
 foundation-only `NetworkRegistry` service on the server after configuration
 validation. Phase 08 added the Match-only `MatchLifecycle` server service and
-`MatchReadyController` client service. The current Phase 09 composition also
-registers `EnemySimulation` on the Match server and `EnemyController` on the
-Match client. Phase 08 and its Studio, consolidated-review, and
+`MatchReadyController` client service. Phase 09 added `EnemySimulation` and
+`EnemyController`; Phase 10 now adds `BaseRuntime` and `BaseController` between
+those Match owners. Phase 08 and its Studio, consolidated-review, and
 complete-local-gate evidence passed on 2026-08-27. Phase 09 code, exact Match
 Studio gate, consolidated review, 467-case local gate, and all four structural
-builds passed on 2026-08-27. Phase 09 is complete; Phase 10 is next but has not
-begun, and Phase 11 has not begun.
+builds passed on 2026-08-27. Phase 09 is complete. Phase 10 focused and exact
+Studio checks, consolidated review, `593`-case local gate, and all four
+structural builds passed on 2026-08-28. Phase 10 is complete; exact-final-SHA CI
+is cited at handoff. Phase 11 remains unbegun.
 
 ## Public contract
 
@@ -150,12 +152,12 @@ runner. Each resolves one environment context, creates one local logger, calls
 the shared `ConfigurationValidator.validateLoaded()` gate, and passes the
 logger to the runner only after success. At the historical Phase 06 checkpoint
 the client initialized an empty runner and the server registered only
-`NetworkRegistry`. The current Phase 09 Match composition extends those
+`NetworkRegistry`. The current Phase 10 Match composition extends those
 validated owners without bypassing them:
 
 ```text
 Lobby server/client: [serviceCount=1]/[serviceCount=0]
-Match server/client: [serviceCount=3]/[serviceCount=2]
+Match server/client: [serviceCount=4]/[serviceCount=3]
 ```
 
 The runner remains local to its bootstrap. No global registry or service locator was
@@ -249,14 +251,14 @@ Packets 08.1–08.5, the four-client Studio gate, consolidated final review, and
 complete local exit gate passed. At that dated checkpoint Phase 08 was complete
 and Phase 09 was next but had not begun. The current Phase 09 extension follows.
 
-## Phase 09 Match composition (current)
+## Phase 09 Match composition (historical current-at-completion extension)
 
-The Match server entrypoint now binds the authenticated `GetEnemySnapshot`
-request and captures the `EnemyReplication` sender while `NetworkRegistry` is
-still Registering. It constructs `EnemySimulation` from `MatchLifecycle`, the
-validated production enemy catalog, and that sender, then registers its service
-definition with exact dependencies `{ "NetworkRegistry", "MatchLifecycle" }`.
-The resolved server order is:
+At Phase 09 completion, the Match server entrypoint bound the authenticated
+`GetEnemySnapshot` request and captured the `EnemyReplication` sender while
+`NetworkRegistry` was still Registering. It constructed `EnemySimulation` from
+`MatchLifecycle`, the validated production enemy catalog, and that sender, then
+registered its service definition with exact dependencies
+`{ "NetworkRegistry", "MatchLifecycle" }`. The resolved server order was:
 
 ```text
 initialize/start: NetworkRegistry -> MatchLifecycle -> EnemySimulation
@@ -277,9 +279,9 @@ retained timing/dependency references. Only after that may `MatchLifecycle`
 cancel Ready work, disconnect its Player listeners, clear Match state, and clean
 the MapLoader/runtime map; the network registry and remote tree shut down last.
 
-The Match client entrypoint now registers `EnemyController` after
-`MatchReadyController`. Its service definition depends on
-`{ "MatchReadyController" }`, so the resolved client order is:
+The Phase 09 Match client entrypoint registered `EnemyController` after
+`MatchReadyController`. Its service definition depended on
+`{ "MatchReadyController" }`, so the resolved client order was:
 
 ```text
 initialize/start: MatchReadyController -> EnemyController
@@ -302,9 +304,40 @@ idempotent reverse lifecycle path.
 Packets 09.1–09.5 and the exact two-client Match Studio gate passed on
 2026-08-27, including constant one-server-simulation/one-client-render
 connection ownership and residue-free shutdown. The consolidated review and
-complete local/structural gates also pass. Phase 09 is complete; Phase 10 is
-next but no base-health behavior has begun, and no Phase 11 wave scheduler has
-begun.
+complete local/structural gates also pass. Phase 09 is complete. The current
+Phase 10 extension follows; no Phase 11 wave scheduler has begun.
+
+## Phase 10 Match composition (current)
+
+The Match entrypoints bind `GetBaseSnapshot` and capture `BaseReplication` while
+NetworkRegistry is still Registering. The server registers BaseRuntime after
+MatchLifecycle and before EnemySimulation; EnemySimulation declares BaseRuntime
+as a dependency. The client registers BaseController after MatchReadyController
+and makes EnemyController depend on BaseController. The resolved order is:
+
+```text
+server initialize/start: NetworkRegistry -> MatchLifecycle -> BaseRuntime -> EnemySimulation
+server shutdown:         EnemySimulation -> BaseRuntime -> MatchLifecycle -> NetworkRegistry
+client initialize/start: MatchReadyController -> BaseController -> EnemyController
+client shutdown:         EnemyController -> BaseController -> MatchReadyController
+```
+
+BaseRuntime authenticates and copies only detached difficulty/map identity and
+base state; it owns no Player, enemy Instance, map marker Instance, UI, or client
+object. Its synchronous endpoint sink mutates health and the bounded ledger but
+never re-enters EnemySimulation. Defeat work is returned to EnemySimulation's
+next safe pass boundary, where spawn closes and remaining enemies terminalize
+before MatchLifecycle commits Results through its narrow opaque-token API.
+Initialization, start, shutdown, callbacks, transition, publication, and cleanup
+faults are non-yielding and fail closed.
+
+BaseController owns two remote connections, bounded request/recovery state,
+BaseStateReducer/BaseViewModel state, one BaseWorldView, marker ancestry
+watchers, and at most one cancellable feedback tween. It has no permanent render
+loop. Reverse client cleanup removes enemy presentation first, then base
+listeners/UI/tween, and then Ready state. The exact Studio gate retained constant
+`2/38` BaseController/BaseWorldView connections per client, cleaned its one
+temporary evidence probe, and left no runtime residue.
 
 ## Focused Studio Edit-mode validation
 
@@ -431,8 +464,10 @@ evidence described in `docs/NETWORK_PROTOCOL.md`. Packet 06.5 and the fresh
 Phase 06/Gate A audit pass, including clean workflow run `33022784985`. Phase 06
 is complete and Gate A passed. Phase 08 is also complete. Phase 09 code, exact
 Match Studio evidence, consolidated review, 467-case local gate, and all four
-structural builds pass on 2026-08-27. Phase 09 is complete; Phase 10 is next but
-has not begun, and Phase 11 has not begun. The current enemy lifecycle evidence is in
-`docs/ENEMY_SIMULATION.md`.
+structural builds pass on 2026-08-27. Phase 09 is complete. Phase 10's focused
+and exact Studio lifecycle evidence, consolidated review, complete local gate,
+and all four structural builds passed on 2026-08-28. Phase 10 is complete;
+exact-final-SHA CI is cited at handoff. Phase 11 remains unbegun. Current lifecycle
+evidence is in `docs/ENEMY_SIMULATION.md` and `docs/BASE_RUNTIME.md`.
 Configuration evidence remains in
 `docs/CONFIGURATION_VALIDATION.md`.

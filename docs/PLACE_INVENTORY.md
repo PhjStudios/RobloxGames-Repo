@@ -20,6 +20,11 @@ keys, cookies, or secrets.
 - Roblox Studio content changed: no
 - Roblox publishing authorized: no
 
+Those fields record Packet 00.3. The exact Match identity was reconfirmed for
+the unsaved Phase 10 two-client gate on 2026-08-28. Only mapped branch source and
+runtime-created evidence objects changed during Play; Studio-authored content
+remained untouched and unsaved.
+
 ## Evidence sources
 
 ### Local repository
@@ -92,6 +97,11 @@ combined Rojo project name is `Ant Tower Defense`.
   `ATDPlaceRole = Match`. Exact simulation, replication, renderer, stress, and
   cleanup evidence is in
   `docs/ENEMY_SIMULATION.md#executed-studio-evidence--2026-08-27`.
+- Phase 10 two-client defender-base gate identity reconfirmed on 2026-08-28:
+  PlaceId `136401514513678`, GameId `10757629094`, CreatorType `Group`, CreatorId
+  `35420107`, official owner `PHJGAMES`, and `ATDPlaceRole = Match`. Exact base,
+  world-presentation, defeat, and cleanup evidence is in
+  `docs/BASE_RUNTIME.md#executed-studio-evidence--2026-08-28`.
 - Controlled Phase 07 Save To Cloud: succeeded at `2026-08-27T02:11:31Z` under
   the user's exact graybox authorization; it did not change visibility,
   settings, services, Lobby, or unrelated assets.
@@ -113,6 +123,12 @@ combined Rojo project name is `Ant Tower Defense`.
   Rojo server was stopped, emulation and profiling were reset, all simulated
   windows were closed, and Studio remained in Edit mode. No map, unmapped
   Instance, asset, setting, Lobby content, save, or publish changed.
+- The Phase 10 final Edit-mode cleanup probe found the same persistent
+  Studio-authored map catalog and no `Workspace.ATDRuntimeMap`, `ATDNetwork`,
+  runtime trigger, enemy visual root, base GUI, listener/tween evidence object,
+  request state, result seed, ledger, queue, or cache residue. All simulated
+  windows were closed, the task-owned Rojo process was disconnected, emulation
+  and profiling were reset, and no place was saved or published.
 
 The Match place must:
 
@@ -333,6 +349,10 @@ not created by Rojo-managed scripts.
 - Ant nest/enemy spawn markers.
 - Ordered lane/path markers.
 - Defender base and endpoint marker.
+- Phase 10 uses the existing real `DefenderBase` Part read-only as a BillboardGui
+  Adornee. The GUI, bar, numeric text, `LOW` label, and damage pulse are
+  client-created repository-owned presentation and are never saved beneath the
+  runtime map.
 - Tower placement and no-placement regions.
 - Map bounds.
 - Player spawn/spectator locations.
@@ -414,6 +434,25 @@ Roblox environment.
   visual recreation, `1/32/64/128` stress ladder, constant connection counts,
   profiling, and residue checks are recorded in
   [Enemy Simulation and Replication](ENEMY_SIMULATION.md#executed-studio-evidence--2026-08-27).
+
+### Phase 10 defender-base gate
+
+- Complete in the restricted Match place on 2026-08-28. Focused and exact
+  unsaved Studio evidence, consolidated review, the `593`-case local gate, and
+  all four structural builds pass; exact-final-SHA CI is cited at handoff.
+- Runtime-only validated difficulty/enemy fixtures initialized the otherwise
+  dormant base service and drove only the evidence-only PreWave -> WaveActive
+  seam. No production catalog, difficulty selection, wave, cadence, boss
+  metadata, model, asset, marker, or balance content was created.
+- Both clients converged on the authenticated world marker and base state;
+  zero/ordinary/low/exact/overkill/high leaks, recovery, UI/marker recreation,
+  one defeat/Results transition, spawn closure, ordered enemy cleanup, timing,
+  constant connections, and residue checks passed as recorded in
+  [Defender Base Runtime and Replication](BASE_RUNTIME.md#executed-studio-evidence--2026-08-28).
+- A true late-client add terminates the local multiplayer server on the tested
+  Studio build, so the established delayed-bootstrap active-session fallback was
+  used and explicitly measured. This limitation does not substitute for later
+  published-client/rejoin testing.
 
 ### Needed before Phase 26 teleport testing
 

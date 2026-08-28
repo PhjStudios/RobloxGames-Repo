@@ -25,21 +25,24 @@ only change through an explicit architecture decision recorded here.
 
 - Roadmap state: active; approved defaults are recorded in `docs/GAME_DESIGN.md`.
 - Gameplay state: the Match place has a server-owned lifecycle, UserId roster,
-  45-second initial Ready protocol, revisioned match/enemy recovery, deterministic
-  fixed-lane placeholder enemies, and minimal Ready/enemy presentation. It still
-  has no wave scheduler, combat, tower, placement, base-health/leak behavior,
-  reward, persistence, matchmaking, or teleport implementation.
-- Current implementation phase: Phases 00–09 are complete. Packets 09.1–09.5,
-  the exact Match Studio gate, consolidated review, complete local gate, and all
-  four structural builds passed on 2026-08-27. Phase 10 is next but has not
-  begun; Phase 11 is also unbegun.
+  45-second initial Ready protocol, revisioned match/enemy/base recovery,
+  deterministic fixed-lane placeholder enemies, a match-scoped defender base,
+  and minimal Ready/enemy/world-base presentation. It still has no wave
+  scheduler, combat, tower, placement, reward, persistence, matchmaking, or
+  teleport implementation.
+- Current implementation phase: Phases 00–10 are complete. Phase 10 Packets
+  10.1–10.4, the exact unsaved Match Studio gate, consolidated review,
+  `593`-case/`48`-suite local gate, and all four structural builds passed on
+  2026-08-28. Exact-final-SHA CI is cited at handoff. Phase 11 is next and
+  remains unbegun.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
   Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, 06.3, 06.4,
   and 06.5 completed on 2026-08-26. Packets 07.1–07.4 and their Phase 07 exit
   gate completed on 2026-08-27. Packets 08.1–08.5 and the Phase 08 exit gate
   completed on 2026-08-27. Packets 09.1–09.5 completed their implementation,
-  deterministic, and exact Match Studio checks on 2026-08-27.
+  deterministic, and exact Match Studio checks on 2026-08-27. Packets 10.1–10.4
+  and their Phase 10 exit gate completed on 2026-08-28.
 - Current checkpoint: Phase 06 and Gate A are complete. Its three exact current-tree
   canonical runs are byte-identical at 200 cases across 16 suites, all four
   structural builds pass, and the unsaved three-cycle Lobby, three-cycle Match,
@@ -71,7 +74,16 @@ only change through an explicit architecture decision recorded here.
   Default/Lobby/Match/Test module counts `63/44/63/111`, formatting, lint, diff,
   scope, generated-output, production-test exclusion, catalogs, and role
   isolation. The exact-final-SHA Repository Verification run is cited at
-  handoff rather than through a self-referential evidence commit.
+  handoff rather than through a self-referential evidence commit. Phase 10 now
+  adds only the systems in `docs/BASE_RUNTIME.md`. Its focused deterministic
+  suites and exact unsaved two-client Studio measurement/defeat/cleanup gate
+  passed on 2026-08-28. Production `Difficulties`, `Maps`, `Waves`, `Enemies`,
+  and `Assets` remain empty. The consolidated review found one P1 terminal
+  publication-status defect and one P2 evidence-count gap; both were fixed. The
+  complete gate passes `593` tests across `48` suites and Default/Lobby/Match/
+  Test module counts `71/45/71/129`, with `1/1`, `1/1`, `1/1`, and `0/0`
+  Script/LocalScript counts. Exact-final-SHA CI is cited at handoff. Phase 10 is
+  complete and Phase 11 remains unbegun.
 - Publishing state: the user authorized the Packet 02.4 Match-place creation and
   one controlled Phase 07 Save To Cloud of the reviewed Match graybox. No
   release, public-audience, settings, service, Lobby, or unrelated publication
@@ -877,8 +889,9 @@ and smooth client visuals.
 **Current status:** Complete on 2026-08-27. Packets 09.1–09.5, the exact Match
 Studio gate, consolidated review with both material findings resolved, the
 467-case/39-suite local gate, all four structural builds, and scope/isolation
-checks pass. Phase 10 is next but has not begun. The authoritative decision and
-executed evidence are in `docs/ENEMY_SIMULATION.md`.
+checks pass. At that dated checkpoint Phase 10 was next and unbegun; its current
+status is recorded in the following section. The Phase 09 authoritative decision
+and executed evidence are in `docs/ENEMY_SIMULATION.md`.
 
 ### Packet 09.1 — Enemy runtime model
 
@@ -941,27 +954,57 @@ clean Edit-mode shutdown without saving or publishing.
 consistently and render within the declared bounds without one permanent
 movement loop per model. The review findings are resolved, the complete local
 and structural gates pass, and the exact-final-SHA Repository Verification run
-is cited outside this tracked plan. Phase 09 is complete; Phase 10 is next but
-not begun.
+is cited outside this tracked plan. Phase 09 is complete. Its then-next Phase 10
+status is recorded below.
 
 ## Phase 10 — Defender base and leak damage
 
 **Objective:** Add the loss condition and trustworthy base feedback.
 
+**Current status:** Complete on 2026-08-28. Packets 10.1–10.4, the exact
+two-client Match Studio gate, consolidated review, `593`-case/`48`-suite local
+gate, and all four structural builds passed. The authoritative implementation
+and evidence are in
+`docs/BASE_RUNTIME.md`. Production configuration remains dormant because the
+production difficulty and enemy catalogs are empty. Exact-final-SHA CI is cited
+at handoff rather than added through a self-referential evidence commit. Phase
+11 remains unbegun.
+
 ### Packet 10.1 — Base runtime service
 
-- Initialize max/current health from difficulty and map configuration.
+**Executable status:** Passed on 2026-08-28. One strict match-scoped runtime
+authenticates a validated `DifficultyDefinition` and detached runtime-map
+snapshot, copies immutable enemy leak damage from the Phase 09 endpoint seam,
+uses safe-integer clamped arithmetic, and owns a bounded exact-once outcome
+ledger and independent base revision.
+
+- Initialize max/current health only from the authenticated difficulty while
+  binding identity/position to the detached runtime-map base marker.
 - Apply fixed enemy leak damage on endpoint arrival.
 - Clamp health and emit one defeat transition.
 - Reject damage outside active match states.
 
 ### Packet 10.2 — Base replication and world display
 
+**Executable/Studio status:** Passed on 2026-08-28. Two reliable Match-only
+definitions provide bounded full-state recovery and coalesced feedback. The
+client listens before requesting, rejects stale/foreign state, and owns one
+recreatable `BillboardGui` in `PlayerGui` whose Adornee is the real authored
+`DefenderBase` marker. Numeric text, `LOW`, and textual/visual damage feedback do
+not depend on color or sound alone.
+
 - Replicate current and maximum health.
 - Add a world-space bar anchored to the Studio-authored base marker.
 - Add low-health and damage events without relying only on sound.
 
 ### Packet 10.3 — Defeat transition
+
+**Executable/Studio status:** Passed on 2026-08-28. The first zero-health commit
+reserves defeat once, finishes the leaking enemy transaction, closes spawn and
+future tower-input admission, despawns remaining enemies in ascending runtime-ID
+order without leaks, commits `WaveActive -> Results` once, and freezes the
+minimal detached future result seed. Failures after irreversible state fail
+closed without reopening gameplay.
 
 - Stop future spawns.
 - Resolve active enemies and tower inputs safely.
@@ -970,10 +1013,19 @@ not begun.
 
 ### Packet 10.4 — Base edge-case tests
 
-- Test simultaneous leaks, overkill, boss leak, zero health, late damage, and
-  cleanup during defeat.
+**Headless/Studio status:** Passed through `97` focused base cases across `9`
+dedicated suites, the `593`-case/`48`-suite complete run, all four structural
+builds, and the exact unsaved Studio gate on 2026-08-28.
 
-**Exit gate:** Leaks cause deterministic base damage and exactly one defeat.
+- Test simultaneous leaks, overkill, a validated high-leakDamage fixture (not a
+  boss system), zero health, late damage, and cleanup during defeat.
+
+**Exit gate:** Passed on 2026-08-28. Executable and Studio criteria pass: leaks cause deterministic
+base damage and exactly one defeat, both clients converge within the required
+bound, and cleanup is residue-free. Both consolidated-review findings are
+resolved, the complete local/structural gate passes, and the exact-final-SHA CI
+record is cited at handoff. Phase 10 is complete; Phase 11 is next and remains
+unbegun.
 
 ## Phase 11 — Authored waves and difficulty scheduler
 
