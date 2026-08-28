@@ -27,13 +27,14 @@ only change through an explicit architecture decision recorded here.
 - Gameplay state: the Match place has a server-owned lifecycle, UserId roster,
   45-second initial Ready protocol, revisioned match/enemy/base recovery,
   deterministic fixed-lane placeholder enemies, a match-scoped defender base,
-  and minimal Ready/enemy/world-base presentation. It still has no wave
-  scheduler, combat, tower, placement, reward, persistence, matchmaking, or
-  teleport implementation.
-- Current implementation phase: Phases 00–10 are complete. Phase 10 Packets
-  10.1–10.4, the exact unsaved Match Studio gate, consolidated review,
-  `593`-case/`48`-suite local gate, and all four structural builds passed on
-  2026-08-28. Exact-final-SHA CI is cited at handoff. Phase 11 is next and
+  a finite authenticated authored-wave scheduler, strict-majority skip voting,
+  and minimal Ready/enemy/world-base presentation plus a nonvisual Wave client
+  seam. It still has no combat, tower, placement, victory, reward, persistent
+  economy, persistence, matchmaking, or teleport implementation.
+- Current implementation phase: Phases 00–11 are complete. Phase 11 Packets
+  11.1–11.6, the exact unsaved Match Studio gate, consolidated review,
+  `742`-case/`56`-suite local gate, and all four structural builds passed on
+  2026-08-28. Exact-final-SHA CI is cited at handoff. Phase 12 is next and
   remains unbegun.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
@@ -42,7 +43,8 @@ only change through an explicit architecture decision recorded here.
   gate completed on 2026-08-27. Packets 08.1–08.5 and the Phase 08 exit gate
   completed on 2026-08-27. Packets 09.1–09.5 completed their implementation,
   deterministic, and exact Match Studio checks on 2026-08-27. Packets 10.1–10.4
-  and their Phase 10 exit gate completed on 2026-08-28.
+  and their Phase 10 exit gate completed on 2026-08-28. Packets 11.1–11.6 and
+  their Phase 11 exit gate completed on 2026-08-28.
 - Current checkpoint: Phase 06 and Gate A are complete. Its three exact current-tree
   canonical runs are byte-identical at 200 cases across 16 suites, all four
   structural builds pass, and the unsaved three-cycle Lobby, three-cycle Match,
@@ -83,7 +85,17 @@ only change through an explicit architecture decision recorded here.
   complete gate passes `593` tests across `48` suites and Default/Lobby/Match/
   Test module counts `71/45/71/129`, with `1/1`, `1/1`, `1/1`, and `0/0`
   Script/LocalScript counts. Exact-final-SHA CI is cited at handoff. Phase 10 is
-  complete and Phase 11 remains unbegun.
+  complete. Phase 11 subsequently added only the authenticated finite scheduler
+  contract in `docs/WAVE_RUNTIME.md`. Its exact authored ordering, inclusive
+  deadlines, five-second early clear, overlap ownership, skip/disconnect,
+  difficulty modifiers, client recovery, finite completion, defeat preemption,
+  and cleanup scenarios passed in headless and unsaved Match Studio evidence.
+  One consolidated review found one client transition omission, one recovery
+  gap, and two fault-boundary recovery issues; all were fixed and verified. The
+  complete gate passes `742` tests across `56` suites and Default/Lobby/Match/
+  Test module counts `77/46/77/144`, with `1/1`, `1/1`, `1/1`, and `0/0`
+  Script/LocalScript counts. Production content remains empty. Phase 11 is
+  complete and Phase 12 remains unbegun.
 - Publishing state: the user authorized the Packet 02.4 Match-place creation and
   one controlled Phase 07 Save To Cloud of the reviewed Match graybox. No
   release, public-audience, settings, service, Lobby, or unrelated publication
@@ -968,7 +980,8 @@ and evidence are in
 `docs/BASE_RUNTIME.md`. Production configuration remains dormant because the
 production difficulty and enemy catalogs are empty. Exact-final-SHA CI is cited
 at handoff rather than added through a self-referential evidence commit. Phase
-11 remains unbegun.
+11 was unbegun at that Phase 10 checkpoint and is now complete as recorded
+below.
 
 ### Packet 10.1 — Base runtime service
 
@@ -1025,13 +1038,29 @@ base damage and exactly one defeat, both clients converge within the required
 bound, and cleanup is residue-free. Both consolidated-review findings are
 resolved, the complete local/structural gate passes, and the exact-final-SHA CI
 record is cited at handoff. Phase 10 is complete; Phase 11 is next and remains
-unbegun.
+unbegun at this historical checkpoint. Current Phase 11 status follows.
 
 ## Phase 11 — Authored waves and difficulty scheduler
 
 **Objective:** Run deterministic finite-mode waves with the approved timer rule.
 
+**Current status:** Complete on 2026-08-28. Packets 11.1–11.6, focused and
+real-stack deterministic coverage, the exact unsaved two-client Match Studio
+gate, the single consolidated review and resolution pass, the
+`742`-case/`56`-suite local gate, and all four structural builds passed. The
+authoritative decision, implementation details, and Studio evidence are in
+`docs/WAVE_RUNTIME.md`. Exact-final-SHA CI is cited at handoff. Production
+`Assets`, `Enemies`, `Maps`, `Difficulties`, `Waves`, and difficulty-specific
+`Economy` rules remain empty, so production initialization remains dormant.
+
 ### Packet 11.1 — Wave definition fixtures
+
+**Executable status:** Passed. Fresh raw Asset, Enemy, Map, Difficulty, Wave,
+and Economy inputs are validated in production schema dependency order and only
+their canonical frozen outputs are accepted. Primary and intentional-overlap
+fixtures cover delays, zero/nonzero intervals, lanes, empty waves, boss/reward
+metadata, inclusive deadlines, hostile values, detached copies, and production
+dormancy.
 
 - Create small test definitions for Easy-like and overlap scenarios.
 - Support groups, counts, intervals, delays, lanes, and boss flags.
@@ -1039,11 +1068,23 @@ unbegun.
 
 ### Packet 11.2 — Wave scheduler
 
+**Executable status:** Passed. One match-scoped `WaveRuntime` authenticates the
+MatchId, runtime map, enemy epoch, canonical configuration and selection,
+initializes Base before `WaveActive`, binds one-time enemy health/speed products,
+and processes stable absolute events through EnemySimulation's sole sampled
+boundary. Per-origin queues, ownership, counters, outcomes, revisions, and
+capacity are bounded and server-owned.
+
 - Spawn groups according to server time.
 - Track scheduled, spawned, alive, and leaked enemies.
 - Never infer completion only from a client or a visual folder.
 
 ### Packet 11.3 — Early-clear and deadline rules
+
+**Executable/Studio status:** Passed. Inclusive exact-deadline work precedes a
+single boundary; five-second early-clear intermissions, empty waves,
+deadline/skip overlap, large-delta catch-up, simultaneous ordering, final
+completion, and defeat preemption preserve old work and exact origin ownership.
 
 - Start a five-second intermission after all scheduled enemies are gone.
 - Start the next wave at deadline when old enemies remain.
@@ -1052,12 +1093,25 @@ unbegun.
 
 ### Packet 11.4 — Difficulty runtime
 
+**Executable/Studio status:** Passed. Wave one and the canonical finite total,
+base maximum health, one-time enemy modifiers, detached starting-cash metadata,
+wave/boss/timer/counter/vote snapshot fields, and three bounded reliable Wave
+definitions converge without adding a HUD, cash balance, reward, boss behavior,
+victory, or Results mutation.
+
 - Select test difficulty.
 - Apply starting wave count, base health, starting cash placeholder, and enemy
   modifiers from configuration.
 - Expose current/total wave and boss metadata.
 
 ### Packet 11.5 — Skip-vote system
+
+**Executable/Studio status:** Passed. Votes derive identity from request context,
+admit one yes per Active UserId per current nonfinal wave after the server-owned
+minimum time, use `floor(active / 2) + 1`, discard disconnected votes, recompute
+quorum, and apply one safe deadline-equivalent boundary without canceling old
+work. Zero participants, stale/duplicate/early/final/terminal requests fail
+closed.
 
 - Make votes match-scoped and server-authoritative.
 - Require a strict majority of active participants.
@@ -1066,11 +1120,24 @@ unbegun.
 
 ### Packet 11.6 — Wave scheduler tests
 
+**Headless/Studio status:** Passed. The exact finite, empty, deadline, overlap,
+skip-majority, disconnect, recovery, `1/32/64/128` due-spawn, defeat, and cleanup
+Studio scenarios all passed with two clients, zero console errors, constant
+connections, no early spawn, and zero residue. The deterministic headless gate
+also covers configuration forgery, boundary races, sender/callback/lifecycle/
+clock/capacity faults, committed-spawn reconciliation, and cleanup.
+
 - Test empty waves, early clear, exact deadline, overlap, disconnect voting,
   final wave, defeat mid-spawn, and cleanup.
 
-**Exit gate:** A test finite difficulty runs from wave one through its final wave
-with correct overlaps and no duplicate transitions.
+**Exit gate:** Passed on 2026-08-28. A test finite difficulty runs from wave one
+through its final wave with correct overlaps and no duplicate transitions.
+Healthy `FiniteComplete` is recorded once while MatchLifecycle stays
+`WaveActive`; it implements no victory or Results behavior. Phase 10 defeat
+still closes future work and commits exactly one `Results` transition. All
+material consolidated-review findings are resolved, the complete local and
+structural gate passes, and exact-final-SHA CI is cited at handoff. Phase 11 is
+complete; Phase 12 is next and remains unbegun.
 
 ## Phase 12 — Tower definitions and temporary match loadout
 

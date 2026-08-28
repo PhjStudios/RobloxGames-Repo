@@ -116,6 +116,7 @@ local function legalStateTransition(previous: string, nextState: string): boolea
 	elseif previous == "Intermission" then
 		return nextState == "Intermission"
 			or nextState == "Running"
+			or nextState == "FiniteComplete"
 			or nextState == "DefeatClosed"
 			or nextState == "Faulted"
 	end
@@ -160,9 +161,7 @@ local function canAdvance(previous: WaveProtocol.WaveSnapshot, nextSnapshot: Wav
 			and monotonicCurrent(previous.currentCounts, nextSnapshot.currentCounts)
 	end
 
-	return not isTerminal(previous.state)
-		and nextSnapshot.waveStartedServerTime >= previous.waveStartedServerTime
-		and nextSnapshot.deadlineServerTime >= previous.deadlineServerTime
+	return not isTerminal(previous.state) and nextSnapshot.waveStartedServerTime >= previous.waveStartedServerTime
 end
 
 local function makeOutcome(
@@ -253,19 +252,32 @@ function ReducerMethods.observeEvent(self: Reducer, value: unknown): ApplyResult
 	return Result.ok(observeCanonical(data, snapshot, "Event", false))
 end
 
-function ReducerMethods.observeGetResponse(self: Reducer, value: unknown, allowMatchReplacement: unknown): ApplyResult
+function ReducerMethods.observeGetResponse(
+	self: Reducer,
+	value: unknown,
+	allowMatchReplacement: unknown,
+	confirmRecoveryEpisode: unknown?
+): ApplyResult
 	local data = requireData(self)
 	if data.cleaned then
 		return failure("CLEANED_UP")
 	end
-	if type(allowMatchReplacement) ~= "boolean" then
+	if
+		type(allowMatchReplacement) ~= "boolean"
+		or (confirmRecoveryEpisode ~= nil and type(confirmRecoveryEpisode) ~= "boolean")
+	then
 		return failure("INVALID_ARGUMENT")
 	end
 	local snapshot = validateSnapshot(value)
 	if snapshot == nil then
 		return failure("INVALID_SNAPSHOT")
 	end
-	return Result.ok(observeCanonical(data, snapshot, "GetResponse", allowMatchReplacement :: boolean))
+	local outcome = observeCanonical(data, snapshot, "GetResponse", allowMatchReplacement :: boolean)
+	if confirmRecoveryEpisode == true and outcome.kind == "Duplicate" and data.recoveryRequired then
+		data.recoveryRequired = false
+		outcome = makeOutcome("Duplicate", false, false, false, false)
+	end
+	return Result.ok(outcome)
 end
 
 function ReducerMethods.observeSubmitResponse(self: Reducer, value: unknown): ApplyResult

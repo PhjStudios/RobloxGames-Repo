@@ -8,20 +8,26 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phases 00–10 are complete; Gate A passed on 2026-08-26 and the Phase
+order. Phases 00–11 are complete; Gate A passed on 2026-08-26 and the Phase
 07–09 exit gates passed on 2026-08-27. Phase 10 Packets 10.1–10.4 implement
 the server-owned defender-base runtime, exact-once leak damage, bounded reliable
 recovery, world-space base presentation, and one fail-closed defeat path into
-Results. The exact unsaved two-client Match Studio gate, consolidated review,
-`593`-case/`48`-suite local gate, and all four structural builds passed on
-2026-08-28. Both material review findings were resolved. Exact-final-SHA CI is
-cited at handoff rather than through a self-referential evidence commit.
+Results. Phase 11 Packets 11.1–11.6 add the authenticated finite authored-wave
+runtime, exact server-time scheduler, per-origin ownership and outcomes,
+difficulty composition, strict-majority skip voting, and bounded full-state
+client recovery. Its deterministic `742`-case/`56`-suite local gate, all four
+structural builds, exact unsaved two-client Match Studio scenarios, and one
+consolidated review passed on 2026-08-28. Every material review finding was
+resolved. Exact-final-SHA CI is cited at handoff rather than through a
+self-referential evidence commit.
 
-Production networking contains seven Match-only reliable endpoints and four
-client-request rate policies. `Enemies`, `Assets`, `Maps`, `Difficulties`, and
-`Waves` remain empty production catalogs, so the new base runtime remains
-dormant until a future server-owned caller supplies a validated difficulty.
-Phase 11 is next and remains unbegun.
+Production networking contains ten Match-only reliable endpoints and six
+client-request rate policies. `Enemies`, `Assets`, `Maps`, `Difficulties`,
+`Waves`, and difficulty-specific `Economy` rules remain empty production
+catalogs, so the Wave runtime is production-dormant until authenticated content
+exists. Healthy finite completion deliberately leaves MatchLifecycle in
+`WaveActive`; victory, rewards, Results UI, economy balances, and all Phase 12
+systems remain unbegun. Phase 12 is next.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -44,6 +50,7 @@ Phase 11 is next and remains unbegun.
 - [Match lifecycle, roster, Ready protocol, UI, and four-client evidence](docs/MATCH_LIFECYCLE_READY.md)
 - [Phase 09 enemy simulation, replication, rendering, and Studio evidence](docs/ENEMY_SIMULATION.md)
 - [Phase 10 defender-base runtime, replication, defeat, and Studio evidence](docs/BASE_RUNTIME.md)
+- [Phase 11 authored-wave runtime, difficulty scheduler, replication, and Studio evidence](docs/WAVE_RUNTIME.md)
 - [Economy, banner, and default-settings schemas](docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md)
 - [Whole-configuration validation and bootstrap gate](docs/CONFIGURATION_VALIDATION.md)
 - [Phase 04 exit-gate audit](docs/PHASE_04_EXIT_AUDIT.md)

@@ -34,6 +34,7 @@ end
 type Environment = {
 	now: number,
 	lifecycleState: string,
+	lifecycleRevision: number,
 	matchId: string,
 	enemyIdentity: any,
 	statusEpoch: number,
@@ -95,7 +96,10 @@ type Environment = {
 	triggerDestroyCount: number,
 	validationMode: string,
 	validationCount: number,
+	validationCompleted: boolean,
 	validationHook: any?,
+	readySubmissionCalls: number,
+	readySubmissionMode: string,
 	durationNow: number,
 	baseCatalogInstallMode: string,
 	baseCatalogInstallCalls: number,
@@ -126,9 +130,9 @@ end
 local function matchSnapshot(environment: Environment): any
 	local validated = MatchProtocol.validateMatchSnapshot({
 		matchId = environment.matchId,
-		revision = if environment.lifecycleState == "WaveActive" then 4 else 3,
+		revision = environment.lifecycleRevision,
 		state = environment.lifecycleState,
-		deadlineServerTime = nil,
+		deadlineServerTime = if environment.lifecycleState == "ReadyCheck" then environment.now + 30 else nil,
 		participants = {},
 	})
 	if not validated.ok then
@@ -141,6 +145,7 @@ local function newEnvironment(): Environment
 	return {
 		now = 100,
 		lifecycleState = "PreWave",
+		lifecycleRevision = 3,
 		matchId = MATCH_ID,
 		enemyIdentity = table.freeze({
 			matchId = MATCH_ID,
@@ -205,7 +210,10 @@ local function newEnvironment(): Environment
 		triggerDestroyCount = 0,
 		validationMode = "success",
 		validationCount = 0,
+		validationCompleted = false,
 		validationHook = nil,
+		readySubmissionCalls = 0,
+		readySubmissionMode = "success",
 		durationNow = 0,
 		baseCatalogInstallMode = "success",
 		baseCatalogInstallCalls = 0,
@@ -360,6 +368,12 @@ local function wrapRuntime(environment: Environment, runtime: any): any
 		end
 		return runtime:step(frame)
 	end
+	function wrapper.closeDependencyFault(_self: any, context: unknown): unknown
+		if environment.voteSnapshot ~= nil and environment.voteSnapshot.state == "Faulted" then
+			return Result.ok(environment.voteSnapshot)
+		end
+		return runtime:closeDependencyFault(context)
+	end
 	function wrapper.getSnapshot(_self: any): unknown
 		if environment.voteSnapshot ~= nil then
 			return Result.ok(environment.voteSnapshot)
@@ -501,6 +515,46 @@ local function dependenciesFor(environment: Environment, selection: WaveRuntimeS
 		end
 		return Result.ok(environment.recipients)
 	end
+	function lifecycle.getCommittedBaseDefeatRecipients(_self: any): unknown
+		table.insert(environment.order, "committedBaseDefeatRecipients")
+		if environment.recipientMode == "committed-throw" then
+			error("PRIVATE_COMMITTED_RECIPIENT_FAILURE", 0)
+		elseif environment.recipientMode == "committed-malformed" then
+			return Result.ok({ malformed = true })
+		elseif environment.recipientMode ~= "committed-defeat" then
+			return Result.err(table.freeze({ code = "UNAVAILABLE" }))
+		end
+		return Result.ok(environment.recipients)
+	end
+	function lifecycle.submitReady(
+		_self: any,
+		connection: unknown,
+		matchId: unknown,
+		observedRevision: unknown
+	): unknown
+		environment.readySubmissionCalls += 1
+		table.insert(environment.order, `submitReady:{tostring((connection :: any).userId)}`)
+		local before = matchSnapshot(environment)
+		if
+			not environment.validationCompleted
+			or environment.lifecycleState ~= "ReadyCheck"
+			or matchId ~= environment.matchId
+			or observedRevision ~= before.revision
+			or type(connection) ~= "table"
+			or (connection :: any).alive ~= true
+		then
+			return Result.err(table.freeze({ code = "PRIVATE_READY_FAILURE" }))
+		elseif environment.readySubmissionMode == "failure" then
+			return Result.err(table.freeze({ code = "PRIVATE_READY_FAILURE" }))
+		elseif environment.readySubmissionMode == "malformed" then
+			return Result.ok(table.freeze({ malformed = true }))
+		end
+		environment.lifecycleRevision += 1
+		if environment.readySubmissionCalls >= #environment.recipients then
+			environment.lifecycleState = "PreWave"
+		end
+		return Result.ok(matchSnapshot(environment))
+	end
 	function lifecycle.isRuntimeMapSnapshot(_self: any, value: unknown): unknown
 		return value == fixture.runtimeMap
 	end
@@ -517,6 +571,7 @@ local function dependenciesFor(environment: Environment, selection: WaveRuntimeS
 			return Result.err(table.freeze({ code = "PRIVATE_FAILURE" }))
 		end
 		environment.lifecycleState = "WaveActive"
+		environment.lifecycleRevision += 1
 		return Result.ok(table.freeze({
 			committed = true,
 			published = true,
@@ -666,7 +721,10 @@ local function dependenciesFor(environment: Environment, selection: WaveRuntimeS
 			lifecycleState = "Started",
 			stepConnectionCount = 1,
 			playerRemovingConnectionCount = 1,
-			publisher = table.freeze({ publicationCount = 0 }),
+			publisher = table.freeze({
+				deltaMessageCount = 0,
+				snapshotMessageCount = 0,
+			}),
 		})
 	end
 
@@ -802,7 +860,9 @@ local function dependenciesFor(environment: Environment, selection: WaveRuntimeS
 			elseif environment.validationMode == "malformed" then
 				return Result.ok(table.freeze({ malformed = true }))
 			end
-			return ConfigurationValidator.validate(sources)
+			local resultValue = ConfigurationValidator.validate(sources)
+			environment.validationCompleted = resultValue.ok
+			return resultValue
 		end,
 		durationClock = function(): unknown
 			environment.durationNow += 0.001
@@ -1007,6 +1067,7 @@ return TestHarness.suite("WaveRuntimeService", {
 		assertions.isTrue(table.isfrozen(diagnostics.base))
 		assertions.isTrue(table.isfrozen(diagnostics.enemy))
 		assertions.equal(diagnostics.residue.activeEnemyCount, 0)
+		assertions.equal(diagnostics.publications.enemy, 0)
 		assertions.isTrue(diagnostics.scheduler.noEarlySpawns)
 		studioEnvironment.activeEnemies = {
 			table.freeze({
@@ -1036,6 +1097,28 @@ return TestHarness.suite("WaveRuntimeService", {
 		assertions.equal(studioService:getMetrics().studioValidationCount, 0)
 		assertions.equal(studioService:getMetrics().studioSpawnEvidenceCount, 0)
 		assertions.equal(studioService:getMetrics().lifecycleState, "Shutdown")
+
+		local readyEnvironment = newEnvironment()
+		readyEnvironment.isStudio = true
+		readyEnvironment.lifecycleState = "ReadyCheck"
+		local _firstConnection, firstRecipient = makeRecipient(17)
+		local _secondConnection, secondRecipient = makeRecipient(29)
+		readyEnvironment.recipients = table.freeze({ firstRecipient, secondRecipient })
+		local readyService = createService(readyEnvironment, dormantSelection())
+		startService(readyService)
+		local readyActivation = expectSuccess(
+			assertions,
+			(readyEnvironment.triggerHandler :: any)({ operation = "Activate", scenario = "Primary" })
+		)
+		assertions.equal(readyActivation.matchId, MATCH_ID)
+		assertions.isTrue(readyEnvironment.validationCompleted)
+		assertions.equal(readyEnvironment.readySubmissionCalls, 2)
+		assertions.equal(readyEnvironment.lifecycleState, "WaveActive")
+		assertions.equal(readyEnvironment.baseCatalogInstallCalls, 1)
+		assertions.isTrue(table.find(readyEnvironment.order, "submitReady:17") ~= nil)
+		assertions.isTrue(table.find(readyEnvironment.order, "submitReady:29") ~= nil)
+		readyService:getServiceDefinition().shutdown()
+		assertions.equal(readyService:getMetrics().lifecycleState, "Shutdown")
 
 		local scenarios = {
 			Primary = 4,
@@ -1078,6 +1161,7 @@ return TestHarness.suite("WaveRuntimeService", {
 				assertions.equal(measured.spawnEvidence[1].currentHealth, 100)
 				assertions.equal(measured.spawnEvidence[1].effectiveSpeed, 16)
 			elseif scenario == "Defeat" then
+				variantEnvironment.recipientMode = "committed-defeat"
 				local configuration = variantEnvironment.boundConfiguration
 				local schedule = configuration.waves.byMapId[WaveFixtures.MAP_ID]["difficulty:phase11-studio"]
 				local defeatWave = schedule.waves[1]
@@ -1199,10 +1283,12 @@ return TestHarness.suite("WaveRuntimeService", {
 			local _, recipientRecord = makeRecipient(71)
 			environment.recipients = { recipientRecord }
 			local boundary = environment.boundary :: any
-			expectSuccess(assertions, boundary:onEnemyPass(healthyFrame(environment, 1)))
+			expectSuccess(assertions, boundary:onEnemyPass(healthyFrame(environment, 73)))
 			table.insert(environment.order, "enemyPublisherAdvance")
-			expectSuccess(assertions, boundary:flushEnemyPass(1))
+			expectSuccess(assertions, boundary:flushEnemyPass(73))
 			assertions.equal(environment.recipientCalls, 1)
+			assertions.isTrue(table.find(environment.order, "connectedRecipients") ~= nil)
+			assertions.isNil(table.find(environment.order, "committedBaseDefeatRecipients"))
 			assertions.equal(#environment.waveSends, 1)
 			assertions.equal(environment.waveSends[1].snapshot.waveRevision, 3)
 			assertions.isFalse(service:getMetrics().publisher.hasPending)
@@ -1488,6 +1574,7 @@ return TestHarness.suite("WaveRuntimeService", {
 		defeatEnvironment.voteMode = "defeat-failure"
 		local _, defeatRecipient = makeRecipient(82)
 		defeatEnvironment.recipients = { defeatRecipient }
+		defeatEnvironment.recipientMode = "committed-defeat"
 		local defeatService = createService(defeatEnvironment, configuredSelection())
 		startService(defeatService)
 		expectError(assertions, defeatService:submitSkipVote(82, MATCH_ID, 1), "UNAVAILABLE", "submitSkipVote")
@@ -1506,6 +1593,8 @@ return TestHarness.suite("WaveRuntimeService", {
 		assertions.equal(#defeatEnvironment.waveSends, 1)
 		assertions.equal(defeatEnvironment.waveSends[1].snapshot.state, "DefeatClosed")
 		assertions.equal(defeatEnvironment.waveSends[1].snapshot.waveRevision, 2)
+		assertions.isNil(table.find(defeatEnvironment.order, "connectedRecipients"))
+		assertions.isTrue(table.find(defeatEnvironment.order, "committedBaseDefeatRecipients") ~= nil)
 		local defeatClosedMetrics = defeatService:getMetrics()
 		assertions.isFalse(defeatClosedMetrics.publisher.hasPending)
 		assertions.equal(defeatClosedMetrics.publisher.publicationCount, 1)
@@ -1515,8 +1604,44 @@ return TestHarness.suite("WaveRuntimeService", {
 		assertions.equal(boundaryStatus(defeatEnvironment).status, "DefeatClosed")
 		defeatService:getServiceDefinition().shutdown()
 
+		for _, recipientMode in { "committed-failure", "committed-malformed", "committed-throw" } do
+			local terminalRecipientEnvironment = newEnvironment()
+			terminalRecipientEnvironment.voteMode = "defeat-failure"
+			terminalRecipientEnvironment.recipientMode = recipientMode
+			local _, terminalRecipient = makeRecipient(91)
+			terminalRecipientEnvironment.recipients = { terminalRecipient }
+			local terminalRecipientService = createService(terminalRecipientEnvironment, configuredSelection())
+			startService(terminalRecipientService)
+			expectError(
+				assertions,
+				terminalRecipientService:submitSkipVote(91, MATCH_ID, 1),
+				"UNAVAILABLE",
+				"submitSkipVote"
+			)
+			local terminalRecipientBoundary = terminalRecipientEnvironment.boundary :: any
+			assertions.isFalse(
+				expectSuccess(
+					assertions,
+					terminalRecipientBoundary:onEnemyPass(
+						closedFrame(terminalRecipientEnvironment, "DefeatCommitted", 1)
+					)
+				)
+			)
+			terminalRecipientEnvironment.boundaryStatus = "DefeatClosed"
+			expectError(assertions, terminalRecipientBoundary:flushEnemyPass(1), "INTERNAL_ERROR", "flushEnemyPass")
+			local terminalRecipientMetrics = terminalRecipientService:getMetrics()
+			assertions.equal(terminalRecipientMetrics.lifecycleState, "Failed")
+			assertions.equal(terminalRecipientMetrics.terminalState, "Faulted")
+			assertions.isFalse(terminalRecipientMetrics.publisher.hasPending)
+			assertions.isTrue(table.find(terminalRecipientEnvironment.order, "committedBaseDefeatRecipients") ~= nil)
+			assertions.isNil(table.find(terminalRecipientEnvironment.order, "connectedRecipients"))
+			assertions.equal(#terminalRecipientEnvironment.waveSends, 0)
+			terminalRecipientService:getServiceDefinition().shutdown()
+		end
+
 		local lateHealthyEnvironment = newEnvironment()
 		lateHealthyEnvironment.voteMode = "defeat-failure"
+		lateHealthyEnvironment.recipientMode = "committed-defeat"
 		local _, lateHealthyRecipient = makeRecipient(85)
 		lateHealthyEnvironment.recipients = { lateHealthyRecipient }
 		local lateHealthyService = createService(lateHealthyEnvironment, configuredSelection())
@@ -1567,6 +1692,52 @@ return TestHarness.suite("WaveRuntimeService", {
 		faultService:getServiceDefinition().shutdown()
 	end),
 
+	TestHarness.case("retains canonical Faulted truth after terminal sender failures", function(assertions)
+		for _, senderMode in { "false", "throw" } do
+			local environment = newEnvironment()
+			environment.stepMode = "faulted"
+			environment.senderMode = senderMode
+			local _, recipient = makeRecipient(92)
+			environment.recipients = { recipient }
+			local service = createService(environment, configuredSelection())
+			startService(service)
+			local boundary = environment.boundary :: any
+			assertions.isTrue(expectSuccess(assertions, boundary:onEnemyPass(healthyFrame(environment, 1))))
+			expectError(assertions, boundary:flushEnemyPass(1), "INTERNAL_ERROR", "flushEnemyPass")
+
+			local first = expectSuccess(assertions, service:getSnapshot())
+			local second = expectSuccess(assertions, service:getSnapshot())
+			assertions.equal(first.state, "Faulted")
+			assertions.equal(second, first)
+			assertions.equal(first.waveRevision, environment.waveSends[1].snapshot.waveRevision)
+			assertions.equal(first.state, environment.waveSends[1].snapshot.state)
+			assertions.equal(first.aggregateCounts.spawned, environment.waveSends[1].snapshot.aggregateCounts.spawned)
+			assertions.equal(service:getMetrics().publisher.senderFailureCount, 1)
+			expectError(assertions, service:submitSkipVote(92, MATCH_ID, 1), "UNAVAILABLE", "submitSkipVote")
+
+			expectSuccess(
+				assertions,
+				boundary:close(table.freeze({
+					disposition = "DependencyFault",
+					matchId = MATCH_ID,
+					enemyEpoch = ENEMY_EPOCH,
+					passOrdinal = 1,
+					sampleServerTime = environment.now,
+				}))
+			)
+			assertions.equal(service:getMetrics().publisher.publicationCount, 1)
+			assertions.equal(environment.publisherFlushCalls, 1)
+			assertions.equal(#environment.waveSends, 1)
+			expectError(assertions, boundary:onEnemyPass(healthyFrame(environment, 2)), "INTERNAL_ERROR", "onEnemyPass")
+			local afterReplay = expectSuccess(assertions, service:getSnapshot())
+			assertions.equal(afterReplay.state, first.state)
+			assertions.equal(afterReplay.waveRevision, first.waveRevision)
+
+			service:getServiceDefinition().shutdown()
+			expectError(assertions, service:getSnapshot(), "UNAVAILABLE", "getSnapshot")
+		end
+	end),
+
 	TestHarness.case("fails closed when a scheduler spawn dependency rejects after activation", function(assertions)
 		local environment = newEnvironment()
 		environment.spawnMode = "uncommitted"
@@ -1583,7 +1754,9 @@ return TestHarness.suite("WaveRuntimeService", {
 		assertions.equal(service:getMetrics().terminalState, "Faulted")
 		assertions.equal(service:getMetrics().publisher.publicationCount, 1)
 		assertions.isFalse(service:getMetrics().publisher.hasPending)
-		expectError(assertions, service:getSnapshot(), "UNAVAILABLE", "getSnapshot")
+		local recoverableFault = expectSuccess(assertions, service:getSnapshot())
+		assertions.equal(recoverableFault.state, "Faulted")
+		assertions.equal(recoverableFault.waveRevision, service:getMetrics().lastQueuedWaveRevision)
 		expectError(assertions, service:submitSkipVote(51, MATCH_ID, 1), "UNAVAILABLE", "submitSkipVote")
 
 		local closeContext = table.freeze({
@@ -1598,6 +1771,7 @@ return TestHarness.suite("WaveRuntimeService", {
 		service:getServiceDefinition().shutdown()
 		assertions.equal(environment.detachCount, 1)
 		assertions.equal(environment.runtimeCleanupCount, 1)
+		expectError(assertions, service:getSnapshot(), "UNAVAILABLE", "getSnapshot")
 
 		local terminalEnvironment = newEnvironment()
 		local terminalService = createService(terminalEnvironment, configuredSelection())
@@ -1940,19 +2114,40 @@ return TestHarness.suite("WaveRuntimeService", {
 
 		local preflightFaultEnvironment = newEnvironment()
 		preflightFaultEnvironment.isStudio = true
-		preflightFaultEnvironment.lifecycleState = "ReadyCheck"
+		preflightFaultEnvironment.lifecycleState = "Loading"
+		preflightFaultEnvironment.recipients = table.freeze({})
 		local preflightFaultService = createService(preflightFaultEnvironment, dormantSelection())
 		startService(preflightFaultService)
 		expectError(
 			assertions,
 			(preflightFaultEnvironment.triggerHandler :: any)({ operation = "Activate", scenario = "Primary" }),
-			"INTERNAL_ERROR",
+			"UNAVAILABLE",
 			"runtimeTrigger"
 		)
-		assertions.equal(preflightFaultEnvironment.validationCount, 1)
+		assertions.equal(preflightFaultEnvironment.validationCount, 0)
 		assertions.equal(preflightFaultEnvironment.baseCatalogInstallCalls, 0)
-		assertions.equal(preflightFaultEnvironment.triggerDestroyCount, 1)
-		assertions.equal(preflightFaultService:getMetrics().lifecycleState, "Failed")
+		assertions.equal(preflightFaultEnvironment.triggerDestroyCount, 0)
+		assertions.equal(preflightFaultService:getMetrics().lifecycleState, "Started")
+		assertions.isFalse(preflightFaultService:getMetrics().studioActivationAttempted)
+		preflightFaultEnvironment.lifecycleState = "ReadyCheck"
+		expectError(
+			assertions,
+			(preflightFaultEnvironment.triggerHandler :: any)({ operation = "Activate", scenario = "Primary" }),
+			"UNAVAILABLE",
+			"runtimeTrigger"
+		)
+		assertions.equal(preflightFaultEnvironment.validationCount, 0)
+		assertions.equal(preflightFaultEnvironment.triggerDestroyCount, 0)
+		local retryConnection, retryRecipient = makeRecipient(41)
+		preflightFaultEnvironment.recipients = table.freeze({ retryRecipient })
+		local retried = expectSuccess(
+			assertions,
+			(preflightFaultEnvironment.triggerHandler :: any)({ operation = "Activate", scenario = "Primary" })
+		)
+		assertions.equal(retried.matchId, MATCH_ID)
+		assertions.equal(preflightFaultEnvironment.readySubmissionCalls, 1)
+		assertions.isTrue(retryConnection.alive)
+		assertions.equal(preflightFaultEnvironment.lifecycleState, "WaveActive")
 		preflightFaultService:getServiceDefinition().shutdown()
 
 		local triggerFaultEnvironment = newEnvironment()

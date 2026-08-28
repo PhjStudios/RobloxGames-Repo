@@ -10,6 +10,7 @@ local WaveProtocol = require(ReplicatedStorage.Shared.match.WaveProtocol)
 local RemoteRegistry = require(ReplicatedStorage.Shared.network.RemoteRegistry)
 local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
 local Result = require(ReplicatedStorage.Shared.util.Result)
+local Validation = require(ReplicatedStorage.Shared.util.Validation)
 
 local WaveStateReducer = require(script.Parent.WaveStateReducer)
 
@@ -38,6 +39,18 @@ export type Error = {
 	code: ErrorCode,
 }
 
+export type ApplyKind = "Applied" | "Replaced" | "Duplicate" | "Stale" | "Skipped" | "WrongMatch" | "Rejected"
+
+export type ApplyOutcomeCounts = {
+	Applied: number,
+	Replaced: number,
+	Duplicate: number,
+	Stale: number,
+	Skipped: number,
+	WrongMatch: number,
+	Rejected: number,
+}
+
 export type Metrics = {
 	lifecycleState: LifecycleState,
 	connectionCount: number,
@@ -53,6 +66,8 @@ export type Metrics = {
 	acceptedStateCount: number,
 	matchReplacementCount: number,
 	rejectedInputCount: number,
+	applyOutcomeCounts: ApplyOutcomeCounts,
+	lastApplyKind: ApplyKind?,
 	locked: boolean,
 	matchId: string?,
 	waveRevision: number?,
@@ -91,7 +106,12 @@ export type TrackerAdapter = {
 
 export type ReducerAdapter = {
 	observeEvent: (self: ReducerAdapter, value: unknown) -> any,
-	observeGetResponse: (self: ReducerAdapter, value: unknown, allowMatchReplacement: unknown) -> any,
+	observeGetResponse: (
+		self: ReducerAdapter,
+		value: unknown,
+		allowMatchReplacement: unknown,
+		confirmRecoveryEpisode: unknown?
+	) -> any,
 	observeSubmitResponse: (self: ReducerAdapter, value: unknown) -> any,
 	getState: (self: ReducerAdapter) -> any,
 	reset: (self: ReducerAdapter) -> any,
@@ -111,6 +131,13 @@ type PendingRequest = {
 	matchGeneration: number,
 }
 
+type PendingGetRequest = {
+	pending: RequestProtocol.Pending,
+	matchGeneration: number,
+	recovery: boolean,
+	recoveryEpisode: number?,
+}
+
 type ControllerData = {
 	state: LifecycleState,
 	dependencyFactory: () -> Dependencies,
@@ -119,9 +146,10 @@ type ControllerData = {
 	callbacksEnabled: boolean,
 	callbackGeneration: number,
 	matchGeneration: number,
-	getPending: PendingRequest?,
+	getPending: PendingGetRequest?,
 	skipPending: PendingRequest?,
 	initialRequestIssued: boolean,
+	recoveryEpisode: number,
 	recoveryQueued: boolean,
 	recoveryUsed: boolean,
 	getRequestCount: number,
@@ -130,6 +158,8 @@ type ControllerData = {
 	acceptedStateCount: number,
 	matchReplacementCount: number,
 	rejectedInputCount: number,
+	applyOutcomeCounts: ApplyOutcomeCounts,
+	lastApplyKind: ApplyKind?,
 	cleanupFailed: boolean,
 	controller: unknown?,
 	studioDiagnosticsBridge: BindableFunction?,
@@ -170,7 +200,7 @@ local ERRORS: { [ErrorCode]: Error } = table.freeze({
 local WaveController = {
 	SERVICE_NAME = SERVICE_NAME,
 	CONNECTION_COUNT = 3,
-	MAX_RECOVERY_REQUESTS_PER_MATCH = 1,
+	MAX_RECOVERY_REQUESTS_PER_GAP = 1,
 	MAX_SKIP_REQUESTS_PENDING = 1,
 	newForTests = nil :: TestConstructor?,
 	invokeStudioDiagnosticsForTests = nil :: ((Controller, ...unknown) -> unknown)?,
@@ -356,6 +386,8 @@ local function issueGet(data: ControllerData, recovery: boolean): boolean
 	data.getPending = {
 		pending = request.pending,
 		matchGeneration = data.matchGeneration,
+		recovery = recovery,
+		recoveryEpisode = if recovery then data.recoveryEpisode else nil,
 	}
 	if not pcall(dependencies.getSnapshot.fire, request.envelope) then
 		cancelRequest(data, "getPending")
@@ -372,12 +404,32 @@ issueRecovery = function(data: ControllerData): boolean
 	return issueGet(data, true)
 end
 
-local function requestRecovery(data: ControllerData, forced: boolean)
-	if data.state ~= "Started" or not data.callbacksEnabled or data.studioRecoverySuspended or data.recoveryUsed then
+local function beginRecoveryEpisode(data: ControllerData): boolean
+	if data.recoveryEpisode >= Validation.MAX_SAFE_INTEGER then
+		data.rejectedInputCount += 1
+		return false
+	end
+	data.recoveryEpisode += 1
+	data.recoveryUsed = false
+	return true
+end
+
+local function requestRecovery(data: ControllerData, forced: boolean, newEpisode: boolean?)
+	if data.state ~= "Started" or not data.callbacksEnabled or data.studioRecoverySuspended then
+		return
+	end
+	if newEpisode == true and not beginRecoveryEpisode(data) then
+		return
+	elseif forced and data.getPending == nil and not data.recoveryUsed and not beginRecoveryEpisode(data) then
 		return
 	end
 	if data.getPending ~= nil then
-		data.recoveryQueued = true
+		if newEpisode == true then
+			data.recoveryQueued = true
+		end
+		return
+	end
+	if data.recoveryUsed then
 		return
 	end
 	if forced then
@@ -387,14 +439,69 @@ local function requestRecovery(data: ControllerData, forced: boolean)
 	end
 end
 
+local function handleGetFailure(data: ControllerData, pending: PendingGetRequest?, retryUnlockedInitial: boolean)
+	local converged = readConverged(data)
+	if converged == nil then
+		if pending ~= nil and not pending.recovery and retryUnlockedInitial then
+			requestRecovery(data, true)
+		end
+		return
+	end
+	if pending ~= nil and pending.recovery then
+		if converged.recoveryRequired == true then
+			requestRecovery(data, false)
+		elseif converged.locked == true then
+			data.recoveryUsed = false
+		end
+		return
+	end
+	if converged.recoveryRequired == true or (converged.locked ~= true and retryUnlockedInitial) then
+		requestRecovery(data, true)
+	end
+end
+
+local function resetApplyOutcomeDiagnostics(data: ControllerData)
+	local counts = data.applyOutcomeCounts
+	counts.Applied = 0
+	counts.Replaced = 0
+	counts.Duplicate = 0
+	counts.Stale = 0
+	counts.Skipped = 0
+	counts.WrongMatch = 0
+	counts.Rejected = 0
+	data.lastApplyKind = nil
+end
+
+local function recordApplyOutcome(data: ControllerData, kindValue: unknown)
+	if
+		kindValue ~= "Applied"
+		and kindValue ~= "Replaced"
+		and kindValue ~= "Duplicate"
+		and kindValue ~= "Stale"
+		and kindValue ~= "Skipped"
+		and kindValue ~= "WrongMatch"
+		and kindValue ~= "Rejected"
+	then
+		return
+	end
+	local kind = kindValue :: ApplyKind
+	local counts = data.applyOutcomeCounts
+	counts[kind] = math.min(counts[kind] + 1, Validation.MAX_SAFE_INTEGER)
+	data.lastApplyKind = kind
+end
+
 local function applyOutcome(data: ControllerData, resultValue: unknown): any?
 	if not isSuccess(resultValue) or type((resultValue :: any).value) ~= "table" then
 		data.rejectedInputCount += 1
 		return nil
 	end
 	local outcome = (resultValue :: any).value
+	recordApplyOutcome(data, outcome.kind)
 	if outcome.stateChanged == true then
 		data.acceptedStateCount += 1
+	end
+	if outcome.recoveryRequired ~= true and outcome.kind ~= "WrongMatch" and outcome.kind ~= "Rejected" then
+		data.recoveryUsed = false
 	end
 	if outcome.matchReplaced == true then
 		cancelRequest(data, "skipPending")
@@ -403,7 +510,9 @@ local function applyOutcome(data: ControllerData, resultValue: unknown): any?
 		data.recoveryQueued = false
 		data.recoveryUsed = false
 	end
-	if outcome.recoveryRequested == true or outcome.recoveryRequired == true then
+	if outcome.recoveryRequested == true then
+		requestRecovery(data, false, true)
+	elseif outcome.recoveryRequired == true then
 		requestRecovery(data, false)
 	else
 		data.recoveryQueued = false
@@ -435,10 +544,7 @@ local function onReplicationEvent(data: ControllerData, generation: number, valu
 		data.rejectedInputCount += 1
 		return
 	end
-	local outcome = applyOutcome(data, observed)
-	if outcome ~= nil and (outcome.kind == "Skipped" or outcome.kind == "WrongMatch") then
-		requestRecovery(data, false)
-	end
+	applyOutcome(data, observed)
 end
 
 local function shouldRecoverResponse(response: unknown): boolean
@@ -458,6 +564,7 @@ local function onGetResponse(data: ControllerData, generation: number, value: un
 		return
 	end
 	local dependencies = data.dependencies :: Dependencies
+	local pending = data.getPending
 	local handled = dependencies.tracker:handleResponse(dependencies.getSnapshot.definition, value, ...)
 	if not isSuccess(handled) then
 		if
@@ -467,26 +574,31 @@ local function onGetResponse(data: ControllerData, generation: number, value: un
 		then
 			cancelRequest(data, "getPending")
 			data.rejectedInputCount += 1
-			requestRecovery(data, true)
+			handleGetFailure(data, pending, true)
 		end
 		return
 	end
-	local pending = data.getPending
 	data.getPending = nil
 	local response = (handled :: any).value
 	if RequestProtocol.isSuccess(response) then
 		local currentRequest = pending ~= nil and pending.matchGeneration == data.matchGeneration
+		local confirmsRecoveryEpisode = currentRequest
+			and pending ~= nil
+			and pending.recovery
+			and pending.recoveryEpisode == data.recoveryEpisode
 		local called, observed = pcall(function()
 			return dependencies.reducer:observeGetResponse(
 				(response :: RequestProtocol.Success).payload,
-				currentRequest
+				currentRequest,
+				confirmsRecoveryEpisode
 			)
 		end)
-		if not called or applyOutcome(data, observed) == nil then
-			requestRecovery(data, true)
+		local outcome = if called then applyOutcome(data, observed) else nil
+		if outcome == nil then
+			handleGetFailure(data, pending, true)
 		end
 	elseif shouldRecoverResponse(response) then
-		requestRecovery(data, true)
+		handleGetFailure(data, pending, (response :: RequestProtocol.Rejected).error.code ~= "UNAVAILABLE")
 	end
 	reconcileRecovery(data)
 end
@@ -569,8 +681,10 @@ local function cleanup(data: ControllerData): boolean
 	data.skipPending = nil
 	data.recoveryQueued = false
 	data.recoveryUsed = false
+	data.recoveryEpisode = 0
 	data.studioRecoverySuspended = false
 	data.studioRecoveryUsed = false
+	resetApplyOutcomeDiagnostics(data)
 	data.dependencies = nil
 	data.controller = nil
 	data.cleanupFailed = failed
@@ -667,6 +781,7 @@ local function construct(logger: Log.Logger, dependencyFactory: () -> Dependenci
 		getPending = nil,
 		skipPending = nil,
 		initialRequestIssued = false,
+		recoveryEpisode = 0,
 		recoveryQueued = false,
 		recoveryUsed = false,
 		getRequestCount = 0,
@@ -675,6 +790,16 @@ local function construct(logger: Log.Logger, dependencyFactory: () -> Dependenci
 		acceptedStateCount = 0,
 		matchReplacementCount = 0,
 		rejectedInputCount = 0,
+		applyOutcomeCounts = {
+			Applied = 0,
+			Replaced = 0,
+			Duplicate = 0,
+			Stale = 0,
+			Skipped = 0,
+			WrongMatch = 0,
+			Rejected = 0,
+		},
+		lastApplyKind = nil,
 		cleanupFailed = false,
 		controller = controller,
 		studioDiagnosticsBridge = nil,
@@ -737,6 +862,7 @@ function ControllerMethods.getMetrics(self: Controller): Metrics
 	local data = requireData(self)
 	local converged = readConverged(data)
 	local snapshot = if converged == nil then nil else converged.snapshot
+	local outcomeCounts = data.applyOutcomeCounts
 	return table.freeze({
 		lifecycleState = data.state,
 		connectionCount = #data.connections,
@@ -752,6 +878,16 @@ function ControllerMethods.getMetrics(self: Controller): Metrics
 		acceptedStateCount = data.acceptedStateCount,
 		matchReplacementCount = data.matchReplacementCount,
 		rejectedInputCount = data.rejectedInputCount,
+		applyOutcomeCounts = table.freeze({
+			Applied = outcomeCounts.Applied,
+			Replaced = outcomeCounts.Replaced,
+			Duplicate = outcomeCounts.Duplicate,
+			Stale = outcomeCounts.Stale,
+			Skipped = outcomeCounts.Skipped,
+			WrongMatch = outcomeCounts.WrongMatch,
+			Rejected = outcomeCounts.Rejected,
+		}),
+		lastApplyKind = data.lastApplyKind,
 		locked = type(snapshot) == "table",
 		matchId = if type(snapshot) == "table" then snapshot.matchId else nil,
 		waveRevision = if type(snapshot) == "table" then snapshot.waveRevision else nil,
@@ -784,6 +920,7 @@ local function suspendStudioRecovery(data: ControllerData): boolean
 	cancelRequest(data, "getPending")
 	data.matchGeneration += 1
 	data.initialRequestIssued = false
+	data.recoveryEpisode = 0
 	data.recoveryQueued = false
 	data.recoveryUsed = false
 	local dependencies = data.dependencies
@@ -793,7 +930,11 @@ local function suspendStudioRecovery(data: ControllerData): boolean
 	local reset, resetResult = pcall(function()
 		return dependencies.reducer:reset()
 	end)
-	return reset and isSuccess(resetResult)
+	local succeeded = reset and isSuccess(resetResult)
+	if succeeded then
+		resetApplyOutcomeDiagnostics(data)
+	end
+	return succeeded
 end
 
 local function resumeStudioRecovery(data: ControllerData): boolean

@@ -502,6 +502,83 @@ return TestHarness.suite("server enemy runtime store", {
 	end),
 
 	TestHarness.case(
+		"fault-despawns only the exact committed scheduler snapshot at its authenticated sample",
+		function(assertions)
+			local difficulty = createDifficultyFixture()
+			local clockState = { now = 100, reads = 0 }
+			local store = newStore(assertions, {
+				clock = function()
+					clockState.reads += 1
+					return clockState.now
+				end,
+			})
+			success(assertions, store:bindDifficulty(difficulty.catalog, difficulty.finite))
+			clockState.now = 125
+			local token = success(assertions, store:step(0)).schedulerSampleToken
+			local spawned = success(
+				assertions,
+				store:spawnScheduled(token, EnemyFixtures.NORMAL_ENEMY_ID, EnemyFixtures.BENT_LANE_ID)
+			)
+			local readsBeforeFaultDespawn = clockState.reads
+
+			local forgedToken = table.freeze({
+				matchId = token.matchId,
+				enemyEpoch = token.enemyEpoch,
+				sampleServerTime = token.sampleServerTime,
+			})
+			expectError(
+				assertions,
+				store:despawnScheduledForFault(forgedToken, spawned),
+				"INVALID_SCHEDULER_SAMPLE",
+				"despawnScheduledForFault"
+			)
+			local alteredSnapshot = table.clone(spawned)
+			alteredSnapshot.revision += 1
+			table.freeze(alteredSnapshot)
+			expectError(
+				assertions,
+				store:despawnScheduledForFault(token, alteredSnapshot),
+				"ILLEGAL_LIFECYCLE",
+				"despawnScheduledForFault"
+			)
+			assertions.equal(store:getMetrics().activeCount, 1)
+			assertions.equal(clockState.reads, readsBeforeFaultDespawn)
+
+			local resolution = success(assertions, store:despawnScheduledForFault(token, spawned))
+			assertions.equal(clockState.reads, readsBeforeFaultDespawn)
+			assertDetachedFrozen(assertions, resolution)
+			assertions.equal(resolution.despawn.runtimeEnemyId, spawned.runtimeEnemyId)
+			assertions.equal(resolution.despawn.enemyId, spawned.enemyId)
+			assertions.equal(resolution.despawn.laneId, spawned.laneId)
+			assertions.equal(resolution.despawn.revision, spawned.revision + 1)
+			assertions.equal(resolution.despawn.lifecycle, "Despawned")
+			assertions.equal(resolution.despawn.reason, "Manual")
+			assertions.equal(resolution.despawn.sampleServerTime, 125)
+			assertions.equal(resolution.terminalOutcome.matchId, MATCH_ID)
+			assertions.equal(resolution.terminalOutcome.enemyEpoch, 1)
+			assertions.equal(resolution.terminalOutcome.runtimeEnemyId, spawned.runtimeEnemyId)
+			assertions.equal(resolution.terminalOutcome.enemyId, spawned.enemyId)
+			assertions.equal(resolution.terminalOutcome.reason, "Manual")
+			assertions.equal(resolution.terminalOutcome.serverTime, 125)
+			assertions.isTrue(store:isAuthenticatedTerminalOutcome(resolution.terminalOutcome))
+			assertions.equal(store:getMetrics().activeCount, 0)
+			assertions.equal(store:getMetrics().terminalCount, 1)
+			assertions.equal(success(assertions, store:queryTerminal(spawned.runtimeEnemyId)), resolution.despawn)
+			local outcomes = success(assertions, store:drainTerminalOutcomes())
+			assertions.equal(#outcomes, 1)
+			assertions.equal(outcomes[1], resolution.terminalOutcome)
+			assertions.isTrue(store:isAuthenticatedSchedulerSample(token))
+			expectError(
+				assertions,
+				store:despawnScheduledForFault(token, spawned),
+				"STALE_RUNTIME_ID",
+				"despawnScheduledForFault"
+			)
+			assertions.isTrue(success(assertions, store:finishSchedulerSample(token)))
+		end
+	),
+
+	TestHarness.case(
 		"uses the exact live scheduler sample for bound defeat removal without another clock read",
 		function(assertions)
 			local difficulty = createDifficultyFixture()

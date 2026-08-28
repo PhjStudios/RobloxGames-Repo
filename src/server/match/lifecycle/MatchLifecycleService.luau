@@ -111,6 +111,11 @@ export type ConnectedRecipientsError = {
 	operation: "getConnectedRecipients",
 }
 
+export type CommittedBaseDefeatRecipientsError = {
+	code: SnapshotErrorCode,
+	operation: "getCommittedBaseDefeatRecipients",
+}
+
 export type ReadyErrorCode = "STALE_REQUEST" | "DUPLICATE_REQUEST" | "NOT_AUTHORIZED" | "UNAVAILABLE" | "INTERNAL_ERROR"
 
 export type ReadyError = {
@@ -384,6 +389,15 @@ local function connectedRecipientsFailure(code: SnapshotErrorCode): Result.Failu
 	return Result.err(table.freeze({
 		code = code,
 		operation = "getConnectedRecipients",
+	}))
+end
+
+local function committedBaseDefeatRecipientsFailure(
+	code: SnapshotErrorCode
+): Result.Failure<CommittedBaseDefeatRecipientsError>
+	return Result.err(table.freeze({
+		code = code,
+		operation = "getCommittedBaseDefeatRecipients",
 	}))
 end
 
@@ -993,6 +1007,23 @@ local function collectRecipients(data: ServiceData): { SnapshotRecipientRecord }
 	return table.freeze(recipients)
 end
 
+local function currentBaseDefeatTokenData(data: ServiceData): BaseDefeatTokenData?
+	local token = data.baseDefeatToken
+	local tokenData = if token == nil then nil else BASE_DEFEAT_TOKEN_DATA[token]
+	if tokenData == nil or tokenData.owner ~= data then
+		return nil
+	end
+	return tokenData
+end
+
+local function committedBaseDefeatRecipients(data: ServiceData): { SnapshotRecipientRecord }?
+	local tokenData = currentBaseDefeatTokenData(data)
+	if data.baseDefeatCommitted and tokenData ~= nil and tokenData.state == "Committed" then
+		return tokenData.terminalRecipients
+	end
+	return nil
+end
+
 local function afterRosterMutation(data: ServiceData): boolean
 	local machine = data.machine
 	if machine == nil or not touchRevision(machine) then
@@ -1577,6 +1608,32 @@ function ServiceMethods.getConnectedRecipients(
 	local recipients = collectRecipients(data)
 	if recipients == nil then
 		return connectedRecipientsFailure("INTERNAL_ERROR")
+	end
+	return Result.ok(recipients)
+end
+
+function ServiceMethods.getCommittedBaseDefeatRecipients(self: Service): Result.Result<
+	{ ConnectedRecipient },
+	CommittedBaseDefeatRecipientsError
+>
+	local data = requireData(self)
+	if not data.available or data.state ~= "Started" or data.baseDefeatOperationActive then
+		return committedBaseDefeatRecipientsFailure("UNAVAILABLE")
+	end
+	if not data.baseDefeatCommitted then
+		return committedBaseDefeatRecipientsFailure("UNAVAILABLE")
+	end
+
+	local tokenData = currentBaseDefeatTokenData(data)
+	local recipients = committedBaseDefeatRecipients(data)
+	if
+		data.callbacksEnabled
+		or tokenData == nil
+		or tokenData.state ~= "Committed"
+		or tokenData.outcome == nil
+		or recipients == nil
+	then
+		return committedBaseDefeatRecipientsFailure("INTERNAL_ERROR")
 	end
 	return Result.ok(recipients)
 end
@@ -2377,17 +2434,7 @@ local function construct(
 			if data.callbacksEnabled then
 				return collectRecipients(data)
 			end
-			local token = data.baseDefeatToken
-			local tokenData = if token == nil then nil else BASE_DEFEAT_TOKEN_DATA[token]
-			if
-				data.baseDefeatCommitted
-				and tokenData ~= nil
-				and tokenData.owner == data
-				and tokenData.state == "Committed"
-			then
-				return tokenData.terminalRecipients
-			end
-			return nil
+			return committedBaseDefeatRecipients(data)
 		end,
 		onFault = function()
 			failClosedAtRuntime(data, "SNAPSHOT_BROADCAST_FAULT")

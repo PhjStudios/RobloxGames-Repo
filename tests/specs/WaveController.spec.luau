@@ -71,12 +71,17 @@ local function counts(total: number, spawned: number): any
 	}
 end
 
-local function snapshot(matchId: string, revision: number, available: boolean?): WaveProtocol.WaveSnapshot
+local function snapshot(
+	matchId: string,
+	revision: number,
+	available: boolean?,
+	mapId: string?
+): WaveProtocol.WaveSnapshot
 	local spawned = math.min(revision - 1, 3)
 	local raw = {
 		matchId = matchId,
 		enemyEpoch = 1,
-		mapId = "map:phase11-wave-controller",
+		mapId = mapId or "map:phase11-wave-controller",
 		difficultyId = "difficulty:phase11-wave-controller",
 		state = "Running",
 		waveRevision = revision,
@@ -103,6 +108,55 @@ local function snapshot(matchId: string, revision: number, available: boolean?):
 	local validated = WaveProtocol.validateWaveSnapshot(raw)
 	if not validated.ok then
 		error(`[ATD_TEST_FIXTURE][code=WAVE_CONTROLLER_SNAPSHOT_INVALID][path={validated.error.path}]`, 0)
+	end
+	return validated.value
+end
+
+local function terminalSnapshot(matchId: string, revision: number): WaveProtocol.WaveSnapshot
+	local raw = {
+		matchId = matchId,
+		enemyEpoch = 1,
+		mapId = "map:phase11-wave-controller",
+		difficultyId = "difficulty:phase11-wave-controller",
+		state = "FiniteComplete",
+		waveRevision = revision,
+		currentWaveNumber = 3,
+		totalWaves = 3,
+		currentWaveId = "wave:phase11-wave-controller-3",
+		bossKind = "Boss",
+		timerPhase = "None",
+		waveStartedServerTime = 120,
+		deadlineServerTime = 130,
+		intermissionEndsServerTime = 0,
+		skipAvailableServerTime = 0,
+		finiteCompleteServerTime = 120,
+		currentCounts = {
+			totalScheduled = 0,
+			pending = 0,
+			spawned = 0,
+			alive = 0,
+			leaked = 0,
+			otherwiseResolved = 0,
+		},
+		aggregateCounts = {
+			totalScheduled = 3,
+			pending = 0,
+			spawned = 3,
+			alive = 0,
+			leaked = 0,
+			otherwiseResolved = 3,
+		},
+		skipState = {
+			available = false,
+			activeParticipantCount = 2,
+			yesVoteCount = 0,
+			requiredVoteCount = 2,
+			quorumPending = false,
+		},
+	}
+	local validated = WaveProtocol.validateWaveSnapshot(raw)
+	if not validated.ok then
+		error(`[ATD_TEST_FIXTURE][code=WAVE_CONTROLLER_TERMINAL_SNAPSHOT_INVALID][path={validated.error.path}]`, 0)
 	end
 	return validated.value
 end
@@ -189,8 +243,8 @@ local function makeRig(options: Options?): Rig
 		observeEvent = function(_self, value)
 			return rig.reducer:observeEvent(value)
 		end,
-		observeGetResponse = function(_self, value, allowReplacement)
-			return rig.reducer:observeGetResponse(value, allowReplacement)
+		observeGetResponse = function(_self, value, allowReplacement, confirmRecoveryEpisode)
+			return rig.reducer:observeGetResponse(value, allowReplacement, confirmRecoveryEpisode)
 		end,
 		observeSubmitResponse = function(_self, value)
 			return rig.reducer:observeSubmitResponse(value)
@@ -309,7 +363,7 @@ return TestHarness.suite("WaveController", {
 		rig.definition.shutdown()
 	end),
 
-	TestHarness.case("coalesces repeated revision gaps into one bounded recovery Get", function(assertions)
+	TestHarness.case("coalesces repeated revisions into one recovery Get per unresolved gap", function(assertions)
 		local rig = makeRig()
 		sendGetResponse(rig, 1, snapshot(MATCH_A, 1))
 		sendEvent(rig, snapshot(MATCH_A, 3))
@@ -322,10 +376,216 @@ return TestHarness.suite("WaveController", {
 		sendGetResponse(rig, 2, snapshot(MATCH_A, 4))
 		assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 4)
 		assertions.isFalse(rig.controller:getMetrics().recoveryRequired)
+		assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
 		sendEvent(rig, snapshot(MATCH_A, 6))
-		assertions.equal(#rig.getFires, 2)
-		assertions.equal(rig.controller:getMetrics().recoveryRequestCount, 1)
+		assertions.equal(#rig.getFires, 3)
+		sendEvent(rig, snapshot(MATCH_A, 7))
+		assertions.equal(#rig.getFires, 3)
+		assertions.equal(rig.controller:getMetrics().recoveryRequestCount, 2)
+		sendGetResponse(rig, 3, snapshot(MATCH_A, 7))
+		assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 7)
+		assertions.isFalse(rig.controller:getMetrics().recoveryRequired)
+		assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
 		rig.definition.shutdown()
+	end),
+
+	TestHarness.case(
+		"releases a successful bootstrap fallback before a later revision-gap recovery",
+		function(assertions)
+			local rig = makeRig()
+			rig.getResponseSignal:fire(rejectedWire(rig.getFires[1], "INTERNAL_ERROR"))
+			assertions.equal(#rig.getFires, 2)
+			assertions.isTrue(rig.controller:getMetrics().recoveryUsed)
+
+			sendEvent(rig, snapshot(MATCH_A, 1))
+			sendGetResponse(rig, 2, snapshot(MATCH_A, 1))
+			assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 1)
+			assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+
+			sendEvent(rig, snapshot(MATCH_A, 3))
+			assertions.equal(#rig.getFires, 3)
+			assertions.equal(rig.controller:getMetrics().recoveryRequestCount, 2)
+			sendGetResponse(rig, 3, snapshot(MATCH_A, 3))
+			assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 3)
+			assertions.isFalse(rig.controller:getMetrics().recoveryRequired)
+			assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+			rig.definition.shutdown()
+		end
+	),
+
+	TestHarness.case(
+		"rearms gap recovery when the first valid event supersedes failed bootstrap Gets",
+		function(assertions)
+			local rig = makeRig()
+			rig.getResponseSignal:fire(rejectedWire(rig.getFires[1], "INTERNAL_ERROR"))
+			rig.getResponseSignal:fire(rejectedWire(rig.getFires[2], "INTERNAL_ERROR"))
+			assertions.equal(#rig.getFires, 2)
+			assertions.isTrue(rig.controller:getMetrics().recoveryUsed)
+
+			sendEvent(rig, snapshot(MATCH_A, 1))
+			assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+			sendEvent(rig, snapshot(MATCH_A, 3))
+			assertions.equal(#rig.getFires, 3)
+			assertions.equal(rig.controller:getMetrics().recoveryRequestCount, 2)
+			sendGetResponse(rig, 3, snapshot(MATCH_A, 3))
+			assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 3)
+			assertions.isFalse(rig.controller:getMetrics().recoveryRequired)
+			assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+			rig.definition.shutdown()
+		end
+	),
+
+	TestHarness.case("queues a new gap episode behind an older bootstrap fallback in flight", function(assertions)
+		local rig = makeRig()
+		rig.getResponseSignal:fire(rejectedWire(rig.getFires[1], "INTERNAL_ERROR"))
+		assertions.equal(#rig.getFires, 2)
+
+		sendEvent(rig, snapshot(MATCH_A, 1))
+		sendEvent(rig, snapshot(MATCH_A, 3))
+		assertions.equal(#rig.getFires, 2)
+		assertions.isTrue(rig.controller:getMetrics().recoveryQueued)
+		rig.getResponseSignal:fire(rejectedWire(rig.getFires[2], "INTERNAL_ERROR"))
+		assertions.equal(#rig.getFires, 3)
+		assertions.isTrue(rig.controller:getMetrics().recoveryRequired)
+
+		sendGetResponse(rig, 3, snapshot(MATCH_A, 3))
+		assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 3)
+		assertions.isFalse(rig.controller:getMetrics().recoveryRequired)
+		assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+		rig.definition.shutdown()
+	end),
+
+	TestHarness.case(
+		"queues a gap behind a forced Get and ignores its older duplicate confirmation",
+		function(assertions)
+			local rig = makeRig()
+			sendGetResponse(rig, 1, snapshot(MATCH_A, 1, true))
+			expectSuccess(assertions, rig.controller:submitSkipVote())
+			rig.skipResponseSignal:fire(rejectedWire(rig.skipFires[1], "STALE_REQUEST"))
+			assertions.equal(#rig.getFires, 2)
+
+			sendEvent(rig, snapshot(MATCH_A, 3, true))
+			assertions.equal(#rig.getFires, 2)
+			assertions.isTrue(rig.controller:getMetrics().recoveryRequired)
+			assertions.isTrue(rig.controller:getMetrics().recoveryQueued)
+
+			sendGetResponse(rig, 2, snapshot(MATCH_A, 1, true))
+			assertions.equal(#rig.getFires, 3)
+			assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 1)
+			assertions.isTrue(rig.controller:getMetrics().recoveryRequired)
+			assertions.isTrue(rig.controller:getMetrics().getRequestPending)
+
+			sendGetResponse(rig, 3, snapshot(MATCH_A, 3, true))
+			assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 3)
+			assertions.isFalse(rig.controller:getMetrics().recoveryRequired)
+			assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+			rig.definition.shutdown()
+		end
+	),
+
+	TestHarness.case(
+		"accepts a same-revision Get as authoritative recovery confirmation and rearms",
+		function(assertions)
+			local rig = makeRig()
+			sendGetResponse(rig, 1, snapshot(MATCH_A, 1))
+			sendEvent(rig, snapshot(MATCH_B, 1))
+			assertions.equal(#rig.getFires, 2)
+			assertions.isTrue(rig.controller:getMetrics().recoveryRequired)
+
+			sendGetResponse(rig, 2, snapshot(MATCH_A, 1))
+			assertions.equal(#rig.getFires, 2)
+			assertions.isFalse(rig.controller:getMetrics().recoveryRequired)
+			assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+
+			sendEvent(rig, snapshot(MATCH_A, 3))
+			assertions.equal(#rig.getFires, 3)
+			sendGetResponse(rig, 3, snapshot(MATCH_A, 3))
+			assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 3)
+			assertions.isFalse(rig.controller:getMetrics().recoveryRequired)
+			assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+			rig.definition.shutdown()
+		end
+	),
+
+	TestHarness.case("does not let a stale recovery failure consume the next healed-gap budget", function(assertions)
+		local rig = makeRig()
+		sendGetResponse(rig, 1, snapshot(MATCH_A, 1))
+		sendEvent(rig, snapshot(MATCH_A, 3))
+		assertions.equal(#rig.getFires, 2)
+
+		sendEvent(rig, snapshot(MATCH_A, 2))
+		assertions.isFalse(rig.controller:getMetrics().recoveryRequired)
+		rig.getResponseSignal:fire(rejectedWire(rig.getFires[2], "INTERNAL_ERROR"))
+		assertions.equal(#rig.getFires, 2)
+		assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+
+		sendEvent(rig, snapshot(MATCH_A, 4))
+		assertions.equal(#rig.getFires, 3)
+		assertions.equal(rig.controller:getMetrics().recoveryRequestCount, 2)
+		rig.definition.shutdown()
+	end),
+
+	TestHarness.case("counts every reducer rejection classification without changing convergence", function(assertions)
+		local rig = makeRig()
+		sendGetResponse(rig, 1, snapshot(MATCH_A, 2))
+		sendEvent(rig, snapshot(MATCH_A, 2))
+		sendEvent(rig, snapshot(MATCH_A, 1))
+		sendEvent(rig, snapshot(MATCH_A, 2, nil, "map:phase11-wave-controller-conflict"))
+		sendEvent(rig, snapshot(MATCH_A, 4))
+		sendEvent(rig, snapshot(MATCH_B, 1))
+
+		local metrics = rig.controller:getMetrics()
+		assertions.isTrue(table.isfrozen(metrics.applyOutcomeCounts))
+		assertions.equal(keyCount(metrics.applyOutcomeCounts :: any), 7)
+		assertions.equal(metrics.applyOutcomeCounts.Applied, 1)
+		assertions.equal(metrics.applyOutcomeCounts.Replaced, 0)
+		assertions.equal(metrics.applyOutcomeCounts.Duplicate, 1)
+		assertions.equal(metrics.applyOutcomeCounts.Stale, 1)
+		assertions.equal(metrics.applyOutcomeCounts.Skipped, 1)
+		assertions.equal(metrics.applyOutcomeCounts.Rejected, 1)
+		assertions.equal(metrics.applyOutcomeCounts.WrongMatch, 1)
+		assertions.equal(metrics.lastApplyKind, "WrongMatch")
+		assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 2)
+		assertions.equal(#rig.getFires, 2)
+
+		local diagnostics = (invokeStudioDiagnosticsForTests :: (WaveController.Controller, ...unknown) -> any)(
+			rig.controller,
+			{ operation = "Diagnostics" }
+		)
+		assertions.isTrue(diagnostics.ok)
+		assertions.equal(diagnostics.value.controller.applyOutcomeCounts.Skipped, 1)
+		assertions.equal(diagnostics.value.controller.lastApplyKind, "WrongMatch")
+		rig.definition.shutdown()
+	end),
+
+	TestHarness.case("resets outcome diagnostics with recovery state and clears them on cleanup", function(assertions)
+		local rig = makeRig()
+		local invokeDiagnostics = invokeStudioDiagnosticsForTests :: (WaveController.Controller, ...unknown) -> any
+		sendGetResponse(rig, 1, snapshot(MATCH_A, 1))
+		sendEvent(rig, snapshot(MATCH_A, 1))
+		assertions.equal(rig.controller:getMetrics().applyOutcomeCounts.Duplicate, 1)
+		assertions.equal(rig.controller:getMetrics().lastApplyKind, "Duplicate")
+
+		local suspended = invokeDiagnostics(rig.controller, { operation = "SuspendRecovery" })
+		assertions.isTrue(suspended.ok)
+		assertions.isNil(suspended.value.controller.lastApplyKind)
+		assertions.equal(suspended.value.controller.applyOutcomeCounts.Applied, 0)
+		assertions.equal(suspended.value.controller.applyOutcomeCounts.Duplicate, 0)
+
+		local resumed = invokeDiagnostics(rig.controller, { operation = "ResumeRecovery" })
+		assertions.isTrue(resumed.ok)
+		sendGetResponse(rig, 2, snapshot(MATCH_A, 2))
+		assertions.equal(rig.controller:getMetrics().applyOutcomeCounts.Applied, 1)
+		assertions.equal(rig.controller:getMetrics().lastApplyKind, "Applied")
+
+		rig.definition.shutdown()
+		local afterCleanup = rig.controller:getMetrics()
+		assertions.isNil(afterCleanup.lastApplyKind)
+		assertions.equal(afterCleanup.applyOutcomeCounts.Applied, 0)
+		assertions.equal(afterCleanup.applyOutcomeCounts.Duplicate, 0)
+		rig.eventSignal:force({ payload = snapshot(MATCH_A, 3) })
+		assertions.isNil(rig.controller:getMetrics().lastApplyKind)
+		assertions.equal(rig.controller:getMetrics().applyOutcomeCounts.Applied, 0)
 	end),
 
 	TestHarness.case(
@@ -377,6 +637,52 @@ return TestHarness.suite("WaveController", {
 		unavailable.definition.shutdown()
 	end),
 
+	TestHarness.case("forces one bounded reconciliation Get for every rejected skip code", function(assertions)
+		for _, code in { "STALE_REQUEST", "DUPLICATE_REQUEST", "NOT_AUTHORIZED", "UNAVAILABLE", "INTERNAL_ERROR" } do
+			local rig = makeRig()
+			sendGetResponse(rig, 1, snapshot(MATCH_A, 1, true))
+			expectSuccess(assertions, rig.controller:submitSkipVote())
+			rig.skipResponseSignal:fire(rejectedWire(rig.skipFires[1], code))
+			assertions.equal(#rig.getFires, 2)
+			assertions.equal(rig.controller:getMetrics().recoveryRequestCount, 1)
+			assertions.isTrue(rig.controller:getMetrics().getRequestPending)
+			assertions.isTrue(rig.controller:getMetrics().recoveryUsed)
+
+			expectSuccess(assertions, rig.controller:submitSkipVote())
+			rig.skipResponseSignal:fire(rejectedWire(rig.skipFires[2], code))
+			assertions.equal(#rig.getFires, 2)
+			assertions.equal(rig.controller:getMetrics().recoveryRequestCount, 1)
+
+			sendGetResponse(rig, 2, snapshot(MATCH_A, 1, true))
+			assertions.isFalse(rig.controller:getMetrics().getRequestPending)
+			assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+			rig.definition.shutdown()
+		end
+	end),
+
+	TestHarness.case("recovers a missed terminal event after skip rejection and rearms", function(assertions)
+		local rig = makeRig()
+		sendGetResponse(rig, 1, snapshot(MATCH_A, 1, true))
+		expectSuccess(assertions, rig.controller:submitSkipVote())
+		rig.skipResponseSignal:fire(rejectedWire(rig.skipFires[1], "STALE_REQUEST"))
+		assertions.equal(#rig.getFires, 2)
+
+		sendGetResponse(rig, 2, terminalSnapshot(MATCH_A, 2))
+		assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).state, "FiniteComplete")
+		assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 2)
+		assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+
+		sendEvent(rig, snapshot(MATCH_B, 1))
+		assertions.equal(#rig.getFires, 3)
+		assertions.equal(rig.controller:getMetrics().recoveryRequestCount, 2)
+		sendGetResponse(rig, 3, snapshot(MATCH_B, 1))
+		assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).matchId, MATCH_B)
+		assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).state, "Running")
+		assertions.isFalse(rig.controller:getMetrics().recoveryRequired)
+		assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+		rig.definition.shutdown()
+	end),
+
 	TestHarness.case("allows a correlated skip response to heal a gap without rollback", function(assertions)
 		local rig = makeRig()
 		sendGetResponse(rig, 1, snapshot(MATCH_A, 1, true))
@@ -391,9 +697,25 @@ return TestHarness.suite("WaveController", {
 		rig.definition.shutdown()
 	end),
 
-	TestHarness.case("bounds rejected initial recovery and sender failures", function(assertions)
+	TestHarness.case("preserves recovery capacity across expected preactivation unavailability", function(assertions)
 		local rig = makeRig()
 		rig.getResponseSignal:fire(rejectedWire(rig.getFires[1], "UNAVAILABLE"))
+		assertions.equal(#rig.getFires, 1)
+		assertions.isFalse(rig.controller:getMetrics().recoveryUsed)
+
+		sendEvent(rig, snapshot(MATCH_A, 1))
+		sendEvent(rig, snapshot(MATCH_A, 3))
+		assertions.equal(#rig.getFires, 2)
+		assertions.equal(rig.controller:getMetrics().recoveryRequestCount, 1)
+		sendGetResponse(rig, 2, snapshot(MATCH_A, 3))
+		assertions.equal((current(rig) :: WaveProtocol.WaveSnapshot).waveRevision, 3)
+		assertions.isFalse(rig.controller:getMetrics().recoveryRequired)
+		rig.definition.shutdown()
+	end),
+
+	TestHarness.case("bounds rejected initial fault recovery and sender failures", function(assertions)
+		local rig = makeRig()
+		rig.getResponseSignal:fire(rejectedWire(rig.getFires[1], "INTERNAL_ERROR"))
 		assertions.equal(#rig.getFires, 2)
 		rig.getResponseSignal:fire(rejectedWire(rig.getFires[2], "INTERNAL_ERROR"))
 		assertions.equal(#rig.getFires, 2)

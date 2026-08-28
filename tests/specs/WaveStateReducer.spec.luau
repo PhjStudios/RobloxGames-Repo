@@ -162,6 +162,128 @@ return TestHarness.suite("WaveStateReducer", {
 		assertions.equal(state(assertions, reducer).snapshot.waveRevision, 6)
 	end),
 
+	TestHarness.case("clears recovery only for a correlated exact Get confirmation", function(assertions)
+		local reducer = newReducer()
+		expectSuccess(assertions, reducer:observeEvent(runningSnapshot(1)))
+		local foreign = expectSuccess(
+			assertions,
+			reducer:observeEvent(runningSnapshot(1, {
+				matchId = MATCH_B,
+			}))
+		)
+		assertions.equal(foreign.kind, "WrongMatch")
+		assertions.isTrue(state(assertions, reducer).recoveryRequired)
+
+		local unconfirmed = expectSuccess(assertions, reducer:observeGetResponse(runningSnapshot(1), true, false))
+		assertions.equal(unconfirmed.kind, "Duplicate")
+		assertions.isTrue(unconfirmed.recoveryRequired)
+		assertions.isTrue(state(assertions, reducer).recoveryRequired)
+
+		local confirmed = expectSuccess(assertions, reducer:observeGetResponse(runningSnapshot(1), true, true))
+		assertions.equal(confirmed.kind, "Duplicate")
+		assertions.isFalse(confirmed.recoveryRequired)
+		assertions.isFalse(state(assertions, reducer).recoveryRequired)
+	end),
+
+	TestHarness.case("accepts coalesced empty-final completion directly from intermission", function(assertions)
+		local reducer = newReducer()
+		local disabledSkip = {
+			available = false,
+			activeParticipantCount = 2,
+			yesVoteCount = 0,
+			requiredVoteCount = 2,
+			quorumPending = false,
+		}
+		local resolvedAggregate = counts(3, 3, 0, 0, 3)
+		expectSuccess(
+			assertions,
+			reducer:observeEvent(runningSnapshot(4, {
+				state = "Intermission",
+				timerPhase = "EarlyClearIntermission",
+				currentWaveNumber = 2,
+				totalWaves = 3,
+				waveStartedServerTime = 120,
+				deadlineServerTime = 130,
+				intermissionEndsServerTime = 125,
+				skipAvailableServerTime = 0,
+				currentCounts = counts(1, 1, 0, 0, 1),
+				aggregateCounts = resolvedAggregate,
+				skipState = disabledSkip,
+			}))
+		)
+
+		local completed = expectSuccess(
+			assertions,
+			reducer:observeEvent(runningSnapshot(5, {
+				state = "FiniteComplete",
+				timerPhase = "None",
+				currentWaveNumber = 3,
+				totalWaves = 3,
+				bossKind = "Boss",
+				waveStartedServerTime = 125,
+				deadlineServerTime = 135,
+				intermissionEndsServerTime = 0,
+				skipAvailableServerTime = 0,
+				finiteCompleteServerTime = 125,
+				currentCounts = counts(0, 0, 0, 0, 0),
+				aggregateCounts = resolvedAggregate,
+				skipState = disabledSkip,
+			}))
+		)
+		assertions.equal(completed.kind, "Applied")
+		assertions.isTrue(completed.stateChanged)
+		assertions.equal(state(assertions, reducer).snapshot.state, "FiniteComplete")
+		assertions.equal(state(assertions, reducer).snapshot.currentWaveNumber, 3)
+		assertions.isFalse(state(assertions, reducer).recoveryRequired)
+	end),
+
+	TestHarness.case(
+		"accepts an early-skip wave whose absolute deadline precedes the old deadline",
+		function(assertions)
+			local reducer = newReducer()
+			local beforeSkip = runningSnapshot(4, {
+				totalWaves = 2,
+				deadlineServerTime = 120,
+				currentCounts = counts(1, 0, 0, 0, 0),
+				aggregateCounts = counts(1, 0, 0, 0, 0),
+				skipState = {
+					available = true,
+					activeParticipantCount = 2,
+					yesVoteCount = 2,
+					requiredVoteCount = 2,
+					quorumPending = true,
+				},
+			})
+			expectSuccess(assertions, reducer:observeSubmitResponse(beforeSkip))
+
+			local afterSkip = runningSnapshot(5, {
+				currentWaveNumber = 2,
+				totalWaves = 2,
+				bossKind = "Boss",
+				waveStartedServerTime = 103,
+				deadlineServerTime = 113,
+				skipAvailableServerTime = 0,
+				currentCounts = counts(1, 1, 1, 0, 0),
+				aggregateCounts = counts(2, 1, 1, 0, 0),
+				skipState = {
+					available = false,
+					activeParticipantCount = 2,
+					yesVoteCount = 0,
+					requiredVoteCount = 2,
+					quorumPending = false,
+				},
+			})
+			afterSkip.skipAvailableServerTime = 0
+			local outcome = expectSuccess(assertions, reducer:observeEvent(afterSkip))
+			assertions.equal(outcome.kind, "Applied")
+			assertions.isTrue(outcome.stateChanged)
+			assertions.equal(state(assertions, reducer).snapshot.waveRevision, 5)
+			assertions.equal(state(assertions, reducer).snapshot.currentWaveNumber, 2)
+			assertions.equal(state(assertions, reducer).snapshot.deadlineServerTime, 113)
+			assertions.isFalse(state(assertions, reducer).recoveryRequired)
+		end
+	),
+
 	TestHarness.case("only an authorized Get response may replace a locked Match", function(assertions)
 		local reducer = newReducer()
 		expectSuccess(assertions, reducer:observeEvent(runningSnapshot(1)))

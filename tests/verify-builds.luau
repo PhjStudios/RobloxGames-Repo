@@ -161,6 +161,11 @@ local EXPECTED_PRODUCTION_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/shared/match/EnemyProtocol.luau",
 	},
 	{
+		dataModelPath = "ReplicatedStorage.Shared.match.WaveProtocol",
+		className = "ModuleScript",
+		sourcePath = "src/shared/match/WaveProtocol.luau",
+	},
+	{
 		dataModelPath = "ReplicatedStorage.Shared.network.ProductionRemotes",
 		className = "ModuleScript",
 		sourcePath = "src/shared/network/ProductionRemotes.luau",
@@ -317,6 +322,23 @@ local EXPECTED_MATCH_ENEMY_SERVER_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/server/match/enemies/EnemySimulationService.luau",
 	},
 })
+local EXPECTED_MATCH_WAVE_SERVER_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "ServerScriptService.Server.match.waves.WaveReplicationPublisher",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/waves/WaveReplicationPublisher.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.waves.WaveRuntime",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/waves/WaveRuntime.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.waves.WaveRuntimeService",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/waves/WaveRuntimeService.luau",
+	},
+})
 local EXPECTED_MATCH_LIFECYCLE_SOURCES: { SourceDefinition } = table.freeze({
 	{
 		dataModelPath = "ServerScriptService.Server.match.lifecycle.MatchLifecycleService",
@@ -409,6 +431,18 @@ local EXPECTED_MATCH_ENEMY_CLIENT_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/client/match/enemies/EnemyReplicationState.luau",
 	},
 })
+local EXPECTED_MATCH_WAVE_CLIENT_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.waves.WaveController",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/waves/WaveController.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.waves.WaveStateReducer",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/waves/WaveStateReducer.luau",
+	},
+})
 local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.BaseFixtures",
@@ -434,6 +468,16 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.NetworkFixtures",
 		className = "ModuleScript",
 		sourcePath = "tests/fixtures/NetworkFixtures.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.WaveFixtures",
+		className = "ModuleScript",
+		sourcePath = "tests/fixtures/WaveFixtures.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.AuthenticatedWaveFixtures.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/AuthenticatedWaveFixtures.spec.luau",
 	},
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.Cleanup.spec",
@@ -676,6 +720,41 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "tests/specs/Smoke.spec.luau",
 	},
 	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.WaveController.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/WaveController.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.WaveProtocol.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/WaveProtocol.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.WaveReplicationPublisher.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/WaveReplicationPublisher.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.WaveRuntime.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/WaveRuntime.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.WaveRuntimeIntegration.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/WaveRuntimeIntegration.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.WaveRuntimeService.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/WaveRuntimeService.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.WaveStateReducer.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/WaveStateReducer.spec.luau",
+	},
+	{
 		dataModelPath = "ServerStorage.AutomatedTests.Support.RobloxAdapter",
 		className = "ModuleScript",
 		sourcePath = "tests/support/RobloxAdapter.luau",
@@ -725,7 +804,7 @@ local function normalizeNewlines(value: string): string
 	return string.gsub(value, "\r\n", "\n")
 end
 
-local function verifyPhase10Scope(): boolean
+local function verifyPhase11Scope(): boolean
 	local exactEmptyConfigs = {
 		{
 			path = "src/shared/config/Enemies.luau",
@@ -795,6 +874,58 @@ local function verifyPhase10Scope(): boolean
 				"",
 			}, "\n"),
 		},
+		{
+			path = "src/shared/config/Towers.luau",
+			expected = table.concat({
+				"--!strict",
+				"",
+				"local ConfigTypes = require(script.Parent.Parent.types.ConfigTypes)",
+				"",
+				"local Towers: { ConfigTypes.TowerDefinition } = {}",
+				"",
+				"return table.freeze(Towers)",
+				"",
+			}, "\n"),
+		},
+		{
+			path = "src/shared/config/Banners.luau",
+			expected = table.concat({
+				"--!strict",
+				"",
+				"local ConfigTypes = require(script.Parent.Parent.types.ConfigTypes)",
+				"",
+				"-- Authored banners are intentionally empty until a content and balance packet.",
+				"local Banners: { ConfigTypes.BannerDefinition } = {}",
+				"",
+				"return table.freeze(Banners)",
+				"",
+			}, "\n"),
+		},
+		{
+			path = "src/shared/config/Economy.luau",
+			expected = table.concat({
+				"--!strict",
+				"",
+				"local ConfigTypes = require(script.Parent.Parent.types.ConfigTypes)",
+				"",
+				"-- Only approved structural policy is authored here. Difficulty-specific values",
+				"-- remain empty until a later content and balance packet defines real content.",
+				"local difficultyRules: { ConfigTypes.DifficultyEconomyDefinition } = {}",
+				"local sellRefund: ConfigTypes.SellRefundConfiguration = {",
+				"\tbasisPoints = 7_000,",
+				'\trounding = "Floor",',
+				"}",
+				"",
+				"local Economy: ConfigTypes.AuthoredEconomyConfiguration = {",
+				"\tversion = 1,",
+				"\tsellRefund = table.freeze(sellRefund),",
+				"\tdifficultyRules = table.freeze(difficultyRules),",
+				"}",
+				"",
+				"return table.freeze(Economy)",
+				"",
+			}, "\n"),
+		},
 	}
 	for _, definition in exactEmptyConfigs do
 		if not fs.isFile(definition.path) then
@@ -808,8 +939,8 @@ local function verifyPhase10Scope(): boolean
 
 	for _, forbiddenDirectory in
 		{
-			"src/server/match/waves",
-			"src/client/match/waves",
+			"src/server/match/towers",
+			"src/client/match/towers",
 		}
 	do
 		if fs.isDir(forbiddenDirectory) then
@@ -992,6 +1123,9 @@ local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): {
 		for _, source in EXPECTED_MATCH_ENEMY_SERVER_SOURCES do
 			table.insert(expected, source)
 		end
+		for _, source in EXPECTED_MATCH_WAVE_SERVER_SOURCES do
+			table.insert(expected, source)
+		end
 		for _, source in EXPECTED_MATCH_LIFECYCLE_SOURCES do
 			table.insert(expected, source)
 		end
@@ -1008,6 +1142,9 @@ local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): {
 			table.insert(expected, source)
 		end
 		for _, source in EXPECTED_MATCH_ENEMY_CLIENT_SOURCES do
+			table.insert(expected, source)
+		end
+		for _, source in EXPECTED_MATCH_WAVE_CLIENT_SOURCES do
 			table.insert(expected, source)
 		end
 	end
@@ -1252,7 +1389,7 @@ end
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
 	currentStage = `verify_counts_{definition.name}`
 	local modules, scripts, localScripts = countClasses(dataModel)
-	local expectedModules = if definition.role == "Lobby" then 45 else 71
+	local expectedModules = if definition.role == "Lobby" then 46 else 77
 	if modules ~= expectedModules or scripts ~= 1 or localScripts ~= 1 then
 		emit("FAIL", definition.name, `PRODUCTION_CLASS_COUNTS_{modules}_{scripts}_{localScripts}`)
 		return false
@@ -1278,7 +1415,7 @@ end
 
 local function verifyTest(dataModel: DataModel, definition: BuildDefinition): boolean
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 129 then
+	if modules ~= 144 then
 		emit("FAIL", definition.name, `TEST_MODULE_COUNT_{modules}`)
 		return false
 	end
@@ -1297,7 +1434,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			end
 		end
 	end
-	if sharedModules ~= 36 then
+	if sharedModules ~= 37 then
 		emit("FAIL", definition.name, "SHARED_MODULE_COUNT")
 		return false
 	end
@@ -1319,12 +1456,18 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local productionClientBase = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionClientBase")
+	local productionClientWaves = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionClientWaves")
 	local productionServerEnemies = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerEnemies")
 	local productionServerBase = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerBase")
+	local productionServerWaves = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionServerWaves")
 	local productionServerMaps = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerMaps")
@@ -1443,6 +1586,16 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	if
 		not verifyMirroredSources(
 			definition,
+			productionServerWaves,
+			EXPECTED_MATCH_WAVE_SERVER_SOURCES,
+			"TEST_SERVER_WAVE"
+		)
+	then
+		return false
+	end
+	if
+		not verifyMirroredSources(
+			definition,
 			productionServerMatchLifecycle,
 			EXPECTED_MATCH_LIFECYCLE_SOURCES,
 			"TEST_MATCH_LIFECYCLE"
@@ -1495,15 +1648,27 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	then
 		return false
 	end
+	if
+		not verifyMirroredSources(
+			definition,
+			productionClientWaves,
+			EXPECTED_MATCH_WAVE_CLIENT_SOURCES,
+			"TEST_CLIENT_WAVE"
+		)
+	then
+		return false
+	end
 	local mapModules = #EXPECTED_MATCH_SERVER_SOURCES
 	local serverBaseModules = #EXPECTED_MATCH_BASE_SERVER_SOURCES
 	local serverEnemyModules = #EXPECTED_MATCH_ENEMY_SERVER_SOURCES
+	local serverWaveModules = #EXPECTED_MATCH_WAVE_SERVER_SOURCES
 	local matchLifecycleModules = #EXPECTED_MATCH_LIFECYCLE_SOURCES
 	local matchRosterModules = #EXPECTED_MATCH_ROSTER_SOURCES
 	local matchReadyModules = #EXPECTED_MATCH_READY_SOURCES
 	local clientMatchModules = #EXPECTED_MATCH_CLIENT_SOURCES
 	local clientBaseModules = #EXPECTED_MATCH_BASE_CLIENT_SOURCES
 	local clientEnemyModules = #EXPECTED_MATCH_ENEMY_CLIENT_SOURCES
+	local clientWaveModules = #EXPECTED_MATCH_WAVE_CLIENT_SOURCES
 	if
 		not verifyTestOwnedSources(dataModel, definition, {
 			shared :: Instance,
@@ -1512,8 +1677,10 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			productionClientMatch :: Instance,
 			productionClientBase :: Instance,
 			productionClientEnemies :: Instance,
+			productionClientWaves :: Instance,
 			productionServerBase :: Instance,
 			productionServerEnemies :: Instance,
+			productionServerWaves :: Instance,
 			productionServerMaps :: Instance,
 			productionServerMatchLifecycle :: Instance,
 			productionServerMatchRoster :: Instance,
@@ -1527,15 +1694,15 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	emit(
 		"PASS",
 		definition.name,
-		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_SERVER_BASE_{serverBaseModules}_SERVER_ENEMIES_{serverEnemyModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_CLIENT_MATCH_{clientMatchModules}_CLIENT_BASE_{clientBaseModules}_CLIENT_ENEMIES_{clientEnemyModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
+		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_SERVER_BASE_{serverBaseModules}_SERVER_ENEMIES_{serverEnemyModules}_SERVER_WAVES_{serverWaveModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_CLIENT_MATCH_{clientMatchModules}_CLIENT_BASE_{clientBaseModules}_CLIENT_ENEMIES_{clientEnemyModules}_CLIENT_WAVES_{clientWaveModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
 	)
 	return true
 end
 
 local function run(): boolean
-	currentStage = "phase10_scope"
-	if not verifyPhase10Scope() then
-		emit("FAIL", "All", "PHASE10_SCOPE_BOUNDARY")
+	currentStage = "phase11_scope"
+	if not verifyPhase11Scope() then
+		emit("FAIL", "All", "PHASE11_SCOPE_BOUNDARY")
 		return false
 	end
 	currentStage = "build_directory"

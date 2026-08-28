@@ -318,17 +318,28 @@ type DefeatTestEnvironment = {
 	service: MatchLifecycleService.Service?,
 	machine: MatchStateMachine.StateMachine?,
 	commitMode: "success" | "failure" | "throw" | "yield" | "commit-then-throw" | "commit-then-yield",
-	publishMode: "success" | "failure" | "throw" | "yield" | "malformed" | "budget" | "reenter" | "shutdown",
+	publishMode: "success"
+		| "failure"
+		| "throw"
+		| "yield"
+		| "malformed"
+		| "budget"
+		| "reenter"
+		| "recipient-reenter-failure"
+		| "shutdown",
 	publishCount: number,
 	publishedSnapshots: { MatchLifecycleService.MatchSnapshot },
 	readRecipients: (() -> unknown)?,
 	reentryResult: unknown?,
+	recipientReentryResult: unknown?,
+	recipientsDuringCommit: unknown?,
 	reentryToken: MatchLifecycleService.BaseDefeatToken?,
 	cleanupCount: number,
 }
 
 local function newWaveActiveDefeatService(
-	assertions: Assertions
+	assertions: Assertions,
+	playerSource: FakePlayerSource?
 ): (MatchLifecycleService.Service, DefeatTestEnvironment)
 	local environment: DefeatTestEnvironment = {
 		service = nil,
@@ -339,6 +350,8 @@ local function newWaveActiveDefeatService(
 		publishedSnapshots = {},
 		readRecipients = nil,
 		reentryResult = nil,
+		recipientReentryResult = nil,
+		recipientsDuringCommit = nil,
 		reentryToken = nil,
 		cleanupCount = 0,
 	}
@@ -397,6 +410,14 @@ local function newWaveActiveDefeatService(
 			if environment.publishMode == "reenter" then
 				local service = environment.service :: MatchLifecycleService.Service
 				environment.reentryResult = service:commitBaseDefeat(environment.reentryToken)
+			elseif environment.publishMode == "recipient-reenter-failure" then
+				local service = environment.service :: MatchLifecycleService.Service
+				environment.recipientReentryResult = service:getCommittedBaseDefeatRecipients()
+				local recipientsRead, recipients = pcall(dependencies.getRecipients)
+				if recipientsRead then
+					environment.recipientsDuringCommit = recipients
+				end
+				return Result.err({ code = PRIVATE_SENTINEL })
 			elseif environment.publishMode == "shutdown" then
 				invoke((environment.service :: MatchLifecycleService.Service):getServiceDefinition().shutdown)
 			elseif environment.publishMode == "failure" then
@@ -435,7 +456,7 @@ local function newWaveActiveDefeatService(
 			end,
 			createStateMachine = createMachine,
 			roster = newRoster(),
-			playerSource = fakePlayerSource(),
+			playerSource = playerSource or fakePlayerSource(),
 			createSnapshotBroadcaster = createBroadcaster,
 		} :: any
 	)
@@ -1867,6 +1888,108 @@ return TestHarness.suite("match lifecycle service", {
 			assertions.equal(committedRead.error.code, "UNAVAILABLE")
 		end
 		invoke(service:getServiceDefinition().shutdown)
+	end),
+
+	TestHarness.case("exposes only the exact retained committed BaseDefeat recipients", function(assertions)
+		local forty = { userId = 40 }
+		local minusSeven = { userId = -7 }
+		local ten = { userId = 10 }
+		local twenty = { userId = 20 }
+		local source = fakePlayerSource({ forty, ten, minusSeven, twenty })
+		local service, environment = newWaveActiveDefeatService(assertions, source)
+
+		local function assertUnavailable(result: any)
+			assertions.isFalse(result.ok)
+			assertions.isTrue(table.isfrozen(result))
+			if not result.ok then
+				assertions.isTrue(table.isfrozen(result.error))
+				assertions.equal(result.error.code, "UNAVAILABLE")
+				assertions.equal(result.error.operation, "getCommittedBaseDefeatRecipients")
+			end
+		end
+		local function expectUnavailable()
+			assertUnavailable(service:getCommittedBaseDefeatRecipients())
+		end
+		local function getPlayersCallCount(): number
+			local count = 0
+			for _, operation in source.order do
+				if operation == "get-players" then
+					count += 1
+				end
+			end
+			return count
+		end
+
+		expectUnavailable()
+		assertions.isTrue(service:getConnectedRecipients().ok)
+
+		local rolledBackToken = service:beginBaseDefeat(MATCH_ID)
+		assertions.isTrue(rolledBackToken.ok)
+		if not rolledBackToken.ok then
+			error("[ATD_TEST][code=BASE_DEFEAT_BEGIN_REJECTED]", 0)
+		end
+		expectUnavailable()
+		assertions.isFalse(service:getConnectedRecipients().ok)
+		assertions.isTrue(service:rollbackBaseDefeat(rolledBackToken.value).ok)
+		expectUnavailable()
+		assertions.isTrue(service:getConnectedRecipients().ok)
+
+		local committedToken = service:beginBaseDefeat(MATCH_ID)
+		assertions.isTrue(committedToken.ok)
+		if not committedToken.ok then
+			error("[ATD_TEST][code=BASE_DEFEAT_REPLACEMENT_REJECTED]", 0)
+		end
+		expectUnavailable()
+		assertions.isFalse(service:getConnectedRecipients().ok)
+		local getPlayersCallsAfterBegin = getPlayersCallCount()
+		source.existing = {}
+		environment.publishMode = "recipient-reenter-failure"
+		local commit = service:commitBaseDefeat(committedToken.value)
+		assertions.isTrue(commit.ok)
+		if not commit.ok then
+			error("[ATD_TEST][code=COMMITTED_RESULTS_LOST]", 0)
+		end
+		assertions.isTrue(commit.value.committed)
+		assertions.isFalse(commit.value.published)
+		local recipientReentry = environment.recipientReentryResult
+		assertions.equal(type(recipientReentry), "table")
+		if type(recipientReentry) == "table" then
+			assertUnavailable(recipientReentry)
+		end
+		assertions.isFalse(service:getConnectedRecipients().ok)
+
+		local committed = service:getCommittedBaseDefeatRecipients()
+		assertions.isTrue(committed.ok)
+		if not committed.ok then
+			error("[ATD_TEST][code=COMMITTED_BASE_DEFEAT_RECIPIENTS_MISSING]", 0)
+		end
+		assertions.equal(#committed.value, 4)
+		assertions.isTrue(#committed.value <= 4)
+		assertions.equal(committed.value[1].userId, -7)
+		assertions.equal(committed.value[2].userId, 10)
+		assertions.equal(committed.value[3].userId, 20)
+		assertions.equal(committed.value[4].userId, 40)
+		assertions.equal(committed.value[1].recipient, minusSeven)
+		assertions.equal(committed.value[2].recipient, ten)
+		assertions.equal(committed.value[3].recipient, twenty)
+		assertions.equal(committed.value[4].recipient, forty)
+		assertions.isTrue(table.isfrozen(committed.value))
+		for _, recipient in committed.value do
+			assertions.isTrue(table.isfrozen(recipient))
+		end
+		assertions.equal(committed.value, environment.recipientsDuringCommit)
+		local broadcasterRecipients = (environment.readRecipients :: () -> unknown)()
+		assertions.equal(committed.value, broadcasterRecipients)
+		local repeated = service:getCommittedBaseDefeatRecipients()
+		assertions.isTrue(repeated.ok)
+		if repeated.ok then
+			assertions.equal(repeated.value, committed.value)
+		end
+		assertions.equal(getPlayersCallCount(), getPlayersCallsAfterBegin)
+
+		invoke(service:getServiceDefinition().shutdown)
+		expectUnavailable()
+		assertions.isFalse(service:getConnectedRecipients().ok)
 	end),
 
 	TestHarness.case("revokes prepared activation map and recipient capabilities on cleanup", function(assertions)

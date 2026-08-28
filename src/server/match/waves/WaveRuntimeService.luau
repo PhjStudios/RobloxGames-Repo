@@ -9,6 +9,7 @@ local Workspace = game:GetService("Workspace")
 local ConfigurationValidator = require(ReplicatedStorage.Shared.config.ConfigurationValidator)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
 local BaseProtocol = require(ReplicatedStorage.Shared.match.BaseProtocol)
+local MatchProtocol = require(ReplicatedStorage.Shared.match.MatchProtocol)
 local WaveProtocol = require(ReplicatedStorage.Shared.match.WaveProtocol)
 local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
 local Ids = require(ReplicatedStorage.Shared.util.Ids)
@@ -67,6 +68,13 @@ export type MatchLifecycleAdapter = {
 	getSnapshot: (self: MatchLifecycleAdapter) -> unknown,
 	getRuntimeMapSnapshot: (self: MatchLifecycleAdapter) -> unknown,
 	getConnectedRecipients: (self: MatchLifecycleAdapter) -> unknown,
+	getCommittedBaseDefeatRecipients: (self: MatchLifecycleAdapter) -> unknown,
+	submitReady: ((
+		self: MatchLifecycleAdapter,
+		connection: unknown,
+		matchId: unknown,
+		observedRevision: unknown
+	) -> unknown)?,
 	isRuntimeMapSnapshot: (self: MatchLifecycleAdapter, value: unknown) -> unknown,
 	beginWaveActivation: (self: MatchLifecycleAdapter, matchId: unknown) -> unknown,
 	commitWaveActivation: (self: MatchLifecycleAdapter, token: unknown) -> unknown,
@@ -108,6 +116,7 @@ export type EnemySimulationAdapter = {
 export type RuntimeAdapter = {
 	initialize: (self: RuntimeAdapter) -> unknown,
 	step: (self: RuntimeAdapter, frame: unknown) -> unknown,
+	closeDependencyFault: (self: RuntimeAdapter, context: unknown) -> unknown,
 	getSnapshot: (self: RuntimeAdapter) -> unknown,
 	getStartingCashPlaceholder: (self: RuntimeAdapter) -> unknown,
 	getCompletionState: (self: RuntimeAdapter) -> unknown,
@@ -243,6 +252,7 @@ type ServiceData = {
 	lastQueuedWaveRevision: number,
 	terminalPublicationPending: boolean,
 	terminalState: string?,
+	recoverableFaultSnapshot: WaveProtocol.WaveSnapshot?,
 	studioTrigger: unknown?,
 	studioTriggerOperationActive: boolean,
 	studioActivationAttempted: boolean,
@@ -317,6 +327,7 @@ local LIFECYCLE_METHODS = table.freeze({
 	"getSnapshot",
 	"getRuntimeMapSnapshot",
 	"getConnectedRecipients",
+	"getCommittedBaseDefeatRecipients",
 	"isRuntimeMapSnapshot",
 	"beginWaveActivation",
 	"commitWaveActivation",
@@ -347,6 +358,7 @@ local ENEMY_METHODS = table.freeze({
 local RUNTIME_METHODS = table.freeze({
 	"initialize",
 	"step",
+	"closeDependencyFault",
 	"getSnapshot",
 	"getStartingCashPlaceholder",
 	"getCompletionState",
@@ -422,11 +434,17 @@ local CLOSE_CONTEXT_WITH_SPAWN_FIELDS = table.freeze({
 	passOrdinal = true,
 	sampleServerTime = true,
 	committedSpawn = true,
+	terminalOutcome = true,
 })
 
 local ENEMY_IDENTITY_FIELDS = table.freeze({
 	matchId = true,
 	enemyEpoch = true,
+})
+
+local CONNECTED_RECIPIENT_FIELDS = table.freeze({
+	recipient = true,
+	userId = true,
 })
 
 local RESULT_FAILURE_FIELDS = table.freeze({
@@ -606,6 +624,41 @@ local function canonicalRuntimeSnapshot(value: unknown, data: ServiceData): Wave
 	return snapshot
 end
 
+local function waveCountsEqual(left: WaveProtocol.WaveCounts, right: WaveProtocol.WaveCounts): boolean
+	return left.totalScheduled == right.totalScheduled
+		and left.pending == right.pending
+		and left.spawned == right.spawned
+		and left.alive == right.alive
+		and left.leaked == right.leaked
+		and left.otherwiseResolved == right.otherwiseResolved
+end
+
+local function waveSnapshotsEqual(left: WaveProtocol.WaveSnapshot, right: WaveProtocol.WaveSnapshot): boolean
+	return left.matchId == right.matchId
+		and left.enemyEpoch == right.enemyEpoch
+		and left.mapId == right.mapId
+		and left.difficultyId == right.difficultyId
+		and left.state == right.state
+		and left.waveRevision == right.waveRevision
+		and left.currentWaveNumber == right.currentWaveNumber
+		and left.totalWaves == right.totalWaves
+		and left.currentWaveId == right.currentWaveId
+		and left.bossKind == right.bossKind
+		and left.timerPhase == right.timerPhase
+		and left.waveStartedServerTime == right.waveStartedServerTime
+		and left.deadlineServerTime == right.deadlineServerTime
+		and left.intermissionEndsServerTime == right.intermissionEndsServerTime
+		and left.skipAvailableServerTime == right.skipAvailableServerTime
+		and left.finiteCompleteServerTime == right.finiteCompleteServerTime
+		and waveCountsEqual(left.currentCounts, right.currentCounts)
+		and waveCountsEqual(left.aggregateCounts, right.aggregateCounts)
+		and left.skipState.available == right.skipState.available
+		and left.skipState.activeParticipantCount == right.skipState.activeParticipantCount
+		and left.skipState.yesVoteCount == right.skipState.yesVoteCount
+		and left.skipState.requiredVoteCount == right.skipState.requiredVoteCount
+		and left.skipState.quorumPending == right.skipState.quorumPending
+end
+
 local function parseBoundaryStatus(value: unknown, data: ServiceData, expectedStatus: string): BoundaryStatus?
 	if type(value) ~= "table" or getmetatable(value :: any) ~= nil or not table.isfrozen(value :: any) then
 		return nil
@@ -694,6 +747,7 @@ local function clearConstructionDependencies(data: ServiceData)
 	data.totalWaves = 0
 	data.lastQueuedWaveRevision = 0
 	data.terminalPublicationPending = false
+	data.recoverableFaultSnapshot = nil
 	data.studioBaseCatalogPending = nil
 	data.studioRuntimeMapPending = nil
 end
@@ -804,7 +858,7 @@ local function validBoundaryFrame(data: ServiceData, value: unknown): boolean
 		or frame.enemyEpoch ~= data.enemyEpoch
 		or type(frame.passOrdinal) ~= "number"
 		or not Validation.isSafeInteger(frame.passOrdinal)
-		or frame.passOrdinal ~= data.lastEnemyPassOrdinal + 1
+		or ((data.lastEnemyPassOrdinal == 0 and frame.passOrdinal < 1) or (data.lastEnemyPassOrdinal > 0 and frame.passOrdinal ~= data.lastEnemyPassOrdinal + 1))
 		or not isFiniteNumber(frame.sampleServerTime)
 		or frame.sampleServerTime < data.lastSampleServerTime
 		or type(frame.terminalOutcomes) ~= "table"
@@ -824,7 +878,12 @@ local function validCloseContext(data: ServiceData, value: unknown): boolean
 		return false
 	end
 	local context = value :: any
-	local fields = if context.committedSpawn == nil then CLOSE_CONTEXT_FIELDS else CLOSE_CONTEXT_WITH_SPAWN_FIELDS
+	local hasCommittedSpawn = context.committedSpawn ~= nil
+	local hasTerminalOutcome = context.terminalOutcome ~= nil
+	if hasCommittedSpawn ~= hasTerminalOutcome then
+		return false
+	end
+	local fields = if hasCommittedSpawn then CLOSE_CONTEXT_WITH_SPAWN_FIELDS else CLOSE_CONTEXT_FIELDS
 	return hasExactFields(context, fields)
 		and (context.disposition == "DependencyFault" or context.disposition == "Shutdown")
 		and context.matchId == data.matchId
@@ -938,7 +997,14 @@ local function publisherDependencies(data: ServiceData): WaveReplicationPublishe
 	return table.freeze({
 		sender = sender,
 		getRecipients = function(): unknown
-			local called, resultValue = callResult(matchLifecycle.getConnectedRecipients, matchLifecycle)
+			-- MatchLifecycle intentionally closes ordinary transient recipient reads
+			-- while BaseDefeat owns the WaveActive -> Results transaction. DefeatClosed
+			-- therefore uses only that transaction's exact preflighted terminal set;
+			-- every other Wave state uses only the live connected-recipient capability.
+			local provider = if data.terminalState == "DefeatClosed"
+				then matchLifecycle.getCommittedBaseDefeatRecipients
+				else matchLifecycle.getConnectedRecipients
+			local called, resultValue = callResult(provider, matchLifecycle)
 			if not called or not isSuccess(resultValue) then
 				return nil
 			end
@@ -1028,6 +1094,9 @@ local function reconcileVoteFailureSnapshot(
 	if snapshot.state == "DefeatClosed" or snapshot.state == "Faulted" then
 		data.terminalState = snapshot.state
 		data.terminalPublicationPending = newer
+		if snapshot.state == "Faulted" then
+			data.recoverableFaultSnapshot = snapshot
+		end
 		if snapshot.state == "Faulted" and not newer then
 			data.callbacksEnabled = false
 			data.state = "Failed"
@@ -1037,6 +1106,74 @@ local function reconcileVoteFailureSnapshot(
 		data.terminalPublicationPending = newer
 	end
 	return true
+end
+
+local function closeRuntimeDependencyFault(data: ServiceData, context: any): (boolean, boolean)
+	local runtime = data.runtime
+	local publisher = data.publisher
+	if runtime == nil or publisher == nil then
+		return false, false
+	end
+
+	-- Preflight before the irreversible runtime close when possible. A failed
+	-- preflight cannot keep authoritative Wave truth Running; the exact Faulted
+	-- snapshot is still retained for Get recovery even if publication is lost.
+	local preflighted, preflightResult = callResult(publisher.preflightPublication, publisher)
+	local publicationReady = preflighted and isSuccess(preflightResult) and (preflightResult :: any).value == true
+	local closed, closeResult = callResult(runtime.closeDependencyFault, runtime, context)
+	local snapshot = if closed and isSuccess(closeResult)
+		then canonicalRuntimeSnapshot((closeResult :: any).value, data)
+		else nil
+	if snapshot == nil or (snapshot :: WaveProtocol.WaveSnapshot).state ~= "Faulted" then
+		return false, false
+	end
+
+	local faultSnapshot = snapshot :: WaveProtocol.WaveSnapshot
+	local previouslyRetained = data.recoverableFaultSnapshot
+	if
+		faultSnapshot.waveRevision == data.lastQueuedWaveRevision
+		and (previouslyRetained == nil or not waveSnapshotsEqual(previouslyRetained, faultSnapshot))
+	then
+		return false, false
+	end
+	data.recoverableFaultSnapshot = faultSnapshot
+	data.terminalState = "Faulted"
+	data.lastEnemyPassOrdinal = math.max(data.lastEnemyPassOrdinal, context.passOrdinal)
+	data.lastSampleServerTime = math.max(data.lastSampleServerTime, context.sampleServerTime)
+
+	local revision = faultSnapshot.waveRevision
+	local newlyQueued = revision > data.lastQueuedWaveRevision
+	if revision < data.lastQueuedWaveRevision then
+		return true, false
+	end
+	if newlyQueued then
+		if not publicationReady then
+			data.terminalPublicationPending = false
+			return true, false
+		end
+		local queued, queueResult = callResult(publisher.queueSnapshot, publisher, faultSnapshot)
+		if not queued or not isSuccess(queueResult) or (queueResult :: any).value ~= true then
+			data.terminalPublicationPending = false
+			return true, false
+		end
+		data.lastQueuedWaveRevision = revision
+		data.terminalPublicationPending = true
+	end
+
+	if not data.terminalPublicationPending then
+		return true, true
+	end
+	local flushed, flushResult = callResult(publisher.flush, publisher, context.passOrdinal)
+	local flushOutcome = if flushed and isSuccess(flushResult) then (flushResult :: any).value else nil
+	local publicationSucceeded = flushed
+		and isSuccess(flushResult)
+		and validFlushOutcome(flushOutcome, context.passOrdinal, data.lastQueuedWaveRevision)
+		and (flushOutcome :: any).published == true
+	data.terminalPublicationPending = false
+	if publicationSucceeded then
+		data.lastFlushedPassOrdinal = context.passOrdinal
+	end
+	return true, publicationSucceeded
 end
 
 local function makeBoundaryAdapter(data: ServiceData): WaveBoundaryAdapter
@@ -1224,6 +1361,9 @@ local function makeBoundaryAdapter(data: ServiceData): WaveBoundaryAdapter
 				or snapshotState == "Faulted"
 			data.terminalState = if terminalSnapshot then snapshotState else nil
 			data.terminalPublicationPending = terminalSnapshot and newer
+			if snapshotState == "Faulted" then
+				data.recoverableFaultSnapshot = snapshot
+			end
 			data.operationActive = false
 			if data.shutdownRequested then
 				return Result.ok(true)
@@ -1292,7 +1432,7 @@ local function makeBoundaryAdapter(data: ServiceData): WaveBoundaryAdapter
 			if data.state == "Shutdown" or data.terminalState == "Cleaned" then
 				return Result.ok(false)
 			end
-			if not validCloseContext(data, contextValue) then
+			if data.operationActive or not validCloseContext(data, contextValue) then
 				return boundaryFailure(data, "close")
 			end
 			if data.shutdownRequested then
@@ -1300,9 +1440,30 @@ local function makeBoundaryAdapter(data: ServiceData): WaveBoundaryAdapter
 				data.state = if cleaned then "Shutdown" else "Failed"
 				return if cleaned then Result.ok(true) else serviceFailure("INTERNAL_ERROR", "close")
 			end
+			local context = contextValue :: any
 			data.callbacksEnabled = false
-			data.terminalState = if (contextValue :: any).disposition == "Shutdown" then "ShutdownClosed" else "Faulted"
+			if context.disposition == "Shutdown" then
+				data.terminalState = "ShutdownClosed"
+				data.state = "Failed"
+				return Result.ok(true)
+			end
+			if data.terminalState == "FiniteComplete" or data.terminalState == "DefeatClosed" then
+				-- A downstream dependency fault cannot rewrite an already committed
+				-- Wave terminal. The Enemy boundary still closes and service mutation
+				-- admission remains permanently disabled.
+				data.state = "Failed"
+				return Result.ok(true)
+			end
+
+			data.operationActive = true
+			local runtimeClosed, _published = closeRuntimeDependencyFault(data, context)
+			data.operationActive = false
+			data.callbacksEnabled = false
 			data.state = "Failed"
+			if not runtimeClosed then
+				data.terminalState = "Faulted"
+				return serviceFailure("INTERNAL_ERROR", "close")
+			end
 			return Result.ok(true)
 		end,
 	})
@@ -1619,6 +1780,129 @@ local function buildStudioSources(scenario: string, mapIdentity: StudioMapIdenti
 		waveCount
 end
 
+local function canonicalMatchSnapshot(value: unknown): MatchProtocol.MatchSnapshot?
+	if type(value) ~= "table" or getmetatable(value :: any) ~= nil or not table.isfrozen(value :: any) then
+		return nil
+	end
+	local validated = MatchProtocol.validateMatchSnapshot(value)
+	return if validated.ok then validated.value else nil
+end
+
+local function readStudioMatchSnapshot(matchLifecycle: MatchLifecycleAdapter): MatchProtocol.MatchSnapshot?
+	local called, resultValue = callResult(matchLifecycle.getSnapshot, matchLifecycle)
+	if not called or not isSuccess(resultValue) then
+		return nil
+	end
+	return canonicalMatchSnapshot((resultValue :: any).value)
+end
+
+local function readStudioRecipients(matchLifecycle: MatchLifecycleAdapter): { any }?
+	local called, resultValue = callResult(matchLifecycle.getConnectedRecipients, matchLifecycle)
+	local recipients = if called and isSuccess(resultValue) then (resultValue :: any).value else nil
+	if
+		type(recipients) ~= "table"
+		or getmetatable(recipients :: any) ~= nil
+		or not table.isfrozen(recipients :: any)
+		or #recipients > WaveProtocol.MAX_BROADCAST_RECIPIENTS
+	then
+		return nil
+	end
+	local count = 0
+	for key in next, recipients :: any do
+		count += 1
+		if type(key) ~= "number" or not Validation.isSafeInteger(key) or key < 1 or key > #recipients then
+			return nil
+		end
+	end
+	if count ~= #recipients then
+		return nil
+	end
+	local seenUserIds: { [number]: boolean } = {}
+	for _, record in recipients :: { unknown } do
+		if
+			type(record) ~= "table"
+			or getmetatable(record :: any) ~= nil
+			or not table.isfrozen(record :: any)
+			or not hasExactFields(record :: any, CONNECTED_RECIPIENT_FIELDS)
+			or (record :: any).recipient == nil
+			or not isUserId((record :: any).userId)
+			or seenUserIds[(record :: any).userId] == true
+		then
+			return nil
+		end
+		seenUserIds[(record :: any).userId] = true
+	end
+	return recipients :: { any }
+end
+
+local function studioPreWaveAvailability(data: ServiceData): boolean?
+	local matchLifecycle = data.matchLifecycle
+	if matchLifecycle == nil then
+		return nil
+	end
+	local snapshot = readStudioMatchSnapshot(matchLifecycle)
+	if snapshot == nil then
+		return nil
+	elseif snapshot.state == "PreWave" then
+		return true
+	elseif snapshot.state == "Loading" then
+		return false
+	elseif snapshot.state ~= "ReadyCheck" then
+		return nil
+	end
+	local recipients = readStudioRecipients(matchLifecycle)
+	if recipients == nil then
+		return nil
+	end
+	return #recipients > 0
+end
+
+local function prepareStudioPreWave(data: ServiceData): boolean
+	local matchLifecycle = data.matchLifecycle
+	if matchLifecycle == nil then
+		return false
+	end
+	local snapshot = readStudioMatchSnapshot(matchLifecycle)
+	if snapshot == nil then
+		return false
+	elseif snapshot.state == "PreWave" then
+		return true
+	elseif snapshot.state ~= "ReadyCheck" then
+		return false
+	end
+	local submitReady = matchLifecycle.submitReady
+	if type(submitReady) ~= "function" then
+		return false
+	end
+	local recipients = readStudioRecipients(matchLifecycle)
+	if recipients == nil then
+		return false
+	end
+	local matchId = snapshot.matchId
+	for _, record in recipients do
+		if snapshot.state == "PreWave" then
+			break
+		end
+		local called, resultValue =
+			callResult(submitReady, matchLifecycle, record.recipient, matchId, snapshot.revision)
+		local nextSnapshot = if called and isSuccess(resultValue)
+			then canonicalMatchSnapshot((resultValue :: any).value)
+			else nil
+		if
+			nextSnapshot == nil
+			or nextSnapshot.matchId ~= matchId
+			or nextSnapshot.revision <= snapshot.revision
+			or (nextSnapshot.state ~= "ReadyCheck" and nextSnapshot.state ~= "PreWave")
+		then
+			local refreshed = readStudioMatchSnapshot(matchLifecycle)
+			return refreshed ~= nil and refreshed.matchId == matchId and refreshed.state == "PreWave"
+		end
+		snapshot = nextSnapshot
+	end
+	local finalSnapshot = readStudioMatchSnapshot(matchLifecycle)
+	return finalSnapshot ~= nil and finalSnapshot.matchId == matchId and finalSnapshot.state == "PreWave"
+end
+
 local function initializeFinite(data: ServiceData)
 	local selection = data.selection :: Selection
 	if selection.kind ~= "AuthoredFinite" then
@@ -1798,6 +2082,14 @@ local function activateStudioScenario(data: ServiceData, scenario: string): unkn
 	then
 		return serviceFailure("STUDIO_ONLY", "runtimeTrigger")
 	end
+	local preWaveAvailable = studioPreWaveAvailability(data)
+	if preWaveAvailable == false then
+		return serviceFailure("UNAVAILABLE", "runtimeTrigger")
+	elseif preWaveAvailable == nil then
+		data.studioActivationAttempted = true
+		data.studioScenario = scenario
+		return studioFailure(data)
+	end
 	data.studioActivationAttempted = true
 	data.studioScenario = scenario
 	local mapIdentity = readStudioMapIdentity(data)
@@ -1828,6 +2120,9 @@ local function activateStudioScenario(data: ServiceData, scenario: string): unkn
 		or finiteSchedule.kind ~= "AuthoredFinite"
 		or #finiteSchedule.waves ~= expectedWaveCount
 	then
+		return studioFailure(data)
+	end
+	if not prepareStudioPreWave(data) then
 		return studioFailure(data)
 	end
 
@@ -1872,6 +2167,19 @@ local function readPublicationCount(metrics: unknown): number?
 		return nil
 	end
 	return readNonnegativeMetric((metrics :: any).publisher, "publicationCount")
+end
+
+local function readEnemyPublicationCount(metrics: unknown): number?
+	if type(metrics) ~= "table" or not table.isfrozen(metrics :: any) then
+		return nil
+	end
+	local publisher = (metrics :: any).publisher
+	local deltaCount = readNonnegativeMetric(publisher, "deltaMessageCount")
+	local snapshotCount = readNonnegativeMetric(publisher, "snapshotMessageCount")
+	if deltaCount == nil or snapshotCount == nil or deltaCount > Validation.MAX_SAFE_INTEGER - snapshotCount then
+		return nil
+	end
+	return deltaCount + snapshotCount
 end
 
 local function getStudioDiagnostics(data: ServiceData): unknown
@@ -1920,7 +2228,7 @@ local function getStudioDiagnostics(data: ServiceData): unknown
 	local startingCash = if cashCalled and isSuccess(cashResult) then (cashResult :: any).value else nil
 	local wavePublicationCount = readNonnegativeMetric(waveMetrics, "publicationCount")
 	local basePublicationCount = readPublicationCount(baseMetrics)
-	local enemyPublicationCount = readPublicationCount(enemyMetrics)
+	local enemyPublicationCount = readEnemyPublicationCount(enemyMetrics)
 	local enemyStepConnections = readNonnegativeMetric(enemyMetrics, "stepConnectionCount")
 	local enemyRemovingConnections = readNonnegativeMetric(enemyMetrics, "playerRemovingConnectionCount")
 	if
@@ -2336,6 +2644,19 @@ local function readRuntimeResult(self: Service, operation: Operation, methodName
 end
 
 function ServiceMethods.getSnapshot(self: Service): unknown
+	local data = requireData(self)
+	local retained = data.recoverableFaultSnapshot
+	if data.state == "Failed" and data.terminalState == "Faulted" and retained ~= nil then
+		if data.operationActive then
+			return serviceFailure("REENTRANT", "getSnapshot")
+		elseif data.runtime == nil then
+			return serviceFailure("UNAVAILABLE", "getSnapshot")
+		end
+		-- Fault recovery is deliberately read-only. The exact validated terminal
+		-- full state survives a contained FireClient failure, while callbacks,
+		-- votes, spawns, boundary admission, and every other public read stay shut.
+		return Result.ok(retained)
+	end
 	return readRuntimeResult(self, "getSnapshot", "getSnapshot")
 end
 
@@ -2622,6 +2943,7 @@ local function construct(
 		lastQueuedWaveRevision = 0,
 		terminalPublicationPending = false,
 		terminalState = nil,
+		recoverableFaultSnapshot = nil,
 		studioTrigger = nil,
 		studioTriggerOperationActive = false,
 		studioActivationAttempted = false,

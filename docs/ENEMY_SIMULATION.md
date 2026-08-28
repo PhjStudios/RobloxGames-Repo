@@ -16,8 +16,11 @@ placeholder visuals, deterministic tests, and an unsaved Match Studio stress
 sample. Phase 10 now consumes the existing endpoint seam through the separate
 authoritative [Defender Base Runtime and Replication](BASE_RUNTIME.md) contract;
 it does not change Phase 09 movement, client enemy replication, or production
-enemy content. Waves, automatic production state progression, combat, towers,
-placement, rewards, persistence, production art, and Lobby source remain absent.
+enemy content. Phase 11 subsequently adds the separate authenticated finite
+[Wave Runtime](WAVE_RUNTIME.md), scheduler-owned spawn admission, difficulty
+composition, and terminal attribution while preserving this movement and
+replication contract. Combat, towers, placement, rewards, persistence,
+production art/content, and Lobby source remain absent; Phase 12 is unbegun.
 
 `src/shared/config/Enemies.luau` and `src/shared/config/Assets.luau` remain frozen
 empty arrays. `docs/TOWER_ENEMY_SCHEMAS.md` is the repository's existing enemy
@@ -116,16 +119,17 @@ Definitions come only from an authenticated immutable `EnemySchema` catalog.
 The runtime store resolves a server-selected `EnemyId` against that catalog and
 never accepts a client definition or caller-owned mutable definition. Current
 production receives the already-validated empty catalog, so it is dormant until
-a future server wave scheduler calls the spawn API with production content.
+production content exists. Phase 11's WaveRuntime is now the sole authenticated
+scheduler caller after its one-shot configuration transaction commits.
 
 Headless fixtures build fresh symbolic `EnemyModel` manifests and enemy
-catalogs through the real `AssetSchema` and `EnemySchema`. In Studio only, one
-server-only runtime trigger may install the same kind of freshly validated
-test catalog while the store is empty and has issued zero IDs. Raw input is
-copied, validated, and discarded; production config files remain empty. The
-trigger is absent outside `RunService:IsStudio()`, is inaccessible to clients,
-owns no arbitrary callback or code execution surface, and is destroyed on
-service shutdown.
+catalogs through the real `AssetSchema` and `EnemySchema`. In Studio, Phase 11's
+sole combined server-only runtime trigger validates one fresh complete Core
+Configuration and installs its exact canonical enemy catalog only while the
+store is empty and has issued zero IDs. Raw input is copied, validated, and
+discarded; production config files remain empty. The trigger is absent outside
+`RunService:IsStudio()`, is inaccessible to clients, owns no arbitrary callback
+or code execution surface, and is destroyed on service shutdown.
 
 Immutable definition fields never enter mutable runtime ownership. The strict
 runtime record is conceptually:
@@ -150,10 +154,15 @@ type RuntimeEnemy = {
 ```
 
 Internal records additionally retain only the authenticated immutable
-definition and detached frozen lane snapshot required for computation. They
-retain no Player, Instance, marker, map Model, client object, visual, connection,
-timer, or coroutine. Health initializes exactly to definition `maxHealth`; Phase
-09 exposes no damage or healing operation. The sole status representation is a
+definition and detached frozen lane snapshot required for computation. Under
+Phase 11, creation copies `maxHealth * enemyHealthMultiplier` and
+`moveSpeedStudsPerSecond * enemyMoveSpeedMultiplier` exactly once into the
+record; later slows multiply only that record-owned adjusted speed. Leak damage
+and every authored definition remain unchanged. Records retain no Player,
+Instance, marker, map Model, client object, visual, connection,
+timer, or coroutine. At the Phase 09 checkpoint health initialized exactly to
+definition `maxHealth`; Phase 09 itself exposed no difficulty composition,
+damage, or healing operation. The sole status representation is a
 server-owned finite `slowMultiplier` in `[0, 1]`, initially `1`. Zero means
 fully stopped. This is not a general status-effect framework and has no expiry
 timer, resistance, stacking, source, combat, or client mutation path.
@@ -186,7 +195,7 @@ server-only `getRuntimeMapSnapshot()` Result that returns that same detached,
 deeply frozen, Instance-free value. It never returns the loader, template,
 runtime Model, markers, tags, or a mutable cache. No second map is loaded.
 
-The Match composition registers:
+The Phase 09 Match composition registered:
 
 ```text
 initialize/start: NetworkRegistry -> MatchLifecycle -> EnemySimulation
@@ -202,9 +211,22 @@ replication assemblies, queues, and request counters; clears the runtime store;
 and destroys its Studio-only trigger. Only then may `MatchLifecycle` clean its
 MapLoader and `Workspace.ATDRuntimeMap`.
 
+Phase 10 inserted BaseRuntime before EnemySimulation. Phase 11 now appends
+WaveRuntime and uses this current order:
+
+```text
+initialize/start: NetworkRegistry -> MatchLifecycle -> BaseRuntime -> EnemySimulation -> WaveRuntime
+shutdown:         WaveRuntime -> EnemySimulation -> BaseRuntime -> MatchLifecycle -> NetworkRegistry
+```
+
+Wave cleanup closes and detaches the scheduler boundary before EnemySimulation
+clears the one Heartbeat, active Store state, publisher, terminal authenticators,
+and sole Studio trigger.
+
 No Phase 09 code invokes a match-state transition. Production remains dormant
-in `ReadyCheck`/`PreWave` until a future authoritative scheduler calls spawn. It
-does not add automatic `PreWave -> WaveActive` progression.
+because the canonical production catalogs are empty. Phase 11 now owns the only
+narrow authenticated `PreWave -> WaveActive` scheduler transaction; this does
+not give EnemySimulation a lifecycle transition API.
 
 ## Movement and numeric policy
 
@@ -301,6 +323,28 @@ The store issues and authenticates the outcome before invoking the sink, then
 always finishes the current enemy's terminal transaction before
 EnemySimulation processes any defeat work at its next safe boundary. Duplicate,
 stale, foreign, revoked, or unauthenticated outcomes cannot replay base damage.
+
+Phase 11 adds a distinct detached frozen scheduler terminal outcome for every
+`Endpoint`, `Manual`, or `Defeat` terminal record. It contains only MatchId,
+enemy epoch, RuntimeEnemyId, EnemyId, reason, and the Store-owned server sample;
+the authenticated leak outcome above remains the only Base-damage authority.
+EnemySimulation copies bounded terminal facts to WaveRuntime only after Store
+mutation has ended, so the Wave sink cannot re-enter EnemyRuntimeStore.
+
+If a Wave callback throws after the scheduler capability has already committed
+a spawn, EnemySimulation retains the exact committed `{ event, outcome }` for
+that pass. After the callback returns, outside any Store mutation and while the
+authenticated scheduler sample remains live, the narrow Store
+`despawnScheduledForFault` transaction authenticates that exact spawned
+snapshot, removes the active record, and issues one `Manual` terminal outcome.
+EnemySimulation defers Wave's one-shot dependency-fault close until its own
+operation-active guard has cleared, then passes the committed pair plus that
+terminal outcome. Store active count is zero for that enemy, and Wave reconciles
+the cursor, originating ownership, counters, and terminal resolution once before
+exposing `Faulted`. A callback failure before Store commit carries no pair.
+Re-entry, forged identity/sample, conflicting replay, publisher
+preflight/commit failure, and cleanup races remain closed and cannot admit
+another mutation.
 
 Spawn, slow, manual despawn, endpoint resolution, and nested step operations
 reject mutation re-entry. Cleanup is the sole exception: a cleanup request made
@@ -589,13 +633,16 @@ Studio; no Script Sync, map mutation, save, publish, setting change, Lobby test,
 or unrelated instance change is allowed.
 
 In Studio only, `EnemySimulation` owns one server-only BindableFunction beneath
-`ServerStorage` with a fixed private development name and exact operations:
-install one validated test catalog, spawn by server-selected EnemyId/lane,
-set the one slow multiplier, manually despawn, return detached snapshots/metrics,
-and clear test enemies. Inputs pass the same strict server validation and fixed
-bounds. It cannot change match state, base state, recipient, remote payload,
-map, service, module, or arbitrary property. It is created at runtime, destroyed
-at shutdown, and absent from Edit mode and production servers.
+`ServerStorage` with a fixed private development name. At the Phase 09
+checkpoint its exact operations installed one validated enemy catalog and drove
+server-selected spawn/slow/despawn evidence. Phase 11 migrates the same sole
+trigger into one combined, fixed-operation Wave harness: it validates one fresh
+complete configuration, admits only the server-selected authored fixture and
+bounded evidence operations, and revokes the legacy spawn facade after commit.
+Inputs pass the same strict server validation and fixed bounds. It cannot accept
+client-selected match, base, recipient, remote payload, map, module, callback,
+code, or arbitrary property. It is created at runtime, destroyed at shutdown,
+and absent from Edit mode and production servers.
 
 ## Predeclared Studio late-client and stress gate
 
@@ -740,6 +787,36 @@ service connection. The task-owned Rojo server stopped, its port closed, all
 simulated windows closed, and Studio remained in Edit mode with zero runtime
 residue. The three pre-existing user Rojo servers were not touched.
 
+## Phase 11 scheduler integration evidence — 2026-08-28
+
+The accepted Phase 11 sessions reused EnemySimulation's real one-Heartbeat
+boundary, Store, publisher, endpoint/Base seam, and both client renderers. The
+primary finite run (`match:67f2240b-1636-4073-a667-a6d0e6fc0184`) verified
+that each scheduler-owned spawn received the exact authenticated health and
+movement products once. The overlap run
+(`match:b3f75fcb-cdc4-4db7-8818-0ae6ef555491`) retained old scheduled work,
+active enemies, and originating-wave attribution across a later wave start.
+
+The due-spawn ladder used exact MatchIds
+`match:6555b115-c5f7-428b-9190-091d7ffde547` (1),
+`match:f0856bed-d155-496c-ac0d-a9b136e07738` (32 measurement),
+`match:20bf272c-993c-4782-9ec1-4c880c7e3f12` (64), and
+`match:5344703b-2de0-4f84-a86f-db976a4a7281` (128). Every rung was at or
+below WaveRuntime's explicit `128`-spawn per-pass bound, preserved stable
+authored ordering, spawned nothing early, and retained constant Enemy service
+and controller connection ownership. The separate real-WaveReplication
+recovery/order session used
+`match:39dde4e4-2dc2-48e8-8e58-8862c2b7155a`.
+
+The lethal run (`match:0c0771bc-82b5-40bb-a13a-9ef04026f874`) allowed one
+scheduled enemy to leak, then closed the later `+2` and `+3` spawns, removed
+active state, and reached Wave `DefeatClosed`, Base `Defeated`, and Match
+`Results` at revisions `3/3/9`. It recorded exactly one defeat and one Results
+transition, with zero finite completions. Both clients converged in
+`0.0344388485` and `0.0335118771` seconds. Accepted Phase 11 sessions had zero
+console errors and ended without Enemy records, visuals, terminal data,
+callbacks, trigger state, connections, or other runtime residue.
+
 ## Verification and completion boundary
 
 Headless tests use injected clocks, deltas, schedulers, senders, connections,
@@ -750,12 +827,16 @@ snapshot races/gaps, renderer interpolation/correction/recreation, constant
 connection ownership, and idempotent mass cleanup. Synthetic fixtures prove
 multiple lanes; Studio uses only the real authored one-lane graybox.
 
-The structural verifier authenticates all mappings/source bytes, retains
-exactly one Script and one LocalScript per production build and zero runnable
-Test scripts, exclude every spec/fixture/Studio harness from production, keep
-Lobby free of Match source and Match free of Lobby source, prove production
-`Enemies`/`Assets` remain empty, and reject Phase 11 source or behavior. Final
-module/suite/test counts are recorded only from the actual final run.
+At the Phase 09 checkpoint, the structural verifier authenticated all
+mappings/source bytes, retained exactly one Script and one LocalScript per
+production build and zero runnable Test scripts, excluded every
+spec/fixture/Studio harness from production, kept Lobby free of Match source and
+Match free of Lobby source, proved production `Enemies`/`Assets` remained empty,
+and rejected Phase 11 source or behavior.
+Phase 11's verifier now authenticates the Wave-owned extension while preserving
+the same empty production catalogs, test exclusion, project isolation, and
+runnable-script constraints. Current module/suite/test counts are recorded only
+from the actual final run.
 
 The consolidated independent review found no P0, one P1, and one P2. The P1
 snapshot-covered-spawn race now consumes later queued spawn sequences
@@ -770,7 +851,7 @@ subset is `120` cases across `11` suites. Structural verification passes Default
 authoritative shared modules, 25 exact production mirrors, and 51 test-owned
 modules. Formatting, lint, diff, scope, generated-output, exact remote/rate
 catalogs, production-test exclusion, Lobby/Match isolation, empty production
-`Enemies`/`Assets`, and the then-unbegun Phase 10/11 boundary all pass.
+`Enemies`/`Assets`, and the then-unbegun Phase 10/11 boundary all passed.
 
 Packets 09.1–09.5, Studio, review, local, and structural gates are complete on
 2026-08-27. The exact-final-SHA Repository Verification run and zero-artifact
@@ -778,4 +859,7 @@ result are cited at handoff rather than through a self-referential evidence
 commit. Phase 09 is complete. Phase 10 subsequently implemented its separately
 reviewed endpoint consumer and passed focused and exact Studio checks on
 2026-08-28; its final all-repository/CI record is maintained in
-`docs/BASE_RUNTIME.md`. Phase 11 remains unbegun.
+`docs/BASE_RUNTIME.md`. Phase 11 subsequently implemented the authenticated
+finite scheduler and passed its exact Match Studio and consolidated-review
+gates; its current contract and evidence are maintained in
+`docs/WAVE_RUNTIME.md`. Phase 12 remains unbegun.

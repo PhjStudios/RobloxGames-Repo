@@ -104,6 +104,11 @@ export type AuthenticatedTerminalOutcome = {
 	serverTime: number,
 }
 
+export type ScheduledFaultDespawn = {
+	despawn: DespawnSnapshot,
+	terminalOutcome: AuthenticatedTerminalOutcome,
+}
+
 export type EndpointSink = (outcome: AuthenticatedLeakOutcome) -> ()
 
 export type StoreMetrics = {
@@ -142,6 +147,7 @@ export type Operation =
 	| "bindDifficulty"
 	| "listLaneIds"
 	| "spawnScheduled"
+	| "despawnScheduledForFault"
 	| "finishSchedulerSample"
 	| "drainTerminalOutcomes"
 	| "cleanup"
@@ -396,6 +402,31 @@ local POINT_FIELDS = table.freeze({
 	distance = true,
 })
 
+local RUNTIME_ENEMY_SNAPSHOT_FIELDS = table.freeze({
+	runtimeEnemyId = true,
+	enemyId = true,
+	laneId = true,
+	pathProgress = true,
+	currentHealth = true,
+	maximumHealth = true,
+	speedModifiers = true,
+	spawnServerTime = true,
+	sampleServerTime = true,
+	lifecycle = true,
+	revision = true,
+	worldCFrame = true,
+	effectiveSpeed = true,
+	segmentIndex = true,
+	segmentStartDistance = true,
+	segmentEndDistance = true,
+	segmentStartPosition = true,
+	segmentEndPosition = true,
+})
+
+local SPEED_MODIFIER_FIELDS = table.freeze({
+	slowMultiplier = true,
+})
+
 local function validateLane(value: unknown): RuntimeLaneSnapshot?
 	if
 		type(value) ~= "table"
@@ -523,6 +554,41 @@ local function snapshotRecord(record: RuntimeEnemyRecord): RuntimeEnemySnapshot
 		segmentStartPosition = segmentStart.position,
 		segmentEndPosition = segmentEnd.position,
 	})
+end
+
+local function runtimeEnemySnapshotMatches(value: unknown, expected: RuntimeEnemySnapshot): boolean
+	if
+		type(value) ~= "table"
+		or getmetatable(value :: any) ~= nil
+		or not table.isfrozen(value :: any)
+		or not hasExactFields(value :: { [any]: unknown }, RUNTIME_ENEMY_SNAPSHOT_FIELDS)
+	then
+		return false
+	end
+	local snapshot = value :: any
+	local speedModifiers = snapshot.speedModifiers
+	return type(speedModifiers) == "table"
+		and getmetatable(speedModifiers) == nil
+		and table.isfrozen(speedModifiers)
+		and hasExactFields(speedModifiers, SPEED_MODIFIER_FIELDS)
+		and snapshot.runtimeEnemyId == expected.runtimeEnemyId
+		and snapshot.enemyId == expected.enemyId
+		and snapshot.laneId == expected.laneId
+		and snapshot.pathProgress == expected.pathProgress
+		and snapshot.currentHealth == expected.currentHealth
+		and snapshot.maximumHealth == expected.maximumHealth
+		and speedModifiers.slowMultiplier == expected.speedModifiers.slowMultiplier
+		and snapshot.spawnServerTime == expected.spawnServerTime
+		and snapshot.sampleServerTime == expected.sampleServerTime
+		and snapshot.lifecycle == expected.lifecycle
+		and snapshot.revision == expected.revision
+		and snapshot.worldCFrame == expected.worldCFrame
+		and snapshot.effectiveSpeed == expected.effectiveSpeed
+		and snapshot.segmentIndex == expected.segmentIndex
+		and snapshot.segmentStartDistance == expected.segmentStartDistance
+		and snapshot.segmentEndDistance == expected.segmentEndDistance
+		and snapshot.segmentStartPosition == expected.segmentStartPosition
+		and snapshot.segmentEndPosition == expected.segmentEndPosition
 end
 
 local function terminalSnapshot(
@@ -1174,6 +1240,69 @@ function StoreMethods.spawnScheduled(
 	local result = snapshotRecord(record)
 	finishMutation(data)
 	return Result.ok(result)
+end
+
+function StoreMethods.despawnScheduledForFault(
+	self: Store,
+	schedulerSampleTokenValue: unknown,
+	expectedSnapshotValue: unknown
+): Result.Result<ScheduledFaultDespawn, StoreError>
+	local operation: Operation = "despawnScheduledForFault"
+	local data = requireData(self)
+	local liveError = validateLive(data, operation, true)
+	if liveError ~= nil then
+		return Result.err(liveError)
+	end
+	if data.difficultyBinding == nil or not isAuthenticatedSchedulerSampleForData(data, schedulerSampleTokenValue) then
+		return failure("INVALID_SCHEDULER_SAMPLE", operation)
+	end
+	if type(expectedSnapshotValue) ~= "table" then
+		return failure("INVALID_RUNTIME_ID", operation)
+	end
+	local expectedSnapshot = expectedSnapshotValue :: any
+	local runtimeEnemyId, idError = validateRuntimeEnemyId(expectedSnapshot.runtimeEnemyId, operation)
+	if runtimeEnemyId == nil then
+		return Result.err(idError :: StoreError)
+	end
+	local record = data.activeById[runtimeEnemyId]
+	if
+		record == nil
+		or record.lifecycle ~= "Active"
+		or record.spawnServerTime ~= (schedulerSampleTokenValue :: SchedulerSampleToken).sampleServerTime
+		or not runtimeEnemySnapshotMatches(expectedSnapshotValue, snapshotRecord(record))
+	then
+		return failure(if record == nil then "STALE_RUNTIME_ID" else "ILLEGAL_LIFECYCLE", operation)
+	end
+	if record.revision >= Validation.MAX_SAFE_INTEGER then
+		return failure("REVISION_EXHAUSTED", operation)
+	end
+	if
+		data.authenticatedTerminalOutcomeById[runtimeEnemyId] ~= nil
+		or data.terminalCount >= data.maxLifetime
+		or #data.pendingTerminalOutcomes >= MAX_LIFETIME
+	then
+		return failure("CAPACITY_EXCEEDED", operation)
+	end
+
+	local serverTime = (schedulerSampleTokenValue :: SchedulerSampleToken).sampleServerTime
+	data.mutating = true
+	data.reentryViolation = false
+	record.sampleServerTime = serverTime
+	record.revision += 1
+	local despawn = terminalSnapshot(record, "Manual", serverTime)
+	data.activeById[runtimeEnemyId] = nil
+	data.activeCount -= 1
+	data.terminalById[runtimeEnemyId] = {
+		despawn = despawn,
+	}
+	retainTerminalOutcome(data, record, "Manual", serverTime)
+	data.terminalCount += 1
+	local terminalOutcome = data.authenticatedTerminalOutcomeById[runtimeEnemyId] :: AuthenticatedTerminalOutcome
+	finishMutation(data)
+	return Result.ok(table.freeze({
+		despawn = despawn,
+		terminalOutcome = terminalOutcome,
+	}))
 end
 
 function StoreMethods.finishSchedulerSample(

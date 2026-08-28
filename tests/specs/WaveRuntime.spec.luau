@@ -1443,6 +1443,264 @@ return TestHarness.suite("wave runtime", {
 		expectError(assertions, runtime:step(makeFrame(environment, 101)), "FAULTED", "step")
 	end),
 
+	TestHarness.case(
+		"reconciles committed callback throws and yields exactly once through dependency-fault close",
+		function(assertions)
+			for _, mode in { "throw", "yield" } do
+				local runtime, environment = createRig(assertions)
+				local initialized = initialize(assertions, runtime)
+				local frame = makeFrame(environment, 100)
+				local commitSpawn = frame.spawn
+				local attemptedEvent: any = nil
+				local committedOutcome: any = nil
+				frame.spawn = function(event: any): unknown
+					attemptedEvent = event
+					committedOutcome = commitSpawn(event)
+					if mode == "throw" then
+						error("PRIVATE_WAVE_RUNTIME_COMMITTED_CALLBACK_FAILURE", 0)
+					else
+						coroutine.yield()
+					end
+					return committedOutcome
+				end
+
+				local callbackFault = expectSuccess(assertions, runtime:step(frame))
+				assertions.equal(callbackFault.state, "Faulted")
+				assertions.equal(callbackFault.waveRevision, initialized.waveRevision + 1)
+				assertions.equal(callbackFault.currentCounts.spawned, 0)
+				assertions.equal(callbackFault.currentCounts.pending, 8)
+				assertions.equal(callbackFault.currentCounts.alive, 0)
+				assertions.equal(callbackFault.currentCounts.otherwiseResolved, 0)
+				assertions.equal(runtime:query().faultCode, "CALLBACK_FAILED")
+				assertions.equal(#environment.spawnEvents, 1)
+				assertions.equal((committedOutcome :: any).committed, true)
+
+				local runtimeEnemyId = (committedOutcome :: any).snapshot.runtimeEnemyId
+				local terminalOutcome = issueTerminal(environment, runtimeEnemyId, "Manual", 100)
+				local committedSpawn = table.freeze({
+					event = attemptedEvent,
+					outcome = committedOutcome,
+				})
+				local closeContext = table.freeze({
+					disposition = "DependencyFault",
+					matchId = MATCH_ID,
+					enemyEpoch = ENEMY_EPOCH,
+					passOrdinal = environment.passOrdinal,
+					sampleServerTime = 100,
+					committedSpawn = committedSpawn,
+					terminalOutcome = terminalOutcome,
+				})
+				assertDeepFrozen(assertions, closeContext)
+				local unauthenticatedContext = table.freeze({
+					disposition = "DependencyFault",
+					matchId = MATCH_ID,
+					enemyEpoch = ENEMY_EPOCH,
+					passOrdinal = environment.passOrdinal,
+					sampleServerTime = 100,
+					committedSpawn = committedSpawn,
+					terminalOutcome = frozenClone(terminalOutcome),
+				})
+				expectError(
+					assertions,
+					runtime:closeDependencyFault(unauthenticatedContext),
+					"INVALID_OUTCOME",
+					"closeDependencyFault"
+				)
+				local malformedWrapperContext = table.freeze({
+					disposition = "DependencyFault",
+					matchId = MATCH_ID,
+					enemyEpoch = ENEMY_EPOCH,
+					passOrdinal = environment.passOrdinal,
+					sampleServerTime = 100,
+					committedSpawn = {
+						event = attemptedEvent,
+						outcome = committedOutcome,
+					},
+					terminalOutcome = terminalOutcome,
+				})
+				expectError(
+					assertions,
+					runtime:closeDependencyFault(malformedWrapperContext),
+					"INVALID_OUTCOME",
+					"closeDependencyFault"
+				)
+				local rejectedQuery = runtime:query()
+				assertions.equal(rejectedQuery.faultCloseCount, 0)
+				assertions.equal(rejectedQuery.retainedOwnershipCount, 0)
+				assertions.equal(rejectedQuery.processedTerminalCount, 0)
+				assertions.equal(rejectedQuery.faultCode, "CALLBACK_FAILED")
+				assertions.equal(
+					expectSuccess(assertions, runtime:getSnapshot()).waveRevision,
+					callbackFault.waveRevision
+				)
+
+				local closed = expectSuccess(assertions, runtime:closeDependencyFault(closeContext))
+				assertions.equal(closed.state, "Faulted")
+				assertions.equal(closed.waveRevision, callbackFault.waveRevision + 1)
+				assertions.equal(closed.currentCounts.spawned, 1)
+				assertions.equal(closed.currentCounts.pending, 7)
+				assertions.equal(closed.currentCounts.alive, 0)
+				assertions.equal(closed.currentCounts.otherwiseResolved, 1)
+				assertions.equal(closed.aggregateCounts.spawned, 1)
+				assertions.equal(closed.aggregateCounts.pending, 7)
+				assertions.equal(closed.aggregateCounts.alive, 0)
+				assertions.equal(closed.aggregateCounts.otherwiseResolved, 1)
+				local closedQuery = runtime:query()
+				assertions.equal(closedQuery.faultCloseCount, 1)
+				assertions.equal(closedQuery.retainedOwnershipCount, 1)
+				assertions.equal(closedQuery.processedTerminalCount, 1)
+				assertions.equal(closedQuery.faultCode, "CALLBACK_FAILED")
+
+				local replayContext = frozenClone(closeContext)
+				assertDeepFrozen(assertions, replayContext)
+				local replayed = expectSuccess(assertions, runtime:closeDependencyFault(replayContext))
+				assertions.equal(replayed.waveRevision, closed.waveRevision)
+				assertions.equal(replayed.currentCounts.spawned, closed.currentCounts.spawned)
+				assertions.equal(replayed.currentCounts.pending, closed.currentCounts.pending)
+				assertions.equal(replayed.currentCounts.alive, closed.currentCounts.alive)
+				assertions.equal(replayed.currentCounts.otherwiseResolved, closed.currentCounts.otherwiseResolved)
+				assertions.equal(runtime:query().faultCloseCount, 1)
+				assertions.equal(runtime:query().processedTerminalCount, 1)
+
+				local mutableOutcome = table.clone(committedOutcome)
+				local mutableNestedReplay = table.freeze({
+					disposition = "DependencyFault",
+					matchId = MATCH_ID,
+					enemyEpoch = ENEMY_EPOCH,
+					passOrdinal = environment.passOrdinal,
+					sampleServerTime = 100,
+					committedSpawn = table.freeze({
+						event = attemptedEvent,
+						outcome = mutableOutcome,
+					}),
+					terminalOutcome = terminalOutcome,
+				})
+				expectError(
+					assertions,
+					runtime:closeDependencyFault(mutableNestedReplay),
+					"INVALID_OUTCOME",
+					"closeDependencyFault"
+				)
+
+				local missingTerminal = table.freeze({
+					disposition = "DependencyFault",
+					matchId = MATCH_ID,
+					enemyEpoch = ENEMY_EPOCH,
+					passOrdinal = environment.passOrdinal,
+					sampleServerTime = 100,
+					committedSpawn = committedSpawn,
+				})
+				expectError(
+					assertions,
+					runtime:closeDependencyFault(missingTerminal),
+					"INVALID_PASS",
+					"closeDependencyFault"
+				)
+				local conflictingTerminal = issueTerminal(environment, runtimeEnemyId, "Manual", 101)
+				local conflictingContext = table.freeze({
+					disposition = "DependencyFault",
+					matchId = MATCH_ID,
+					enemyEpoch = ENEMY_EPOCH,
+					passOrdinal = environment.passOrdinal + 1,
+					sampleServerTime = 101,
+					committedSpawn = committedSpawn,
+					terminalOutcome = conflictingTerminal,
+				})
+				expectError(
+					assertions,
+					runtime:closeDependencyFault(conflictingContext),
+					"INVALID_OUTCOME",
+					"closeDependencyFault"
+				)
+				local retained = expectSuccess(assertions, runtime:getSnapshot())
+				assertions.equal(retained.state, "Faulted")
+				assertions.equal(retained.waveRevision, closed.waveRevision)
+				assertions.equal(retained.currentCounts.spawned, 1)
+				assertions.equal(retained.currentCounts.pending, 7)
+				assertions.equal(retained.currentCounts.alive, 0)
+				assertions.equal(retained.currentCounts.otherwiseResolved, 1)
+				assertions.equal(runtime:query().faultCloseCount, 1)
+				assertions.equal(runtime:query().processedTerminalCount, 1)
+
+				assertions.isTrue(expectSuccess(assertions, runtime:cleanup()))
+				local cleaned = runtime:query()
+				assertions.equal(cleaned.state, "Cleaned")
+				assertions.equal(cleaned.retainedOriginCount, 0)
+				assertions.equal(cleaned.retainedOwnershipCount, 0)
+				assertions.equal(cleaned.retainedHeapCount, 0)
+				assertions.equal(cleaned.processedTerminalCount, 0)
+				assertions.equal(cleaned.faultCloseCount, 0)
+				assertions.isFalse(cleaned.busy)
+				expectError(assertions, runtime:closeDependencyFault(closeContext), "CLEANED", "closeDependencyFault")
+			end
+		end
+	),
+
+	TestHarness.case("gives committed terminal states precedence over dependency-fault close", function(assertions)
+		local defeatRuntime, defeatEnvironment = createRig(assertions)
+		initialize(assertions, defeatRuntime)
+		local defeated = expectSuccess(
+			assertions,
+			defeatRuntime:step(makeFrame(defeatEnvironment, 100, nil, "DefeatCommitted", {
+				omitSpawn = true,
+			}))
+		)
+		local defeatContext = table.freeze({
+			disposition = "DependencyFault",
+			matchId = MATCH_ID,
+			enemyEpoch = ENEMY_EPOCH,
+			passOrdinal = defeatEnvironment.passOrdinal,
+			sampleServerTime = 100,
+		})
+		local retainedDefeat = expectSuccess(assertions, defeatRuntime:closeDependencyFault(defeatContext))
+		assertions.equal(retainedDefeat.state, "DefeatClosed")
+		assertions.equal(retainedDefeat.waveRevision, defeated.waveRevision)
+		assertions.equal(defeatRuntime:query().faultCloseCount, 0)
+		assertions.isNil(defeatRuntime:query().faultCode)
+		assertions.isTrue(expectSuccess(assertions, defeatRuntime:cleanup()))
+
+		local rawSources = WaveFixtures.rawSources()
+		local emptySchedule = rawSources.waves[2]
+		emptySchedule.waves[1].groups = {}
+		emptySchedule.waves[2].groups[1].count = 1
+		local emptyConfiguration = validateConfiguration(assertions, rawSources)
+		local finiteRuntime, finiteEnvironment = createRig(
+			assertions,
+			emptyConfiguration,
+			WaveFixtures.createRuntimeMapSnapshot(),
+			WaveFixtures.OVERLAP_DIFFICULTY_ID
+		)
+		initialize(assertions, finiteRuntime)
+		local intermission = expectSuccess(assertions, finiteRuntime:step(makeFrame(finiteEnvironment, 100)))
+		assertions.equal(intermission.state, "Intermission")
+		local finalRunning = expectSuccess(
+			assertions,
+			finiteRuntime:step(makeFrame(finiteEnvironment, intermission.intermissionEndsServerTime))
+		)
+		assertions.equal(finalRunning.state, "Running")
+		assertions.equal(finalRunning.currentCounts.alive, 1)
+		local finalTerminal = issueTerminal(finiteEnvironment, 1, "Manual", intermission.intermissionEndsServerTime)
+		local completed = expectSuccess(
+			assertions,
+			finiteRuntime:step(makeFrame(finiteEnvironment, intermission.intermissionEndsServerTime, { finalTerminal }))
+		)
+		assertions.equal(completed.state, "FiniteComplete")
+		local finiteContext = table.freeze({
+			disposition = "DependencyFault",
+			matchId = MATCH_ID,
+			enemyEpoch = ENEMY_EPOCH,
+			passOrdinal = finiteEnvironment.passOrdinal,
+			sampleServerTime = completed.finiteCompleteServerTime,
+		})
+		local retainedFinite = expectSuccess(assertions, finiteRuntime:closeDependencyFault(finiteContext))
+		assertions.equal(retainedFinite.state, "FiniteComplete")
+		assertions.equal(retainedFinite.waveRevision, completed.waveRevision)
+		assertions.equal(finiteRuntime:getCompletionState().completionCount, 1)
+		assertions.equal(finiteRuntime:query().faultCloseCount, 0)
+		assertions.isNil(finiteRuntime:query().faultCode)
+		assertions.isTrue(expectSuccess(assertions, finiteRuntime:cleanup()))
+	end),
+
 	TestHarness.case("classifies uncommitted malformed throwing and yielding spawn failures", function(assertions)
 		local definitions = {
 			{ mode = "uncommitted", code = "CAPACITY_EXCEEDED" },
@@ -1589,10 +1847,16 @@ return TestHarness.suite("wave runtime", {
 
 		local ordinalRuntime, ordinalEnvironment = createRig(assertions)
 		initialize(assertions, ordinalRuntime)
-		local wrongOrdinal = expectSuccess(
+		expectSuccess(
 			assertions,
 			ordinalRuntime:step(makeFrame(ordinalEnvironment, 100, nil, nil, {
-				passOrdinal = 2,
+				passOrdinal = 73,
+			}))
+		)
+		local wrongOrdinal = expectSuccess(
+			assertions,
+			ordinalRuntime:step(makeFrame(ordinalEnvironment, 101, nil, nil, {
+				passOrdinal = 75,
 			}))
 		)
 		assertions.equal(wrongOrdinal.state, "Faulted")

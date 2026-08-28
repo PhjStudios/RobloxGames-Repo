@@ -215,8 +215,21 @@ local function makeLifecycle(rig: any, participantCount: number): (any, any)
 		defeatBeginCount = 0,
 		defeatCommitCount = 0,
 		defeatRollbackCount = 0,
+		terminalRecipients = nil,
+		connectedRecipientReadCount = 0,
+		committedRecipientReadCount = 0,
 	}
 	local lifecycle = {}
+	local function currentRecipientRecords(): { any }
+		local records = {}
+		for _, current in control.participants do
+			local token = rig.recipientByUserId[current.userId]
+			if current.state == "Active" and token ~= nil and token.alive then
+				table.insert(records, table.freeze({ recipient = token, userId = current.userId }))
+			end
+		end
+		return table.freeze(records)
+	end
 
 	function lifecycle.getSnapshot(_self: unknown): unknown
 		if rig.lifecycleSnapshotFailure then
@@ -235,17 +248,22 @@ local function makeLifecycle(rig: any, participantCount: number): (any, any)
 	end
 
 	function lifecycle.getConnectedRecipients(_self: unknown): unknown
+		control.connectedRecipientReadCount += 1
 		if rig.lifecycleRecipientsFailure then
 			error("PRIVATE_INTEGRATION_RECIPIENT_CALLBACK_FAILURE", 0)
 		end
-		local records = {}
-		for _, current in control.participants do
-			local token = rig.recipientByUserId[current.userId]
-			if current.state == "Active" and token ~= nil and token.alive then
-				table.insert(records, table.freeze({ recipient = token, userId = current.userId }))
-			end
+		if control.defeatToken ~= nil or control.state == "Results" then
+			return Result.err(table.freeze({ code = "UNAVAILABLE" }))
 		end
-		return Result.ok(table.freeze(records))
+		return Result.ok(currentRecipientRecords())
+	end
+
+	function lifecycle.getCommittedBaseDefeatRecipients(_self: unknown): unknown
+		control.committedRecipientReadCount += 1
+		if control.state ~= "Results" or control.defeatCommitCount ~= 1 or control.terminalRecipients == nil then
+			return Result.err(table.freeze({ code = "UNAVAILABLE" }))
+		end
+		return Result.ok(control.terminalRecipients)
 	end
 
 	function lifecycle.beginWaveActivation(_self: unknown, matchId: unknown): unknown
@@ -292,6 +310,7 @@ local function makeLifecycle(rig: any, participantCount: number): (any, any)
 		end
 		local token = table.freeze({})
 		control.defeatToken = token
+		control.terminalRecipients = currentRecipientRecords()
 		control.defeatBeginCount += 1
 		table.insert(rig.order, "lifecycle:begin-defeat")
 		return Result.ok(token)
@@ -301,7 +320,6 @@ local function makeLifecycle(rig: any, participantCount: number): (any, any)
 		if token ~= control.defeatToken or control.state ~= "WaveActive" then
 			return Result.err(table.freeze({ code = "INVALID_TOKEN" }))
 		end
-		control.defeatToken = nil
 		control.state = "Results"
 		control.revision += 1
 		control.defeatCommitCount += 1
@@ -318,6 +336,7 @@ local function makeLifecycle(rig: any, participantCount: number): (any, any)
 			return Result.err(table.freeze({ code = "INVALID_TOKEN" }))
 		end
 		control.defeatToken = nil
+		control.terminalRecipients = nil
 		control.defeatRollbackCount += 1
 		return Result.ok(true)
 	end
@@ -368,6 +387,8 @@ local function newRig(assertions: Assertions, options: any?): any
 		capturedTerminalOutcomes = {},
 		lastEnemyFrame = nil,
 		installedWaveBoundary = nil,
+		committedFaultInjected = false,
+		forcedCommittedSpawn = nil,
 	}
 	rig.fixture = resolved.fixture or WaveFixtures.createAuthenticatedFixture()
 	rig.waveConfiguration = resolved.waveConfiguration or rig.fixture.configuration
@@ -597,7 +618,7 @@ local function newRig(assertions: Assertions, options: any?): any
 			WaveRuntime.new(configuration, runtimeMap, matchId, enemyEpoch, difficultyId, runtimeDependencies)
 		if created.ok then
 			rig.waveRuntime = created.value
-			if resolved.instrumentRuntimeFrames then
+			if resolved.instrumentRuntimeFrames or resolved.throwAfterCommittedSpawn then
 				local runtime = created.value
 				local proxy = {}
 				function proxy.initialize(_self: unknown): unknown
@@ -606,6 +627,30 @@ local function newRig(assertions: Assertions, options: any?): any
 				function proxy.step(_self: unknown, frameValue: unknown): unknown
 					local frame = frameValue :: any
 					rig.lastEnemyFrame = frameValue
+					if resolved.throwAfterCommittedSpawn and not rig.committedFaultInjected then
+						local wave = rig.selection.schedule.waves[1]
+						local group = wave.groups[1]
+						local scheduledServerTime = 100 + group.startDelaySeconds
+						assert(
+							scheduledServerTime == frame.sampleServerTime,
+							"expected first authored spawn at sampled time"
+						)
+						assert(frame.spawn ~= nil, "expected authenticated scheduler spawn capability")
+						local event = table.freeze({
+							originatingWaveIndex = 1,
+							waveId = wave.id,
+							groupIndex = 1,
+							spawnOrdinal = 0,
+							scheduledServerTime = scheduledServerTime,
+							enemyId = group.enemyId,
+							laneId = group.laneId,
+						})
+						local outcome = frame.spawn(event)
+						assert(type(outcome) == "table" and outcome.committed == true, "expected committed Store spawn")
+						rig.committedFaultInjected = true
+						rig.forcedCommittedSpawn = table.freeze({ event = event, outcome = outcome })
+						error("PRIVATE_INTEGRATION_COMMITTED_SPAWN_CALLBACK_FAILURE", 0)
+					end
 					local outcomes = {}
 					for _, outcome in frame.terminalOutcomes do
 						table.insert(rig.capturedTerminalOutcomes, outcome)
@@ -620,6 +665,9 @@ local function newRig(assertions: Assertions, options: any?): any
 					end
 					table.clear(rig.injectedTerminalOutcomes)
 					return runtime:step(copyFrame(frameValue, outcomes))
+				end
+				function proxy.closeDependencyFault(_self: unknown, context: unknown): unknown
+					return runtime:closeDependencyFault(context)
 				end
 				function proxy.getSnapshot(_self: unknown): unknown
 					return runtime:getSnapshot()
@@ -1281,6 +1329,62 @@ return TestHarness.suite("Phase 11 authored-wave real-stack integration", {
 		cleanup(assertions, rig)
 	end),
 
+	TestHarness.case("coalesces an empty final wave directly from intermission for two clients", function(assertions)
+		local fixture = authenticatedFixture(function(raw)
+			raw.difficulties[1].waveCount = 2
+			raw.difficulties[1].timing.bossCadenceWaves = 3
+			raw.waves[1].waves = {
+				{
+					id = "wave:phase11-empty-final-1",
+					deadlineSeconds = 10,
+					deadlinePolicy = "AllSpawnsByDeadline",
+					bossKind = "None",
+					rewardClass = "Standard",
+					groups = {},
+				},
+				{
+					id = "wave:phase11-empty-final-2",
+					deadlineSeconds = 10,
+					deadlinePolicy = "AllSpawnsByDeadline",
+					bossKind = "None",
+					rewardClass = "Final",
+					groups = {},
+				},
+			}
+		end)
+		local rig = newRig(assertions, { fixture = fixture, participantCount = 2 })
+		local clientOne = makeIntegratedClient(assertions, rig, FIRST_USER_ID, false)
+		local clientTwo = makeIntegratedClient(assertions, rig, FIRST_USER_ID + 1, false)
+		local initial = waveSnapshot(assertions, rig)
+
+		driveTo(rig, 100)
+		assertions.equal(deliverWaveMessages(clientOne, rig, false), 1)
+		assertions.equal(deliverWaveMessages(clientTwo, rig, false), 1)
+		assertions.equal(integratedClientSnapshot(assertions, clientOne).state, "Intermission")
+		assertions.equal(integratedClientSnapshot(assertions, clientTwo).state, "Intermission")
+		local publicationsBeforeFinal = rig.wavePublisher:getMetrics().publicationCount
+
+		driveTo(rig, 105)
+		local completed = waveSnapshot(assertions, rig)
+		assertions.equal(completed.state, "FiniteComplete")
+		assertions.equal(completed.currentWaveNumber, 2)
+		assertions.equal(completed.finiteCompleteServerTime, 105)
+		assertions.equal(rig.wavePublisher:getMetrics().publicationCount, publicationsBeforeFinal + 1)
+		assertions.equal(deliverWaveMessages(clientOne, rig, false), 1)
+		assertions.equal(deliverWaveMessages(clientTwo, rig, false), 1)
+		assertions.isTrue(deepEqual(integratedClientSnapshot(assertions, clientOne), completed))
+		assertions.isTrue(deepEqual(integratedClientSnapshot(assertions, clientTwo), completed))
+		assertions.equal(rig.lifecycleControl.state, "WaveActive")
+		assertions.equal(rig.lifecycleControl.defeatCommitCount, 0)
+		assertions.equal(success(assertions, rig.waveService:getCompletionState()).completionCount, 1)
+
+		driveTo(rig, 106)
+		assertions.equal(rig.wavePublisher:getMetrics().publicationCount, publicationsBeforeFinal + 1)
+		cleanupIntegratedClient(assertions, clientOne, initial)
+		cleanupIntegratedClient(assertions, clientTwo, initial)
+		cleanup(assertions, rig)
+	end),
+
 	TestHarness.case("commits one Results transition for same-pass Base defeat", function(assertions)
 		local fixture = authenticatedFixture(function(raw)
 			raw.enemies[1].moveSpeedStudsPerSecond = 1_000_000
@@ -1489,14 +1593,36 @@ return TestHarness.suite("Phase 11 authored-wave real-stack integration", {
 				raw.difficulties[1].base.maxHealth = 1
 				raw.enemies[1].moveSpeedStudsPerSecond = 1_000_000
 			end)
-			local lethalRig = newRig(assertions, { fixture = lethalFixture })
+			local lethalRig = newRig(assertions, { fixture = lethalFixture, participantCount = 2 })
 			driveTo(lethalRig, 100)
+			local lethalInitial = waveSnapshot(assertions, lethalRig)
+			local lethalClientOne = makeIntegratedClient(assertions, lethalRig, FIRST_USER_ID, false)
+			local lethalClientTwo = makeIntegratedClient(assertions, lethalRig, FIRST_USER_ID + 1, false)
 			assertions.equal(lethalRig.enemyStore:getMetrics().lifetimeCount, 3)
 			driveTo(lethalRig, 102)
 			assertions.equal(lethalRig.enemyStore:getMetrics().lifetimeCount, 3)
-			assertions.equal(waveSnapshot(assertions, lethalRig).state, "DefeatClosed")
+			local lethalClosed = waveSnapshot(assertions, lethalRig)
+			assertions.equal(lethalClosed.state, "DefeatClosed")
+			assertions.equal(deliverWaveMessages(lethalClientOne, lethalRig, false), 1)
+			assertions.equal(deliverWaveMessages(lethalClientTwo, lethalRig, false), 1)
+			assertions.isTrue(deepEqual(integratedClientSnapshot(assertions, lethalClientOne), lethalClosed))
+			assertions.isTrue(deepEqual(integratedClientSnapshot(assertions, lethalClientTwo), lethalClosed))
+			assertions.equal(lethalClientOne.controller:getMetrics().connectionCount, 3)
+			assertions.equal(lethalClientTwo.controller:getMetrics().connectionCount, 3)
 			assertions.equal(lethalRig.lifecycleControl.defeatCommitCount, 1)
 			assertions.equal(lethalRig.lifecycleControl.state, "Results")
+			assertions.equal(lethalRig.lifecycleControl.committedRecipientReadCount, 1)
+			local retainedRecipients = lethalRig.lifecycleControl.terminalRecipients
+			assertions.equal(type(retainedRecipients), "table")
+			if type(retainedRecipients) ~= "table" then
+				error("[ATD_TEST][code=TERMINAL_RECIPIENTS_MISSING]", 0)
+			end
+			assertions.isTrue(table.isfrozen(retainedRecipients :: any))
+			assertions.equal(#(retainedRecipients :: any), 2)
+			local exposedRecipients = success(assertions, lethalRig.lifecycle:getCommittedBaseDefeatRecipients())
+			assertions.equal(exposedRecipients, retainedRecipients)
+			cleanupIntegratedClient(assertions, lethalClientOne, lethalInitial)
+			cleanupIntegratedClient(assertions, lethalClientTwo, lethalInitial)
 			cleanup(assertions, lethalRig)
 
 			local raceFixture = authenticatedFixture(function(raw)
@@ -1520,6 +1646,59 @@ return TestHarness.suite("Phase 11 authored-wave real-stack integration", {
 			assertions.equal(raceRig.lifecycleControl.defeatCommitCount, 1)
 			assertions.equal(raceRig.lifecycleControl.state, "Results")
 			cleanup(assertions, raceRig)
+		end
+	),
+
+	TestHarness.case(
+		"reconciles a Store-committed spawn before one-shot dependency-fault publication",
+		function(assertions)
+			local rig = newRig(assertions, {
+				participantCount = 2,
+				throwAfterCommittedSpawn = true,
+			})
+			local waveMessageCount = #rig.waveMessages
+			local senderFailureCount = rig.wavePublisher:getMetrics().senderFailureCount
+			rig.waveSendFailure = true
+
+			driveTo(rig, 100)
+			assertions.isTrue(rig.committedFaultInjected)
+			assertions.equal(type(rig.forcedCommittedSpawn), "table")
+			local enemyMetrics = rig.enemyService:getMetrics()
+			assertions.equal(enemyMetrics.lifecycleState, "Failed")
+			assertions.equal(enemyMetrics.waveBoundaryStatus, "Faulted")
+			local storeMetrics = rig.enemyStore:getMetrics()
+			assertions.equal(storeMetrics.activeCount, 0)
+			assertions.equal(storeMetrics.lifetimeCount, 1)
+			assertions.equal(storeMetrics.terminalCount, 1)
+
+			local faulted = waveSnapshot(assertions, rig)
+			assertions.equal(faulted.state, "Faulted")
+			assertions.equal(faulted.aggregateCounts.spawned, 1)
+			assertions.equal(faulted.aggregateCounts.pending, 7)
+			assertions.equal(faulted.aggregateCounts.alive, 0)
+			assertions.equal(faulted.aggregateCounts.otherwiseResolved, 1)
+			assertions.equal(faulted.currentCounts.spawned, 1)
+			assertions.equal(faulted.currentCounts.pending, 7)
+			assertions.equal(faulted.currentCounts.alive, 0)
+			assertions.equal(faulted.currentCounts.otherwiseResolved, 1)
+			local runtimeMetrics = rig.waveRuntime:query()
+			assertions.equal(runtimeMetrics.faultCloseCount, 1)
+			assertions.equal(runtimeMetrics.retainedOwnershipCount, 1)
+			assertions.equal(runtimeMetrics.processedTerminalCount, 1)
+			assertions.equal(#rig.waveMessages, waveMessageCount + 2)
+			assertions.equal(rig.wavePublisher:getMetrics().senderFailureCount, senderFailureCount + 2)
+			assertions.isTrue(deepEqual(rig.waveMessages[#rig.waveMessages - 1].snapshot, faulted))
+			assertions.isTrue(deepEqual(rig.waveMessages[#rig.waveMessages].snapshot, faulted))
+
+			expectError(assertions, rig.waveService:submitSkipVote(FIRST_USER_ID, rig.matchId, 1), "UNAVAILABLE")
+			local beforeSecondPassMessages = #rig.waveMessages
+			driveTo(rig, 101)
+			assertions.equal(rig.waveRuntime:query().faultCloseCount, 1)
+			assertions.equal(#rig.waveMessages, beforeSecondPassMessages)
+			assertions.isTrue(deepEqual(waveSnapshot(assertions, rig), faulted))
+
+			cleanup(assertions, rig)
+			expectError(assertions, rig.waveService:getSnapshot(), "UNAVAILABLE")
 		end
 	),
 

@@ -30,8 +30,11 @@ consolidated review, 467-case local gate, and all four current structural builds
 passed on 2026-08-27. Phase 09 is complete. Phase 10 adds only the reviewed
 shared/server-Match/client-Match base modules and Test-only mirrors/specs; its
 focused and exact Studio checks, consolidated review, complete local gate, and
-all four structural builds passed on 2026-08-28. Phase 10 is complete;
-exact-final-SHA CI is cited at handoff. Phase 11 remains unbegun.
+  all four structural builds passed on 2026-08-28. Phase 10 is complete. Phase
+  11 adds only reviewed shared/server-Match/client-Match Wave modules and exact
+  Test-only mirrors/specs; its Studio, consolidated-review, `742`-case local, and
+  four-build gates pass. Exact-final-SHA CI is cited at handoff. Phase 11 is
+  complete and Phase 12 remains unbegun.
 
 ## Project inventory
 
@@ -40,7 +43,7 @@ exact-final-SHA CI is cited at handoff. Phase 11 remains unbegun.
 | `default.project.json` | Combined convenience project and documented `rojo serve` default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | Existing development `servePlaceIds`; current role is `Development` |
 | `lobby.project.json` | Role-isolated lobby source | `common`, `lobby` | `common`, `lobby` | No ID binding; current role is `Lobby` |
 | `match.project.json` | Role-isolated match source | `common`, `match` | `common`, `match` | No ID binding; current role is `Match` |
-| `test.project.json` | Headless contract/runtime-module test DataModel | No runnable layer; exact networking, map, lifecycle, roster, ready, base, and enemy mirrors under `ServerStorage` | No runnable layer; exact networking, Match-ready, base, and enemy mirrors under `ServerStorage` | Build-only; no role or `servePlaceIds` |
+| `test.project.json` | Headless contract/runtime-module test DataModel | No runnable layer; exact networking, map, lifecycle, roster, ready, base, enemy, and Wave mirrors under `ServerStorage` | No runnable layer; exact networking, Match-ready, base, enemy, and Wave mirrors under `ServerStorage` | Build-only; no role or `servePlaceIds` |
 
 All four projects map `src/shared` to `ReplicatedStorage.Shared`. Only the test
 project additionally maps `tests/specs`, `tests/fixtures`, `tests/support`, and
@@ -355,9 +358,9 @@ the commands above. `lune run tests/verify-builds.luau` rebuilds and checks all
 four definitions across the complete DataModel and removes only its exact
 generated outputs.
 
-### Current Phase 10 source and Test boundary
+### Phase 10 source and Test boundary (historical)
 
-The current project definitions map `BaseProtocol` through the authoritative
+At Phase 10 completion, the project definitions mapped `BaseProtocol` through the authoritative
 shared tree, the three server-base modules through `src/server/match/base`, and
 the four client-base modules through `src/client/match/base`. Default and Match
 contain those seven role-specific modules; Lobby contains none. Test maps exact
@@ -365,7 +368,7 @@ copies beneath `ProductionServerBase` and `ProductionClientBase`, plus the
 Test-owned Base specs and fixture. No bootstrap, Studio harness, role entrypoint,
 Script, or LocalScript is added to Test or mapped twice.
 
-The current verifier authenticates both mapping directions and every source
+The Phase 10 verifier authenticated both mapping directions and every source
 byte; keeps one Script and one LocalScript in each production build and zero
 Test runnables; excludes tests, fixtures, and Studio-only evidence infrastructure
 from production; preserves Lobby/Match isolation; and rejects generated output
@@ -406,8 +409,9 @@ suites with 120 cases, and the exact two-client Match Studio gate passed on
 the consolidated review and all four current structural builds also pass.
 Phase 09 is complete. Phase 10 focused and exact Studio checks, consolidated
 review, `593`-case local gate, and all four current structural builds passed on
-2026-08-28. Phase 10 is complete. Phase 11 remains unbegun. Exact-final-SHA CI
-evidence is cited at handoff.
+2026-08-28. Phase 10 is complete. Phase 11 remained unbegun at that historical
+checkpoint; the current Phase 11 boundary is recorded below. Exact-final-SHA CI
+evidence is cited at each handoff.
 
 ## Scope boundary and next gate
 
@@ -415,3 +419,22 @@ Packet 02.2 did not create the Match place, connect a role project to a real
 place, run role-specific code, save Studio content, or publish. Packet 02.4 has
 since passed the real Lobby-versus-Match Studio isolation gate; current evidence
 is recorded in `docs/MULTI_PLACE_GATE.md`.
+
+## Current Phase 11 mapping boundary
+
+Default and Match map the authoritative shared Wave protocol, three server Wave
+modules, and two client Wave modules through their existing trees. Lobby maps
+only shared protocol/configuration and contains no server/client Match Wave
+runtime. Test maps exact Wave production mirrors under `ServerStorage` alongside
+the Phase 11 fixtures/specs; it remains build-only with zero Script and
+LocalScript. No project maps `tests/studio`, and no source is mapped twice.
+
+The final structural inventory is `77/46/77/144` ModuleScripts for
+Default/Lobby/Match/Test. Each production build retains exactly one Script and
+one LocalScript; Test retains zero. The current verifier also proves ten
+Match-only reliable definitions, six inbound rate policies, 70 exact Test-owned
+modules, byte-identical authoritative source, generated-output absence,
+Lobby/Match isolation, and zero production test/fixture/Studio-harness content.
+Production `Assets`, `Enemies`, `Maps`, `Difficulties`, `Waves`, and
+difficulty-specific `Economy` rules remain frozen empty. Phase 12 remains
+unbegun.

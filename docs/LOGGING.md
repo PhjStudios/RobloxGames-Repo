@@ -35,7 +35,7 @@ Packet 06.4 adds only `protocolRejectionCount` and
 add request IDs, Players, payloads, handler errors, or response contents to the
 logging vocabulary.
 
-Phases 08–10 reuse this closed vocabulary without adding a gameplay telemetry
+Phases 08–11 reuse this closed vocabulary without adding a gameplay telemetry
 subsystem or high-frequency record. Phase 10 base arithmetic, endpoint outcomes,
 health, revisions, recipients, map markers, result seeds, and UI state are never
 logged. A fail-closed MatchLifecycle diagnostic uses only the existing
@@ -43,6 +43,10 @@ logged. A fail-closed MatchLifecycle diagnostic uses only the existing
 and typed `state` fields. Sender, transition, callback, validation, and cleanup
 errors discard caught values and client data. Studio timings, assertion totals,
 and connection counts are bounded test diagnostics, not production log records.
+Phase 11 likewise never logs schedules, spawn events, enemy IDs, MatchIds,
+UserIds, voter identities, snapshot payloads, definitions, caught values, or a
+per-spawn/per-enemy/per-vote stream. Its sender, callback, clock, lifecycle,
+capacity, and cleanup failures use only static bounded codes and existing fields.
 
 ## Architecture boundary
 
@@ -476,9 +480,27 @@ report, privacy, bootstrap, and Studio evidence is recorded in
 Packets 06.1–06.5 make and test the narrow `network` vocabulary and
 aggregate-field extensions recorded above. Their registry-empty statement is a
 historical Phase 06 checkpoint; the current reviewed Match-only definitions are
-recorded in `docs/NETWORK_PROTOCOL.md`. Phases 08–10 add no log sink or
+recorded in `docs/NETWORK_PROTOCOL.md`. Phases 08–11 add no log sink or
 client-authored logging path. Phase 10 focused and exact Studio checks had zero
 accepted-run console errors on 2026-08-28; its consolidated review and complete
 local/structural gate also passed, and its base/defeat logging boundary is
-recorded in `docs/BASE_RUNTIME.md`. Phase 10 is complete and Phase 11 remains
-unbegun.
+recorded in `docs/BASE_RUNTIME.md`. Phase 10 is complete; Phase 11's current
+logging boundary follows.
+
+## Phase 11 logging boundary (current)
+
+WaveRuntime, its publisher/service, and WaveController reuse the closed logging
+vocabulary. Production emits no countdown ticks, per-pass timings, per-spawn,
+per-enemy, per-wave, per-vote, per-recipient, or per-client records. Public
+errors remain fixed bounded codes; caught errors and rejected payloads are never
+serialized. MatchIds, UserIds, RuntimeEnemyIds, voters, schedules, canonical
+definitions, cash metadata, boss metadata, recipients, and full snapshots are
+not logged.
+
+The Studio evidence trigger exposes bounded detached diagnostics only in Studio:
+assertion totals, processing/lateness/convergence measurements, publication and
+connection counts, revisions/states, and residue counts. Those diagnostics are
+not production logs. All accepted Phase 11 Studio runs recorded zero console
+errors; the one expected bootstrap/network warning is documented as a bounded
+test condition rather than gameplay telemetry. Phase 11 is complete and Phase
+12 logging remains unbegun.

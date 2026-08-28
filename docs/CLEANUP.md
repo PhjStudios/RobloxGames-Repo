@@ -27,12 +27,16 @@ tracker, input bindings, and Ready GUI. Phase 09 extended the ownership model to
 enemy simulation, replication queues and ledgers, client recovery state, and
 programmatic visuals. Phase 10 extends it to base state/outcome ledgers,
 coalesced publication, defeat coordination, marker watchers, a cancellable
-tween, and the world GUI. Phase 08 is complete. Phase 09 code, exact Match Studio
+  tween, and the world GUI. Phase 11 extends it to the Wave schedule/heap/cursors,
+  origin ownership and terminal ledgers, votes/roster copies, publisher queue,
+  recovery requests, controller cache, and Studio-only trigger. Phase 08 is complete. Phase 09 code, exact Match Studio
 gate, consolidated review, 467-case local gate, and all four structural builds
 passed on 2026-08-27. Phase 09 is complete. Phase 10 focused and exact Studio
 cleanup checks, consolidated review, `593`-case local gate, and all four
 structural builds passed on 2026-08-28. Phase 10 is complete; exact-final-SHA CI
-is cited at handoff. Phase 11 remains unbegun.
+is cited at handoff. Phase 11's exact Studio cleanup, consolidated review,
+`742`-case/`56`-suite local gate, and four structural builds also pass. Phase 11
+is complete; Phase 12 remains unbegun.
 
 ## Public contract
 
@@ -293,10 +297,10 @@ The exact two-client Match Studio gate passed this ownership boundary on
 per client, and no enemy record, request ledger, queue, buffer, trigger, visual,
 runtime map, remote root, Ready UI, or service connection after End Session.
 The consolidated review and complete local/structural gates also pass. Phase 09
-is complete. The current Phase 10 ownership extension follows; no Phase 11
-ownership has been introduced.
+is complete. The historical Phase 10 ownership extension follows; Phase 11
+ownership had not been introduced at that checkpoint.
 
-## Phase 10 base ownership and release order (current)
+## Phase 10 base ownership and release order (historical)
 
 The current order is:
 
@@ -461,7 +465,34 @@ Match Studio cleanup evidence, consolidated review, 467-case local gate, and all
 four structural builds pass on 2026-08-27. Phase 09 is complete. Phase 10's
 focused and exact Studio cleanup evidence, consolidated review, complete local
 gate, and all four structural builds passed on 2026-08-28. Phase 10 is complete;
-exact-final-SHA CI is cited at handoff. Phase 11 remains unbegun. Current
-cleanup evidence is in `docs/ENEMY_SIMULATION.md` and `docs/BASE_RUNTIME.md`.
+exact-final-SHA CI is cited at its handoff. Phase 11 remained unbegun at that
+historical checkpoint. Earlier cleanup evidence is in
+`docs/ENEMY_SIMULATION.md` and `docs/BASE_RUNTIME.md`.
 Configuration evidence is in
 `docs/CONFIGURATION_VALIDATION.md`.
+
+## Phase 11 Wave ownership and release order (current)
+
+Wave owns the authenticated configuration reference and detached starting-cash
+placeholder; schedule heap, origin cursors, backlog state, absolute timestamps,
+per-origin counters, RuntimeEnemyId ownership and processed-outcome ledgers;
+vote and Active-UserId copies; revision/publication queue and boundary adapter;
+request state; and the Studio trigger. The client owns one detached reducer
+snapshot, bounded request/recovery generations, pending skip state, diagnostics,
+and exactly three listeners. None retains a Player, Instance, UI, authored
+definition copy, per-wave task, or timer.
+
+Shutdown first closes Wave request, vote, spawn, boundary, completion, terminal,
+publication, and Studio-trigger admission. It detaches the Enemy boundary and
+clears the heap/cursors/origins, ownership/outcomes/counters, votes/roster copies,
+publisher queue, recoverable `Faulted` snapshot, starting-cash placeholder,
+identities/revisions/timestamps, and client cache/listeners. Enemy then clears its
+single step and PlayerRemoving connections, Store, publisher, committed-spawn
+reconciliation pair, terminal token, trigger, and active enemies; Base,
+Match/Map, and Network follow in reverse dependency order.
+
+The exact Match Studio scenarios ended every two-client server, found zero Wave,
+Enemy, Base, runtime-map, network-root, trigger, request, timer, connection, UI,
+cache, or retained-instance residue, and left Studio in Edit mode without save or
+publish. Headless cleanup repeats shutdown, invokes captured stale callbacks,
+and proves no post-clean mutation or publication.

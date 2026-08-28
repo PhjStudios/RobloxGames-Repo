@@ -113,6 +113,21 @@ export type PassFrame = {
 	spawn: ((event: SpawnEvent) -> unknown)?,
 }
 
+export type CommittedSpawnReconciliation = {
+	event: SpawnEvent,
+	outcome: SpawnCommitOutcome,
+}
+
+export type DependencyFaultContext = {
+	disposition: "DependencyFault",
+	matchId: Ids.MatchId,
+	enemyEpoch: number,
+	passOrdinal: number,
+	sampleServerTime: number,
+	committedSpawn: CommittedSpawnReconciliation?,
+	terminalOutcome: TerminalOutcome?,
+}
+
 export type Dependencies = {
 	clock: () -> unknown,
 	isRuntimeMapSnapshot: (value: unknown) -> unknown,
@@ -156,7 +171,15 @@ export type ErrorCode =
 	| "NOT_AUTHORIZED"
 	| "UNAVAILABLE"
 
-export type Operation = "new" | "initialize" | "step" | "submitSkipVote" | "getSnapshot" | "query" | "cleanup"
+export type Operation =
+	"new"
+	| "initialize"
+	| "step"
+	| "closeDependencyFault"
+	| "submitSkipVote"
+	| "getSnapshot"
+	| "query"
+	| "cleanup"
 
 export type RuntimeError = {
 	code: ErrorCode,
@@ -214,6 +237,7 @@ type RuntimeData = {
 	relativeEventsByWave: { { RelativeEvent } },
 	origins: { [number]: OriginRecord },
 	heap: { HeapEntry },
+	pendingSpawnEntry: HeapEntry?,
 	ownership: { [number]: OwnershipRecord },
 	processedTerminalCount: number,
 	currentWaveNumber: number,
@@ -242,6 +266,9 @@ type RuntimeData = {
 	reentryViolation: boolean,
 	cleanupRequested: boolean,
 	faultCode: ErrorCode?,
+	faultCloseCount: number,
+	faultCloseCommittedSpawn: CommittedSpawnReconciliation?,
+	faultCloseTerminalOutcome: TerminalOutcome?,
 	completionCount: number,
 }
 
@@ -290,6 +317,39 @@ local HEALTHY_PASS_FRAME_FIELDS = table.freeze({
 	sampleServerTime = true,
 	terminalOutcomes = true,
 	spawn = true,
+})
+
+local DEPENDENCY_FAULT_CONTEXT_FIELDS = table.freeze({
+	disposition = true,
+	matchId = true,
+	enemyEpoch = true,
+	passOrdinal = true,
+	sampleServerTime = true,
+})
+
+local DEPENDENCY_FAULT_CONTEXT_WITH_SPAWN_FIELDS = table.freeze({
+	disposition = true,
+	matchId = true,
+	enemyEpoch = true,
+	passOrdinal = true,
+	sampleServerTime = true,
+	committedSpawn = true,
+	terminalOutcome = true,
+})
+
+local COMMITTED_SPAWN_RECONCILIATION_FIELDS = table.freeze({
+	event = true,
+	outcome = true,
+})
+
+local SPAWN_EVENT_FIELDS = table.freeze({
+	originatingWaveIndex = true,
+	waveId = true,
+	groupIndex = true,
+	spawnOrdinal = true,
+	scheduledServerTime = true,
+	enemyId = true,
+	laneId = true,
 })
 
 local RuntimeMethods = {}
@@ -802,6 +862,7 @@ local function cleanupData(data: RuntimeData)
 	data.relativeEventsByWave = {}
 	table.clear(data.origins)
 	table.clear(data.heap)
+	data.pendingSpawnEntry = nil
 	table.clear(data.ownership)
 	data.processedTerminalCount = 0
 	data.currentWaveNumber = 0
@@ -830,6 +891,9 @@ local function cleanupData(data: RuntimeData)
 	data.reentryViolation = false
 	data.cleanupRequested = false
 	data.faultCode = nil
+	data.faultCloseCount = 0
+	data.faultCloseCommittedSpawn = nil
+	data.faultCloseTerminalOutcome = nil
 	data.completionCount = 0
 end
 
@@ -1170,6 +1234,11 @@ local function spawnHead(data: RuntimeData, frame: PassFrame, entry: HeapEntry):
 		enemyId = entry.event.enemyId,
 		laneId = entry.event.laneId,
 	})
+	-- Retain the exact attempted head until Enemy's commit-aware outcome has
+	-- either been adopted or has proven that Store did not mutate. The separate
+	-- authenticated close path uses this record if the callback commits a Store
+	-- spawn and then throws before returning its outcome.
+	data.pendingSpawnEntry = entry
 	local called, outcomeValue = callNonYielding(frame.spawn :: (SpawnEvent) -> unknown, event)
 	if not called then
 		return false, false, "CALLBACK_FAILED"
@@ -1178,6 +1247,7 @@ local function spawnHead(data: RuntimeData, frame: PassFrame, entry: HeapEntry):
 	if not valid then
 		return false, false, "ENEMY_FAILED"
 	elseif not committed then
+		data.pendingSpawnEntry = nil
 		return false, false, "CAPACITY_EXCEEDED"
 	end
 	heapPop(data.heap)
@@ -1196,6 +1266,7 @@ local function spawnHead(data: RuntimeData, frame: PassFrame, entry: HeapEntry):
 		terminalReason = nil,
 		terminalServerTime = nil,
 	}
+	data.pendingSpawnEntry = nil
 	if not insertOriginHead(data, origin) then
 		return false, true, "ENEMY_FAILED"
 	end
@@ -1388,7 +1459,7 @@ local function validateFrame(data: RuntimeData, value: unknown): (PassFrame?, Er
 		or frame.enemyEpoch ~= data.enemyEpoch
 		or type(frame.passOrdinal) ~= "number"
 		or not Validation.isSafeInteger(frame.passOrdinal)
-		or frame.passOrdinal ~= data.lastPassOrdinal + 1
+		or ((data.lastPassOrdinal == 0 and frame.passOrdinal < 1) or (data.lastPassOrdinal > 0 and frame.passOrdinal ~= data.lastPassOrdinal + 1))
 		or type(frame.terminalOutcomes) ~= "table"
 		or getmetatable(frame.terminalOutcomes) ~= nil
 		or (healthy and type(frame.spawn) ~= "function")
@@ -1557,6 +1628,321 @@ function RuntimeMethods.step(self: Runtime, frameValue: unknown): Result.Result<
 	return Result.ok(result)
 end
 
+local function validateDependencyFaultContext(data: RuntimeData, value: unknown): DependencyFaultContext?
+	if type(value) ~= "table" or getmetatable(value :: any) ~= nil or not table.isfrozen(value :: any) then
+		return nil
+	end
+	local context = value :: any
+	local hasCommittedSpawn = context.committedSpawn ~= nil
+	local hasTerminalOutcome = context.terminalOutcome ~= nil
+	if hasCommittedSpawn ~= hasTerminalOutcome then
+		return nil
+	end
+	local fields = if hasCommittedSpawn
+		then DEPENDENCY_FAULT_CONTEXT_WITH_SPAWN_FIELDS
+		else DEPENDENCY_FAULT_CONTEXT_FIELDS
+	local nextPassOrdinal = if data.lastPassOrdinal < Validation.MAX_SAFE_INTEGER
+		then data.lastPassOrdinal + 1
+		else data.lastPassOrdinal
+	if
+		not hasExactFields(context, fields)
+		or context.disposition ~= "DependencyFault"
+		or context.matchId ~= data.matchId
+		or context.enemyEpoch ~= data.enemyEpoch
+		or type(context.passOrdinal) ~= "number"
+		or not Validation.isSafeInteger(context.passOrdinal)
+		or context.passOrdinal < 1
+		or (context.passOrdinal ~= data.lastPassOrdinal and context.passOrdinal ~= nextPassOrdinal)
+		or not isFiniteNumber(context.sampleServerTime)
+		or context.sampleServerTime < data.lastServerTime
+	then
+		return nil
+	end
+	return value :: DependencyFaultContext
+end
+
+local function eventMatchesEntry(data: RuntimeData, value: unknown, entry: HeapEntry): boolean
+	if
+		type(value) ~= "table"
+		or getmetatable(value :: any) ~= nil
+		or not table.isfrozen(value :: any)
+		or not hasExactFields(value :: { [any]: unknown }, SPAWN_EVENT_FIELDS)
+	then
+		return false
+	end
+	local event = value :: any
+	local origin = data.origins[entry.waveIndex]
+	return origin ~= nil
+		and event.originatingWaveIndex == entry.waveIndex
+		and event.waveId == origin.waveId
+		and event.groupIndex == entry.event.groupIndex
+		and event.spawnOrdinal == entry.event.spawnOrdinal
+		and event.scheduledServerTime == entry.scheduledServerTime
+		and event.enemyId == entry.event.enemyId
+		and event.laneId == entry.event.laneId
+end
+
+local function validFaultTerminalOutcome(
+	data: RuntimeData,
+	value: unknown,
+	spawnOutcome: unknown,
+	sampleServerTime: number
+): boolean
+	local dependencies = data.dependencies
+	if
+		dependencies == nil
+		or type(value) ~= "table"
+		or getmetatable(value :: any) ~= nil
+		or not table.isfrozen(value :: any)
+		or not hasExactFields(value :: { [any]: unknown }, TERMINAL_FIELDS)
+		or type(spawnOutcome) ~= "table"
+		or type((spawnOutcome :: any).snapshot) ~= "table"
+	then
+		return false
+	end
+	local terminal = value :: any
+	local spawn = (spawnOutcome :: any).snapshot
+	local called, authenticated = callNonYielding(dependencies.isAuthenticatedTerminalOutcome, value)
+	return called
+		and authenticated == true
+		and terminal.matchId == data.matchId
+		and terminal.enemyEpoch == data.enemyEpoch
+		and terminal.runtimeEnemyId == spawn.runtimeEnemyId
+		and terminal.enemyId == spawn.enemyId
+		and terminal.reason == "Manual"
+		and terminal.serverTime == sampleServerTime
+end
+
+local function sameDeepFrozenValue(left: unknown, right: unknown, seen: { [any]: any }?): boolean
+	if left == right then
+		return true
+	elseif type(left) ~= "table" or type(right) ~= "table" then
+		return false
+	elseif
+		getmetatable(left :: any) ~= nil
+		or getmetatable(right :: any) ~= nil
+		or not table.isfrozen(left :: any)
+		or not table.isfrozen(right :: any)
+	then
+		return false
+	end
+
+	local visited = seen or {}
+	if visited[left :: any] ~= nil then
+		return visited[left :: any] == right
+	end
+	visited[left :: any] = right
+	local leftCount = 0
+	for key, leftValue in next, left :: any do
+		leftCount += 1
+		if not sameDeepFrozenValue(leftValue, (right :: any)[key], visited) then
+			return false
+		end
+	end
+	local rightCount = 0
+	for _ in next, right :: any do
+		rightCount += 1
+	end
+	return leftCount == rightCount
+end
+
+local function sameCommittedSpawn(left: CommittedSpawnReconciliation?, right: unknown): boolean
+	if left == nil then
+		return left == nil and right == nil
+	end
+	return sameDeepFrozenValue(left, right)
+end
+
+local function sameTerminalOutcome(left: TerminalOutcome?, right: unknown): boolean
+	if left == nil then
+		return left == nil and right == nil
+	end
+	return sameDeepFrozenValue(left, right)
+end
+
+local function matchesOwnedCommittedSpawn(data: RuntimeData, outcome: any, sampleServerTime: number): boolean
+	if
+		type(outcome) ~= "table"
+		or getmetatable(outcome) ~= nil
+		or not table.isfrozen(outcome)
+		or not hasExactFields(outcome, SPAWN_OUTCOME_TRUE_FIELDS)
+		or outcome.committed ~= true
+		or type(outcome.replicationCommitted) ~= "boolean"
+		or type(outcome.snapshot) ~= "table"
+		or getmetatable(outcome.snapshot) ~= nil
+		or not table.isfrozen(outcome.snapshot)
+	then
+		return false
+	end
+	local record = outcome.snapshot
+	local ownership = data.ownership[record.runtimeEnemyId]
+	local definition = data.configuration and data.configuration.enemies.byId[record.enemyId]
+	local difficulty = data.difficulty
+	return ownership ~= nil
+		and ownership.resolved == false
+		and ownership.enemyId == record.enemyId
+		and ownership.spawnServerTime == record.spawnServerTime
+		and record.spawnServerTime == sampleServerTime
+		and definition ~= nil
+		and difficulty ~= nil
+		and record.maximumHealth == definition.maxHealth * difficulty.modifiers.enemyHealthMultiplier
+		and record.currentHealth == record.maximumHealth
+		and record.effectiveSpeed
+			== definition.moveSpeedStudsPerSecond * difficulty.modifiers.enemyMoveSpeedMultiplier
+end
+
+local function reconcileCommittedSpawn(
+	data: RuntimeData,
+	committedSpawnValue: unknown,
+	sampleServerTime: number
+): (boolean, boolean)
+	if committedSpawnValue == nil then
+		data.pendingSpawnEntry = nil
+		return true, false
+	end
+	if
+		type(committedSpawnValue) ~= "table"
+		or getmetatable(committedSpawnValue :: any) ~= nil
+		or not table.isfrozen(committedSpawnValue :: any)
+		or not hasExactFields(committedSpawnValue :: { [any]: unknown }, COMMITTED_SPAWN_RECONCILIATION_FIELDS)
+	then
+		return false, false
+	end
+	local committedSpawn = committedSpawnValue :: any
+	if matchesOwnedCommittedSpawn(data, committedSpawn.outcome, sampleServerTime) then
+		data.pendingSpawnEntry = nil
+		return true, false
+	end
+
+	local entry = data.pendingSpawnEntry or data.heap[1]
+	if entry == nil or not eventMatchesEntry(data, committedSpawn.event, entry) then
+		return false, false
+	end
+	local origin = data.origins[entry.waveIndex]
+	local valid, committed, record = validateSpawnOutcome(data, entry, committedSpawn.outcome, sampleServerTime)
+	if
+		not valid
+		or not committed
+		or record == nil
+		or origin == nil
+		or origin.nextEventIndex ~= entry.eventIndex
+		or origin.counts.pending < 1
+		or data.aggregateCounts.pending < 1
+		or origin.counts.spawned >= Validation.MAX_SAFE_INTEGER
+		or origin.counts.alive >= Validation.MAX_SAFE_INTEGER
+		or data.aggregateCounts.spawned >= Validation.MAX_SAFE_INTEGER
+		or data.aggregateCounts.alive >= Validation.MAX_SAFE_INTEGER
+	then
+		return false, false
+	end
+	if data.heap[1] == entry then
+		heapPop(data.heap)
+	elseif data.pendingSpawnEntry ~= entry then
+		return false, false
+	end
+	origin.nextEventIndex += 1
+	origin.counts.pending -= 1
+	origin.counts.spawned += 1
+	origin.counts.alive += 1
+	data.aggregateCounts.pending -= 1
+	data.aggregateCounts.spawned += 1
+	data.aggregateCounts.alive += 1
+	data.ownership[(record :: any).runtimeEnemyId] = {
+		waveIndex = entry.waveIndex,
+		enemyId = (record :: any).enemyId,
+		spawnServerTime = (record :: any).spawnServerTime,
+		resolved = false,
+		terminalReason = nil,
+		terminalServerTime = nil,
+	}
+	data.pendingSpawnEntry = nil
+	return true, true
+end
+
+function RuntimeMethods.closeDependencyFault(
+	self: Runtime,
+	contextValue: unknown
+): Result.Result<WaveSnapshot, RuntimeError>
+	local data = requireData(self)
+	local operation: Operation = "closeDependencyFault"
+	if data.state == "Cleaned" then
+		return failure("CLEANED", operation)
+	elseif data.state == "Uninitialized" then
+		return failure("WRONG_STATE", operation)
+	end
+	local context = validateDependencyFaultContext(data, contextValue)
+	if context == nil then
+		return failure("INVALID_PASS", operation)
+	end
+	if data.state == "FiniteComplete" or data.state == "DefeatClosed" then
+		local terminalSnapshot = snapshot(data)
+		return if terminalSnapshot == nil then failure("WRONG_STATE", operation) else Result.ok(terminalSnapshot)
+	end
+	if data.faultCloseCount ~= 0 then
+		if
+			data.faultCloseCount == 1
+			and sameCommittedSpawn(data.faultCloseCommittedSpawn, context.committedSpawn)
+			and sameTerminalOutcome(data.faultCloseTerminalOutcome, context.terminalOutcome)
+		then
+			local retainedSnapshot = snapshot(data)
+			return if retainedSnapshot == nil then failure("WRONG_STATE", operation) else Result.ok(retainedSnapshot)
+		end
+		return failure("INVALID_OUTCOME", operation)
+	end
+
+	-- The primary step coroutine is already returned or forcibly closed before
+	-- this private one-shot path is invoked. Recover its stale mutation latch so
+	-- the sole driver cannot leave Wave apparently Running after a callback yield.
+	data.busy = true
+	data.reentryViolation = false
+	local committedOutcome = if context.committedSpawn == nil
+		then nil
+		else (context.committedSpawn :: CommittedSpawnReconciliation).outcome
+	if
+		context.terminalOutcome ~= nil
+		and not validFaultTerminalOutcome(data, context.terminalOutcome, committedOutcome, context.sampleServerTime)
+	then
+		finishOperation(data)
+		return failure("INVALID_OUTCOME", operation)
+	end
+	local reconciled, changed = reconcileCommittedSpawn(data, context.committedSpawn, context.sampleServerTime)
+	if not reconciled then
+		finishOperation(data)
+		return failure("INVALID_OUTCOME", operation)
+	end
+	if context.terminalOutcome ~= nil then
+		local acceptedTerminal, terminalChanged = applyTerminal(data, context.terminalOutcome, context.sampleServerTime)
+		if not acceptedTerminal then
+			setFault(data, "INVALID_OUTCOME")
+			if data.waveRevision < Validation.MAX_SAFE_INTEGER then
+				advanceRevision(data)
+			end
+			finishOperation(data)
+			return failure("INVALID_OUTCOME", operation)
+		end
+		changed = changed or terminalChanged
+	end
+	data.faultCloseCount = 1
+	data.faultCloseCommittedSpawn = context.committedSpawn
+	data.faultCloseTerminalOutcome = context.terminalOutcome
+	data.lastPassOrdinal = math.max(data.lastPassOrdinal, context.passOrdinal)
+	data.lastServerTime = context.sampleServerTime
+	local transitioned = data.state ~= "Faulted"
+	if transitioned then
+		setFault(data, "ENEMY_FAILED")
+	end
+	if (transitioned or changed) and not advanceRevision(data) then
+		finishOperation(data)
+		return failure("REVISION_EXHAUSTED", operation)
+	end
+	local result = snapshot(data)
+	finishOperation(data)
+	if result == nil or data.state == "Cleaned" then
+		return failure("CLEANED", operation)
+	end
+	return Result.ok(result)
+end
+
 function RuntimeMethods.submitSkipVote(
 	self: Runtime,
 	userIdValue: unknown,
@@ -1702,6 +2088,7 @@ function RuntimeMethods.query(self: Runtime): unknown
 			retainedVoteCount = 0,
 			retainedCastHistoryCount = 0,
 			lastLifecycleRevision = 0,
+			faultCloseCount = 0,
 			completionCount = 0,
 			busy = false,
 		})
@@ -1742,6 +2129,7 @@ function RuntimeMethods.query(self: Runtime): unknown
 		retainedVoteCount = voterCount,
 		retainedCastHistoryCount = castHistoryCount,
 		lastLifecycleRevision = data.lastLifecycleRevision,
+		faultCloseCount = data.faultCloseCount,
 		completionCount = data.completionCount,
 		faultCode = data.faultCode,
 		busy = data.busy,
@@ -1855,6 +2243,7 @@ function WaveRuntime.new(
 		relativeEventsByWave = relativeEventsByWave,
 		origins = {},
 		heap = {},
+		pendingSpawnEntry = nil,
 		ownership = {},
 		processedTerminalCount = 0,
 		currentWaveNumber = 0,
@@ -1883,6 +2272,9 @@ function WaveRuntime.new(
 		reentryViolation = false,
 		cleanupRequested = false,
 		faultCode = nil,
+		faultCloseCount = 0,
+		faultCloseCommittedSpawn = nil,
+		faultCloseTerminalOutcome = nil,
 		completionCount = 0,
 	}
 	return Result.ok(runtime)

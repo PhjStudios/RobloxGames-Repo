@@ -87,6 +87,11 @@ export type RuntimeStoreAdapter = {
 		enemyId: unknown,
 		laneId: unknown
 	) -> unknown,
+	despawnScheduledForFault: (
+		self: RuntimeStoreAdapter,
+		schedulerSampleToken: unknown,
+		expectedSnapshot: unknown
+	) -> unknown,
 	get: (self: RuntimeStoreAdapter, runtimeEnemyId: unknown) -> unknown,
 	list: (self: RuntimeStoreAdapter) -> unknown,
 	queryTerminal: (self: RuntimeStoreAdapter, runtimeEnemyId: unknown) -> unknown,
@@ -159,6 +164,17 @@ export type WaveSpawnEvent = {
 	scheduledServerTime: number,
 	enemyId: string,
 	laneId: string,
+}
+
+export type SpawnCommitOutcome = {
+	committed: true,
+	replicationCommitted: boolean,
+	snapshot: unknown,
+}
+
+export type CommittedSchedulerSpawn = {
+	event: WaveSpawnEvent,
+	outcome: SpawnCommitOutcome,
 }
 
 export type WavePassFrame = {
@@ -291,11 +307,15 @@ type ServiceData = {
 	waveBoundaryPassCount: number,
 	waveBoundaryFlushCount: number,
 	waveBindingActive: boolean,
+	waveFaultCloseAttempted: boolean,
 	legacySpawnClosed: boolean,
 	lastWaveSampleServerTime: number,
 	lastWavePassOrdinal: number,
 	activeSchedulerCapabilityGeneration: number,
 	lastCommittedSchedulerSpawn: unknown?,
+	lastReconciledSchedulerTerminalOutcome: unknown?,
+	faultClosePassOrdinal: number?,
+	faultCloseSampleServerTime: number?,
 	passDurationSamples: { number },
 	nextPassDurationIndex: number,
 	totalPassDurationCount: number,
@@ -451,6 +471,7 @@ end
 local STORE_METHODS = table.freeze({
 	"spawn",
 	"spawnScheduled",
+	"despawnScheduledForFault",
 	"get",
 	"list",
 	"queryTerminal",
@@ -594,6 +615,9 @@ local function closeWaveBoundary(
 	passOrdinalValue: number?,
 	sampleServerTimeValue: number?
 ): boolean
+	if disposition == "DependencyFault" and data.operationActive then
+		return false
+	end
 	local adapter = data.waveBoundary
 	if adapter == nil or not data.waveBindingActive then
 		return true
@@ -601,12 +625,13 @@ local function closeWaveBoundary(
 	if
 		data.waveBoundaryStatus == "ShutdownClosed"
 		or data.waveBoundaryStatus == "Detached"
-		or (
-			disposition == "DependencyFault"
-			and (data.waveBoundaryStatus == "Faulted" or data.waveBoundaryStatus == "DefeatClosed")
-		)
+		or data.waveBoundaryStatus == "Faulted"
+		or data.waveBoundaryStatus == "DefeatClosed"
 	then
 		return true
+	end
+	if data.waveFaultCloseAttempted then
+		return data.waveBoundaryStatus == "Faulted"
 	end
 	invalidateSchedulerCapability(data)
 	local passOrdinal = passOrdinalValue or data.lastWavePassOrdinal
@@ -624,14 +649,26 @@ local function closeWaveBoundary(
 		passOrdinal = passOrdinal,
 		sampleServerTime = sampleServerTime,
 	}
-	if data.lastCommittedSchedulerSpawn ~= nil then
+	if
+		disposition == "DependencyFault"
+		and data.lastCommittedSchedulerSpawn ~= nil
+		and data.lastReconciledSchedulerTerminalOutcome ~= nil
+	then
 		context.committedSpawn = data.lastCommittedSchedulerSpawn
+		context.terminalOutcome = data.lastReconciledSchedulerTerminalOutcome
 	end
 	table.freeze(context)
+	if disposition == "DependencyFault" then
+		data.waveFaultCloseAttempted = true
+	end
 	local called, resultValue = callResult(adapter.close, adapter, context)
+	local succeeded = called and isSuccess(resultValue) and (resultValue :: any).value == true
+	if succeeded then
+		data.waveBoundaryStatus = if disposition == "Shutdown" then "ShutdownClosed" else "Faulted"
+	end
 	data.lastCommittedSchedulerSpawn = nil
-	data.waveBoundaryStatus = if disposition == "Shutdown" then "ShutdownClosed" else "Faulted"
-	return called and isSuccess(resultValue) and (resultValue :: any).value == true
+	data.lastReconciledSchedulerTerminalOutcome = nil
+	return succeeded
 end
 
 local function revokeWaveBoundary(data: ServiceData)
@@ -645,8 +682,12 @@ local function revokeWaveBoundary(data: ServiceData)
 	data.waveBoundaryHandle = nil
 	data.waveBoundaryStatus = if data.waveBoundaryStatus == nil then nil else "Detached"
 	data.waveBindingActive = false
+	data.waveFaultCloseAttempted = false
 	data.legacySpawnClosed = true
 	data.lastCommittedSchedulerSpawn = nil
+	data.lastReconciledSchedulerTerminalOutcome = nil
+	data.faultClosePassOrdinal = nil
+	data.faultCloseSampleServerTime = nil
 end
 
 local function cleanupPublisher(data: ServiceData): boolean
@@ -737,10 +778,15 @@ local function releaseOwnedResources(data: ServiceData): boolean
 	data.waveBoundaryPassCount = 0
 	data.waveBoundaryFlushCount = 0
 	data.waveBindingActive = false
+	data.waveFaultCloseAttempted = false
 	data.legacySpawnClosed = true
 	data.lastWaveSampleServerTime = 0
 	data.lastWavePassOrdinal = 0
 	data.activeSchedulerCapabilityGeneration = 0
+	data.lastCommittedSchedulerSpawn = nil
+	data.lastReconciledSchedulerTerminalOutcome = nil
+	data.faultClosePassOrdinal = nil
+	data.faultCloseSampleServerTime = nil
 	data.spawnAdmissionClosed = true
 	data.nextEnemyPassOrdinal = 1
 	data.defeatCount = 0
@@ -840,10 +886,37 @@ local function hasDrainablePublication(metrics: any): boolean
 	return ordinaryMessageCapacity >= 1 and sequenceCapacity >= 1
 end
 
+local sampleFirstWaveFaultClose: ((ServiceData) -> number?)? = nil
+
+local function requestRuntimeFault(data: ServiceData, passOrdinal: number?, sampleServerTime: number?)
+	data.faultRequested = true
+	if passOrdinal ~= nil then
+		data.faultClosePassOrdinal = passOrdinal
+	end
+	if sampleServerTime ~= nil then
+		data.faultCloseSampleServerTime = sampleServerTime
+	end
+end
+
 local function beginRuntimeFault(data: ServiceData)
+	if data.operationActive then
+		data.faultRequested = true
+		return
+	end
 	data.faultRequested = false
-	closeWaveBoundary(data, "DependencyFault", nil, nil)
+	local passOrdinal = data.faultClosePassOrdinal
+	local sampleServerTime = data.faultCloseSampleServerTime
+	data.faultClosePassOrdinal = nil
+	data.faultCloseSampleServerTime = nil
 	data.state = "Failed"
+	if data.waveBindingActive and data.lastWavePassOrdinal == 0 and sampleFirstWaveFaultClose ~= nil then
+		local sampled = (sampleFirstWaveFaultClose :: (ServiceData) -> number?)(data)
+		if sampled ~= nil then
+			sampleServerTime = sampled
+			data.lastWaveSampleServerTime = sampled
+		end
+	end
+	closeWaveBoundary(data, "DependencyFault", passOrdinal or math.max(data.lastWavePassOrdinal, 1), sampleServerTime)
 	local metrics = publisherMetrics(data)
 	if
 		metrics ~= nil
@@ -1166,6 +1239,27 @@ local function getCommittedStepResult(
 	return stepResult :: CommittedStepResult
 end
 
+sampleFirstWaveFaultClose = function(data: ServiceData): number?
+	local store = data.store
+	if store == nil or not data.waveBindingActive or data.lastWavePassOrdinal ~= 0 then
+		return nil
+	end
+	local stepped, stepResultValue = callResult(store.step, store, 0)
+	if not stepped then
+		return nil
+	end
+	local emptyActiveIds = table.freeze({})
+	local stepResult = getCommittedStepResult(data, stepResultValue, 0, emptyActiveIds)
+	if stepResult == nil or stepResult.cleaned or stepResult.faulted or stepResult.schedulerSampleToken == nil then
+		return nil
+	end
+	local finished, finishResult = callResult(store.finishSchedulerSample, store, stepResult.schedulerSampleToken)
+	if not finished or not isSuccess(finishResult) or (finishResult :: any).value ~= true then
+		return nil
+	end
+	return stepResult.sampleServerTime
+end
+
 local function abortCurrentBasePass(data: ServiceData)
 	-- The store has already committed this simulation pass. If its matching
 	-- publisher transaction cannot complete, no later call may finish or reuse
@@ -1396,6 +1490,32 @@ local TERMINAL_OUTCOME_FIELDS = table.freeze({
 	serverTime = true,
 })
 
+local SPAWN_COMMIT_OUTCOME_FIELDS = table.freeze({
+	committed = true,
+	replicationCommitted = true,
+	snapshot = true,
+})
+
+local COMMITTED_SCHEDULER_SPAWN_FIELDS = table.freeze({
+	event = true,
+	outcome = true,
+})
+
+local SCHEDULED_FAULT_DESPAWN_FIELDS = table.freeze({
+	despawn = true,
+	terminalOutcome = true,
+})
+
+local DESPAWN_SNAPSHOT_FIELDS = table.freeze({
+	runtimeEnemyId = true,
+	enemyId = true,
+	laneId = true,
+	revision = true,
+	lifecycle = true,
+	reason = true,
+	sampleServerTime = true,
+})
+
 type SchedulerCapabilityState = {
 	generation: number,
 	rejected: boolean,
@@ -1486,13 +1606,132 @@ local function makeSchedulerCapability(
 			replicationCommitted = replicationCommitted,
 			snapshot = snapshotValue,
 		})
-		data.lastCommittedSchedulerSpawn = outcome
+		data.lastCommittedSchedulerSpawn = table.freeze({
+			event = event,
+			outcome = outcome,
+		})
+		data.lastReconciledSchedulerTerminalOutcome = nil
 		if not replicationCommitted then
 			state.publisherFailed = true
 		end
 		return outcome
 	end
 	return capability, state
+end
+
+local function reconcileCommittedSchedulerSpawn(
+	data: ServiceData,
+	schedulerSampleToken: unknown,
+	sampleServerTime: number,
+	capabilityState: SchedulerCapabilityState
+): boolean
+	local retainedValue = data.lastCommittedSchedulerSpawn
+	if retainedValue == nil then
+		return true
+	end
+	local store = data.store
+	local publisher = data.publisher
+	local identity = data.storeIdentity
+	if
+		store == nil
+		or publisher == nil
+		or identity == nil
+		or type(retainedValue) ~= "table"
+		or getmetatable(retainedValue :: any) ~= nil
+		or not table.isfrozen(retainedValue :: any)
+		or not hasExactFields(retainedValue :: { [any]: unknown }, COMMITTED_SCHEDULER_SPAWN_FIELDS)
+	then
+		return false
+	end
+	local retained = retainedValue :: any
+	local event = validateWaveSpawnEvent(retained.event, sampleServerTime)
+	local outcome = retained.outcome
+	if
+		event == nil
+		or type(outcome) ~= "table"
+		or getmetatable(outcome) ~= nil
+		or not table.isfrozen(outcome)
+		or not hasExactFields(outcome, SPAWN_COMMIT_OUTCOME_FIELDS)
+		or outcome.committed ~= true
+		or type(outcome.replicationCommitted) ~= "boolean"
+		or type(outcome.snapshot) ~= "table"
+		or getmetatable(outcome.snapshot) ~= nil
+		or not table.isfrozen(outcome.snapshot)
+	then
+		return false
+	end
+	local snapshot = outcome.snapshot
+	if
+		type(snapshot.runtimeEnemyId) ~= "number"
+		or not Validation.isSafeInteger(snapshot.runtimeEnemyId)
+		or snapshot.runtimeEnemyId < 1
+		or snapshot.enemyId ~= event.enemyId
+		or snapshot.laneId ~= event.laneId
+		or snapshot.spawnServerTime ~= sampleServerTime
+		or snapshot.lifecycle ~= "Active"
+	then
+		return false
+	end
+
+	local publicationReserved = true
+	if outcome.replicationCommitted then
+		local preflighted, preflightResult =
+			callResult(publisher.preflightManualDespawn, publisher, snapshot.runtimeEnemyId)
+		publicationReserved = preflighted and isSuccess(preflightResult) and (preflightResult :: any).value == true
+		if not publicationReserved then
+			capabilityState.publisherFailed = true
+		end
+	end
+
+	local despawned, despawnResult = callResult(store.despawnScheduledForFault, store, schedulerSampleToken, snapshot)
+	local resolution = if despawned and isSuccess(despawnResult) then (despawnResult :: any).value else nil
+	if
+		type(resolution) ~= "table"
+		or getmetatable(resolution :: any) ~= nil
+		or not table.isfrozen(resolution :: any)
+		or not hasExactFields(resolution :: { [any]: unknown }, SCHEDULED_FAULT_DESPAWN_FIELDS)
+	then
+		return false
+	end
+	local despawn = (resolution :: any).despawn
+	local terminalOutcome = (resolution :: any).terminalOutcome
+	if
+		type(despawn) ~= "table"
+		or getmetatable(despawn) ~= nil
+		or not table.isfrozen(despawn)
+		or not hasExactFields(despawn, DESPAWN_SNAPSHOT_FIELDS)
+		or despawn.runtimeEnemyId ~= snapshot.runtimeEnemyId
+		or despawn.enemyId ~= snapshot.enemyId
+		or despawn.laneId ~= snapshot.laneId
+		or despawn.lifecycle ~= "Despawned"
+		or despawn.reason ~= "Manual"
+		or despawn.sampleServerTime ~= sampleServerTime
+		or type(terminalOutcome) ~= "table"
+		or getmetatable(terminalOutcome) ~= nil
+		or not table.isfrozen(terminalOutcome)
+		or not hasExactFields(terminalOutcome, TERMINAL_OUTCOME_FIELDS)
+		or terminalOutcome.matchId ~= identity.matchId
+		or terminalOutcome.enemyEpoch ~= identity.enemyEpoch
+		or terminalOutcome.runtimeEnemyId ~= snapshot.runtimeEnemyId
+		or terminalOutcome.enemyId ~= snapshot.enemyId
+		or terminalOutcome.reason ~= "Manual"
+		or terminalOutcome.serverTime ~= sampleServerTime
+	then
+		return false
+	end
+	local authenticated, authentic = callNonYielding(store.isAuthenticatedTerminalOutcome, store, terminalOutcome)
+	if not authenticated or authentic ~= true then
+		return false
+	end
+	data.lastReconciledSchedulerTerminalOutcome = terminalOutcome
+
+	if outcome.replicationCommitted and publicationReserved then
+		local committed, commitResult = callResult(publisher.commitManualDespawn, publisher, despawn)
+		if not committed or not isSuccess(commitResult) then
+			capabilityState.publisherFailed = true
+		end
+	end
+	return true
 end
 
 local function finishSchedulerSample(data: ServiceData, schedulerSampleToken: unknown?): boolean
@@ -1608,17 +1847,37 @@ local function deliverWavePass(
 	end
 	table.freeze(frameValue)
 	local called, resultValue = callResult(adapter.onEnemyPass, adapter, frameValue :: any)
+	local consumedValue = if isSuccess(resultValue) then (resultValue :: any).value else nil
+	local callbackSucceeded = called and type(consumedValue) == "boolean"
+	local capabilityFault = capabilityState ~= nil
+		and (
+			(capabilityState :: SchedulerCapabilityState).rejected
+			or (capabilityState :: SchedulerCapabilityState).publisherFailed
+		)
+	local reconciled = true
+	if
+		disposition == "Healthy"
+		and not terminalNoop
+		and (not callbackSucceeded or capabilityFault)
+		and data.lastCommittedSchedulerSpawn ~= nil
+	then
+		reconciled = reconcileCommittedSchedulerSpawn(
+			data,
+			schedulerSampleToken,
+			sampleServerTime,
+			capabilityState :: SchedulerCapabilityState
+		)
+	end
 	local sampleFinished = if disposition == "Healthy" and not terminalNoop
 		then finishSchedulerSample(data, schedulerSampleToken)
 		else true
 	data.waveBoundaryPassCount = math.min(data.waveBoundaryPassCount + 1, Validation.MAX_SAFE_INTEGER)
-	local consumedValue = if isSuccess(resultValue) then (resultValue :: any).value else nil
-	if not called or type(consumedValue) ~= "boolean" or not sampleFinished then
-		closeWaveBoundary(data, "DependencyFault", passOrdinal, sampleServerTime)
+	if not callbackSucceeded or not reconciled or not sampleFinished then
 		return false, capabilityState
 	end
 	if capabilityState == nil or (not capabilityState.rejected and not capabilityState.publisherFailed) then
 		data.lastCommittedSchedulerSpawn = nil
+		data.lastReconciledSchedulerTerminalOutcome = nil
 	end
 	if disposition == "DefeatCommitted" then
 		data.waveBoundaryStatus = "DefeatClosed"
@@ -1640,7 +1899,6 @@ local function flushWavePass(data: ServiceData, passOrdinal: number, sampleServe
 	local called, resultValue = callResult(adapter.flushEnemyPass, adapter, passOrdinal)
 	local flushedValue = if called and isSuccess(resultValue) then (resultValue :: any).value else nil
 	if type(flushedValue) ~= "boolean" then
-		closeWaveBoundary(data, "DependencyFault", passOrdinal, sampleServerTime)
 		return false
 	end
 	data.waveBoundaryFlushCount = math.min(data.waveBoundaryFlushCount + 1, Validation.MAX_SAFE_INTEGER)
@@ -1686,7 +1944,11 @@ local function updateLegacy(data: ServiceData, deltaSeconds: number)
 	if data.state ~= "Started" then
 		return
 	end
-	if data.operationActive or not Validation.isFiniteNumber(deltaSeconds) or deltaSeconds < 0 then
+	if data.operationActive then
+		data.faultRequested = true
+		return
+	end
+	if not Validation.isFiniteNumber(deltaSeconds) or deltaSeconds < 0 then
 		beginRuntimeFault(data)
 		return
 	end
@@ -1738,22 +2000,25 @@ local function updateWaveBound(data: ServiceData, deltaSeconds: number)
 		return
 	end
 	if data.state == "Failed" and data.faultDrainActive then
-		closeWaveBoundary(data, "DependencyFault", nil, nil)
 		drainFault(data, deltaSeconds)
 		return
 	end
 	if data.state ~= "Started" then
 		return
 	end
-	if data.operationActive or not Validation.isFiniteNumber(deltaSeconds) or deltaSeconds < 0 then
-		closeWaveBoundary(data, "DependencyFault", nil, nil)
+	if data.operationActive then
+		data.faultRequested = true
+		return
+	end
+	if not Validation.isFiniteNumber(deltaSeconds) or deltaSeconds < 0 then
+		requestRuntimeFault(data, math.max(data.nextEnemyPassOrdinal, 1), data.lastWaveSampleServerTime)
 		beginRuntimeFault(data)
 		return
 	end
 	local store = data.store
 	local publisher = data.publisher
 	if store == nil or publisher == nil then
-		closeWaveBoundary(data, "DependencyFault", nil, nil)
+		requestRuntimeFault(data, math.max(data.nextEnemyPassOrdinal, 1), data.lastWaveSampleServerTime)
 		beginRuntimeFault(data)
 		return
 	end
@@ -1779,12 +2044,14 @@ local function updateWaveBound(data: ServiceData, deltaSeconds: number)
 		end
 		local advanced = advancePublisher(data, deltaSeconds)
 		local flushed = not boundarySucceeded or (advanced and flushWavePass(data, closedPassOrdinal, sampleServerTime))
-		if boundarySucceeded and not advanced then
-			closeWaveBoundary(data, "DependencyFault", closedPassOrdinal, sampleServerTime)
-		end
-		data.faultRequested = if disposition == nil
+		local shouldFault = if disposition == nil
 			then not advanced and data.resultsCommitCount == 0
 			else disposition == "DependencyFault" or not boundarySucceeded or not advanced or not flushed
+		if shouldFault then
+			requestRuntimeFault(data, closedPassOrdinal, sampleServerTime)
+		else
+			data.faultRequested = false
+		end
 		finishOperation(data)
 		return
 	end
@@ -1794,23 +2061,20 @@ local function updateWaveBound(data: ServiceData, deltaSeconds: number)
 		then denseFrozenAscendingIdsFromSnapshots((listResult :: any).value)
 		else nil
 	if activeIds == nil then
-		closeWaveBoundary(data, "DependencyFault", passOrdinal, nil)
-		data.faultRequested = true
+		requestRuntimeFault(data, passOrdinal, nil)
 		finishOperation(data)
 		return
 	end
 	local preflightCalled, preflightResult = callResult(publisher.preflightStep, publisher, activeIds)
 	if not preflightCalled or not isSuccess(preflightResult) or (preflightResult :: any).value ~= true then
-		closeWaveBoundary(data, "DependencyFault", passOrdinal, nil)
-		data.faultRequested = true
+		requestRuntimeFault(data, passOrdinal, nil)
 		finishOperation(data)
 		return
 	end
 	local stepped, stepResultValue = callResult(store.step, store, deltaSeconds)
 	local stepResult = if stepped then getCommittedStepResult(data, stepResultValue, deltaSeconds, activeIds) else nil
 	if stepResult == nil then
-		closeWaveBoundary(data, "DependencyFault", passOrdinal, nil)
-		data.faultRequested = true
+		requestRuntimeFault(data, passOrdinal, nil)
 		finishOperation(data)
 		return
 	end
@@ -1852,11 +2116,8 @@ local function updateWaveBound(data: ServiceData, deltaSeconds: number)
 			(capabilityState :: SchedulerCapabilityState).rejected
 			or (capabilityState :: SchedulerCapabilityState).publisherFailed
 		)
-	if capabilityFault or (boundarySucceeded and not advanced) then
-		closeWaveBoundary(data, "DependencyFault", passOrdinal, sampleServerTime)
-	end
 	data.shutdownRequested = requestedShutdown
-	data.faultRequested = not requestedShutdown
+	local shouldFault = not requestedShutdown
 		and (
 			disposition == "DependencyFault"
 			or not boundarySucceeded
@@ -1864,6 +2125,11 @@ local function updateWaveBound(data: ServiceData, deltaSeconds: number)
 			or not flushed
 			or capabilityFault
 		)
+	if shouldFault then
+		requestRuntimeFault(data, passOrdinal, sampleServerTime)
+	else
+		data.faultRequested = false
+	end
 	finishOperation(data)
 end
 
@@ -2600,6 +2866,7 @@ function ServiceMethods.commitWaveBinding(self: Service, tokenValue: unknown): u
 		return finishAndReturn(data, serviceFailure("INTERNAL_ERROR", operation))
 	end
 	data.waveBindingActive = true
+	data.waveFaultCloseAttempted = false
 	data.legacySpawnClosed = true
 	data.waveBoundaryStatus = "Active"
 	local identity = data.storeIdentity
@@ -2632,9 +2899,13 @@ function ServiceMethods.detachWaveBoundary(self: Service, handleValue: unknown):
 	invalidateSchedulerCapability(data)
 	data.waveBoundary = nil
 	data.waveBindingActive = false
+	data.waveFaultCloseAttempted = false
 	data.waveBoundaryStatus = "Detached"
 	data.legacySpawnClosed = data.legacySpawnClosed or wasActive
 	data.lastCommittedSchedulerSpawn = nil
+	data.lastReconciledSchedulerTerminalOutcome = nil
+	data.faultClosePassOrdinal = nil
+	data.faultCloseSampleServerTime = nil
 	return finishAndReturn(data, Result.ok(true))
 end
 
@@ -3285,11 +3556,15 @@ local function construct(
 		waveBoundaryPassCount = 0,
 		waveBoundaryFlushCount = 0,
 		waveBindingActive = false,
+		waveFaultCloseAttempted = false,
 		legacySpawnClosed = false,
 		lastWaveSampleServerTime = 0,
 		lastWavePassOrdinal = 0,
 		activeSchedulerCapabilityGeneration = 0,
 		lastCommittedSchedulerSpawn = nil,
+		lastReconciledSchedulerTerminalOutcome = nil,
+		faultClosePassOrdinal = nil,
+		faultCloseSampleServerTime = nil,
 		passDurationSamples = {},
 		nextPassDurationIndex = 1,
 		totalPassDurationCount = 0,

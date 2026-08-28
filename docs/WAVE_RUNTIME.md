@@ -2,7 +2,7 @@
 
 ## Status and authority
 
-This document is the authoritative Phase 11 decision for the finite authored-wave runtime, difficulty composition, skip voting, reliable wave replication, and their cleanup boundaries.
+This document is the authoritative Phase 11 decision and implemented contract for the finite authored-wave runtime, difficulty composition, skip voting, reliable wave replication, and their cleanup boundaries. Packets 11.1–11.6, the exact unsaved Match Studio gate, and the one consolidated review are complete on 2026-08-28. Exact final all-repository and exact-SHA CI counts are reported at handoff after the final gate rather than guessed in this tracked record. Phase 12 remains unbegun.
 
 Phase 11 implements only `AuthoredFinite` schedules. `GeneratedEndless` remains Phase 32. Production `Assets`, `Enemies`, `Maps`, `Difficulties`, `Waves`, and difficulty-specific `Economy` rules remain frozen and empty, so the production scheduler is dormant until a future content phase supplies an authenticated selection. Phase 11 permits only fresh schema-validated test fixtures and one Studio-only runtime fixture seam.
 
@@ -52,6 +52,7 @@ Uninitialized
   -> Intermission -> Running
   -> FiniteComplete
 
+Running | Intermission -> FiniteComplete
 Running | Intermission -> DefeatClosed
 Running | Intermission -> Faulted
 Uninitialized | Running | Intermission | FiniteComplete | DefeatClosed | Faulted -> Cleaned
@@ -105,13 +106,15 @@ Before any Base, lifecycle, enemy, or scheduler mutation, the selected finite sc
 
 `WaveSchema` uses a scale-aware tolerance while admitting authored `AllSpawnsByDeadline` data. Runtime preflight is intentionally stricter: it never moves a positive-epsilon event earlier. A selected `AllSpawnsByDeadline` schedule whose exact formula exceeds the deadline fails closed. Only `AllowScheduledOverlap` may retain events after its originating deadline.
 
-Static preflight cannot prove that all dynamic overlap stays below `128` active enemies. A due spawn that cannot be admitted because of active, lifetime, publisher, ID, arithmetic, or callback capacity faults the runtime closed; it is never silently dropped, retried out of order, or counted as consumed.
+Static preflight cannot prove that all dynamic overlap stays at or below `128` active enemies. A due spawn that cannot be admitted because of active, lifetime, publisher, ID, arithmetic, or callback capacity faults the runtime closed; it is never silently dropped, retried out of order, or counted as consumed.
 
 ### Production dormancy and Studio installation
 
 With the production-empty configuration, `WaveRuntimeService` initializes and starts in a dormant `Uninitialized` state. It does not initialize BaseRuntime, bind EnemySimulation, activate `WaveActive`, connect another loop, or publish wave state.
 
 In Studio only, the sole combined Phase 11 trigger may accept fresh raw synthetic sources and run the real `ConfigurationValidator` once. It passes the resulting canonical root only to a Wave-owned prepare/commit transaction. The seam is one-shot, fixed-operation, server-only, absent outside Studio, and unavailable after any runtime mutation. Separately validated or separately installed catalogs are not composable into a Phase 11 runtime.
+
+The ordinary Match bootstrap still owns ReadyCheck. A fresh Studio production-path session may therefore receive a retryable `UNAVAILABLE` from the Wave trigger while MatchLifecycle is still in `ReadyCheck`; the trigger does not bypass that gate. The harness must then submit the exact server-selected ready operation once for every current Active recipient, wait for the real lifecycle to reach `PreWave`, and retry the fixed configuration operation. Only that authenticated `PreWave` state permits the transaction below.
 
 Preparation is mutation-free and requires all of these exact preconditions at once:
 
@@ -132,7 +135,7 @@ The trigger may drive controlled terminal resolutions and participant operations
 
 Phase 11 adds a narrow server-only opaque-token transaction to `MatchLifecycle`:
 
-1. `beginWaveActivation(matchId)` authenticates the exact current Match, requires `PreWave`, prepares exactly `PreWave -> WaveActive`, snapshots recipients, and reserves the lifecycle revision.
+1. `beginWaveActivation(matchId)` authenticates the exact current Match, requires `PreWave`, prepares exactly `PreWave -> WaveActive`, validates the next detached Match snapshot, and reserves the lifecycle revision. It does not retain recipients.
 2. The Wave coordinator commits the prepared one-shot configuration transaction, initializes BaseRuntime once from the same exact canonical finite `DifficultyDefinition`, and confirms the exact enemy modifier bind and scheduler admission owner.
 3. It installs the integrated Wave boundary, stages wave 1's prevalidated relative event head, and preflights the initial public snapshot.
 4. `commitWaveActivation(token)` commits `WaveActive` and attempts the reliable Match snapshot publication.
@@ -185,7 +188,9 @@ EnemySimulation delivers exactly one disposition to the installed Wave adapter f
 - `DependencyFault`, after a store, publisher, Base, callback, or invariant failure; or
 - `Shutdown`, when admission/service teardown has closed the pass.
 
-The capability is invalidated before any non-`Healthy` disposition and in a finally-style path immediately after a healthy callback returns. A retained capability cannot be reused. `DefeatCommitted` moves Wave to `DefeatClosed`; `DependencyFault` moves it to `Faulted`; and `Shutdown` closes it without later mutation. The existing Enemy `spawnAdmissionClosed` fast path still reports a disposition. A missing adapter after successful installation is itself a dependency fault. If the primary Wave step callback throws or yields, EnemySimulation invokes a separate one-shot non-yielding Wave close method; if that also fails, EnemySimulation faults and every later Wave request synchronously checks the exact boundary generation/status before it can mutate or answer. Thus Wave cannot remain apparently `Running` after its sole driver has stopped.
+The capability is invalidated before any non-`Healthy` disposition and in a finally-style path immediately after a healthy callback returns. A retained capability cannot be reused. `DefeatCommitted` moves Wave to `DefeatClosed`; `DependencyFault` moves it to `Faulted`; and `Shutdown` closes it without later mutation. The existing Enemy `spawnAdmissionClosed` fast path still reports a disposition. A missing adapter after successful installation is itself a dependency fault.
+
+If the primary Wave callback fails after EnemyRuntimeStore has committed a scheduled spawn, EnemySimulation retains the exact authenticated `{ event, outcome }`, performs one store-owned fault despawn with a `Manual` terminal outcome, and invokes the separate one-shot Wave dependency-fault close only after the Enemy operation guard has cleared. The close carries the exact committed pair plus that terminal outcome. WaveRuntime authenticates and reconciles the event cursor, originating-wave ownership, `pending`/`spawned`/`alive` counters, and terminal resolution exactly once, then advances once to canonical `Faulted`. A repeated identical close is an idempotent replay; a conflicting pair fails closed. If the primary callback failed before any Store commit, the close has no pair to reconcile. This transaction prevents a committed enemy from becoming unowned or remaining active after its sole driver stops.
 
 Before every spawn, wave boundary, and completion commit, WaveRuntime rechecks the Base defeat state and Match lifecycle state. A lethal leak in the pass therefore commits defeat and closes scheduler admission before any later Wave spawn, boundary, or finite-completion mutation.
 
@@ -215,7 +220,7 @@ Zero-interval and simultaneous groups follow that key exactly. The total preflat
 
 One Wave pass processes at most `256` scheduler work units, of which at most `128` are spawn events and at most `128` are terminal outcomes. Consuming one terminal outcome, spawn event/head replacement, wave start/head insertion, intermission transition, deadline/skip/final-deadline boundary, completion, or terminal close costs one unit. Each heap operation is bounded by the at-most-`1,000` started origins and does no bulk schedule traversal. Roster reconciliation and the one coalesced publication do not create unbounded per-member work because the Match roster is capped at four.
 
-When the bound is exhausted, the cursor and dirty state remain for the next Heartbeat. Backlog never reorders, deletes, duplicates, or backdates work; never declares early clear or completion while earlier work remains; and never crosses a deadline/skip boundary before all earlier due events are consumed. No event is emitted before its authored absolute time. The `1`, `32`, `64`, and `128` due-spawn Studio ladder therefore fits the explicit per-pass spawn bound when active capacity is available.
+When the bound is exhausted, the cursor and dirty state remain for the next Heartbeat. Backlog never reorders, deletes, duplicates, or backdates work; never declares early clear or completion while earlier work remains; and never crosses a deadline/skip boundary before all earlier due events are consumed. No event is emitted before its authored absolute time. Every rung of the `1`, `32`, `64`, and `128` due-spawn Studio ladder is at or below the explicit `128`-event per-pass spawn bound when active capacity is available.
 
 Clock values must be finite, nonnegative, and monotonic. A backward/nonfinite clock, unsafe timestamp arithmetic, exhausted work cursor/ledger/revision, impossible counter equation, callback failure, or dependency invariant failure transitions once to `Faulted`, closes admission, cancels pending work, and attempts one bounded terminal full-state publication.
 
@@ -261,7 +266,7 @@ Before invoking the scheduler spawn capability, WaveRuntime preflights every cou
 - `committed=false` contains no RuntimeEnemyId and proves Store state did not change; or
 - `committed=true` contains the genuine frozen spawned snapshot and whether publisher commit succeeded.
 
-Once Store spawn commits, the event is irrevocably consumed and WaveRuntime performs only preflighted no-fail assignments: map the RuntimeEnemyId to its one origin, advance the origin cursor/head, and increment `spawned`/`alive` while decrementing `pending`. If publisher commit then failed, those ownership facts still commit exactly once before WaveRuntime and EnemySimulation fault closed. Only a proven `committed=false` rejection consumes nothing. A malformed/missing outcome after a possible Store mutation is an integration fault; EnemySimulation's own retained committed-spawn record supplies the exact ID to the one-shot Wave close path so cleanup cannot leave an unowned live enemy. Old ownership is never reassigned at deadline, skip, or a later wave start.
+Once Store spawn commits, the event is irrevocably consumed and WaveRuntime performs only preflighted no-fail assignments: map the RuntimeEnemyId to its one origin, advance the origin cursor/head, and increment `spawned`/`alive` while decrementing `pending`. If publisher commit then failed, those ownership facts still commit exactly once before WaveRuntime and EnemySimulation fault closed. Only a proven `committed=false` rejection consumes nothing. A malformed/missing outcome after a possible Store mutation is an integration fault; EnemySimulation's retained exact `{ event, outcome }` and Store-issued `Manual` terminal outcome supply the complete one-shot close transaction described above. It despawns the record and reconciles event consumption, ownership, counters, and resolution once before canonical `Faulted` truth is exposed. Old ownership is never reassigned at deadline, skip, or a later wave start.
 
 EnemyRuntimeStore creates a separate authenticated terminal outcome for every terminal reason relevant to scheduler ownership:
 
@@ -348,7 +353,9 @@ The full per-wave ledger, schedule queue, starting-cash placeholder, voter ident
 
 Every event is a full state, never a delta. Scheduler semantic changes in one integrated pass are coalesced into at most one `WaveReplication` event, excluding direct request responses. Synchronous votes may advance revisions between Heartbeats; the next event carries only the newest full state.
 
-A logical publisher invariant, revision, schema, or dependency failure faults WaveRuntime. For each event, the publisher obtains one fresh trusted connected-recipient snapshot from MatchLifecycle, capped at four and sorted by server-derived UserId. Recipient records may transiently contain a Player only for the synchronous send loop; WaveRuntime and the publisher never cache the Player, UserId, or array after that call. Request/client data never selects recipients. One disconnected or failing recipient's `FireClient` attempt is contained, counted as consumed, does not roll back server truth, and recovers through a later full event or `GetWaveSnapshot`. No payload, MatchId, UserId, voter list, definition, or raw error is logged.
+A logical publisher invariant, revision, schema, or dependency failure faults WaveRuntime. Running, Intermission, FiniteComplete, and Faulted publications obtain one fresh trusted connected-recipient snapshot from MatchLifecycle, capped at four and sorted by server-derived UserId. Only `DefeatClosed` uses the exact authenticated recipient set retained during Phase 10 defeat preflight, because MatchLifecycle is already in `Results` when that terminal Wave snapshot is sent. Recipient records may transiently contain a Player only for the synchronous send loop; the Wave publisher caches no Player, UserId, live array, or defeat array after the call. Request/client data never selects recipients. One disconnected or failing recipient's `FireClient` attempt is contained, counted as consumed, does not roll back server truth, and recovers through a later full event or `GetWaveSnapshot`. No payload, MatchId, UserId, voter list, definition, or raw error is logged.
+
+If Wave closes to `Faulted`, the service cache retains the exact canonical terminal full snapshot even when one or every terminal `FireClient` call returns false or throws. All mutation and vote operations remain closed. `GetWaveSnapshot` alone stays available as a read-only recovery path until service cleanup; cleanup erases that retained truth and makes the request unavailable. The Faulted transaction and terminal publication attempt each occur at most once.
 
 ### Client convergence
 
@@ -358,8 +365,8 @@ A logical publisher invariant, revision, schema, or dependency failure faults Wa
 
 - duplicate and lower revisions are ignored;
 - a contiguous `waveRevision + 1` event is accepted;
-- an event revision gap is classified as `Skipped`, rejected without rollback, and arms one bounded `GetWaveSnapshot` recovery request;
-- a valid direct `GetWaveSnapshot` or `SubmitSkipVote` response may accept a higher full revision and heal the gap;
+- an event revision gap is classified as `Skipped`, rejected without rollback, and arms one bounded `GetWaveSnapshot` recovery request for that unresolved gap episode;
+- further skipped events in the same unresolved episode do not issue another recovery request; a valid direct `GetWaveSnapshot` or `SubmitSkipVote` response may accept a higher full revision, heal the episode, and rearm the one-request allowance for a later independent gap;
 - malformed, impossible-transition, stale-wave, wrong-identity, and out-of-order values are rejected;
 - an unlocked controller may lock from its first valid event or correlated direct response;
 - a valid wrong-MatchId event while locked is rejected but arms exactly one bounded `GetWaveSnapshot` recovery request;
@@ -367,6 +374,8 @@ A logical publisher invariant, revision, schema, or dependency failure faults Wa
 - event/response races always retain the highest accepted revision and never roll back.
 
 Thus full events are self-contained while explicit gap policy preserves the requested skipped-state rejection and bounded recovery. Delayed bootstrap or a recreated controller registers first, requests a fresh full snapshot, and converges without server-side client state. Skip requests use only the cached MatchId and current wave number; pending request state is bounded and never treated as authority.
+
+A semantic skip-response rejection with `STALE_REQUEST`, `DUPLICATE_REQUEST`, `NOT_AUTHORIZED`, `UNAVAILABLE`, or `INTERNAL_ERROR` forces one bounded `GetWaveSnapshot` even when no gap was previously armed. This refresh is recovery only, never a retry of the vote and never authority to replace server truth.
 
 Cleanup disconnects listeners, invalidates callback generations, clears pending requests/recovery flags/cache/reducer diagnostics, and prevents delayed responses from recreating state.
 
@@ -400,21 +409,46 @@ The server and client connection counts are constant. No count depends on waves,
 
 Headless tests use injected deterministic clocks, boundary invocations, senders, and roster snapshots. They never wait in real time and do not claim engine networking, Heartbeat timing, rendering, or client behavior. In addition to the Studio ladder, a headless worst-case selected schedule with `4,096` events proves preflatten bounds, heap-head work, large-delta backlog, and exact-once cursor progress without one-pass bulk insertion.
 
-The sole Studio fixture is fresh on every run, real-schema validated, below `128` active and `4,096` lifetime enemies, and maps exactly to the loaded Match `RuntimeMapSnapshot`. It includes zero/nonzero intervals, multiple groups and lanes where the real map permits, empty waves, all boss/reward metadata, exact-deadline events, a deliberate `AllowScheduledOverlap`, and a five-second early-clear intermission.
+The sole Studio fixture is fresh on every run, real-schema validated, at or below `128` active enemies and below the `4,096` lifetime limit, and maps exactly to the loaded Match `RuntimeMapSnapshot`. It includes zero/nonzero intervals, multiple groups and lanes where the real map permits, empty waves, all boss/reward metadata, exact-deadline events, a deliberate `AllowScheduledOverlap`, and a five-second early-clear intermission.
 
 Studio evidence is valid only in Edit-started fresh two-client sessions for PlaceId `136401514513678`, GameId `10757629094`, Group CreatorId `35420107`, PHJGAMES ownership, and `ATDPlaceRole=Match`. Synchronization is limited to branch-owned `match.project.json` sources. No map, terrain, model, setting, marker, unmapped instance, or Team Create content is saved or published.
 
 The evidence records the `1`, `32`, `64`, and `128` due-spawn ladder, scheduler processing time, maximum lateness/no-early result, client convergence time, publication count, wave/base/enemy identities and revisions, constant connection counts, assertion totals, console errors/warnings, and residue. Healthy finite completion must occur exactly once with MatchLifecycle still `WaveActive`; the defeat scenario must record exactly one defeat and one `Results` transition.
 
+Ordering and recovery injections in Studio travel through the production `WaveReplication` sender and its real captured `FireClient` operation. They do not call `WaveStateReducer` or a client signal directly, so accepted stale, duplicate, skipped, out-of-order, wrong-Match, and recovery observations exercise the actual reliable endpoint path.
+
 After evidence, all clients/server stop, the task-owned Rojo process disconnects, profiling/emulation resets, the combined trigger and all runtime/network/map/enemy/client state are absent, and the exact Match place remains in Edit mode. Studio content is not saved or published.
+
+## Executed Studio evidence — 2026-08-28
+
+Every accepted run used the exact Match place and two fresh clients under the identity and safety rules above. The scenario records were:
+
+| Scenario | MatchId |
+| --- | --- |
+| Primary finite schedule | `match:67f2240b-1636-4073-a667-a6d0e6fc0184` |
+| Empty-wave/five-second intermission | `match:a725186d-48f6-4b7f-a13a-4d9a8b721c46` |
+| Exact-deadline ordering | `match:23b6b16c-f0d9-4de1-a42f-25e1016c2e76` |
+| Allowed overlap and originating-wave ownership | `match:b3f75fcb-cdc4-4db7-8818-0ae6ef555491` |
+| Strict-majority skip | `match:52f2d64a-4e05-4379-8247-92f825efcff3` |
+| Disconnect threshold recomputation | `match:cbf08299-27de-47b9-9f50-ee44715ec238` |
+| Due-spawn ladder, 1 | `match:6555b115-c5f7-428b-9190-091d7ffde547` |
+| Due-spawn ladder, 32 recovery/order injection | `match:39dde4e4-2dc2-48e8-8e58-8862c2b7155a` |
+| Due-spawn ladder, 32 measurement | `match:f0856bed-d155-496c-ac0d-a9b136e07738` |
+| Due-spawn ladder, 64 | `match:20bf272c-993c-4782-9ec1-4c880c7e3f12` |
+| Due-spawn ladder, 128 | `match:5344703b-2de0-4f84-a86f-db976a4a7281` |
+| Lethal defeat preemption | `match:0c0771bc-82b5-40bb-a13a-9ef04026f874` |
+
+The primary, empty, deadline, overlap, skip/disconnect, and all four ladder rungs passed their server/client assertions with the expected authored ordering, ownership, bounded per-pass work, no early spawn, one coalesced Wave publication per semantic pass, and constant client ownership. The primary healthy run reached `FiniteComplete` once while MatchLifecycle remained `WaveActive`; it created no victory, reward, or Results transition. The real `WaveReplication` injection run recovered skipped and out-of-order state without rollback. Every accepted scenario recorded zero console errors; the only warning was the expected bootstrap/network warning. Each session stopped cleanly with no retained runtime state.
+
+The final defeat run measured a last scheduler pass of `0.0000119000033` seconds, a maximum scheduler pass of `0.0002893999990` seconds, maximum spawn lateness of `0.0140790939331` seconds, and zero early spawns. Client convergence was `0.0344388485` and `0.0335118771` seconds. One lethal spawn produced Wave revision `3` in `DefeatClosed`, Base revision `3` in `Defeated`, and Match revision `9` in `Results`; the later `+2` and `+3` scheduled spawns never occurred. Counts were exactly one defeat, one Results transition, and zero finite completions. The Wave publisher remained healthy, each client retained exactly three WaveController connections and one diagnostics bridge, assertions reported one completed set with zero failures, and shutdown left no residue.
 
 ## Fault and privacy policy
 
 All public failures use the existing fixed public error vocabulary without metadata. Internal failures use static bounded codes and existing logging fields only. Phase 11 adds no per-spawn, per-enemy, per-vote, per-wave, or per-client log stream and never logs payloads, MatchIds, UserIds, voter identities, definitions, raw Roblox errors, or object stringifications.
 
-Every dependency call is synchronous and non-yielding. A dependency throw, yield, malformed result, re-entry attempt, callback after cleanup, unsafe arithmetic, impossible state, or capacity breach fails closed according to whether lifecycle/base truth is already irreversible. Cleanup remains idempotent and cannot recreate callbacks, state, network roots, maps, enemies, or client caches.
+Every dependency call is synchronous and non-yielding. A dependency throw, yield, malformed result, re-entry attempt, callback after cleanup, unsafe arithmetic, impossible state, or capacity breach fails closed according to whether lifecycle/base truth is already irreversible. The callback-after-Store-commit close is the narrow exception that completes already committed ownership/terminal bookkeeping before closing; it accepts no arbitrary event, enemy, or terminal data. Cleanup remains idempotent and cannot recreate callbacks, state, network roots, maps, enemies, or client caches.
 
-## Pre-implementation review disposition
+## Review disposition
 
 One focused independent architecture/security/lifecycle review completed on 2026-08-28 before executable Phase 11 work. It required eight material corrections, all incorporated above:
 
@@ -427,4 +461,6 @@ One focused independent architecture/security/lifecycle review completed on 2026
 7. fresh MatchLifecycle roster and clock authentication in every vote request; and
 8. wrong-match client recovery plus fresh MatchLifecycle-owned replication recipients.
 
-After these corrections, the review found no remaining material architecture, authority, timing, bounds, lifecycle, privacy, cleanup, or testability issue and cleared the decision for executable implementation. No overlapping review round was performed.
+After these corrections, the review found no remaining material architecture, authority, timing, bounds, lifecycle, privacy, cleanup, or testability issue and cleared the decision for executable implementation. No overlapping pre-implementation review round was performed.
+
+The one consolidated independent final review covered requirements, runtime correctness, authority/security, cleanup, tests, Studio evidence, and documentation. It found no P0. Its two P1 and four P2 material findings are all resolved in the implemented contract and evidence: the client reducer admits the legal `Intermission -> FiniteComplete` empty-final-wave transition; a callback failure after Store commit performs the exact one-shot spawn/terminal reconciliation above; canonical `Faulted` truth remains recoverable through read-only `GetWaveSnapshot` until cleanup even when terminal sends fail; every recovery-worthy skip rejection forces one bounded Get without requiring an earlier revision gap; explicit recovery-episode correlation prevents an older in-flight Get from consuming a newer replication gap while allowing an exact authoritative duplicate to clear and rearm the matching episode; and the authoritative test/place indexes now report the actual Phase 11 systems, Studio records, `742`-case/`56`-suite gate, `77/46/77/144` module inventory, ten endpoints, and six policies. The same review also required the ReadyCheck bootstrap, at-or-below-128 bound, gap-episode regression coverage, real `FireClient` ordering injection, defeat-recipient distinction, and affected-document corrections now recorded here. These were resolutions within that single consolidated review, not a second review round. Phase 12 remains unbegun.

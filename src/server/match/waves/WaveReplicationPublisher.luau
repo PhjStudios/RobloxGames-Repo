@@ -401,8 +401,7 @@ local function flushInternal(
 	passOrdinal: number,
 	operation: Operation
 ): Result.Result<FlushOutcome, PublisherError>
-	local expectedPassOrdinal = if data.lastPassOrdinal == nil then 1 else (data.lastPassOrdinal :: number) + 1
-	if passOrdinal ~= expectedPassOrdinal then
+	if data.lastPassOrdinal ~= nil and passOrdinal ~= (data.lastPassOrdinal :: number) + 1 then
 		return fault(data, "INVALID_PASS", operation)
 	end
 	data.lastPassOrdinal = passOrdinal

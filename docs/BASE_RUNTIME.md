@@ -20,22 +20,24 @@ exact unsaved two-client Match Studio gate, consolidated final review,
 defect and one P2 Studio-count documentation gap; both were fixed and covered by
 the focused regression/evidence replay. Exact-final-SHA CI is cited at handoff
 rather than through a self-referential evidence commit. Phase 10 is complete;
-Phase 11 remains unbegun.
+Phase 11 subsequently integrated this runtime through the authoritative
+[Wave Runtime](WAVE_RUNTIME.md) contract, and Phase 12 remains unbegun.
 
 Phase 10 adds one match-scoped server-owned defender-base runtime, its bounded
 reliable replication, a minimal client-owned world bar, and the narrow defeat
 coordination required to move an already active match to Results. Production
 configuration remains dormant because the validated production difficulty and
-enemy catalogs remain empty. A future server-owned Phase 11 caller may select an
-already authenticated `DifficultyDefinition` and initialize this service; Phase
-10 does not select a difficulty, schedule a wave, or progress into WaveActive in
-production.
+enemy catalogs remain empty. The server-owned Phase 11 `WaveRuntime` now selects
+one already authenticated `DifficultyDefinition` and initializes this service
+before its guarded `PreWave -> WaveActive` commit. Phase 10 itself still does not
+select a difficulty, schedule a wave, or progress into WaveActive.
 
 Phase 10 does not add authored content, balance composition, map health,
 player-count scaling, wave scheduling, spawn cadence, wave tracking, towers,
 combat, healing, repair, armor, rewards, persistence, a results screen, a global
-base HUD, audio, assets, or a client-to-server gameplay mutation. Phase 11
-remains unbegun.
+base HUD, audio, assets, or a client-to-server gameplay mutation. Phase 11 adds
+only its separate finite scheduler/difficulty integration; it does not widen
+BaseRuntime's damage authority. Phase 12 tower work remains unbegun.
 
 ## Engine constraints
 
@@ -80,7 +82,7 @@ Primary references:
 
 ## Server ownership and service graph
 
-The resolved Match server graph becomes:
+At the Phase 10 checkpoint the resolved Match server graph was:
 
 ```text
 initialize/start: NetworkRegistry -> MatchLifecycle -> BaseRuntime -> EnemySimulation
@@ -93,12 +95,22 @@ loads a second map nor retains a marker Instance. `EnemySimulation` depends on
 `BaseRuntime` and installs the base's synchronous endpoint sink into its sole
 runtime store. Network remains the first owner and last cleanup target.
 
-The client graph becomes:
+Phase 11 extends that graph without changing Base ownership:
+
+```text
+initialize/start: NetworkRegistry -> MatchLifecycle -> BaseRuntime -> EnemySimulation -> WaveRuntime
+shutdown:         WaveRuntime -> EnemySimulation -> BaseRuntime -> MatchLifecycle -> NetworkRegistry
+```
+
+At the Phase 10 checkpoint the client graph was:
 
 ```text
 initialize/start: MatchReadyController -> BaseController -> EnemyController
 shutdown:         EnemyController -> BaseController -> MatchReadyController
 ```
+
+Phase 11 appends `WaveController` after `EnemyController`; reverse cleanup
+therefore removes Wave state before enemy visuals and Base state.
 
 The base controller cleans its listener, request state, marker listeners, GUI,
 tween, and cached state before Ready/map shutdown. It
@@ -200,8 +212,9 @@ Successful initialization samples the injected non-yielding monotonic server
 clock once, sets maximum and current health to that positive safe integer, sets
 `baseRevision = 1`, sets `lowHealth = false`, and enters `Active`. A bad clock,
 invalid map, invalid definition, duplicate initialization, or unavailable match
-fails without partial state. Production's empty difficulty catalog leaves the
-runtime `Uninitialized` until Phase 11.
+fails without partial state. Production's still-empty difficulty catalog leaves
+the runtime `Uninitialized`; Phase 11 supplies only authenticated test/runtime
+fixtures and does not populate production content.
 
 Initialization is allowed only while the authenticated lifecycle is ReadyCheck
 or PreWave. WaveActive, Results, Closing, unavailable, Faulted, Defeated, and
@@ -415,10 +428,11 @@ revision, result-construction, or logical-capacity decision remains.
 server-only transactional API. They have no remote definition and accept no
 Player, recipient, client payload, arbitrary target state, or caller token.
 Rollback is allowed only before commit and releases the claim without changing
-state. No general transition API is exposed. Studio-only evidence may use a
-separately gated exact operation to move PreWave to WaveActive while Phase 11 is
-absent; it is unavailable outside `RunService:IsStudio()` and is not production
-progression.
+state. No general transition API is exposed. The historical Phase 10
+Studio-only activation operation is now a compatibility wrapper around Phase
+11's narrow `beginWaveActivation`/`commitWaveActivation` transaction rather
+than a second progression authority. It remains unavailable outside
+`RunService:IsStudio()` while production catalogs are empty.
 
 The future tower admission query returns true only for an initialized Active
 base while MatchLifecycle is WaveActive. It returns false before initialization,
@@ -681,22 +695,21 @@ mapped source from `match.project.json` may synchronize after a bounded
 persistent inventory and mapped-source capture. No map, marker, terrain, model,
 setting, unmapped instance, or Team Create content is saved or published.
 
-EnemySimulation remains the single server-only runtime-trigger owner and extends
-the Phase 09 trigger into one fixed Phase 10 coordinator; BaseRuntime creates no
-second trigger. The trigger exists only while `RunService:IsStudio()` and owns a
-closed command set for: one fresh schema-validated fixture install, one base
-initialization, the evidence-only PreWave -> WaveActive transition, fixed
-server-selected zero/ordinary/exact/high endpoint fixtures and bounded batches,
-detached diagnostics, and cleanup probes. The fixture install builds fresh raw
-synthetic assets/difficulty/enemy records, validates them through the real
-schemas, and uses BaseRuntime's one-shot empty-catalog replacement rule before
-any enemy ID or base outcome is issued.
+At the Phase 10 checkpoint EnemySimulation was the single server-only
+runtime-trigger owner and BaseRuntime created no second trigger. Phase 11 keeps
+that single-owner rule and migrates the trigger into the combined Wave
+coordinator described in `WAVE_RUNTIME.md`. Its fixed server-selected fixture
+operation validates one fresh complete configuration, initializes Base from the
+canonical difficulty before Wave activation, binds Enemy difficulty modifiers,
+and drives only the authenticated Wave schedule and bounded evidence actions.
+The former standalone Phase 9/10 fixture admission is revoked when this
+transaction commits.
 
 The trigger cannot accept raw health, damage, MatchId, epoch, RuntimeEnemyId,
 revision, recipient, result, arbitrary enemy/difficulty definition,
 callback/code/property, cadence, or transition target. Every fixture variant and
-batch size is a fixed allowlisted token. EnemySimulation destroys this one
-trigger first during shutdown; it is absent outside Studio and in Edit mode.
+batch size is a fixed allowlisted token. Wave/Enemy reverse cleanup destroys
+this one trigger; it is absent outside Studio and in Edit mode.
 
 The same endpoint ladder `1, 32, 64, 128` is predeclared. Measurement health is
 high enough that the ladder cannot accidentally defeat; the defeat scenario is
@@ -796,13 +809,36 @@ removed base state, outcome ledger, result seed, request/recovery state,
 feedback, listeners, tween, GUI, trigger, enemies, runtime map, network root, and
 caches; no runtime residue remained.
 
+## Phase 11 scheduler integration evidence — 2026-08-28
+
+Phase 11 preserves this Base contract while making its previously reserved
+caller concrete. In every accepted scheduler session, WaveRuntime authenticated
+the complete canonical configuration, initialized BaseRuntime from exactly
+`DifficultyDefinition.base.maxHealth` before committing `WaveActive`, and never
+used the map, client, enemy visual, or starting-cash placeholder as base-health
+authority. Healthy finite completion left MatchLifecycle in `WaveActive` and
+created no victory result.
+
+The accepted primary finite run used MatchId
+`match:67f2240b-1636-4073-a667-a6d0e6fc0184`. The accepted lethal preemption
+run used `match:0c0771bc-82b5-40bb-a13a-9ef04026f874`: one lethal scheduled
+spawn produced Base revision `3` in `Defeated`, Wave revision `3` in
+`DefeatClosed`, and Match revision `9` in `Results`; later scheduled spawns were
+closed. Both clients converged in `0.0344388485` and `0.0335118771` seconds,
+with exactly one defeat, one Results transition, zero finite completions, zero
+accepted-run console errors, and no shutdown residue. This is the same Phase 10
+defeat authority exercised through the Phase 11 boundary, not a second result
+path.
+
 ## Cleanup and residue contract
 
-EnemySimulation shutdown first closes all mutation/callback admission,
-disconnects its shared connections, destroys the sole combined Studio trigger,
-revokes authenticated endpoint outcomes, and clears active enemies, terminal
-records, queues, publisher state, request ledgers, and store references. Only
-then does BaseRuntime disable snapshot/record/boundary callbacks; clear
+WaveRuntime shutdown first closes scheduler request/vote/spawn/boundary and
+publication admission and clears its schedule, ownership, outcome, vote, and
+snapshot state. EnemySimulation shutdown then closes all mutation/callback
+admission, disconnects its shared connections, destroys the sole combined
+Studio trigger, revokes authenticated endpoint outcomes, and clears active
+enemies, terminal records, queues, publisher state, request ledgers, and store
+references. Only then does BaseRuntime disable snapshot/record/boundary callbacks; clear
 publication state, copied outcome ledger, feedback, health, revision, identity,
 result seed, clocks, provenance predicate, callbacks, and detached
 map/difficulty references; replace its payload with nil; and enter Cleaned.
@@ -832,14 +868,21 @@ despawns; one Results transition; replication races/gaps/reconnect; UI state
 calculations; marker/view recreation adapters; and mass idempotent cleanup.
 Injected clocks/schedulers never wait in real time.
 
-The structural verifier must authenticate every new mapping and source byte,
-retain exactly one production Script and one LocalScript in each production
-build and zero runnable Test scripts, exclude every spec/fixture/Studio harness
-from production, keep Lobby free of Match source and Match free of Lobby source,
-prove production `Difficulties`, `Maps`, `Waves`, `Enemies`, and `Assets` remain
-empty, reject generated output, and prove no Phase 11 source or behavior began.
-The actual final gate passed `593` cases across `48` suites. Default, Lobby,
+At the Phase 10 checkpoint, the structural verifier authenticated every new
+mapping and source byte, retained exactly one production Script and one
+LocalScript in each production build and zero runnable Test scripts, excluded
+every spec/fixture/Studio harness from production, kept Lobby free of Match
+source and Match free of Lobby source, proved production `Difficulties`, `Maps`,
+`Waves`, `Enemies`, and `Assets` remained empty, rejected generated output, and
+proved no Phase 11 source or behavior had yet begun.
+That historical gate passed `593` cases across `48` suites. Default, Lobby,
 Match, and Test contain `71/45/71/129` ModuleScripts respectively; production
 builds each retain exactly one Script and one LocalScript, while Test has zero
 runnable scripts. The registry contains `7` reliable Match-only endpoints
 (`4` requests and `3` events) and `4` inbound rate policies.
+
+The Phase 11 verifier now authenticates the added Wave mappings and reliable
+protocol while preserving all of those production-exclusion, empty-catalog,
+project-isolation, one-Script/one-LocalScript, and zero-runnable-test rules. Its
+actual final counts are taken only from the final gate and reported at task
+handoff. Phase 12 remains unbegun.

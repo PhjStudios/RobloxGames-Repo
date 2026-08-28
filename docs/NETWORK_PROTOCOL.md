@@ -14,9 +14,10 @@
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Phase 06 checkpoint endpoints: none; that completed checkpoint used an empty
   authenticated registry
-- Current Phase 10 endpoints: `GetMatchSnapshot`, `SubmitReady`,
+- Current Phase 11 endpoints: `GetMatchSnapshot`, `SubmitReady`,
   `MatchSnapshot`, `GetEnemySnapshot`, `EnemyReplication`, `GetBaseSnapshot`,
-  and `BaseReplication`, all Match-only reliable `RemoteEvent` contracts
+  `BaseReplication`, `GetWaveSnapshot`, `SubmitSkipVote`, and
+  `WaveReplication`, all Match-only reliable `RemoteEvent` contracts
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
   decision
 - Generic remote bus, client-selected action, service, handler, or path: prohibited
@@ -27,15 +28,17 @@ This is the authoritative Phase 06 network-boundary document. The decision
 section was recorded before implementation. The sections below also record the
 completed Packet 06.1–06.5 implementations and evidence. Statements that the
 production registry or rate-policy catalog was empty describe those historical
-checkpoints. The current Phase 10 extension is recorded below and uses the same
+  checkpoints. The current Phase 11 extension is recorded below and uses the same
 authenticated registry, validation, dispatcher, limiter, correlation, logging,
 and cleanup boundary. Phase 08 is complete. Phase 09 implementation, exact
 Studio gate, consolidated review, 467-case local gate, and all four structural
 builds pass on 2026-08-27. Phase 09 is complete; exact-final-SHA CI evidence is
 cited at handoff. Phase 10 focused and exact Match Studio checks, consolidated
 review, `593`-case local gate, and all four structural builds passed on
-2026-08-28. Phase 10 is complete; exact-final-SHA CI is cited at handoff. Phase
-11 remains unbegun.
+  2026-08-28. Phase 10 is complete. Phase 11's exact Studio gate, consolidated
+  review, `742`-case local gate, and all four structural builds also passed on
+  2026-08-28. Exact-final-SHA CI is cited at handoff. Phase 11 is complete and
+  Phase 12 remains unbegun.
 
 ## Official Roblox behavior that shapes the design
 
@@ -1056,3 +1059,41 @@ Exact combined evidence is in `PHASE_06_EXIT_AUDIT.md`. Audit-content commit
 `33022784985` with zero retained artifacts. Phase 06 is complete, Gate A passed,
 and Phase 07 is next but has not begun. No gameplay endpoint or Phase 07 system
 is approved or implemented by this audit.
+
+## Phase 11 Wave protocol (current)
+
+Phase 11 adds exactly three definitions beneath the existing reliable
+`ATDNetwork/v1` Match registry:
+
+- `GetWaveSnapshot`: client-to-server Request with exact payload `{}` and one
+  bounded full `WaveSnapshot` response;
+- `SubmitSkipVote`: client-to-server Request with exact payload
+  `{ matchId, waveNumber }`, where engine request context supplies the Player and
+  the server derives membership, time, threshold, and target state; and
+- `WaveReplication`: server-to-client Event carrying a complete independently
+  convergent `WaveSnapshot`.
+
+The exact production token buckets are capacity `2`, refill `0.25` per second
+for `GetWaveSnapshot`, and capacity `2`, refill `0.5` per second for
+`SubmitSkipVote`. This brings the current catalog to ten reliable Match-only
+definitions and six inbound policies. No `RemoteFunction`,
+`UnreliableRemoteEvent`, generic bus, client-selected recipient, second root, or
+Phase 12 endpoint was added.
+
+`WaveController` connects `WaveReplication` before its first Get. It accepts only
+validated matching full state ordered by `(MatchId, waveRevision)`. One skipped
+episode arms one bounded Get; later events coalesce behind it, healing rearms the
+budget for a later gap, and every semantic skip rejection forces one bounded Get
+even if no gap was already recorded. A direct authenticated Get may replace a
+locked Match generation; events cannot. Studio ordering tests injected stale,
+duplicate, skipped, out-of-order, and delayed messages through the real
+`WaveReplication:FireClient` sender path.
+
+Each safe server pass queues at most one newest full Wave event. Sender false or
+throw is contained per recipient and never rolls back server truth. A terminal
+dependency fault retains the exact canonical `Faulted` snapshot for read-only
+Get recovery until cleanup even when every terminal send fails; voting and all
+other mutation remain closed. Only `DefeatClosed` uses the exact recipient set
+captured during Phase 10 defeat preflight. Other states query live trusted
+recipients synchronously, and the publisher caches no Player, UserId, or
+recipient array.

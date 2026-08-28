@@ -160,6 +160,7 @@ local function makeEnvironment(): any
 		activeSchedulerToken = nil,
 		terminalOutcomes = {},
 		authenticatedTerminalOutcomes = {},
+		terminalCount = 0,
 	}
 
 	local function activeList(): { any }
@@ -375,6 +376,54 @@ local function makeEnvironment(): any
 			table.insert(environment.activeSnapshots, value)
 			return Result.ok(value)
 		end,
+		despawnScheduledForFault = function(_self: unknown, token: unknown, expectedSnapshot: unknown): unknown
+			local runtimeEnemyId = if type(expectedSnapshot) == "table"
+				then (expectedSnapshot :: any).runtimeEnemyId
+				else nil
+			table.insert(environment.trace, `store:fault-despawn:{tostring(runtimeEnemyId)}`)
+			if token ~= environment.activeSchedulerToken then
+				return Result.err(table.freeze({ code = "INVALID_SCHEDULER_SAMPLE" }))
+			end
+			local found = false
+			for index = #environment.activeSnapshots, 1, -1 do
+				if environment.activeSnapshots[index] == expectedSnapshot then
+					found = true
+					table.remove(environment.activeSnapshots, index)
+					break
+				end
+			end
+			if not found then
+				return Result.err(table.freeze({ code = "STALE_RUNTIME_ID" }))
+			end
+			local snapshotValue = expectedSnapshot :: any
+			local despawn = table.freeze({
+				runtimeEnemyId = snapshotValue.runtimeEnemyId,
+				enemyId = snapshotValue.enemyId,
+				laneId = snapshotValue.laneId,
+				revision = snapshotValue.revision + 1,
+				lifecycle = "Despawned",
+				reason = "Manual",
+				sampleServerTime = token.sampleServerTime,
+			})
+			local terminalOutcome = table.freeze({
+				matchId = MATCH_ID,
+				enemyEpoch = 1,
+				runtimeEnemyId = snapshotValue.runtimeEnemyId,
+				enemyId = snapshotValue.enemyId,
+				reason = "Manual",
+				serverTime = token.sampleServerTime,
+			})
+			environment.terminalById[runtimeEnemyId] = despawn
+			environment.authenticatedTerminalOutcomes[terminalOutcome] = true
+			table.insert(environment.terminalOutcomes, terminalOutcome)
+			environment.terminalCount += 1
+			environment.faultDespawn = despawn
+			environment.faultTerminalOutcome = terminalOutcome
+			return Result.ok(table.freeze({
+				despawn = despawn,
+				terminalOutcome = terminalOutcome,
+			}))
+		end,
 		get = function(_self: unknown, runtimeEnemyId: unknown): unknown
 			table.insert(environment.trace, `store:get:{tostring(runtimeEnemyId)}`)
 			for _, value in environment.activeSnapshots do
@@ -537,7 +586,7 @@ local function makeEnvironment(): any
 			return table.freeze({
 				activeCount = #environment.activeSnapshots,
 				lifetimeCount = environment.nextRuntimeEnemyId - 1,
-				terminalCount = 0,
+				terminalCount = environment.terminalCount,
 				queuedTerminalOutcomeCount = #environment.terminalOutcomes,
 				retainedTerminalOutcomeCount = 0,
 				difficultyBound = environment.difficultyBound,
@@ -673,6 +722,10 @@ local function makeEnvironment(): any
 		end,
 		commitManualDespawn = function(_self: unknown, value: unknown): unknown
 			environment.committedDespawn = value
+			if environment.commitManualDespawnMode == "failure" then
+				table.insert(environment.trace, `publisher:commit-despawn:{tostring((value :: any).runtimeEnemyId)}`)
+				return Result.err(table.freeze({ code = "INVALID_SNAPSHOT" }))
+			end
 			return publisherOk("publisher:commit-despawn", (value :: any).runtimeEnemyId)
 		end,
 		commitDefeat = function(_self: unknown, values: unknown): unknown
@@ -895,7 +948,15 @@ local function makeWaveBoundary(environment: any): any
 		end
 		if environment.spawnDuringWavePass then
 			environment.schedulerCapability = frame.spawn
-			environment.schedulerSpawnOutcome = frame.spawn(waveSpawnEvent(environment, frame.sampleServerTime))
+			environment.schedulerSpawnEvent = waveSpawnEvent(environment, frame.sampleServerTime)
+			environment.schedulerSpawnOutcome = frame.spawn(environment.schedulerSpawnEvent)
+		end
+		if environment.wavePassMode == "throw-after-spawn" then
+			error("PRIVATE_WAVE_FAILURE_AFTER_SPAWN", 0)
+		elseif environment.wavePassMode == "yield-after-spawn" then
+			coroutine.yield()
+		elseif environment.wavePassMode == "failure-after-spawn" then
+			return Result.err(table.freeze({ code = "FAULTED" }))
 		end
 		if environment.wavePassTerminalNoop then
 			return Result.ok(false)
@@ -916,6 +977,10 @@ local function makeWaveBoundary(environment: any): any
 		table.insert(environment.trace, "wave:close")
 		environment.waveCloseCalls += 1
 		environment.waveCloseContext = context
+		if environment.readDuringWaveClose then
+			environment.waveCloseListResult = environment.service:list()
+			environment.waveCloseMutationResult = environment.service:spawn("enemy:late", "main")
+		end
 		if environment.waveCloseMode == "failure" then
 			return Result.err(table.freeze({ code = "FAULTED" }))
 		end
@@ -2299,10 +2364,27 @@ return TestHarness.suite("server enemy simulation and replication service", {
 						end,
 					},
 					{
+						mode = "wave-after-spawn",
+						configure = function(environment: any)
+							environment.spawnDuringWavePass = true
+							environment.wavePassMode = "throw-after-spawn"
+							environment.readDuringWaveClose = true
+						end,
+					},
+					{
+						mode = "yield-after-spawn",
+						configure = function(environment: any)
+							environment.spawnDuringWavePass = true
+							environment.wavePassMode = "yield-after-spawn"
+							environment.readDuringWaveClose = true
+						end,
+					},
+					{
 						mode = "commit",
 						configure = function(environment: any)
 							environment.spawnDuringWavePass = true
 							environment.commitSpawnMode = "failure"
+							environment.readDuringWaveClose = true
 						end,
 					},
 					{
@@ -2327,32 +2409,94 @@ return TestHarness.suite("server enemy simulation and replication service", {
 				assertions.equal(environment.waveCloseCalls, 1)
 				assertions.equal(environment.waveCloseContext.disposition, "DependencyFault")
 				assertions.equal(environment.waveCloseContext.passOrdinal, 1)
-				assertions.equal(
-					environment.waveCloseContext.sampleServerTime,
-					if failureCase.mode == "preflight-false" then 0 else 400
-				)
+				assertions.equal(environment.waveCloseContext.sampleServerTime, 400)
+				assertions.isTrue(table.isfrozen(environment.waveCloseContext))
 				assertions.equal(success(assertions, service:getWaveBoundaryStatus(handle)).status, "Faulted")
 				if failureCase.mode == "preflight-false" then
-					assertions.equal(indexOf(environment.trace, "store:step"), 0)
-					assertions.equal(indexOf(environment.trace, "store:finish-scheduler-sample"), 0)
+					assertions.isTrue(
+						indexOf(environment.trace, "publisher:preflight-step")
+							< indexOf(environment.trace, "store:step")
+					)
+					assertions.isTrue(indexOf(environment.trace, "store:finish-scheduler-sample") > 0)
 				else
 					assertions.isTrue(indexOf(environment.trace, "store:finish-scheduler-sample") > 0)
 				end
-				if failureCase.mode == "commit" then
+				if
+					failureCase.mode == "commit"
+					or failureCase.mode == "wave-after-spawn"
+					or failureCase.mode == "yield-after-spawn"
+				then
 					assertions.isTrue(environment.schedulerSpawnOutcome.committed)
-					assertions.isFalse(environment.schedulerSpawnOutcome.replicationCommitted)
+					assertions.equal(#environment.activeSnapshots, 0)
+					assertions.equal(environment.terminalCount, 1)
+					assertions.equal(#environment.terminalOutcomes, 1)
+					assertions.equal(environment.waveCloseContext.committedSpawn.event, environment.schedulerSpawnEvent)
 					assertions.equal(
-						environment.waveCloseContext.committedSpawn.snapshot.runtimeEnemyId,
+						environment.waveCloseContext.committedSpawn.outcome,
+						environment.schedulerSpawnOutcome
+					)
+					assertions.equal(
+						environment.waveCloseContext.committedSpawn.outcome.snapshot.runtimeEnemyId,
 						environment.schedulerSpawnOutcome.snapshot.runtimeEnemyId
 					)
+					assertions.equal(environment.waveCloseContext.terminalOutcome, environment.faultTerminalOutcome)
+					assertions.isTrue(
+						environment.authenticatedTerminalOutcomes[environment.waveCloseContext.terminalOutcome]
+					)
+					assertions.isTrue(
+						indexOf(environment.trace, "store:fault-despawn:1")
+							< indexOf(environment.trace, "store:finish-scheduler-sample")
+					)
+					assertions.isTrue(environment.waveCloseListResult.ok)
+					assertions.equal(#environment.waveCloseListResult.value, 0)
+					assertions.isFalse(environment.waveCloseMutationResult.ok)
+					assertions.equal(environment.waveCloseMutationResult.error.code, "UNAVAILABLE")
+					if failureCase.mode == "commit" then
+						assertions.isFalse(environment.schedulerSpawnOutcome.replicationCommitted)
+						assertions.equal(indexOf(environment.trace, "publisher:preflight-despawn:1"), 0)
+						assertions.equal(indexOf(environment.trace, "publisher:commit-despawn:1"), 0)
+					else
+						assertions.isTrue(environment.schedulerSpawnOutcome.replicationCommitted)
+						assertions.isTrue(
+							indexOf(environment.trace, "publisher:preflight-despawn:1")
+								< indexOf(environment.trace, "store:fault-despawn:1")
+						)
+						assertions.isTrue(
+							indexOf(environment.trace, "store:fault-despawn:1")
+								< indexOf(environment.trace, "publisher:commit-despawn:1")
+						)
+					end
 				elseif failureCase.mode == "advance" then
 					assertions.equal(indexOf(environment.trace, "wave:flush:1"), 0)
 				end
+				environment.stepCallbacks[1](0.1)
+				assertions.equal(environment.waveCloseCalls, 1)
 				assertions.isTrue(success(assertions, service:detachWaveBoundary(handle)))
 				invoke(definition.shutdown)
 			end
 		end
 	),
+
+	TestHarness.case("does not report or retry an unsuccessful private Wave fault close", function(assertions)
+		local environment, service, definition, handle = createBoundWaveService(assertions)
+		environment.stepSampleServerTime = 401
+		environment.preflightStepMode = "false"
+		environment.waveCloseMode = "failure"
+		environment.stepCallbacks[1](0.1)
+		assertions.equal(service:getLifecycleState(), "Failed")
+		assertions.equal(environment.waveCloseCalls, 1)
+		assertions.equal(environment.waveCloseContext.passOrdinal, 1)
+		assertions.equal(environment.waveCloseContext.sampleServerTime, 401)
+		assertions.equal(success(assertions, service:getWaveBoundaryStatus(handle)).status, "Active")
+		environment.stepCallbacks[1](0.1)
+		assertions.equal(environment.waveCloseCalls, 1)
+		local shutdownSucceeded, shutdownFailure = pcall(function()
+			invoke(definition.shutdown)
+		end)
+		assertions.isFalse(shutdownSucceeded)
+		assertions.contains(shutdownFailure, "[ATD_ENEMY_SIMULATION_SERVICE][code=CLEANUP_FAILED]")
+		assertions.equal(environment.waveCloseCalls, 1)
+	end),
 
 	TestHarness.case("authenticates one mutation-free Wave binding transaction", function(assertions)
 		local environment = makeEnvironment()

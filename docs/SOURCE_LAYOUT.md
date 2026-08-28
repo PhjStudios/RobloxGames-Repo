@@ -17,12 +17,13 @@ place-isolated mappings recorded in `docs/ROJO_PROJECTS.md`.
 - Studio-authored content changed: no
 - Place saved or published: no
 
-Those fields record Packet 02.1. The current Phase 10 extension adds only
+Those fields record Packet 02.1. The current Phase 11 extension adds only
 ModuleScripts beneath the established shared/server-Match/client-Match layers
 and test-only mirrors/specs; it adds no runnable entrypoint. Focused and exact
-Studio checks passed on 2026-08-28. Phase 11 remains unbegun.
+Studio checks passed on 2026-08-28. Phase 11 is complete and Phase 12 remains
+unbegun.
 
-## Current Phase 10-relevant source tree excerpt
+## Current Phase 11-relevant source tree excerpt
 
 ```text
 src/
@@ -318,7 +319,8 @@ EnemySimulation and BaseController between MatchReadyController and
 EnemyController; no Script or LocalScript is added. Two Match-only reliable
 definitions and one request-rate policy are added. Production `Difficulties`,
 `Maps`, `Waves`, `Enemies`, and `Assets` remain empty, so runtime initialization
-is dormant outside Studio/test injection. Phase 11 remains unbegun.
+is dormant outside Studio/test injection. At that Phase 10 checkpoint, Phase 11
+remained unbegun.
 
 ## Bootstrap move manifest
 
@@ -584,7 +586,7 @@ negative controls, and Studio tools occur in no production build. Packets
 gate, and exact structural inventory passed on 2026-08-27. Phase 09 is complete;
 that dated inventory remains historical. The current Phase 10 extension follows.
 
-### Current Phase 10 source and Test boundary
+### Phase 10 source and Test boundary (historical)
 
 `BaseProtocol` is mapped once through the normal authoritative shared tree.
 Default and Match map the three `src/server/match/base` modules and four
@@ -610,8 +612,8 @@ contain `71/45/71/129` ModuleScripts and Script/LocalScript counts `1/1`, `1/1`,
 
 Phase 10 focused and exact Match Studio checks, consolidated review, complete
 local gate, and all four structural builds passed on 2026-08-28. Phase 10 is
-complete; exact-final-SHA CI is cited at handoff. Phase 11 is next and remains
-unbegun.
+complete; exact-final-SHA CI is cited at its handoff. Phase 11 was next and
+unbegun at that historical checkpoint.
 
 ## Historical Packet 02 Roblox Studio verification
 
@@ -704,9 +706,9 @@ entrypoint, Script, or LocalScript. Production code must never import a test
 module, and fixtures and intentional negative controls stay under test-only
 directories. The frozen production `src/shared/config/Enemies.luau` and
 `src/shared/config/Assets.luau` catalogs remain empty, as do `Difficulties`,
-`Maps`, and `Waves`. The production remote registry contains only the seven
-reliable Match endpoints, and only its four client-to-server requests have
-production rate policies.
+`Maps`, and `Waves`. At Phase 10 completion the production remote registry
+contained seven reliable Match endpoints, and four client-to-server requests
+had production rate policies.
 
 `test.project.json` creates no runnable Script or LocalScript. Conversely,
 Default, Lobby, and Match map no test directory.
@@ -717,12 +719,12 @@ modules and three production map modules, and an exact positive
 path/class/source map for all 30 Test-owned ModuleScripts. Those counts are
 historical.
 
-The current Phase 10 verifier enforces both mapping directions across the
+The Phase 10 verifier historically enforced both mapping directions across the
 complete generated DataModels and its exact allowlists of authoritative shared,
 production-mirror, and Test-owned modules. It authenticates DataModel path,
 class, authoritative file, and byte-for-byte source, rejects unlisted Test-owned
 source, proves zero Test runnables, excludes all tests and Studio tools from
-production, and rejects Phase 11 source or behavior. The final Phase 10
+production, and rejected then-unbegun Phase 11 source or behavior. The final Phase 10
 inventory is `71/45/71/129` ModuleScripts across Default/Lobby/Match/Test, with
 no Test runnable source.
 
@@ -734,3 +736,31 @@ consolidated review, 467-case local gate, and four current structural builds
 passed on 2026-08-27 and are recorded in `docs/ENEMY_SIMULATION.md`. Phase 10's
 focused and exact Studio evidence is recorded in `docs/BASE_RUNTIME.md`. The
 exact-final-SHA CI evidence is cited at handoff.
+
+## Current Phase 11 source and Test boundary
+
+Phase 11 adds shared `match/WaveProtocol.luau`; server-Match
+`waves/WaveRuntime.luau`, `WaveReplicationPublisher.luau`, and
+`WaveRuntimeService.luau`; and client-Match `waves/WaveStateReducer.luau` and
+`WaveController.luau`. Existing Match bootstraps compose those ModuleScripts but
+remain the only production Script and LocalScript. Narrow extensions to
+MatchLifecycle and EnemySimulation/Base integration preserve their established
+layers; no Phase 12 directory, tower runtime, HUD, economy service, or new
+runnable entrypoint exists.
+
+Test maps exact production copies beneath `ProductionServerWaves` and
+`ProductionClientWaves`. The Phase 11-owned test surface is
+`WaveFixtures.luau`; `AuthenticatedWaveFixtures`, `WaveProtocol`,
+`WaveRuntime`, `WaveReplicationPublisher`, `WaveRuntimeService`,
+`WaveStateReducer`, `WaveController`, and `WaveRuntimeIntegration` specs, plus
+narrow affected MatchLifecycle/Enemy/Base/network coverage. Studio evidence
+lives behind production `RunService:IsStudio()` triggers and bounded diagnostics,
+not in `tests/studio` or a production content catalog.
+
+The current verified Default/Lobby/Match/Test ModuleScript inventory is
+`77/46/77/144`; Script/LocalScript counts are `1/1`, `1/1`, `1/1`, and `0/0`.
+Test contains 70 explicitly allowlisted Test-owned modules and no runnable
+source. The verifier authenticates both mapping directions and exact source
+bytes, ten Match-only reliable definitions, six inbound policies, role
+isolation, production test exclusion, and empty production `Assets`, `Enemies`,
+`Maps`, `Difficulties`, `Waves`, and difficulty-specific `Economy` rules.

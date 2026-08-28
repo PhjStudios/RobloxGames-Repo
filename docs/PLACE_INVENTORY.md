@@ -21,7 +21,7 @@ keys, cookies, or secrets.
 - Roblox publishing authorized: no
 
 Those fields record Packet 00.3. The exact Match identity was reconfirmed for
-the unsaved Phase 10 two-client gate on 2026-08-28. Only mapped branch source and
+the unsaved Phase 11 two-client gate on 2026-08-28. Only mapped branch source and
 runtime-created evidence objects changed during Play; Studio-authored content
 remained untouched and unsaved.
 
@@ -102,6 +102,11 @@ combined Rojo project name is `Ant Tower Defense`.
   `35420107`, official owner `PHJGAMES`, and `ATDPlaceRole = Match`. Exact base,
   world-presentation, defeat, and cleanup evidence is in
   `docs/BASE_RUNTIME.md#executed-studio-evidence--2026-08-28`.
+- Phase 11 two-client authored-wave gate identity reconfirmed on 2026-08-28:
+  PlaceId `136401514513678`, GameId `10757629094`, CreatorType `Group`, CreatorId
+  `35420107`, official owner `PHJGAMES`, and `ATDPlaceRole = Match`. Exact
+  scheduler, recovery, stress, completion, defeat, and cleanup evidence is in
+  `docs/WAVE_RUNTIME.md#executed-studio-evidence--2026-08-28`.
 - Controlled Phase 07 Save To Cloud: succeeded at `2026-08-27T02:11:31Z` under
   the user's exact graybox authorization; it did not change visibility,
   settings, services, Lobby, or unrelated assets.
@@ -453,6 +458,25 @@ Roblox environment.
   Studio build, so the established delayed-bootstrap active-session fallback was
   used and explicitly measured. This limitation does not substitute for later
   published-client/rejoin testing.
+
+### Phase 11 authored-wave gate
+
+- Complete in the restricted Match place on 2026-08-28. Twelve exact unsaved
+  two-client Studio scenario records, the one consolidated review, the
+  `742`-case/`56`-suite local gate, and all four structural builds pass;
+  exact-final-SHA CI is cited at handoff.
+- One runtime-only full-root fixture transaction authenticated the otherwise
+  empty production catalogs and ran the real finite scheduler over the saved
+  Phase 07 lane. No lasting catalog, wave, difficulty, enemy, economy, map,
+  marker, model, asset, or Studio-authored content was created or changed.
+- Exact-time ordering, empty waves, five-second intermission, allowed overlap,
+  skip/disconnect quorum, production-transport recovery, the `1/32/64/128`
+  due-spawn ladder, healthy finite completion without Results, and lethal defeat
+  preemption passed as recorded in
+  [Authored Wave Runtime and Difficulty Scheduler](WAVE_RUNTIME.md#executed-studio-evidence--2026-08-28).
+- Both clients retained constant Wave ownership and converged within the declared
+  bound. Accepted sessions had zero console errors, stopped without runtime
+  residue, left Studio in Edit mode, and performed no save or publication.
 
 ### Needed before Phase 26 teleport testing
 

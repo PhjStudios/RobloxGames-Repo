@@ -270,29 +270,30 @@ return TestHarness.suite("bounded full-state wave replication publisher", {
 		assertions.equal(publisher:getMetrics().publicationCount, 1)
 	end),
 
-	TestHarness.case("enforces exactly one contiguous flush starting at Enemy pass one", function(assertions)
+	TestHarness.case("adopts the current Enemy pass then enforces exactly one contiguous flush", function(assertions)
 		local environment = makeEnvironment()
 		local publisher = newPublisher(assertions, environment)
-		local empty = expectSuccess(assertions, publisher:flush(1))
+		local empty = expectSuccess(assertions, publisher:flush(73))
 		assertions.isFalse(empty.published)
 		assertions.isNil(empty.waveRevision)
 		assertions.equal(environment.providerCalls, 0)
 
 		assertions.isTrue(expectSuccess(assertions, publisher:queueSnapshot(snapshot(1))))
-		local second = expectSuccess(assertions, publisher:flush(2))
+		local second = expectSuccess(assertions, publisher:flush(74))
 		assertions.isTrue(second.published)
-		assertions.equal(second.passOrdinal, 2)
+		assertions.equal(second.passOrdinal, 74)
 		assertions.equal(publisher:getMetrics().flushCount, 2)
 
 		local duplicateEnvironment = makeEnvironment()
 		local duplicate = newPublisher(assertions, duplicateEnvironment)
-		expectSuccess(assertions, duplicate:flush(1))
-		expectFailure(assertions, duplicate:flush(1), "INVALID_PASS", "flush")
+		expectSuccess(assertions, duplicate:flush(73))
+		expectFailure(assertions, duplicate:flush(73), "INVALID_PASS", "flush")
 		assertions.isTrue(duplicate:getMetrics().faulted)
 
 		local skippedEnvironment = makeEnvironment()
 		local skipped = newPublisher(assertions, skippedEnvironment)
-		expectFailure(assertions, skipped:flush(2), "INVALID_PASS", "flush")
+		expectSuccess(assertions, skipped:flush(73))
+		expectFailure(assertions, skipped:flush(75), "INVALID_PASS", "flush")
 		assertions.isTrue(skipped:getMetrics().faulted)
 	end),
 

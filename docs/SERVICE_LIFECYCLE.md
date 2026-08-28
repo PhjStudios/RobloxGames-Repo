@@ -24,14 +24,17 @@ Those fields record Packet 03.1 at completion. Packet 06.1 later registered one
 foundation-only `NetworkRegistry` service on the server after configuration
 validation. Phase 08 added the Match-only `MatchLifecycle` server service and
 `MatchReadyController` client service. Phase 09 added `EnemySimulation` and
-`EnemyController`; Phase 10 now adds `BaseRuntime` and `BaseController` between
-those Match owners. Phase 08 and its Studio, consolidated-review, and
+`EnemyController`; Phase 10 added `BaseRuntime` and `BaseController` between
+those Match owners. Phase 11 adds `WaveRuntime` after EnemySimulation and
+`WaveController` after EnemyController. Phase 08 and its Studio, consolidated-review, and
 complete-local-gate evidence passed on 2026-08-27. Phase 09 code, exact Match
 Studio gate, consolidated review, 467-case local gate, and all four structural
 builds passed on 2026-08-27. Phase 09 is complete. Phase 10 focused and exact
 Studio checks, consolidated review, `593`-case local gate, and all four
 structural builds passed on 2026-08-28. Phase 10 is complete; exact-final-SHA CI
-is cited at handoff. Phase 11 remains unbegun.
+is cited at handoff. Phase 11's exact Studio, consolidated-review,
+`742`-case/`56`-suite local, and four-build gates also pass. Phase 11 is complete;
+Phase 12 remains unbegun.
 
 ## Public contract
 
@@ -304,10 +307,10 @@ idempotent reverse lifecycle path.
 Packets 09.1–09.5 and the exact two-client Match Studio gate passed on
 2026-08-27, including constant one-server-simulation/one-client-render
 connection ownership and residue-free shutdown. The consolidated review and
-complete local/structural gates also pass. Phase 09 is complete. The current
-Phase 10 extension follows; no Phase 11 wave scheduler has begun.
+complete local/structural gates also pass. Phase 09 is complete. The historical
+Phase 10 extension follows; Phase 11 had not begun at that checkpoint.
 
-## Phase 10 Match composition (current)
+## Phase 10 Match composition (historical)
 
 The Match entrypoints bind `GetBaseSnapshot` and capture `BaseReplication` while
 NetworkRegistry is still Registering. The server registers BaseRuntime after
@@ -467,7 +470,46 @@ Match Studio evidence, consolidated review, 467-case local gate, and all four
 structural builds pass on 2026-08-27. Phase 09 is complete. Phase 10's focused
 and exact Studio lifecycle evidence, consolidated review, complete local gate,
 and all four structural builds passed on 2026-08-28. Phase 10 is complete;
-exact-final-SHA CI is cited at handoff. Phase 11 remains unbegun. Current lifecycle
-evidence is in `docs/ENEMY_SIMULATION.md` and `docs/BASE_RUNTIME.md`.
+exact-final-SHA CI is cited at its handoff. Phase 11 remained unbegun at that
+historical checkpoint. Earlier lifecycle evidence is in
+`docs/ENEMY_SIMULATION.md` and `docs/BASE_RUNTIME.md`.
 Configuration evidence remains in
 `docs/CONFIGURATION_VALIDATION.md`.
+
+## Phase 11 Match composition (current)
+
+The current server registration order is:
+
+```text
+NetworkRegistry -> MatchLifecycle -> BaseRuntime -> EnemySimulation -> WaveRuntime
+```
+
+The current client order is:
+
+```text
+MatchReadyController -> BaseController -> EnemyController -> WaveController
+```
+
+WaveRuntime depends on the exact loaded Match/runtime-map identity, BaseRuntime,
+and EnemySimulation, but adds no Heartbeat. EnemySimulation remains the sole
+server step owner and invokes one non-yielding sampled Wave boundary. The Wave
+service is production-dormant while canonical production configuration is empty.
+Its Studio-only trigger is absent outside Studio and cannot become a second
+production lifecycle path.
+
+Reverse shutdown is WaveRuntime -> EnemySimulation -> BaseRuntime ->
+MatchLifecycle/MapLoader -> NetworkRegistry on the server. Client Wave state
+cleans before Enemy, Base, Ready, map, and network owners. Each owner has a
+constant connection budget: WaveRuntime has no simulation connection, and
+WaveController owns exactly three network listeners regardless of waves,
+groups, spawns, enemies, votes, or revisions.
+
+If the sole Wave callback fails after an Enemy Store spawn commits,
+EnemySimulation finishes its operation, fault-despawns the exact committed
+snapshot at the authenticated sample, and invokes the one-shot Wave close with
+the exact frozen `{ event, outcome }` plus authenticated Manual terminal. Wave
+reconciles ownership and counters once, enters `Faulted`, and the service retains
+read-only truth until cleanup. A pre-first-pass dependency fault first obtains a
+fresh authenticated zero-delta Store sample and uses pass ordinal one. An
+unsuccessful private close is not falsely reported as `Faulted` and is not
+retried.
