@@ -81,6 +81,10 @@
           "$path": "src/server/match/waves"
         },
 
+        "ProductionServerTowers": {
+          "$path": "src/server/match/towers"
+        },
+
         "ProductionServerMatchLifecycle": {
           "$path": "src/server/match/lifecycle"
         },

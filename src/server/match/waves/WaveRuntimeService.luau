@@ -37,6 +37,8 @@ export type Operation =
 	| "onEnemyPass"
 	| "flushEnemyPass"
 	| "close"
+	| "installStudioTowerBoundary"
+	| "detachStudioTowerBoundary"
 	| "runtimeTrigger"
 
 export type ErrorCode =
@@ -159,6 +161,19 @@ export type CreateRuntimeTrigger = (handler: RuntimeTriggerHandler) -> unknown
 export type IsStudio = () -> unknown
 export type ValidateConfiguration = (sources: unknown) -> unknown
 
+export type StudioTowerBoundaryAdapter = {
+	buildStudioFixtureSources: (self: StudioTowerBoundaryAdapter) -> unknown,
+	prepareStudioConfiguration: (
+		self: StudioTowerBoundaryAdapter,
+		canonicalRoot: unknown,
+		matchId: unknown
+	) -> unknown,
+	commitStudioConfiguration: (self: StudioTowerBoundaryAdapter, token: unknown) -> unknown,
+	dispatchStudioEvidence: (self: StudioTowerBoundaryAdapter, fixedOperation: unknown) -> unknown,
+	getStudioDiagnostics: (self: StudioTowerBoundaryAdapter) -> unknown,
+	closeFromWave: (self: StudioTowerBoundaryAdapter) -> unknown,
+}
+
 export type TestDependencies = {
 	matchLifecycle: MatchLifecycleAdapter,
 	baseRuntime: BaseRuntimeAdapter,
@@ -207,6 +222,14 @@ export type ServiceMetrics = {
 	studioMaximumSpawnLatenessSeconds: number,
 	studioEarlySpawnCount: number,
 	studioSpawnEvidenceCount: number,
+	studioTowerBoundaryCount: number,
+	studioTowerPreparedTokenCount: number,
+	studioTowerBuildCount: number,
+	studioTowerPrepareCount: number,
+	studioTowerCommitCount: number,
+	studioTowerDispatchCount: number,
+	studioTowerDiagnosticsCount: number,
+	studioTowerCloseCount: number,
 }
 
 type BoundaryStatus = {
@@ -270,6 +293,19 @@ type ServiceData = {
 	studioBaseCatalogPending: unknown?,
 	studioRuntimeMapPending: unknown?,
 	studioSpawnEvidence: { unknown },
+	studioTowerBoundaryAdapter: StudioTowerBoundaryAdapter?,
+	studioTowerBoundaryHandle: unknown,
+	studioTowerOwnerToken: unknown,
+	studioTowerIssuedHandles: { [any]: boolean },
+	studioTowerPreparedToken: unknown,
+	studioTowerCallbackActive: boolean,
+	studioTowerReentryViolation: boolean,
+	studioTowerBuildCount: number,
+	studioTowerPrepareCount: number,
+	studioTowerCommitCount: number,
+	studioTowerDispatchCount: number,
+	studioTowerDiagnosticsCount: number,
+	studioTowerCloseCount: number,
 	service: any?,
 	serviceDefinition: ServiceLifecycle.ServiceDefinition?,
 }
@@ -285,6 +321,13 @@ local STUDIO_MAP_MODEL_ASSET_KEY = "test.phase11.studio.map-model"
 local MAX_STUDIO_LANES = 32
 local MAX_STUDIO_OPERATIONS = 10_000
 local MAX_STUDIO_ASSERTIONS = 10_000
+local MAX_STUDIO_TOWER_DIAGNOSTIC_NODES = 256
+local MAX_STUDIO_TOWER_DIAGNOSTIC_DEPTH = 6
+local MAX_STUDIO_TOWER_DIAGNOSTIC_STRING = 256
+local MAX_STUDIO_TOWER_CFRAME_POSITION = 100_000
+local MAX_STUDIO_TOWER_FIXTURE_NODES = 512
+local MAX_STUDIO_TOWER_FIXTURE_DEPTH = 10
+local MAX_STUDIO_TOWER_RECORD_FIELDS = 32
 local STUDIO_SCENARIOS = table.freeze({
 	Primary = true,
 	Empty = true,
@@ -321,6 +364,60 @@ local STUDIO_SKIP_FIELDS = table.freeze({
 local STUDIO_ASSERTION_FIELDS = table.freeze({
 	operation = true,
 	passed = true,
+})
+
+local STUDIO_TOWER_REQUEST_FIELDS = table.freeze({
+	operation = true,
+})
+
+local STUDIO_TOWER_OPERATIONS: { [string]: boolean } = table.freeze({
+	TowerCreateNext = true,
+	TowerRemoveVisualLast = true,
+	TowerRecreateVisualLast = true,
+	TowerRemoveLast = true,
+	TowerInvalidTemplate = true,
+	TowerCleanup = true,
+})
+
+local STUDIO_TOWER_BOUNDARY_METHODS: { [string]: boolean } = table.freeze({
+	buildStudioFixtureSources = true,
+	prepareStudioConfiguration = true,
+	commitStudioConfiguration = true,
+	dispatchStudioEvidence = true,
+	getStudioDiagnostics = true,
+	closeFromWave = true,
+})
+
+local STUDIO_TOWER_FIXTURE_FIELDS: { [string]: boolean } = table.freeze({
+	assets = true,
+	towers = true,
+})
+
+local STUDIO_TOWER_ASSET_FIELDS: { [string]: boolean } = table.freeze({
+	key = true,
+	kind = true,
+})
+
+local STUDIO_TOWER_DEFINITION_FIELDS: { [string]: boolean } = table.freeze({
+	id = true,
+	displayName = true,
+	description = true,
+	modelAssetKey = true,
+	iconAssetKey = true,
+	placementCost = true,
+	footprintRadiusStuds = true,
+	placementCap = true,
+	supportedTargetModes = true,
+	defaultTargetMode = true,
+	levels = true,
+	tags = true,
+	mergeProgression = true,
+})
+
+local EXPECTED_STUDIO_TOWER_IDS = table.freeze({
+	"tower:phase12-single",
+	"tower:phase12-splash",
+	"tower:phase12-support",
 })
 
 local LIFECYCLE_METHODS = table.freeze({
@@ -471,11 +568,16 @@ export type Service = typeof(setmetatable({} :: {}, ServiceMethods))
 export type TestConstructor = (dependencies: TestDependencies) -> Service
 
 local SERVICE_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ServiceData }
+local STUDIO_TOWER_HANDLE_OWNERS = setmetatable({}, { __mode = "k" }) :: { [any]: unknown }
+local STUDIO_TOWER_ACTIVE_HANDLES = setmetatable({}, { __mode = "k" }) :: { [any]: boolean }
 
 local WaveRuntimeService = {
 	STUDIO_TRIGGER_NAME = STUDIO_TRIGGER_NAME,
 	newForTests = nil :: TestConstructor?,
 }
+
+local STUDIO_TOWER_DETACH_TRUE = Result.ok(true)
+local STUDIO_TOWER_DETACH_FALSE = Result.ok(false)
 
 local function staticError(code: string): never
 	error(`{STATIC_ERROR_PREFIX}[code={code}]`, 0)
@@ -554,6 +656,296 @@ local function hasMethods(value: unknown, methods: { string }): boolean
 		end
 	end
 	return true
+end
+
+local function isExactStudioTowerBoundaryAdapter(value: unknown): boolean
+	if
+		type(value) ~= "table"
+		or getmetatable(value :: any) ~= nil
+		or not table.isfrozen(value :: any)
+		or not hasExactFields(value :: any, STUDIO_TOWER_BOUNDARY_METHODS)
+	then
+		return false
+	end
+	for methodName in STUDIO_TOWER_BOUNDARY_METHODS do
+		if type((value :: any)[methodName]) ~= "function" then
+			return false
+		end
+	end
+	return true
+end
+
+local function isExactSuccessResult(value: unknown): boolean
+	return type(value) == "table"
+		and getmetatable(value :: any) == nil
+		and table.isfrozen(value :: any)
+		and (value :: any).ok == true
+		and hasExactFields(value :: any, { ok = true, value = true })
+end
+
+local function callStudioTower(data: ServiceData, callback: (...any) -> any, ...: any): (boolean, unknown)
+	if data.studioTowerCallbackActive then
+		data.studioTowerReentryViolation = true
+		return false, nil
+	end
+	data.studioTowerCallbackActive = true
+	data.studioTowerReentryViolation = false
+	local called, value = callNonYielding(callback, ...)
+	data.studioTowerCallbackActive = false
+	if data.studioTowerReentryViolation then
+		return false, nil
+	end
+	return called, value
+end
+
+local function denseFrozenArray(value: unknown, exactLength: number): boolean
+	if
+		type(value) ~= "table"
+		or getmetatable(value :: any) ~= nil
+		or not table.isfrozen(value :: any)
+		or #value ~= exactLength
+	then
+		return false
+	end
+	local count = 0
+	for key in next, value :: any do
+		count += 1
+		if type(key) ~= "number" or not Validation.isSafeInteger(key) or key < 1 or key > exactLength then
+			return false
+		end
+	end
+	return count == exactLength
+end
+
+type FrozenTreeBudget = {
+	nodes: number,
+	maximumNodes: number,
+	maximumDepth: number,
+	seen: { [any]: boolean },
+}
+
+local function copyFrozenTree(
+	value: unknown,
+	budget: FrozenTreeBudget,
+	depth: number,
+	freezeOutput: boolean
+): (unknown, boolean)
+	local valueType = type(value)
+	if typeof(value) == "CFrame" then
+		if not freezeOutput or depth > budget.maximumDepth then
+			return nil, false
+		end
+		local x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22 = (value :: CFrame):GetComponents()
+		local components = { x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22 }
+		for _, component in components do
+			if not Validation.isFiniteNumber(component) or math.abs(component) > Validation.MAX_SAFE_INTEGER then
+				return nil, false
+			end
+		end
+		if
+			math.abs(x) > MAX_STUDIO_TOWER_CFRAME_POSITION
+			or math.abs(y) > MAX_STUDIO_TOWER_CFRAME_POSITION
+			or math.abs(z) > MAX_STUDIO_TOWER_CFRAME_POSITION
+		then
+			return nil, false
+		end
+		budget.nodes += 1
+		if budget.nodes > budget.maximumNodes then
+			return nil, false
+		end
+		return table.freeze({
+			x = x,
+			y = y,
+			z = z,
+			r00 = r00,
+			r01 = r01,
+			r02 = r02,
+			r10 = r10,
+			r11 = r11,
+			r12 = r12,
+			r20 = r20,
+			r21 = r21,
+			r22 = r22,
+		}),
+			true
+	end
+	if valueType == "nil" or valueType == "boolean" then
+		return value, true
+	elseif valueType == "number" then
+		local numberValue = value :: number
+		return value,
+			numberValue == numberValue and numberValue > -math.huge and numberValue < math.huge and math.abs(
+				numberValue
+			) <= Validation.MAX_SAFE_INTEGER
+	elseif valueType == "string" then
+		return value, #(value :: string) <= MAX_STUDIO_TOWER_DIAGNOSTIC_STRING
+	elseif valueType ~= "table" or depth > budget.maximumDepth then
+		return nil, false
+	end
+	local source = value :: { [any]: unknown }
+	if getmetatable(source) ~= nil or not table.isfrozen(source) or budget.seen[source] then
+		return nil, false
+	end
+	budget.seen[source] = true
+	budget.nodes += 1
+	if budget.nodes > budget.maximumNodes then
+		return nil, false
+	end
+
+	local entryCount = 0
+	local numericCount = 0
+	local stringCount = 0
+	for key in next, source do
+		entryCount += 1
+		if entryCount > MAX_STUDIO_TOWER_RECORD_FIELDS then
+			return nil, false
+		elseif type(key) == "number" then
+			if not Validation.isSafeInteger(key) or key < 1 then
+				return nil, false
+			end
+			numericCount += 1
+		elseif type(key) == "string" then
+			if #key < 1 or #key > 64 or string.match(key, "^[A-Za-z][A-Za-z0-9]*$") == nil then
+				return nil, false
+			end
+			stringCount += 1
+		else
+			return nil, false
+		end
+	end
+	if numericCount > 0 and stringCount > 0 then
+		return nil, false
+	elseif numericCount > 0 and (#source ~= numericCount or entryCount ~= numericCount) then
+		return nil, false
+	end
+
+	local copy: { [any]: unknown } = table.create(if numericCount > 0 then numericCount else 0)
+	for key, child in source do
+		local childCopy, copied = copyFrozenTree(child, budget, depth + 1, freezeOutput)
+		if not copied then
+			return nil, false
+		end
+		copy[key] = childCopy
+	end
+	if freezeOutput then
+		table.freeze(copy)
+	end
+	return copy, true
+end
+
+local function detachedStudioTowerResult(value: unknown): unknown?
+	if
+		type(value) ~= "table"
+		or getmetatable(value :: any) ~= nil
+		or not table.isfrozen(value :: any)
+		or type((value :: any).ok) ~= "boolean"
+	then
+		return nil
+	end
+	local succeeded = (value :: any).ok == true
+	local payloadField = if succeeded then "value" else "error"
+	if
+		not hasExactFields(value :: any, if succeeded then { ok = true, value = true } else { ok = true, error = true })
+	then
+		return nil
+	end
+	local budget: FrozenTreeBudget = {
+		nodes = 0,
+		maximumNodes = MAX_STUDIO_TOWER_DIAGNOSTIC_NODES,
+		maximumDepth = MAX_STUDIO_TOWER_DIAGNOSTIC_DEPTH,
+		seen = {},
+	}
+	local detached, copied = copyFrozenTree((value :: any)[payloadField], budget, 0, true)
+	if not copied then
+		return nil
+	end
+	return if succeeded then Result.ok(detached) else Result.err(detached)
+end
+
+local function validateAndCopyStudioTowerFixtures(value: unknown): { [string]: any }?
+	if
+		type(value) ~= "table"
+		or getmetatable(value :: any) ~= nil
+		or not table.isfrozen(value :: any)
+		or not hasExactFields(value :: any, STUDIO_TOWER_FIXTURE_FIELDS)
+		or not denseFrozenArray((value :: any).assets, 6)
+		or not denseFrozenArray((value :: any).towers, 3)
+	then
+		return nil
+	end
+
+	local assetsByKey: { [string]: string } = {}
+	local towerModelCount = 0
+	local iconCount = 0
+	for _, record in (value :: any).assets do
+		if
+			type(record) ~= "table"
+			or getmetatable(record) ~= nil
+			or not table.isfrozen(record)
+			or not hasExactFields(record, STUDIO_TOWER_ASSET_FIELDS)
+			or type(record.key) ~= "string"
+			or not Validation.isSymbolicKey(record.key)
+			or assetsByKey[record.key] ~= nil
+			or (record.kind ~= "TowerModel" and record.kind ~= "Icon")
+		then
+			return nil
+		end
+		assetsByKey[record.key] = record.kind
+		if record.kind == "TowerModel" then
+			towerModelCount += 1
+		else
+			iconCount += 1
+		end
+	end
+	if towerModelCount ~= 3 or iconCount ~= 3 then
+		return nil
+	end
+
+	local usedAssets: { [string]: boolean } = {}
+	for index, definition in (value :: any).towers do
+		if type(definition) ~= "table" or getmetatable(definition) ~= nil or not table.isfrozen(definition) then
+			return nil
+		end
+		local fieldCount = 0
+		for fieldName in next, definition do
+			fieldCount += 1
+			if type(fieldName) ~= "string" or STUDIO_TOWER_DEFINITION_FIELDS[fieldName] ~= true then
+				return nil
+			end
+		end
+		local expectsDefaultTargetMode = index ~= 3
+		for fieldName in STUDIO_TOWER_DEFINITION_FIELDS do
+			local required = fieldName ~= "defaultTargetMode" or expectsDefaultTargetMode
+			if (rawget(definition, fieldName) ~= nil) ~= required then
+				return nil
+			end
+		end
+		if
+			fieldCount ~= (if expectsDefaultTargetMode then 13 else 12)
+			or definition.id ~= EXPECTED_STUDIO_TOWER_IDS[index]
+			or not Ids.validateTowerId(definition.id).ok
+			or type(definition.modelAssetKey) ~= "string"
+			or assetsByKey[definition.modelAssetKey] ~= "TowerModel"
+			or type(definition.iconAssetKey) ~= "string"
+			or assetsByKey[definition.iconAssetKey] ~= "Icon"
+			or usedAssets[definition.modelAssetKey]
+			or usedAssets[definition.iconAssetKey]
+			or not denseFrozenArray(definition.levels, 3)
+		then
+			return nil
+		end
+		usedAssets[definition.modelAssetKey] = true
+		usedAssets[definition.iconAssetKey] = true
+	end
+
+	local budget: FrozenTreeBudget = {
+		nodes = 0,
+		maximumNodes = MAX_STUDIO_TOWER_FIXTURE_NODES,
+		maximumDepth = MAX_STUDIO_TOWER_FIXTURE_DEPTH,
+		seen = {},
+	}
+	local copied, success = copyFrozenTree(value, budget, 0, false)
+	return if success then copied :: { [string]: any } else nil
 end
 
 local function isRuntimeTriggerAdapter(value: unknown): boolean
@@ -726,6 +1118,41 @@ local function detachBoundary(data: ServiceData): boolean
 	return called and isSuccess(detachResult) and (detachResult :: any).value == true
 end
 
+local function invalidateStudioTowerBoundary(data: ServiceData)
+	local handle = data.studioTowerBoundaryHandle
+	data.studioTowerBoundaryAdapter = nil
+	data.studioTowerBoundaryHandle = nil
+	data.studioTowerPreparedToken = nil
+	data.studioTowerCallbackActive = false
+	data.studioTowerReentryViolation = false
+	if handle ~= nil then
+		STUDIO_TOWER_ACTIVE_HANDLES[handle] = nil
+	end
+end
+
+local function revokeStudioTowerHandles(data: ServiceData)
+	for handle in data.studioTowerIssuedHandles do
+		STUDIO_TOWER_ACTIVE_HANDLES[handle] = nil
+		STUDIO_TOWER_HANDLE_OWNERS[handle] = nil
+	end
+	table.clear(data.studioTowerIssuedHandles)
+end
+
+local function closeStudioTowerBoundary(data: ServiceData): boolean
+	local adapter = data.studioTowerBoundaryAdapter
+	if adapter == nil then
+		invalidateStudioTowerBoundary(data)
+		revokeStudioTowerHandles(data)
+		return true
+	end
+	data.studioTowerCloseCount = math.min(data.studioTowerCloseCount + 1, Validation.MAX_SAFE_INTEGER)
+	local called, resultValue = callStudioTower(data, adapter.closeFromWave, adapter)
+	local accepted = called and isExactSuccessResult(resultValue) and type((resultValue :: any).value) == "boolean"
+	invalidateStudioTowerBoundary(data)
+	revokeStudioTowerHandles(data)
+	return accepted
+end
+
 local function clearConstructionDependencies(data: ServiceData)
 	data.matchLifecycle = nil
 	data.baseRuntime = nil
@@ -750,6 +1177,13 @@ local function clearConstructionDependencies(data: ServiceData)
 	data.recoverableFaultSnapshot = nil
 	data.studioBaseCatalogPending = nil
 	data.studioRuntimeMapPending = nil
+	data.studioTowerBoundaryAdapter = nil
+	data.studioTowerBoundaryHandle = nil
+	revokeStudioTowerHandles(data)
+	data.studioTowerOwnerToken = nil
+	data.studioTowerPreparedToken = nil
+	data.studioTowerCallbackActive = false
+	data.studioTowerReentryViolation = false
 end
 
 local function destroyStudioTrigger(data: ServiceData): boolean
@@ -770,6 +1204,12 @@ local function destroyStudioTrigger(data: ServiceData): boolean
 	data.studioEarlySpawnCount = 0
 	data.studioBaseCatalogPending = nil
 	data.studioRuntimeMapPending = nil
+	data.studioTowerBuildCount = 0
+	data.studioTowerPrepareCount = 0
+	data.studioTowerCommitCount = 0
+	data.studioTowerDispatchCount = 0
+	data.studioTowerDiagnosticsCount = 0
+	data.studioTowerCloseCount = 0
 	table.clear(data.studioSpawnEvidence)
 	data.service = nil
 	if trigger == nil then
@@ -794,13 +1234,14 @@ local function releaseOwnedResources(data: ServiceData): boolean
 	data.shutdownRequested = false
 	data.operationActive = false
 	data.terminalState = "Cleaned"
+	local towerClosed = closeStudioTowerBoundary(data)
 	local triggerDestroyed = destroyStudioTrigger(data)
 	local boundaryDetached = detachBoundary(data)
 	local publisherCleaned = cleanupPublisher(data)
 	local runtimeCleaned = cleanupRuntime(data)
 	clearConstructionDependencies(data)
 	data.releasing = false
-	return triggerDestroyed and boundaryDetached and publisherCleaned and runtimeCleaned
+	return towerClosed and triggerDestroyed and boundaryDetached and publisherCleaned and runtimeCleaned
 end
 
 local function releaseAfterEnemyBoundaryClose(data: ServiceData): boolean
@@ -815,12 +1256,13 @@ local function releaseAfterEnemyBoundaryClose(data: ServiceData): boolean
 	data.boundaryHandle = nil
 	data.boundaryAdapter = nil
 	data.boundaryGeneration = 0
+	local towerClosed = closeStudioTowerBoundary(data)
 	local triggerDestroyed = destroyStudioTrigger(data)
 	local publisherCleaned = cleanupPublisher(data)
 	local runtimeCleaned = cleanupRuntime(data)
 	clearConstructionDependencies(data)
 	data.releasing = false
-	return triggerDestroyed and publisherCleaned and runtimeCleaned
+	return towerClosed and triggerDestroyed and publisherCleaned and runtimeCleaned
 end
 
 local function failInitialize(data: ServiceData, code: string): never
@@ -961,7 +1403,34 @@ local function runtimeDependencies(data: ServiceData): WaveRuntime.Dependencies
 		end,
 		beginWaveActivation = function(matchId: Ids.MatchId): unknown
 			local called, resultValue = callResult(matchLifecycle.beginWaveActivation, matchLifecycle, matchId)
-			return if called then resultValue else serviceFailure("INTERNAL_ERROR", "query")
+			if not called then
+				return serviceFailure("INTERNAL_ERROR", "query")
+			end
+			if not isSuccess(resultValue) then
+				return resultValue
+			end
+			local towerToken = data.studioTowerPreparedToken
+			if towerToken ~= nil then
+				local towerAdapter = data.studioTowerBoundaryAdapter
+				local towerHandle = data.studioTowerBoundaryHandle
+				data.studioTowerPreparedToken = nil
+				local towerCommitted = false
+				local towerCommitResult: unknown = nil
+				if towerAdapter ~= nil and towerHandle ~= nil and STUDIO_TOWER_ACTIVE_HANDLES[towerHandle] == true then
+					towerCommitted, towerCommitResult =
+						callStudioTower(data, towerAdapter.commitStudioConfiguration, towerAdapter, towerToken)
+				end
+				if
+					not towerCommitted
+					or not isExactSuccessResult(towerCommitResult)
+					or (towerCommitResult :: any).value ~= true
+				then
+					callResult(matchLifecycle.rollbackWaveActivation, matchLifecycle, (resultValue :: any).value)
+					return serviceFailure("INTERNAL_ERROR", "query")
+				end
+				data.studioTowerCommitCount = math.min(data.studioTowerCommitCount + 1, Validation.MAX_SAFE_INTEGER)
+			end
+			return resultValue
 		end,
 		commitWaveActivation = function(token: unknown): unknown
 			local called, resultValue = callResult(matchLifecycle.commitWaveActivation, matchLifecycle, token)
@@ -2055,6 +2524,74 @@ local function initialize(data: ServiceData)
 	initializeFinite(data)
 end
 
+local function appendStudioTowerFixtures(data: ServiceData, rawSources: { [string]: unknown }): boolean
+	local adapter = data.studioTowerBoundaryAdapter
+	local handle = data.studioTowerBoundaryHandle
+	if adapter == nil and handle == nil then
+		return true
+	end
+	if adapter == nil or handle == nil or STUDIO_TOWER_ACTIVE_HANDLES[handle] ~= true then
+		return false
+	end
+	local called, buildResult = callStudioTower(data, adapter.buildStudioFixtureSources, adapter)
+	if not called or not isExactSuccessResult(buildResult) then
+		return false
+	end
+	local additions = validateAndCopyStudioTowerFixtures((buildResult :: any).value)
+	local existingAssets = rawSources.assets
+	local existingTowers = rawSources.towers
+	if additions == nil or type(existingAssets) ~= "table" or type(existingTowers) ~= "table" then
+		return false
+	end
+	local mergedAssets = table.create(#(existingAssets :: { unknown }) + 6)
+	for _, record in existingAssets :: { unknown } do
+		table.insert(mergedAssets, record)
+	end
+	for _, record in additions.assets do
+		table.insert(mergedAssets, record)
+	end
+	local mergedTowers = table.create(#(existingTowers :: { unknown }) + 3)
+	for _, definition in existingTowers :: { unknown } do
+		table.insert(mergedTowers, definition)
+	end
+	for _, definition in additions.towers do
+		table.insert(mergedTowers, definition)
+	end
+	rawSources.assets = mergedAssets
+	rawSources.towers = mergedTowers
+	data.studioTowerBuildCount = math.min(data.studioTowerBuildCount + 1, Validation.MAX_SAFE_INTEGER)
+	return true
+end
+
+local function prepareStudioTowerConfiguration(
+	data: ServiceData,
+	configuration: ConfigTypes.CoreConfiguration,
+	matchId: Ids.MatchId
+): boolean
+	local adapter = data.studioTowerBoundaryAdapter
+	local handle = data.studioTowerBoundaryHandle
+	if adapter == nil and handle == nil then
+		return true
+	end
+	if
+		adapter == nil
+		or handle == nil
+		or STUDIO_TOWER_ACTIVE_HANDLES[handle] ~= true
+		or data.studioTowerPreparedToken ~= nil
+	then
+		return false
+	end
+	local called, prepareResult =
+		callStudioTower(data, adapter.prepareStudioConfiguration, adapter, configuration, matchId)
+	local token = if called and isExactSuccessResult(prepareResult) then (prepareResult :: any).value else nil
+	if type(token) ~= "table" or getmetatable(token) ~= nil or not table.isfrozen(token) then
+		return false
+	end
+	data.studioTowerPreparedToken = token
+	data.studioTowerPrepareCount = math.min(data.studioTowerPrepareCount + 1, Validation.MAX_SAFE_INTEGER)
+	return true
+end
+
 local function studioFailure(data: ServiceData): Result.Failure<ServiceError>
 	data.callbacksEnabled = false
 	data.terminalState = "Faulted"
@@ -2101,6 +2638,9 @@ local function activateStudioScenario(data: ServiceData, scenario: string): unkn
 	if rawSources == nil or expectedWaveCount == nil then
 		return studioFailure(data)
 	end
+	if not appendStudioTowerFixtures(data, rawSources) then
+		return studioFailure(data)
+	end
 
 	data.validateConfiguration = nil
 	data.studioValidationCount = math.min(data.studioValidationCount + 1, Validation.MAX_SAFE_INTEGER)
@@ -2124,6 +2664,21 @@ local function activateStudioScenario(data: ServiceData, scenario: string): unkn
 	end
 	if not prepareStudioPreWave(data) then
 		return studioFailure(data)
+	end
+	if data.studioTowerBoundaryAdapter ~= nil or data.studioTowerBoundaryHandle ~= nil then
+		local matchLifecycle = data.matchLifecycle
+		local currentMatchSnapshot = if matchLifecycle == nil then nil else readStudioMatchSnapshot(matchLifecycle)
+		if
+			currentMatchSnapshot == nil
+			or currentMatchSnapshot.state ~= "PreWave"
+			or not prepareStudioTowerConfiguration(
+				data,
+				configuration :: ConfigTypes.CoreConfiguration,
+				currentMatchSnapshot.matchId
+			)
+		then
+			return studioFailure(data)
+		end
 	end
 
 	data.configuration = configuration :: ConfigTypes.CoreConfiguration
@@ -2182,6 +2737,28 @@ local function readEnemyPublicationCount(metrics: unknown): number?
 	return deltaCount + snapshotCount
 end
 
+local function readStudioTowerDiagnostics(data: ServiceData): (unknown, boolean)
+	local adapter = data.studioTowerBoundaryAdapter
+	local handle = data.studioTowerBoundaryHandle
+	if adapter == nil and handle == nil then
+		return nil, true
+	end
+	if adapter == nil or handle == nil or STUDIO_TOWER_ACTIVE_HANDLES[handle] ~= true then
+		return nil, false
+	end
+	local called, resultValue = callStudioTower(data, adapter.getStudioDiagnostics, adapter)
+	local detachedResult = if called then detachedStudioTowerResult(resultValue) else nil
+	if detachedResult == nil or not isSuccess(detachedResult) then
+		return nil, false
+	end
+	local diagnostics = (detachedResult :: any).value
+	if type(diagnostics) ~= "table" or not table.isfrozen(diagnostics) then
+		return nil, false
+	end
+	data.studioTowerDiagnosticsCount = math.min(data.studioTowerDiagnosticsCount + 1, Validation.MAX_SAFE_INTEGER)
+	return diagnostics, true
+end
+
 local function getStudioDiagnostics(data: ServiceData): unknown
 	local matchLifecycle = data.matchLifecycle
 	local baseRuntime = data.baseRuntime
@@ -2199,6 +2776,10 @@ local function getStudioDiagnostics(data: ServiceData): unknown
 		or publisher == nil
 	then
 		return serviceFailure("UNAVAILABLE", "runtimeTrigger")
+	end
+	local towerDiagnostics, towerDiagnosticsValid = readStudioTowerDiagnostics(data)
+	if not towerDiagnosticsValid then
+		return studioFailure(data)
 	end
 
 	local matchCalled, matchResult = callResult(matchLifecycle.getSnapshot, matchLifecycle)
@@ -2327,6 +2908,7 @@ local function getStudioDiagnostics(data: ServiceData): unknown
 		enemyIdentity = identity,
 		activeEnemies = detachedActiveEnemies,
 		spawnEvidence = detachedSpawnEvidence,
+		tower = towerDiagnostics,
 		configuration = table.freeze({
 			baseMaximumHealth = (difficulty :: any).base.maxHealth,
 			enemyHealthMultiplier = (difficulty :: any).modifiers.enemyHealthMultiplier,
@@ -2449,6 +3031,11 @@ local function dispatchStudioTrigger(data: ServiceData, argumentCount: number, r
 		or (operation == "ResolveEnemies" and hasExactFields(request :: any, STUDIO_RESOLVE_FIELDS))
 		or (operation == "SubmitSkipVote" and hasExactFields(request :: any, STUDIO_SKIP_FIELDS))
 		or (operation == "RecordAssertion" and hasExactFields(request :: any, STUDIO_ASSERTION_FIELDS))
+		or (
+			type(operation) == "string"
+			and STUDIO_TOWER_OPERATIONS[operation] == true
+			and hasExactFields(request :: any, STUDIO_TOWER_REQUEST_FIELDS)
+		)
 	if not valid then
 		return invalidStudioRequest()
 	end
@@ -2488,6 +3075,29 @@ local function dispatchStudioTrigger(data: ServiceData, argumentCount: number, r
 		end
 		data.studioOperationCount += 1
 		return (data.service :: any):submitSkipVote(userId, data.matchId, waveNumber)
+	elseif type(operation) == "string" and STUDIO_TOWER_OPERATIONS[operation] == true then
+		local adapter = data.studioTowerBoundaryAdapter
+		local handle = data.studioTowerBoundaryHandle
+		if adapter == nil or handle == nil or STUDIO_TOWER_ACTIVE_HANDLES[handle] ~= true then
+			return serviceFailure("UNAVAILABLE", "runtimeTrigger")
+		end
+		data.studioOperationCount += 1
+		if operation == "TowerCleanup" then
+			data.studioTowerCloseCount = math.min(data.studioTowerCloseCount + 1, Validation.MAX_SAFE_INTEGER)
+			data.studioTowerDispatchCount = math.min(data.studioTowerDispatchCount + 1, Validation.MAX_SAFE_INTEGER)
+			local called, closeResult = callStudioTower(data, adapter.dispatchStudioEvidence, adapter, operation)
+			invalidateStudioTowerBoundary(data)
+			revokeStudioTowerHandles(data)
+			local detachedResult = if called then detachedStudioTowerResult(closeResult) else nil
+			return detachedResult or serviceFailure("INTERNAL_ERROR", "runtimeTrigger")
+		end
+		data.studioTowerDispatchCount = math.min(data.studioTowerDispatchCount + 1, Validation.MAX_SAFE_INTEGER)
+		local called, dispatchResult = callStudioTower(data, adapter.dispatchStudioEvidence, adapter, operation)
+		local detachedResult = if called then detachedStudioTowerResult(dispatchResult) else nil
+		if detachedResult == nil then
+			return studioFailure(data)
+		end
+		return detachedResult
 	end
 	local passed = (request :: any).passed
 	if type(passed) ~= "boolean" then
@@ -2527,6 +3137,9 @@ local function installStudioTrigger(data: ServiceData): boolean
 	end
 	local handler = function(...: unknown): unknown
 		if data.studioTriggerOperationActive then
+			if data.studioTowerCallbackActive then
+				data.studioTowerReentryViolation = true
+			end
 			return serviceFailure("REENTRANT", "runtimeTrigger")
 		end
 		data.studioTriggerOperationActive = true
@@ -2641,6 +3254,69 @@ local function readRuntimeResult(self: Service, operation: Operation, methodName
 		return finishRead(data, serviceFailure("INTERNAL_ERROR", operation))
 	end
 	return finishRead(data, runtimeResult)
+end
+
+function ServiceMethods.installStudioTowerBoundary(self: Service, adapterValue: unknown): unknown
+	local operation: Operation = "installStudioTowerBoundary"
+	local data = requireData(self)
+	if data.studioTowerCallbackActive then
+		data.studioTowerReentryViolation = true
+		return serviceFailure("REENTRANT", operation)
+	end
+	if not isExactStudioTowerBoundaryAdapter(adapterValue) then
+		return serviceFailure("INVALID_ARGUMENT", operation)
+	end
+	if data.studioTriggerOperationActive or data.operationActive or data.releasing then
+		return serviceFailure("REENTRANT", operation)
+	end
+	if
+		data.state ~= "Started"
+		or data.studioTrigger == nil
+		or data.selection == nil
+		or (data.selection :: Selection).kind ~= "Dormant"
+		or data.studioActivationAttempted
+		or data.studioActivated
+		or data.studioTowerBoundaryAdapter ~= nil
+		or data.studioTowerBoundaryHandle ~= nil
+	then
+		return serviceFailure("UNAVAILABLE", operation)
+	end
+
+	local handle = table.freeze({})
+	local successResult = Result.ok(handle)
+	STUDIO_TOWER_HANDLE_OWNERS[handle] = data.studioTowerOwnerToken
+	STUDIO_TOWER_ACTIVE_HANDLES[handle] = true
+	data.studioTowerIssuedHandles[handle] = true
+	data.studioTowerBoundaryAdapter = adapterValue :: StudioTowerBoundaryAdapter
+	data.studioTowerBoundaryHandle = handle
+	return successResult
+end
+
+function ServiceMethods.detachStudioTowerBoundary(self: Service, handleValue: unknown): unknown
+	local operation: Operation = "detachStudioTowerBoundary"
+	local data = requireData(self)
+	if data.studioTowerCallbackActive then
+		data.studioTowerReentryViolation = true
+		return serviceFailure("REENTRANT", operation)
+	end
+	if
+		type(handleValue) ~= "table"
+		or data.studioTowerOwnerToken == nil
+		or STUDIO_TOWER_HANDLE_OWNERS[handleValue :: any] ~= data.studioTowerOwnerToken
+	then
+		return serviceFailure("INVALID_ARGUMENT", operation)
+	end
+	if data.studioTriggerOperationActive or data.operationActive or data.releasing then
+		return serviceFailure("REENTRANT", operation)
+	end
+	if STUDIO_TOWER_ACTIVE_HANDLES[handleValue :: any] ~= true then
+		return STUDIO_TOWER_DETACH_FALSE
+	end
+	if data.studioTowerBoundaryHandle ~= handleValue then
+		return serviceFailure("INVALID_ARGUMENT", operation)
+	end
+	invalidateStudioTowerBoundary(data)
+	return STUDIO_TOWER_DETACH_TRUE
 end
 
 function ServiceMethods.getSnapshot(self: Service): unknown
@@ -2872,6 +3548,14 @@ function ServiceMethods.getMetrics(self: Service): ServiceMetrics
 		studioMaximumSpawnLatenessSeconds = data.studioMaximumSpawnLatenessSeconds,
 		studioEarlySpawnCount = data.studioEarlySpawnCount,
 		studioSpawnEvidenceCount = #data.studioSpawnEvidence,
+		studioTowerBoundaryCount = if data.studioTowerBoundaryAdapter == nil then 0 else 1,
+		studioTowerPreparedTokenCount = if data.studioTowerPreparedToken == nil then 0 else 1,
+		studioTowerBuildCount = data.studioTowerBuildCount,
+		studioTowerPrepareCount = data.studioTowerPrepareCount,
+		studioTowerCommitCount = data.studioTowerCommitCount,
+		studioTowerDispatchCount = data.studioTowerDispatchCount,
+		studioTowerDiagnosticsCount = data.studioTowerDiagnosticsCount,
+		studioTowerCloseCount = data.studioTowerCloseCount,
 	})
 end
 
@@ -2961,6 +3645,19 @@ local function construct(
 		studioBaseCatalogPending = nil,
 		studioRuntimeMapPending = nil,
 		studioSpawnEvidence = {},
+		studioTowerBoundaryAdapter = nil,
+		studioTowerBoundaryHandle = nil,
+		studioTowerOwnerToken = table.freeze({}),
+		studioTowerIssuedHandles = setmetatable({}, { __mode = "k" }),
+		studioTowerPreparedToken = nil,
+		studioTowerCallbackActive = false,
+		studioTowerReentryViolation = false,
+		studioTowerBuildCount = 0,
+		studioTowerPrepareCount = 0,
+		studioTowerCommitCount = 0,
+		studioTowerDispatchCount = 0,
+		studioTowerDiagnosticsCount = 0,
+		studioTowerCloseCount = 0,
 		service = nil,
 		serviceDefinition = nil,
 	}

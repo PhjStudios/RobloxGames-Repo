@@ -14,6 +14,7 @@ local BaseRuntimeService = require(script.Parent.Parent.Parent.match.base.BaseRu
 local EnemySimulationService = require(script.Parent.Parent.Parent.match.enemies.EnemySimulationService)
 local MatchLifecycleService = require(script.Parent.Parent.Parent.match.lifecycle.MatchLifecycleService)
 local WaveRuntimeService = require(script.Parent.Parent.Parent.match.waves.WaveRuntimeService)
+local TowerRuntimeService = require(script.Parent.Parent.Parent.match.towers.TowerRuntimeService)
 
 local function publicError(code: RequestProtocol.PublicErrorCode): RequestProtocol.PublicError
 	local result = RequestProtocol.createPublicError(code, nil)
@@ -87,6 +88,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		nil,
 		sendWaveReplication
 	)
+	local towerRuntime = TowerRuntimeService.new(matchLifecycle, waveRuntime, configuration.coreConfiguration)
 
 	network:registerRequest(
 		MatchProtocol.GET_MATCH_SNAPSHOT_ENDPOINT,
@@ -174,4 +176,5 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 	configuration.lifecycleRunner:register(baseRuntime:getServiceDefinition())
 	configuration.lifecycleRunner:register(enemySimulation:getServiceDefinition())
 	configuration.lifecycleRunner:register(waveRuntime:getServiceDefinition())
+	configuration.lifecycleRunner:register(towerRuntime:getServiceDefinition())
 end)

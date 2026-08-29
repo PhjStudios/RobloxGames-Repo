@@ -1,6 +1,7 @@
 --!strict
 
 local TestHarness = require(script.Parent.Parent.Support.TestHarness)
+local TowerFixtures = require(script.Parent.Parent.Fixtures.TowerFixtures)
 local WaveFixtures = require(script.Parent.Parent.Fixtures.WaveFixtures)
 
 local Shared = game:GetService("ReplicatedStorage").Shared
@@ -98,6 +99,7 @@ type Environment = {
 	validationCount: number,
 	validationCompleted: boolean,
 	validationHook: any?,
+	validationSources: any?,
 	readySubmissionCalls: number,
 	readySubmissionMode: string,
 	durationNow: number,
@@ -212,6 +214,7 @@ local function newEnvironment(): Environment
 		validationCount = 0,
 		validationCompleted = false,
 		validationHook = nil,
+		validationSources = nil,
 		readySubmissionCalls = 0,
 		readySubmissionMode = "success",
 		durationNow = 0,
@@ -847,7 +850,9 @@ local function dependenciesFor(environment: Environment, selection: WaveRuntimeS
 			return trigger
 		end,
 		validateConfiguration = function(sources: unknown): unknown
+			table.insert(environment.order, "validateConfiguration")
 			environment.validationCount += 1
+			environment.validationSources = sources
 			if environment.validationHook ~= nil then
 				environment.validationHook()
 			end
@@ -949,6 +954,237 @@ local function closedFrame(environment: Environment, disposition: string, passOr
 		sampleServerTime = environment.now,
 		terminalOutcomes = table.freeze({}),
 	})
+end
+
+local function freezeTree(value: any): any
+	if type(value) ~= "table" then
+		return value
+	end
+	for _, child in value do
+		freezeTree(child)
+	end
+	return table.freeze(value)
+end
+
+local function studioTowerFixtureSources(): any
+	local raw = TowerFixtures.rawSources()
+	return freezeTree({
+		assets = raw.assets,
+		towers = raw.towers,
+	})
+end
+
+type TowerBoundaryRig = {
+	order: { string },
+	buildMode: string,
+	prepareMode: string,
+	commitMode: string,
+	dispatchMode: string,
+	diagnosticsMode: string,
+	closeMode: string,
+	buildCount: number,
+	prepareCount: number,
+	commitCount: number,
+	dispatchCount: number,
+	diagnosticsCount: number,
+	closeCount: number,
+	dispatches: { string },
+	token: any,
+	configuration: any?,
+	matchId: any?,
+	diagnostics: any,
+	buildValue: any?,
+	builtSources: any?,
+	buildHook: (() -> ())?,
+	prepareHook: (() -> ())?,
+	commitHook: (() -> ())?,
+	dispatchHook: ((string) -> ())?,
+	diagnosticsHook: (() -> ())?,
+	closeHook: (() -> ())?,
+}
+
+local function newTowerBoundaryRig(environment: Environment): TowerBoundaryRig
+	return {
+		order = environment.order,
+		buildMode = "success",
+		prepareMode = "success",
+		commitMode = "success",
+		dispatchMode = "success",
+		diagnosticsMode = "success",
+		closeMode = "success",
+		buildCount = 0,
+		prepareCount = 0,
+		commitCount = 0,
+		dispatchCount = 0,
+		diagnosticsCount = 0,
+		closeCount = 0,
+		dispatches = {},
+		token = table.freeze({}),
+		configuration = nil,
+		matchId = nil,
+		diagnostics = freezeTree({
+			state = "Active",
+			runtimeTowers = {
+				{
+					runtimeTowerId = 1,
+					placementCFrame = CFrame.new(12, 34, -56) * CFrame.Angles(0, math.rad(90), 0),
+				},
+			},
+			metrics = {
+				activeCount = 1,
+			},
+		}),
+		buildValue = nil,
+		builtSources = nil,
+		buildHook = nil,
+		prepareHook = nil,
+		commitHook = nil,
+		dispatchHook = nil,
+		diagnosticsHook = nil,
+		closeHook = nil,
+	}
+end
+
+local function callbackMode(mode: string, failureCode: string): unknown?
+	if mode == "throw" then
+		error(`PRIVATE_TOWER_{failureCode}`, 0)
+	elseif mode == "yield" then
+		coroutine.yield()
+	elseif mode == "failure" then
+		return Result.err(table.freeze({ code = failureCode }))
+	elseif mode == "malformed" then
+		return table.freeze({ malformed = true })
+	end
+	return nil
+end
+
+local function cleanedTowerResidue(): any
+	return table.freeze({
+		state = "Cleaned",
+		participantObserverCount = 0,
+		waveBoundaryCount = 0,
+		loadoutCount = 0,
+		unitIdCount = 0,
+		runtimeTowerCount = 0,
+		templateCount = 0,
+		liveModelCount = 0,
+		runtimeRootCount = 0,
+		capabilityCount = 0,
+		connectionCount = 0,
+	})
+end
+
+local function makeTowerBoundaryAdapter(rig: TowerBoundaryRig): any
+	local adapter: any
+	adapter = table.freeze({
+		buildStudioFixtureSources = function(self: any): unknown
+			if self ~= adapter then
+				return Result.err(table.freeze({ code = "INVALID_SELF" }))
+			end
+			table.insert(rig.order, "towerBuild")
+			rig.buildCount += 1
+			if rig.buildHook ~= nil then
+				rig.buildHook()
+			end
+			local fault = callbackMode(rig.buildMode, "BUILD_FAILED")
+			if fault ~= nil then
+				return fault
+			end
+			local sources = rig.buildValue or studioTowerFixtureSources()
+			rig.builtSources = sources
+			return Result.ok(sources)
+		end,
+		prepareStudioConfiguration = function(self: any, configuration: unknown, matchId: unknown): unknown
+			if self ~= adapter then
+				return Result.err(table.freeze({ code = "INVALID_SELF" }))
+			end
+			table.insert(rig.order, "towerPrepare")
+			rig.prepareCount += 1
+			rig.configuration = configuration
+			rig.matchId = matchId
+			if rig.prepareHook ~= nil then
+				rig.prepareHook()
+			end
+			local fault = callbackMode(rig.prepareMode, "PREPARE_FAILED")
+			if fault ~= nil then
+				return fault
+			end
+			return Result.ok(rig.token)
+		end,
+		commitStudioConfiguration = function(self: any, token: unknown): unknown
+			if self ~= adapter or token ~= rig.token then
+				return Result.err(table.freeze({ code = "INVALID_TOKEN" }))
+			end
+			table.insert(rig.order, "towerCommit")
+			rig.commitCount += 1
+			if rig.commitHook ~= nil then
+				rig.commitHook()
+			end
+			local fault = callbackMode(rig.commitMode, "COMMIT_FAILED")
+			if fault ~= nil then
+				return fault
+			end
+			return Result.ok(true)
+		end,
+		dispatchStudioEvidence = function(self: any, operation: unknown): unknown
+			if self ~= adapter or type(operation) ~= "string" then
+				return Result.err(table.freeze({ code = "INVALID_OPERATION" }))
+			end
+			table.insert(rig.order, `towerDispatch:{operation}`)
+			rig.dispatchCount += 1
+			table.insert(rig.dispatches, operation)
+			if rig.dispatchHook ~= nil then
+				rig.dispatchHook(operation)
+			end
+			local fault = callbackMode(rig.dispatchMode, "DISPATCH_FAILED")
+			if fault ~= nil then
+				return fault
+			end
+			if operation == "TowerCleanup" then
+				return Result.ok(cleanedTowerResidue())
+			end
+			return Result.ok(table.freeze({ operation = operation }))
+		end,
+		getStudioDiagnostics = function(self: any): unknown
+			if self ~= adapter then
+				return Result.err(table.freeze({ code = "INVALID_SELF" }))
+			end
+			table.insert(rig.order, "towerDiagnostics")
+			rig.diagnosticsCount += 1
+			if rig.diagnosticsHook ~= nil then
+				rig.diagnosticsHook()
+			end
+			local fault = callbackMode(rig.diagnosticsMode, "DIAGNOSTICS_FAILED")
+			if fault ~= nil then
+				return fault
+			end
+			return Result.ok(rig.diagnostics)
+		end,
+		closeFromWave = function(self: any): unknown
+			if self ~= adapter then
+				return Result.err(table.freeze({ code = "INVALID_SELF" }))
+			end
+			table.insert(rig.order, "towerClose")
+			rig.closeCount += 1
+			if rig.closeHook ~= nil then
+				rig.closeHook()
+			end
+			local fault = callbackMode(rig.closeMode, "CLOSE_FAILED")
+			if fault ~= nil then
+				return fault
+			end
+			return Result.ok(rig.closeMode ~= "false")
+		end,
+	})
+	return adapter
+end
+
+local function findOrder(order: { string }, value: string): number
+	local index = table.find(order, value)
+	if index == nil then
+		error(`[ATD_TEST][code=MISSING_ORDER_ENTRY][entry={value}]`, 0)
+	end
+	return index
 end
 
 return TestHarness.suite("WaveRuntimeService", {
@@ -2218,5 +2454,443 @@ return TestHarness.suite("WaveRuntimeService", {
 		assertions.equal(deferredMetrics.studioTriggerCount, 0)
 		assertions.equal(deferredMetrics.studioValidationCount, 0)
 		assertions.equal(deferredMetrics.studioSpawnEvidenceCount, 0)
+	end),
+
+	TestHarness.case("authenticates the exact Studio Tower boundary and opaque handles", function(assertions)
+		local productionEnvironment = newEnvironment()
+		local productionService = createService(productionEnvironment, dormantSelection())
+		startService(productionService)
+		local productionRig = newTowerBoundaryRig(productionEnvironment)
+		expectError(
+			assertions,
+			productionService:installStudioTowerBoundary(makeTowerBoundaryAdapter(productionRig)),
+			"UNAVAILABLE",
+			"installStudioTowerBoundary"
+		)
+		productionService:getServiceDefinition().shutdown()
+
+		local environment = newEnvironment()
+		environment.isStudio = true
+		local service = createService(environment, dormantSelection())
+		startService(service)
+		local rig = newTowerBoundaryRig(environment)
+		local adapter = makeTowerBoundaryAdapter(rig)
+
+		local mutableAdapter = table.clone(adapter)
+		expectError(
+			assertions,
+			service:installStudioTowerBoundary(mutableAdapter),
+			"INVALID_ARGUMENT",
+			"installStudioTowerBoundary"
+		)
+		local missingMethod = table.clone(adapter)
+		missingMethod.closeFromWave = nil
+		table.freeze(missingMethod)
+		expectError(
+			assertions,
+			service:installStudioTowerBoundary(missingMethod),
+			"INVALID_ARGUMENT",
+			"installStudioTowerBoundary"
+		)
+		local wrongMethod = table.clone(adapter)
+		wrongMethod.getStudioDiagnostics = true
+		table.freeze(wrongMethod)
+		expectError(
+			assertions,
+			service:installStudioTowerBoundary(wrongMethod),
+			"INVALID_ARGUMENT",
+			"installStudioTowerBoundary"
+		)
+		local extraMethod = table.clone(adapter)
+		extraMethod.extra = function() end
+		table.freeze(extraMethod)
+		expectError(
+			assertions,
+			service:installStudioTowerBoundary(extraMethod),
+			"INVALID_ARGUMENT",
+			"installStudioTowerBoundary"
+		)
+		local metatableAdapter = table.clone(adapter)
+		setmetatable(metatableAdapter, {})
+		table.freeze(metatableAdapter)
+		expectError(
+			assertions,
+			service:installStudioTowerBoundary(metatableAdapter),
+			"INVALID_ARGUMENT",
+			"installStudioTowerBoundary"
+		)
+
+		local handle = expectSuccess(assertions, service:installStudioTowerBoundary(adapter))
+		assertions.isTrue(table.isfrozen(handle))
+		assertions.equal(next(handle), nil)
+		assertions.equal(service:getMetrics().studioTowerBoundaryCount, 1)
+		expectError(
+			assertions,
+			service:installStudioTowerBoundary(adapter),
+			"UNAVAILABLE",
+			"installStudioTowerBoundary"
+		)
+		expectError(
+			assertions,
+			service:detachStudioTowerBoundary(table.freeze({})),
+			"INVALID_ARGUMENT",
+			"detachStudioTowerBoundary"
+		)
+		assertions.isTrue(expectSuccess(assertions, service:detachStudioTowerBoundary(handle)))
+		assertions.isFalse(expectSuccess(assertions, service:detachStudioTowerBoundary(handle)))
+		assertions.equal(service:getMetrics().studioTowerBoundaryCount, 0)
+
+		local secondRig = newTowerBoundaryRig(environment)
+		local secondHandle =
+			expectSuccess(assertions, service:installStudioTowerBoundary(makeTowerBoundaryAdapter(secondRig)))
+		assertions.notEqual(secondHandle, handle)
+		service:getServiceDefinition().shutdown()
+		assertions.equal(secondRig.closeCount, 1)
+		assertions.equal(service:getMetrics().studioTowerBoundaryCount, 0)
+		expectError(
+			assertions,
+			service:detachStudioTowerBoundary(handle),
+			"INVALID_ARGUMENT",
+			"detachStudioTowerBoundary"
+		)
+		expectError(
+			assertions,
+			service:detachStudioTowerBoundary(secondHandle),
+			"INVALID_ARGUMENT",
+			"detachStudioTowerBoundary"
+		)
+	end),
+
+	TestHarness.case(
+		"merges Tower fixtures once and routes fixed evidence with detached diagnostics",
+		function(assertions)
+			local environment = newEnvironment()
+			environment.isStudio = true
+			local service = createService(environment, dormantSelection())
+			startService(service)
+			local rig = newTowerBoundaryRig(environment)
+			local handle = expectSuccess(assertions, service:installStudioTowerBoundary(makeTowerBoundaryAdapter(rig)))
+			local invoke = environment.triggerHandler :: any
+
+			local activation = expectSuccess(assertions, invoke({ operation = "Activate", scenario = "Primary" }))
+			assertions.equal(activation.matchId, MATCH_ID)
+			assertions.equal(environment.validationCount, 1)
+			assertions.equal(rig.buildCount, 1)
+			assertions.equal(rig.prepareCount, 1)
+			assertions.equal(rig.commitCount, 1)
+			assertions.equal(rig.matchId, MATCH_ID)
+			assertions.equal(rig.configuration, environment.boundConfiguration)
+
+			local sources = environment.validationSources
+			assertions.equal(#sources.assets, 8)
+			assertions.equal(#sources.towers, 3)
+			assertions.equal(sources.towers[1].id, TowerFixtures.SINGLE_TOWER_ID)
+			assertions.equal(sources.towers[2].id, TowerFixtures.SPLASH_TOWER_ID)
+			assertions.equal(sources.towers[3].id, TowerFixtures.SUPPORT_TOWER_ID)
+			assertions.notEqual(sources.assets[3], rig.builtSources.assets[1])
+			assertions.notEqual(sources.towers[1], rig.builtSources.towers[1])
+			assertions.isTrue(
+				findOrder(environment.order, "towerBuild") < findOrder(environment.order, "validateConfiguration")
+			)
+			assertions.isTrue(
+				findOrder(environment.order, "validateConfiguration") < findOrder(environment.order, "towerPrepare")
+			)
+			assertions.isTrue(
+				findOrder(environment.order, "towerPrepare") < findOrder(environment.order, "beginActivation")
+			)
+			assertions.isTrue(
+				findOrder(environment.order, "beginActivation") < findOrder(environment.order, "towerCommit")
+			)
+			assertions.isTrue(
+				findOrder(environment.order, "towerCommit") < findOrder(environment.order, "initializeBase")
+			)
+
+			local fixedOperations = {
+				"TowerCreateNext",
+				"TowerRemoveVisualLast",
+				"TowerRecreateVisualLast",
+				"TowerRemoveLast",
+				"TowerInvalidTemplate",
+			}
+			for _, operation in fixedOperations do
+				local receipt = expectSuccess(assertions, invoke({ operation = operation }))
+				assertions.equal(receipt.operation, operation)
+			end
+			assertions.equal(rig.dispatchCount, 5)
+			expectError(assertions, invoke({ operation = "TowerUnknown" }), "INVALID_ARGUMENT", "runtimeTrigger")
+			expectError(
+				assertions,
+				invoke({ operation = "TowerCreateNext", extra = true }),
+				"INVALID_ARGUMENT",
+				"runtimeTrigger"
+			)
+			expectError(
+				assertions,
+				invoke({ operation = "TowerCreateNext" }, true),
+				"INVALID_ARGUMENT",
+				"runtimeTrigger"
+			)
+			assertions.equal(rig.dispatchCount, 5)
+
+			local diagnostics = expectSuccess(assertions, invoke({ operation = "Diagnostics" }))
+			assertions.notEqual(diagnostics.tower, rig.diagnostics)
+			assertions.isTrue(table.isfrozen(diagnostics.tower))
+			local placement = diagnostics.tower.runtimeTowers[1].placementCFrame
+			assertions.isTrue(table.isfrozen(placement))
+			assertions.equal(placement.x, 12)
+			assertions.equal(placement.y, 34)
+			assertions.equal(placement.z, -56)
+			local componentCount = 0
+			for _ in placement do
+				componentCount += 1
+			end
+			assertions.equal(componentCount, 12)
+			local metrics = service:getMetrics()
+			assertions.equal(metrics.studioTowerBoundaryCount, 1)
+			assertions.equal(metrics.studioTowerPreparedTokenCount, 0)
+			assertions.equal(metrics.studioTowerBuildCount, 1)
+			assertions.equal(metrics.studioTowerPrepareCount, 1)
+			assertions.equal(metrics.studioTowerCommitCount, 1)
+			assertions.equal(metrics.studioTowerDispatchCount, 5)
+			assertions.equal(metrics.studioTowerDiagnosticsCount, 1)
+
+			local residue = expectSuccess(assertions, invoke({ operation = "TowerCleanup" }))
+			assertions.equal(residue.state, "Cleaned")
+			assertions.equal(residue.participantObserverCount, 0)
+			assertions.equal(residue.runtimeTowerCount, 0)
+			assertions.equal(residue.liveModelCount, 0)
+			assertions.equal(residue.connectionCount, 0)
+			assertions.equal(rig.dispatches[6], "TowerCleanup")
+			assertions.equal(rig.dispatchCount, 6)
+			assertions.equal(rig.closeCount, 0)
+			assertions.equal(service:getMetrics().studioTowerBoundaryCount, 0)
+			expectError(assertions, invoke({ operation = "TowerCreateNext" }), "UNAVAILABLE", "runtimeTrigger")
+			expectError(
+				assertions,
+				service:detachStudioTowerBoundary(handle),
+				"INVALID_ARGUMENT",
+				"detachStudioTowerBoundary"
+			)
+			service:getServiceDefinition().shutdown()
+			assertions.equal(rig.closeCount, 0)
+		end
+	),
+
+	TestHarness.case(
+		"orders Tower prepare and commit faults before Wave truth and closes in reverse order",
+		function(assertions)
+			local prepareEnvironment = newEnvironment()
+			prepareEnvironment.isStudio = true
+			local prepareService = createService(prepareEnvironment, dormantSelection())
+			startService(prepareService)
+			local prepareRig = newTowerBoundaryRig(prepareEnvironment)
+			prepareRig.prepareMode = "failure"
+			local prepareHandle = expectSuccess(
+				assertions,
+				prepareService:installStudioTowerBoundary(makeTowerBoundaryAdapter(prepareRig))
+			)
+			expectError(
+				assertions,
+				(prepareEnvironment.triggerHandler :: any)({ operation = "Activate", scenario = "Primary" }),
+				"INTERNAL_ERROR",
+				"runtimeTrigger"
+			)
+			assertions.equal(prepareEnvironment.validationCount, 1)
+			assertions.equal(prepareRig.prepareCount, 1)
+			assertions.equal(prepareRig.commitCount, 0)
+			assertions.equal(prepareRig.closeCount, 1)
+			assertions.isNil(table.find(prepareEnvironment.order, "beginActivation"))
+			assertions.isNil(table.find(prepareEnvironment.order, "initializeBase"))
+			assertions.equal(prepareService:getMetrics().lifecycleState, "Failed")
+			expectError(
+				assertions,
+				prepareService:detachStudioTowerBoundary(prepareHandle),
+				"INVALID_ARGUMENT",
+				"detachStudioTowerBoundary"
+			)
+			prepareService:getServiceDefinition().shutdown()
+
+			local commitEnvironment = newEnvironment()
+			commitEnvironment.isStudio = true
+			local commitService = createService(commitEnvironment, dormantSelection())
+			startService(commitService)
+			local commitRig = newTowerBoundaryRig(commitEnvironment)
+			commitRig.commitMode = "failure"
+			expectSuccess(assertions, commitService:installStudioTowerBoundary(makeTowerBoundaryAdapter(commitRig)))
+			expectError(
+				assertions,
+				(commitEnvironment.triggerHandler :: any)({ operation = "Activate", scenario = "Primary" }),
+				"INTERNAL_ERROR",
+				"runtimeTrigger"
+			)
+			assertions.equal(commitRig.prepareCount, 1)
+			assertions.equal(commitRig.commitCount, 1)
+			assertions.equal(commitRig.closeCount, 1)
+			assertions.equal(commitEnvironment.lifecycleState, "PreWave")
+			assertions.isTrue(
+				findOrder(commitEnvironment.order, "beginActivation")
+					< findOrder(commitEnvironment.order, "towerCommit")
+			)
+			assertions.isTrue(
+				findOrder(commitEnvironment.order, "towerCommit")
+					< findOrder(commitEnvironment.order, "rollbackActivation")
+			)
+			assertions.isNil(table.find(commitEnvironment.order, "initializeBase"))
+			assertions.isNil(table.find(commitEnvironment.order, "commitActivation"))
+			commitService:getServiceDefinition().shutdown()
+
+			local releaseEnvironment = newEnvironment()
+			releaseEnvironment.isStudio = true
+			local releaseService = createService(releaseEnvironment, dormantSelection())
+			startService(releaseService)
+			local releaseRig = newTowerBoundaryRig(releaseEnvironment)
+			local releaseHandle = expectSuccess(
+				assertions,
+				releaseService:installStudioTowerBoundary(makeTowerBoundaryAdapter(releaseRig))
+			)
+			expectSuccess(
+				assertions,
+				(releaseEnvironment.triggerHandler :: any)({ operation = "Activate", scenario = "Primary" })
+			)
+			releaseService:getServiceDefinition().shutdown()
+			assertions.equal(releaseRig.closeCount, 1)
+			assertions.isTrue(
+				findOrder(releaseEnvironment.order, "towerClose")
+					< findOrder(releaseEnvironment.order, "destroyStudioTrigger")
+			)
+			assertions.isTrue(
+				findOrder(releaseEnvironment.order, "towerClose")
+					< findOrder(releaseEnvironment.order, "detachBoundary")
+			)
+			assertions.equal(releaseService:getMetrics().studioTowerBoundaryCount, 0)
+			expectError(
+				assertions,
+				releaseService:detachStudioTowerBoundary(releaseHandle),
+				"INVALID_ARGUMENT",
+				"detachStudioTowerBoundary"
+			)
+		end
+	),
+
+	TestHarness.case("fails closed on Tower callback shape yield throw and reentry faults", function(assertions)
+		for _, mode in { "wrong-shape", "yield" } do
+			local environment = newEnvironment()
+			environment.isStudio = true
+			local service = createService(environment, dormantSelection())
+			startService(service)
+			local rig = newTowerBoundaryRig(environment)
+			if mode == "wrong-shape" then
+				rig.buildValue = freezeTree({ assets = {}, towers = {} })
+			else
+				rig.buildMode = mode
+			end
+			expectSuccess(assertions, service:installStudioTowerBoundary(makeTowerBoundaryAdapter(rig)))
+			expectError(
+				assertions,
+				(environment.triggerHandler :: any)({ operation = "Activate", scenario = "Primary" }),
+				"INTERNAL_ERROR",
+				"runtimeTrigger"
+			)
+			assertions.equal(environment.validationCount, 0)
+			assertions.equal(rig.closeCount, 1)
+			assertions.equal(service:getMetrics().studioTowerBoundaryCount, 0)
+			service:getServiceDefinition().shutdown()
+		end
+
+		local throwEnvironment = newEnvironment()
+		throwEnvironment.isStudio = true
+		local throwService = createService(throwEnvironment, dormantSelection())
+		startService(throwService)
+		local throwRig = newTowerBoundaryRig(throwEnvironment)
+		throwRig.prepareMode = "throw"
+		expectSuccess(assertions, throwService:installStudioTowerBoundary(makeTowerBoundaryAdapter(throwRig)))
+		expectError(
+			assertions,
+			(throwEnvironment.triggerHandler :: any)({ operation = "Activate", scenario = "Primary" }),
+			"INTERNAL_ERROR",
+			"runtimeTrigger"
+		)
+		assertions.equal(throwRig.closeCount, 1)
+		throwService:getServiceDefinition().shutdown()
+
+		local reentryEnvironment = newEnvironment()
+		reentryEnvironment.isStudio = true
+		local reentryService = createService(reentryEnvironment, dormantSelection())
+		startService(reentryService)
+		local reentryRig = newTowerBoundaryRig(reentryEnvironment)
+		local reentryHandle =
+			expectSuccess(assertions, reentryService:installStudioTowerBoundary(makeTowerBoundaryAdapter(reentryRig)))
+		expectSuccess(
+			assertions,
+			(reentryEnvironment.triggerHandler :: any)({ operation = "Activate", scenario = "Primary" })
+		)
+		local nestedResult: any = nil
+		reentryRig.dispatchHook = function()
+			nestedResult = reentryService:detachStudioTowerBoundary(reentryHandle)
+		end
+		expectError(
+			assertions,
+			(reentryEnvironment.triggerHandler :: any)({ operation = "TowerCreateNext" }),
+			"INTERNAL_ERROR",
+			"runtimeTrigger"
+		)
+		expectError(assertions, nestedResult, "REENTRANT", "detachStudioTowerBoundary")
+		assertions.equal(reentryRig.closeCount, 1)
+		assertions.equal(reentryService:getMetrics().studioTowerBoundaryCount, 0)
+		reentryService:getServiceDefinition().shutdown()
+
+		for _, mode in { "failure", "throw", "yield" } do
+			local cleanupEnvironment = newEnvironment()
+			cleanupEnvironment.isStudio = true
+			local cleanupService = createService(cleanupEnvironment, dormantSelection())
+			startService(cleanupService)
+			local cleanupRig = newTowerBoundaryRig(cleanupEnvironment)
+			local cleanupHandle = expectSuccess(
+				assertions,
+				cleanupService:installStudioTowerBoundary(makeTowerBoundaryAdapter(cleanupRig))
+			)
+			expectSuccess(
+				assertions,
+				(cleanupEnvironment.triggerHandler :: any)({ operation = "Activate", scenario = "Primary" })
+			)
+			cleanupRig.dispatchMode = mode
+			local cleanupResult = (cleanupEnvironment.triggerHandler :: any)({ operation = "TowerCleanup" })
+			if mode == "failure" then
+				expectError(assertions, cleanupResult, "DISPATCH_FAILED", nil :: any)
+			else
+				expectError(assertions, cleanupResult, "INTERNAL_ERROR", "runtimeTrigger")
+			end
+			assertions.equal(cleanupService:getMetrics().studioTowerBoundaryCount, 0)
+			assertions.equal(cleanupRig.closeCount, 0)
+			expectError(
+				assertions,
+				cleanupService:detachStudioTowerBoundary(cleanupHandle),
+				"INVALID_ARGUMENT",
+				"detachStudioTowerBoundary"
+			)
+			cleanupService:getServiceDefinition().shutdown()
+		end
+
+		local closeEnvironment = newEnvironment()
+		closeEnvironment.isStudio = true
+		local closeService = createService(closeEnvironment, dormantSelection())
+		startService(closeService)
+		local closeRig = newTowerBoundaryRig(closeEnvironment)
+		closeRig.closeMode = "throw"
+		local closeHandle =
+			expectSuccess(assertions, closeService:installStudioTowerBoundary(makeTowerBoundaryAdapter(closeRig)))
+		local closed, closeMessage = pcall(function()
+			closeService:getServiceDefinition().shutdown()
+		end)
+		assertions.isFalse(closed)
+		assertions.contains(closeMessage, "CLEANUP_FAILED")
+		assertions.equal(closeRig.closeCount, 1)
+		assertions.equal(closeService:getMetrics().studioTowerBoundaryCount, 0)
+		expectError(
+			assertions,
+			closeService:detachStudioTowerBoundary(closeHandle),
+			"INVALID_ARGUMENT",
+			"detachStudioTowerBoundary"
+		)
 	end),
 })

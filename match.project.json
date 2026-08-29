@@ -86,6 +86,11 @@
             "$ignoreUnknownInstances": true
           },
 
+          "towers": {
+            "$path": "src/server/match/towers",
+            "$ignoreUnknownInstances": true
+          },
+
           "waves": {
             "$path": "src/server/match/waves",
             "$ignoreUnknownInstances": true

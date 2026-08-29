@@ -44,6 +44,37 @@ export type MatchSnapshot = {
 	participants: { ParticipantSnapshot },
 }
 
+export type ParticipantObserverHandle = {}
+
+export type ParticipantObserverAdapter = {
+	onSnapshot: (self: ParticipantObserverAdapter, snapshot: MatchSnapshot) -> unknown,
+}
+
+export type ParticipantObserverReservation = {
+	handle: ParticipantObserverHandle,
+	snapshot: MatchSnapshot,
+}
+
+export type ParticipantObserverOperation =
+	"reserveParticipantObserver"
+	| "refreshParticipantObserver"
+	| "activateParticipantObserver"
+	| "detachParticipantObserver"
+
+export type ParticipantObserverErrorCode =
+	"UNAVAILABLE"
+	| "INVALID_ARGUMENT"
+	| "INVALID_HANDLE"
+	| "WRONG_STATE"
+	| "REVISION_MISMATCH"
+	| "REENTRANT"
+	| "INTERNAL_ERROR"
+
+export type ParticipantObserverError = {
+	code: ParticipantObserverErrorCode,
+	operation: ParticipantObserverOperation,
+}
+
 export type RuntimeRoutePointKind = "EnemySpawn" | "PathNode" | "DefenderBase"
 
 export type RuntimeRoutePointSnapshot = {
@@ -282,10 +313,19 @@ type ServiceData = {
 	studioWaveReentryViolation: boolean,
 	studioWaveActivated: boolean,
 	studioWaveShutdownRequested: boolean,
+	participantObserverAdapter: ParticipantObserverAdapter?,
+	participantObserverHandle: ParticipantObserverHandle?,
+	participantObserverStatus: ParticipantObserverStatus?,
+	participantObserverPendingSnapshot: MatchSnapshot?,
+	participantObserverGeneration: number,
+	participantObserverOperationActive: boolean,
+	participantObserverReentryViolation: boolean,
+	participantObserverShutdownRequested: boolean,
 }
 
 type BaseDefeatTokenState = "Prepared" | "Committed" | "RolledBack"
 type WaveActivationTokenState = "Prepared" | "Committed" | "RolledBack"
+type ParticipantObserverStatus = "Reserved" | "Active" | "Detached"
 
 type ExistingPlayer = {
 	connection: unknown,
@@ -317,6 +357,12 @@ type WaveActivationTokenData = {
 	preparedSnapshot: MatchSnapshot,
 	preparedRevision: number,
 	outcome: WaveActivationCommitOutcome?,
+}
+
+type ParticipantObserverHandleData = {
+	owner: ServiceData,
+	generation: number,
+	status: ParticipantObserverStatus,
 }
 
 local FIXED_MAP_ID = "map:phase07-graybox"
@@ -357,11 +403,16 @@ local BENIGN_RESOLVE_ERRORS: { [string]: boolean } = table.freeze({
 local SERVICE_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ServiceData }
 local BASE_DEFEAT_TOKEN_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: BaseDefeatTokenData }
 local WAVE_ACTIVATION_TOKEN_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: WaveActivationTokenData }
+local PARTICIPANT_OBSERVER_HANDLE_DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ParticipantObserverHandleData }
+local PARTICIPANT_OBSERVER_ACTIVATION_SUCCESS: Result.Success<boolean> = Result.ok(true)
 
 local MatchLifecycleService = {
 	FIXED_MAP_ID = FIXED_MAP_ID,
 	newForTests = nil :: TestConstructor?,
 }
+
+local shutdown: (ServiceData) -> ()
+local clearParticipantObserver: (ServiceData) -> ()
 
 local function staticError(code: string): never
 	error(`{STATIC_ERROR_PREFIX}[code={code}]`, 0)
@@ -444,6 +495,23 @@ local function studioWaveFailure(code: StudioWaveErrorCode): Result.Failure<Stud
 		code = code,
 		operation = "activateStudioWaveForEvidence",
 	}))
+end
+
+local function makeParticipantObserverError(
+	code: ParticipantObserverErrorCode,
+	operation: ParticipantObserverOperation
+): ParticipantObserverError
+	return table.freeze({
+		code = code,
+		operation = operation,
+	})
+end
+
+local function participantObserverFailure(
+	code: ParticipantObserverErrorCode,
+	operation: ParticipantObserverOperation
+): Result.Failure<ParticipantObserverError>
+	return Result.err(makeParticipantObserverError(code, operation))
 end
 
 local function requireData(value: unknown): ServiceData
@@ -559,6 +627,25 @@ local function isAdapter(value: unknown, requiredMethods: { string }): boolean
 		end
 	end
 	return true
+end
+
+local function isParticipantObserverAdapter(value: unknown): boolean
+	if
+		type(value) ~= "table"
+		or getmetatable(value :: any) ~= nil
+		or not table.isfrozen(value :: any)
+		or type((value :: any).onSnapshot) ~= "function"
+	then
+		return false
+	end
+	local fieldCount = 0
+	for fieldName in next, value :: any do
+		if fieldName ~= "onSnapshot" then
+			return false
+		end
+		fieldCount += 1
+	end
+	return fieldCount == 1
 end
 
 local function isUserId(value: unknown): boolean
@@ -805,6 +892,7 @@ end
 local function releaseOwnedResources(data: ServiceData): (boolean, string?)
 	data.callbacksEnabled = false
 	data.available = false
+	clearParticipantObserver(data)
 	data.isStudio = nil
 	data.studioWaveOperationActive = false
 	data.studioWaveReentryViolation = false
@@ -933,6 +1021,144 @@ local function composeSnapshot(data: ServiceData): MatchSnapshot?
 	return validated.value
 end
 
+local function participantObserverHandleMatches(data: ServiceData, value: unknown): boolean
+	if type(value) ~= "table" or data.participantObserverHandle ~= value then
+		return false
+	end
+	local handleData = PARTICIPANT_OBSERVER_HANDLE_DATA[value :: any]
+	return handleData ~= nil
+		and handleData.owner == data
+		and handleData.generation == data.participantObserverGeneration
+		and handleData.status == data.participantObserverStatus
+end
+
+local function detachParticipantObserverState(data: ServiceData): boolean
+	local handle = data.participantObserverHandle
+	local status = data.participantObserverStatus
+	if handle == nil or status == nil or status == "Detached" then
+		return false
+	end
+	data.participantObserverAdapter = nil
+	data.participantObserverPendingSnapshot = nil
+	data.participantObserverStatus = "Detached"
+	local handleData = PARTICIPANT_OBSERVER_HANDLE_DATA[handle]
+	if
+		handleData ~= nil
+		and handleData.owner == data
+		and handleData.generation == data.participantObserverGeneration
+	then
+		handleData.status = "Detached"
+	end
+	return true
+end
+
+clearParticipantObserver = function(data: ServiceData)
+	local handle = data.participantObserverHandle
+	if handle ~= nil then
+		PARTICIPANT_OBSERVER_HANDLE_DATA[handle] = nil
+	end
+	data.participantObserverAdapter = nil
+	data.participantObserverHandle = nil
+	data.participantObserverStatus = nil
+	data.participantObserverPendingSnapshot = nil
+	data.participantObserverOperationActive = false
+	data.participantObserverReentryViolation = false
+	data.participantObserverShutdownRequested = false
+end
+
+local function beginParticipantObserverOperation(
+	data: ServiceData,
+	operation: ParticipantObserverOperation
+): ParticipantObserverError?
+	if data.participantObserverOperationActive then
+		data.participantObserverReentryViolation = true
+		return makeParticipantObserverError("REENTRANT", operation)
+	end
+	if not data.available or not data.callbacksEnabled or (data.state ~= "Initialized" and data.state ~= "Started") then
+		return makeParticipantObserverError("UNAVAILABLE", operation)
+	end
+	data.participantObserverOperationActive = true
+	data.participantObserverReentryViolation = false
+	data.participantObserverShutdownRequested = false
+	return nil
+end
+
+local function participantObserverOperationIntact(data: ServiceData): boolean
+	return data.participantObserverOperationActive
+		and not data.participantObserverReentryViolation
+		and not data.participantObserverShutdownRequested
+		and data.available
+		and data.callbacksEnabled
+		and (data.state == "Initialized" or data.state == "Started")
+end
+
+local function endParticipantObserverOperation(data: ServiceData): boolean
+	local intact = not data.participantObserverReentryViolation and not data.participantObserverShutdownRequested
+	local shutdownRequested = data.participantObserverShutdownRequested
+	data.participantObserverOperationActive = false
+	data.participantObserverReentryViolation = false
+	data.participantObserverShutdownRequested = false
+	if shutdownRequested then
+		callNonYielding(shutdown, data)
+		return false
+	end
+	return intact
+end
+
+local function participantObserverSnapshotAdvances(data: ServiceData, snapshot: MatchSnapshot): boolean
+	local previous = data.participantObserverPendingSnapshot
+	return previous ~= nil and snapshot.matchId == previous.matchId and snapshot.revision > previous.revision
+end
+
+local function dispatchParticipantObserver(data: ServiceData)
+	local status = data.participantObserverStatus
+	if status ~= "Reserved" and status ~= "Active" then
+		return
+	end
+	if data.participantObserverOperationActive then
+		data.participantObserverReentryViolation = true
+		detachParticipantObserverState(data)
+		return
+	end
+
+	data.participantObserverOperationActive = true
+	data.participantObserverReentryViolation = false
+	data.participantObserverShutdownRequested = false
+	local composed, snapshotValue = callNonYielding(composeSnapshot, data)
+	local snapshot = if composed then snapshotValue :: MatchSnapshot? else nil
+	if
+		snapshot == nil
+		or not participantObserverSnapshotAdvances(data, snapshot)
+		or not participantObserverOperationIntact(data)
+	then
+		detachParticipantObserverState(data)
+		endParticipantObserverOperation(data)
+		return
+	end
+
+	data.participantObserverPendingSnapshot = snapshot
+	if status == "Active" then
+		local adapter = data.participantObserverAdapter
+		local handle = data.participantObserverHandle
+		local callbackCalled = false
+		local callbackValue: unknown = nil
+		if adapter ~= nil then
+			callbackCalled, callbackValue = callNonYielding(adapter.onSnapshot, adapter, snapshot)
+		end
+		if
+			not callbackCalled
+			or callbackValue ~= true
+			or handle == nil
+			or not participantObserverHandleMatches(data, handle)
+			or data.participantObserverStatus ~= "Active"
+			or not participantObserverOperationIntact(data)
+		then
+			detachParticipantObserverState(data)
+		end
+	end
+	endParticipantObserverOperation(data)
+end
+
 local function publishCurrentSnapshot(data: ServiceData): boolean
 	if not data.callbacksEnabled or not data.available then
 		return false
@@ -1039,10 +1265,15 @@ local function afterRosterMutation(data: ServiceData): boolean
 			return false
 		end
 		local coordinated, coordinatorResult = pcall(coordinator.onRosterChanged, coordinator)
-		return coordinated and isSuccess(coordinatorResult) and data.available
+		if not coordinated or not isSuccess(coordinatorResult) or not data.available then
+			return false
+		end
 	elseif data.state == "Started" then
-		return publishCurrentSnapshot(data)
+		if not publishCurrentSnapshot(data) then
+			return false
+		end
 	end
+	dispatchParticipantObserver(data)
 	return true
 end
 
@@ -1265,7 +1496,7 @@ local function start(data: ServiceData)
 	data.state = "Started"
 end
 
-local function shutdown(data: ServiceData)
+shutdown = function(data: ServiceData)
 	if data.state == "Shutdown" then
 		return
 	elseif data.state == "Failed" and data.cleanup == nil then
@@ -1277,7 +1508,12 @@ local function shutdown(data: ServiceData)
 	if data.state ~= "Initialized" and data.state ~= "Started" then
 		staticError("INVALID_STATE")
 	end
-	if data.waveActivationOperationActive or data.baseDefeatOperationActive or data.studioWaveOperationActive then
+	if
+		data.waveActivationOperationActive
+		or data.baseDefeatOperationActive
+		or data.studioWaveOperationActive
+		or data.participantObserverOperationActive
+	then
 		data.callbacksEnabled = false
 		if data.waveActivationOperationActive then
 			data.waveActivationShutdownRequested = true
@@ -1287,6 +1523,9 @@ local function shutdown(data: ServiceData)
 		end
 		if data.studioWaveOperationActive then
 			data.studioWaveShutdownRequested = true
+		end
+		if data.participantObserverOperationActive then
+			data.participantObserverShutdownRequested = true
 		end
 		return
 	end
@@ -1576,6 +1815,174 @@ function ServiceMethods.getSnapshot(self: Service): Result.Result<MatchSnapshot,
 		return snapshotFailure("INTERNAL_ERROR")
 	end
 	return Result.ok(snapshot)
+end
+
+function ServiceMethods.reserveParticipantObserver(
+	self: Service,
+	adapterValue: unknown
+): Result.Result<
+	ParticipantObserverReservation,
+	ParticipantObserverError
+>
+	local data = requireData(self)
+	local operation: ParticipantObserverOperation = "reserveParticipantObserver"
+	local operationError = beginParticipantObserverOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	if data.participantObserverStatus == "Reserved" or data.participantObserverStatus == "Active" then
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("UNAVAILABLE", operation)
+	end
+	if
+		not isParticipantObserverAdapter(adapterValue)
+		or data.participantObserverGeneration >= Validation.MAX_SAFE_INTEGER
+	then
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("INVALID_ARGUMENT", operation)
+	end
+
+	local composed, snapshotValue = callNonYielding(composeSnapshot, data)
+	local snapshot = if composed then snapshotValue :: MatchSnapshot? else nil
+	if snapshot == nil or not participantObserverOperationIntact(data) then
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("INTERNAL_ERROR", operation)
+	end
+
+	local handle = table.freeze({}) :: ParticipantObserverHandle
+	local generation = data.participantObserverGeneration + 1
+	local previousHandle = data.participantObserverHandle
+	if previousHandle ~= nil then
+		PARTICIPANT_OBSERVER_HANDLE_DATA[previousHandle] = nil
+	end
+	data.participantObserverAdapter = adapterValue :: ParticipantObserverAdapter
+	data.participantObserverHandle = handle
+	data.participantObserverStatus = "Reserved"
+	data.participantObserverPendingSnapshot = snapshot
+	data.participantObserverGeneration = generation
+	PARTICIPANT_OBSERVER_HANDLE_DATA[handle] = {
+		owner = data,
+		generation = generation,
+		status = "Reserved",
+	}
+	local reservation: ParticipantObserverReservation = table.freeze({
+		handle = handle,
+		snapshot = snapshot,
+	})
+	if not endParticipantObserverOperation(data) then
+		clearParticipantObserver(data)
+		return participantObserverFailure("INTERNAL_ERROR", operation)
+	end
+	return Result.ok(reservation)
+end
+
+function ServiceMethods.refreshParticipantObserver(
+	self: Service,
+	handleValue: unknown
+): Result.Result<MatchSnapshot, ParticipantObserverError>
+	local data = requireData(self)
+	local operation: ParticipantObserverOperation = "refreshParticipantObserver"
+	local operationError = beginParticipantObserverOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	if not participantObserverHandleMatches(data, handleValue) then
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("INVALID_HANDLE", operation)
+	end
+	if data.participantObserverStatus ~= "Reserved" then
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("WRONG_STATE", operation)
+	end
+
+	local previous = data.participantObserverPendingSnapshot
+	local composed, snapshotValue = callNonYielding(composeSnapshot, data)
+	local snapshot = if composed then snapshotValue :: MatchSnapshot? else nil
+	if
+		previous == nil
+		or snapshot == nil
+		or snapshot.matchId ~= previous.matchId
+		or snapshot.revision < previous.revision
+		or not participantObserverOperationIntact(data)
+	then
+		detachParticipantObserverState(data)
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("INTERNAL_ERROR", operation)
+	end
+	data.participantObserverPendingSnapshot = snapshot
+	if not endParticipantObserverOperation(data) then
+		detachParticipantObserverState(data)
+		return participantObserverFailure("INTERNAL_ERROR", operation)
+	end
+	return Result.ok(snapshot)
+end
+
+function ServiceMethods.activateParticipantObserver(
+	self: Service,
+	handleValue: unknown,
+	expectedRevision: unknown
+): Result.Result<boolean, ParticipantObserverError>
+	local data = requireData(self)
+	local operation: ParticipantObserverOperation = "activateParticipantObserver"
+	local operationError = beginParticipantObserverOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	if not participantObserverHandleMatches(data, handleValue) then
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("INVALID_HANDLE", operation)
+	end
+	if data.participantObserverStatus ~= "Reserved" then
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("WRONG_STATE", operation)
+	end
+	if
+		type(expectedRevision) ~= "number"
+		or not Validation.isSafeInteger(expectedRevision)
+		or expectedRevision < MatchStateMachine.INITIAL_REVISION
+	then
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("INVALID_ARGUMENT", operation)
+	end
+	local pending = data.participantObserverPendingSnapshot
+	if pending == nil or pending.revision ~= expectedRevision then
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("REVISION_MISMATCH", operation)
+	end
+
+	local handleData = PARTICIPANT_OBSERVER_HANDLE_DATA[handleValue :: any]
+	if handleData == nil then
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("INVALID_HANDLE", operation)
+	end
+	data.participantObserverStatus = "Active"
+	handleData.status = "Active"
+	if not endParticipantObserverOperation(data) then
+		detachParticipantObserverState(data)
+		return participantObserverFailure("INTERNAL_ERROR", operation)
+	end
+	return PARTICIPANT_OBSERVER_ACTIVATION_SUCCESS
+end
+
+function ServiceMethods.detachParticipantObserver(
+	self: Service,
+	handleValue: unknown
+): Result.Result<boolean, ParticipantObserverError>
+	local data = requireData(self)
+	local operation: ParticipantObserverOperation = "detachParticipantObserver"
+	local operationError = beginParticipantObserverOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	if not participantObserverHandleMatches(data, handleValue) then
+		endParticipantObserverOperation(data)
+		return participantObserverFailure("INVALID_HANDLE", operation)
+	end
+	local detached = detachParticipantObserverState(data)
+	if not endParticipantObserverOperation(data) then
+		return participantObserverFailure("INTERNAL_ERROR", operation)
+	end
+	return Result.ok(detached)
 end
 
 function ServiceMethods.getRuntimeMapSnapshot(self: Service): Result.Result<RuntimeMapSnapshot, RuntimeMapSnapshotError>
@@ -2390,6 +2797,14 @@ local function construct(
 		studioWaveReentryViolation = false,
 		studioWaveActivated = false,
 		studioWaveShutdownRequested = false,
+		participantObserverAdapter = nil,
+		participantObserverHandle = nil,
+		participantObserverStatus = nil,
+		participantObserverPendingSnapshot = nil,
+		participantObserverGeneration = 0,
+		participantObserverOperationActive = false,
+		participantObserverReentryViolation = false,
+		participantObserverShutdownRequested = false,
 	}
 
 	local coordinatorCreated, coordinatorResult = pcall(createReadyCoordinator, {

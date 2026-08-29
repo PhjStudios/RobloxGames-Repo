@@ -314,6 +314,19 @@ local function successSnapshot(
 	return result.value
 end
 
+local function participantObserverAdapter(
+	callback: (MatchLifecycleService.MatchSnapshot) -> unknown
+): MatchLifecycleService.ParticipantObserverAdapter
+	local adapter = {} :: any
+	function adapter.onSnapshot(
+		_self: MatchLifecycleService.ParticipantObserverAdapter,
+		snapshot: MatchLifecycleService.MatchSnapshot
+	): unknown
+		return callback(snapshot)
+	end
+	return table.freeze(adapter) :: MatchLifecycleService.ParticipantObserverAdapter
+end
+
 type DefeatTestEnvironment = {
 	service: MatchLifecycleService.Service?,
 	machine: MatchStateMachine.StateMachine?,
@@ -2208,6 +2221,277 @@ return TestHarness.suite("match lifecycle service", {
 			assertions.equal(environment.cleanupCount, 1)
 		end
 	end),
+
+	TestHarness.case(
+		"reserves one atomic participant snapshot and activates the refreshed revision without an initial call",
+		function(assertions)
+			local source = fakePlayerSource({ { userId = 101 } })
+			local order = {}
+			local function createBroadcaster(_dependencies: unknown): unknown
+				local adapter = {} :: any
+				function adapter.publish(_self: unknown, _snapshot: unknown): unknown
+					table.insert(order, "publish")
+					return Result.ok(true)
+				end
+				function adapter.cleanup(_self: unknown): unknown
+					return Result.ok(true)
+				end
+				return Result.ok(adapter)
+			end
+			local service = (newForTests :: MatchLifecycleService.TestConstructor)(
+				logger,
+				{
+					mapLoader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)),
+					generateMatchId = function()
+						return MATCH_ID
+					end,
+					roster = newRoster(),
+					playerSource = source,
+					createSnapshotBroadcaster = createBroadcaster,
+				} :: any
+			)
+			local definition = service:getServiceDefinition()
+			invoke(definition.initialize)
+			invoke(definition.start)
+			table.clear(order)
+
+			local observed = {} :: { MatchLifecycleService.MatchSnapshot }
+			local adapter = participantObserverAdapter(function(snapshot)
+				table.insert(order, "observer")
+				table.insert(observed, snapshot)
+				return true
+			end)
+			local reserved = service:reserveParticipantObserver(adapter)
+			assertions.isTrue(reserved.ok)
+			if not reserved.ok then
+				error("[ATD_TEST][code=PARTICIPANT_OBSERVER_RESERVE_FAILED]", 0)
+			end
+			assertDetachedAndFrozen(assertions, reserved)
+			assertions.isTrue(table.isfrozen(reserved.value.handle))
+			assertions.equal(reserved.value.snapshot.matchId, MATCH_ID)
+			assertions.equal(#reserved.value.snapshot.participants, 1)
+			assertions.equal(reserved.value.snapshot.participants[1].userId, 101)
+			assertions.equal(#observed, 0)
+
+			local added = source.addedListener
+			assertions.equal(type(added), "function")
+			if added == nil then
+				error("[ATD_TEST][code=PARTICIPANT_ADDED_LISTENER_MISSING]", 0)
+			end
+			added({ userId = 202 })
+			assertions.equal(table.concat(order, ","), "publish")
+			assertions.equal(#observed, 0)
+
+			local refreshed = service:refreshParticipantObserver(reserved.value.handle)
+			assertions.isTrue(refreshed.ok)
+			if not refreshed.ok then
+				error("[ATD_TEST][code=PARTICIPANT_OBSERVER_REFRESH_FAILED]", 0)
+			end
+			assertions.equal(refreshed.value.matchId, MATCH_ID)
+			assertions.equal(#refreshed.value.participants, 2)
+			assertions.equal(refreshed.value.revision, successSnapshot(assertions, service).revision)
+			assertions.equal(#observed, 0)
+
+			local wrongRevision =
+				service:activateParticipantObserver(reserved.value.handle, refreshed.value.revision - 1)
+			assertions.isFalse(wrongRevision.ok)
+			if not wrongRevision.ok then
+				assertions.equal(wrongRevision.error.code, "REVISION_MISMATCH")
+			end
+			local activated = service:activateParticipantObserver(reserved.value.handle, refreshed.value.revision)
+			assertions.isTrue(activated.ok)
+			if activated.ok then
+				assertions.isTrue(activated.value)
+			end
+			assertions.equal(#observed, 0)
+
+			table.clear(order)
+			added({ userId = 303 })
+			assertions.equal(table.concat(order, ","), "publish,observer")
+			assertions.equal(#observed, 1)
+			assertions.equal(#observed[1].participants, 3)
+			assertions.equal(observed[1].revision, successSnapshot(assertions, service).revision)
+			invoke(definition.shutdown)
+		end
+	),
+
+	TestHarness.case(
+		"contains throwing yielding nontrue and reentrant participant observers without rewriting roster truth",
+		function(assertions)
+			for _, mode in { "throw", "yield", "nontrue", "reenter" } do
+				local source = fakePlayerSource({ { userId = 401 } })
+				local service =
+					newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil, nil, source)
+				local definition = service:getServiceDefinition()
+				invoke(definition.initialize)
+				invoke(definition.start)
+				local before = successSnapshot(assertions, service)
+				local callbackCount = 0
+				local handle: MatchLifecycleService.ParticipantObserverHandle? = nil
+				local reentryResult: unknown? = nil
+				local adapter = participantObserverAdapter(function(_snapshot)
+					callbackCount += 1
+					if mode == "throw" then
+						error(PRIVATE_SENTINEL, 0)
+					elseif mode == "yield" then
+						coroutine.yield()
+					elseif mode == "nontrue" then
+						return false
+					elseif mode == "reenter" then
+						reentryResult = service:refreshParticipantObserver(handle)
+					end
+					return true
+				end)
+				local reserved = service:reserveParticipantObserver(adapter)
+				assertions.isTrue(reserved.ok)
+				if not reserved.ok then
+					error("[ATD_TEST][code=PARTICIPANT_OBSERVER_RESERVE_FAILED]", 0)
+				end
+				handle = reserved.value.handle
+				local activated = service:activateParticipantObserver(handle, reserved.value.snapshot.revision)
+				assertions.isTrue(activated.ok)
+
+				local added = source.addedListener
+				if added == nil then
+					error("[ATD_TEST][code=PARTICIPANT_ADDED_LISTENER_MISSING]", 0)
+				end
+				added({ userId = 402 })
+				assertions.equal(callbackCount, 1)
+				local after = successSnapshot(assertions, service)
+				assertions.equal(after.revision, before.revision + 1)
+				assertions.equal(#after.participants, 2)
+				assertions.equal(after.participants[2].userId, 402)
+				assertions.equal(service:getLifecycleState(), "Started")
+				if mode == "reenter" then
+					local reentry = reentryResult :: any
+					assertions.isFalse(reentry.ok)
+					assertions.equal(reentry.error.code, "REENTRANT")
+				end
+
+				local detached = service:detachParticipantObserver(handle)
+				assertions.isTrue(detached.ok)
+				if detached.ok then
+					assertions.isFalse(detached.value)
+				end
+				local replacement = service:reserveParticipantObserver(participantObserverAdapter(function()
+					return true
+				end))
+				assertions.isTrue(replacement.ok)
+				if replacement.ok then
+					local stale = service:refreshParticipantObserver(handle)
+					assertions.isFalse(stale.ok)
+					if not stale.ok then
+						assertions.equal(stale.error.code, "INVALID_HANDLE")
+					end
+					assertions.isTrue(service:detachParticipantObserver(replacement.value.handle).ok)
+				end
+				invoke(definition.shutdown)
+			end
+		end
+	),
+
+	TestHarness.case(
+		"authenticates one exact observer handle and revokes it before shutdown callbacks can run",
+		function(assertions)
+			local firstSource = fakePlayerSource()
+			local secondSource = fakePlayerSource()
+			local first =
+				newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil, nil, firstSource)
+			local second =
+				newService(fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true)), nil, nil, secondSource)
+			invoke(first:getServiceDefinition().initialize)
+			invoke(first:getServiceDefinition().start)
+			invoke(second:getServiceDefinition().initialize)
+			invoke(second:getServiceDefinition().start)
+
+			local unfrozen = first:reserveParticipantObserver({
+				onSnapshot = function()
+					return true
+				end,
+			})
+			assertions.isFalse(unfrozen.ok)
+			if not unfrozen.ok then
+				assertions.equal(unfrozen.error.code, "INVALID_ARGUMENT")
+			end
+			local inexact = first:reserveParticipantObserver(table.freeze({
+				onSnapshot = function()
+					return true
+				end,
+				extra = PRIVATE_SENTINEL,
+			}))
+			assertions.isFalse(inexact.ok)
+			if not inexact.ok then
+				assertions.equal(inexact.error.code, "INVALID_ARGUMENT")
+			end
+
+			local callbackCount = 0
+			local firstReservation = first:reserveParticipantObserver(participantObserverAdapter(function()
+				callbackCount += 1
+				return true
+			end))
+			local secondReservation = second:reserveParticipantObserver(participantObserverAdapter(function()
+				return true
+			end))
+			assertions.isTrue(firstReservation.ok)
+			assertions.isTrue(secondReservation.ok)
+			if not firstReservation.ok or not secondReservation.ok then
+				error("[ATD_TEST][code=PARTICIPANT_OBSERVER_RESERVE_FAILED]", 0)
+			end
+			local duplicate = first:reserveParticipantObserver(participantObserverAdapter(function()
+				return true
+			end))
+			assertions.isFalse(duplicate.ok)
+			if not duplicate.ok then
+				assertions.equal(duplicate.error.code, "UNAVAILABLE")
+			end
+			local foreign = first:refreshParticipantObserver(secondReservation.value.handle)
+			assertions.isFalse(foreign.ok)
+			if not foreign.ok then
+				assertions.equal(foreign.error.code, "INVALID_HANDLE")
+			end
+
+			local detached = first:detachParticipantObserver(firstReservation.value.handle)
+			assertions.isTrue(detached.ok)
+			if detached.ok then
+				assertions.isTrue(detached.value)
+			end
+			local detachedAgain = first:detachParticipantObserver(firstReservation.value.handle)
+			assertions.isTrue(detachedAgain.ok)
+			if detachedAgain.ok then
+				assertions.isFalse(detachedAgain.value)
+			end
+			local replacement = first:reserveParticipantObserver(participantObserverAdapter(function()
+				callbackCount += 1
+				return true
+			end))
+			assertions.isTrue(replacement.ok)
+			if not replacement.ok then
+				error("[ATD_TEST][code=PARTICIPANT_OBSERVER_REPLACEMENT_FAILED]", 0)
+			end
+			local stale = first:detachParticipantObserver(firstReservation.value.handle)
+			assertions.isFalse(stale.ok)
+			if not stale.ok then
+				assertions.equal(stale.error.code, "INVALID_HANDLE")
+			end
+			assertions.isTrue(
+				first:activateParticipantObserver(replacement.value.handle, replacement.value.snapshot.revision).ok
+			)
+
+			local capturedAdded = firstSource.addedListener
+			invoke(first:getServiceDefinition().shutdown)
+			assertions.equal(first:getLifecycleState(), "Shutdown")
+			if capturedAdded ~= nil then
+				capturedAdded({ userId = 501 })
+			end
+			assertions.equal(callbackCount, 0)
+			local afterShutdown = first:detachParticipantObserver(replacement.value.handle)
+			assertions.isFalse(afterShutdown.ok)
+			if not afterShutdown.ok then
+				assertions.equal(afterShutdown.error.code, "UNAVAILABLE")
+			end
+			invoke(second:getServiceDefinition().shutdown)
+		end
+	),
 
 	TestHarness.case("rejects invalid generated identities without touching the loader", function(assertions)
 		local loader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true))

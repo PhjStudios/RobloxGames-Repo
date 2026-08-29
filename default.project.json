@@ -61,6 +61,10 @@
             "$path": "src/server/match/ready"
           },
 
+          "towers": {
+            "$path": "src/server/match/towers"
+          },
+
           "waves": {
             "$path": "src/server/match/waves"
           }
