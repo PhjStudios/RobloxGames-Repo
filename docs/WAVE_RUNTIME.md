@@ -2,13 +2,14 @@
 
 ## Status and authority
 
-This document is the authoritative Phase 11 decision and implemented contract for the finite authored-wave runtime, difficulty composition, skip voting, reliable wave replication, and their cleanup boundaries. Packets 11.1–11.6, the exact unsaved Match Studio gate, and the one consolidated review are complete on 2026-08-28. Exact final all-repository and exact-SHA CI counts are reported at handoff after the final gate rather than guessed in this tracked record. Phase 12 remains unbegun.
+This document is the authoritative Phase 11 decision and implemented contract for the finite authored-wave runtime, difficulty composition, skip voting, reliable wave replication, and their cleanup boundaries. Packets 11.1–11.6, the exact unsaved Match Studio gate, and the one consolidated review are complete on 2026-08-28. Exact final all-repository and exact-SHA CI counts are reported at handoff after the final gate rather than guessed in this tracked record. Phase 12 now composes a separate TowerRuntime after WaveRuntime and extends only the authenticated Studio fixture boundary; it does not change Wave scheduling, ownership, replication, or terminal behavior. Phase 13 remains unbegun.
 
-Phase 11 implements only `AuthoredFinite` schedules. `GeneratedEndless` remains Phase 32. Production `Assets`, `Enemies`, `Maps`, `Difficulties`, `Waves`, and difficulty-specific `Economy` rules remain frozen and empty, so the production scheduler is dormant until a future content phase supplies an authenticated selection. Phase 11 permits only fresh schema-validated test fixtures and one Studio-only runtime fixture seam.
+Phase 11 implements only `AuthoredFinite` schedules. `GeneratedEndless` remains Phase 32. Production `Assets`, `Towers`, `Enemies`, `Maps`, `Difficulties`, `Waves`, and difficulty-specific `Economy` rules remain frozen and empty, so the production scheduler is dormant until a future content phase supplies an authenticated selection. Phase 11 permits only fresh schema-validated test fixtures and one Studio-only runtime fixture seam.
 
 The following remain outside Phase 11:
 
-- Phase 12 tower definitions and tower runtime;
+- tower placement, targeting, combat, economy mutation, and every Phase 13–15
+  behavior; the separate Phase 12 TowerRuntime executes none of them;
 - player balances, grants, income, purchases, rewards, or an economy service;
 - boss identity, boss behavior, boss presentation, or boss-specific scheduling;
 - a wave HUD, countdown renderer, or world-space wave UI;
@@ -384,13 +385,13 @@ Cleanup disconnects listeners, invalidates callback generations, clears pending 
 The server dependency graph is:
 
 ```text
-NetworkRegistry -> MatchLifecycle -> BaseRuntime -> EnemySimulation -> WaveRuntime
+NetworkRegistry -> MatchLifecycle -> BaseRuntime -> EnemySimulation -> WaveRuntime -> TowerRuntime
 ```
 
 The corresponding shutdown order begins:
 
 ```text
-WaveRuntime -> EnemySimulation -> BaseRuntime -> MatchLifecycle/MapLoader -> NetworkRegistry
+TowerRuntime -> WaveRuntime -> EnemySimulation -> BaseRuntime -> MatchLifecycle/MapLoader -> NetworkRegistry
 ```
 
 The client order is:
@@ -401,7 +402,19 @@ MatchReadyController -> BaseController -> EnemyController -> WaveController
 
 and cleanup is the reverse. The lifecycle runner retains transactional initialize/start unwind behavior and attempts every reverse shutdown even after a failure.
 
-Wave cleanup first closes request, vote, spawn, boundary, completion, terminal, and publication admission. It invalidates the boundary adapter and Studio trigger, clears the terminal callback/queue/provenance copies, pending schedule/cursor/backlog, ownership and processed ledgers, counters, votes and Active UserIds, publisher/request state, timestamps/revisions/identities, configuration references, and starting-cash placeholder. It then detaches from EnemySimulation. EnemySimulation subsequently clears its one Heartbeat, PlayerRemoving connection, publisher, store, active enemies, terminal authenticators, and callbacks; Base clears health/leak/result state; Match clears roster/runtime map; Network destroys the one root.
+TowerRuntime closes all loadout/capability/record/model admission, revokes its
+participant observer and its exact Wave-owned Studio boundary, and releases all
+Tower state before ordinary Wave shutdown. Wave cleanup then closes request,
+vote, spawn, boundary, completion, terminal, and publication admission. It
+invalidates the boundary adapter and Studio trigger, clears the terminal
+callback/queue/provenance copies, pending schedule/cursor/backlog, ownership and
+processed ledgers, counters, votes and Active UserIds, publisher/request state,
+timestamps/revisions/identities, configuration references, and starting-cash
+placeholder. It then detaches from EnemySimulation. EnemySimulation
+subsequently clears its one Heartbeat, PlayerRemoving connection, publisher,
+store, active enemies, terminal authenticators, and callbacks; Base clears
+health/leak/result state; Match clears roster/runtime map; Network destroys the
+one root.
 
 The server and client connection counts are constant. No count depends on waves, groups, spawns, enemies, votes, or clients beyond the already bounded recipient iteration.
 
@@ -418,6 +431,27 @@ The evidence records the `1`, `32`, `64`, and `128` due-spawn ladder, scheduler 
 Ordering and recovery injections in Studio travel through the production `WaveReplication` sender and its real captured `FireClient` operation. They do not call `WaveStateReducer` or a client signal directly, so accepted stale, duplicate, skipped, out-of-order, wrong-Match, and recovery observations exercise the actual reliable endpoint path.
 
 After evidence, all clients/server stop, the task-owned Rojo process disconnects, profiling/emulation resets, the combined trigger and all runtime/network/map/enemy/client state are absent, and the exact Match place remains in Edit mode. Studio content is not saved or published.
+
+### Phase 12 fixture-boundary extension
+
+Phase 12 does not create a second trigger or run `ConfigurationValidator` a
+second time. In Studio only, TowerRuntime installs one frozen fixed-operation
+boundary behind the existing Wave-owned `_ATDPhase11WaveEvidence`
+BindableFunction. The one fresh raw root now also contains the three Phase 12
+test/runtime Tower definitions and six symbolic Tower assets; the same one-shot
+Wave transaction validates that complete root once and passes the exact
+canonical result to Base, Enemy, Wave, and Tower preparation.
+
+Tower preparation authenticates that root, privately clones/validates the three
+graybox templates, preallocates temporary loadouts, and reserves the sole
+participant observer before the established Wave activation begins. During
+Wave's reversible lifecycle activation wrapper, Tower refreshes/activates that
+observer at the exact participant revision and commits only preallocated local
+tables before Base/Enemy/lifecycle truth starts committing. If later Wave
+initialization fails, its bounded `closeFromWave` path closes Tower without
+calling back into Wave. Ordinary reverse lifecycle shutdown instead detaches
+Tower's Wave boundary first. Production remains dormant and has no trigger,
+Tower catalog, model, participant observer, or alternate activation path.
 
 ## Executed Studio evidence — 2026-08-28
 
@@ -463,4 +497,4 @@ One focused independent architecture/security/lifecycle review completed on 2026
 
 After these corrections, the review found no remaining material architecture, authority, timing, bounds, lifecycle, privacy, cleanup, or testability issue and cleared the decision for executable implementation. No overlapping pre-implementation review round was performed.
 
-The one consolidated independent final review covered requirements, runtime correctness, authority/security, cleanup, tests, Studio evidence, and documentation. It found no P0. Its two P1 and four P2 material findings are all resolved in the implemented contract and evidence: the client reducer admits the legal `Intermission -> FiniteComplete` empty-final-wave transition; a callback failure after Store commit performs the exact one-shot spawn/terminal reconciliation above; canonical `Faulted` truth remains recoverable through read-only `GetWaveSnapshot` until cleanup even when terminal sends fail; every recovery-worthy skip rejection forces one bounded Get without requiring an earlier revision gap; explicit recovery-episode correlation prevents an older in-flight Get from consuming a newer replication gap while allowing an exact authoritative duplicate to clear and rearm the matching episode; and the authoritative test/place indexes now report the actual Phase 11 systems, Studio records, `742`-case/`56`-suite gate, `77/46/77/144` module inventory, ten endpoints, and six policies. The same review also required the ReadyCheck bootstrap, at-or-below-128 bound, gap-episode regression coverage, real `FireClient` ordering injection, defeat-recipient distinction, and affected-document corrections now recorded here. These were resolutions within that single consolidated review, not a second review round. Phase 12 remains unbegun.
+The one consolidated independent final review covered requirements, runtime correctness, authority/security, cleanup, tests, Studio evidence, and documentation. It found no P0. Its two P1 and four P2 material findings are all resolved in the implemented contract and evidence: the client reducer admits the legal `Intermission -> FiniteComplete` empty-final-wave transition; a callback failure after Store commit performs the exact one-shot spawn/terminal reconciliation above; canonical `Faulted` truth remains recoverable through read-only `GetWaveSnapshot` until cleanup even when terminal sends fail; every recovery-worthy skip rejection forces one bounded Get without requiring an earlier revision gap; explicit recovery-episode correlation prevents an older in-flight Get from consuming a newer replication gap while allowing an exact authoritative duplicate to clear and rearm the matching episode; and the authoritative test/place indexes now report the actual Phase 11 systems, Studio records, `742`-case/`56`-suite gate, `77/46/77/144` module inventory, ten endpoints, and six policies. The same review also required the ReadyCheck bootstrap, at-or-below-128 bound, gap-episode regression coverage, real `FireClient` ordering injection, defeat-recipient distinction, and affected-document corrections now recorded here. These were resolutions within that single consolidated review, not a second review round. Phase 12's separate Tower consumer now passes its exact Studio primary and defeat scenarios without changing any Phase 11 outcome; its final completion gate is tracked in `TOWER_RUNTIME.md`. Phase 13 remains unbegun.

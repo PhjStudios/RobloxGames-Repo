@@ -14,7 +14,7 @@
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Phase 06 checkpoint endpoints: none; that completed checkpoint used an empty
   authenticated registry
-- Current Phase 11 endpoints: `GetMatchSnapshot`, `SubmitReady`,
+- Current Phase 12 endpoints (unchanged from Phase 11): `GetMatchSnapshot`, `SubmitReady`,
   `MatchSnapshot`, `GetEnemySnapshot`, `EnemyReplication`, `GetBaseSnapshot`,
   `BaseReplication`, `GetWaveSnapshot`, `SubmitSkipVote`, and
   `WaveReplication`, all Match-only reliable `RemoteEvent` contracts
@@ -37,8 +37,11 @@ cited at handoff. Phase 10 focused and exact Match Studio checks, consolidated
 review, `593`-case local gate, and all four structural builds passed on
   2026-08-28. Phase 10 is complete. Phase 11's exact Studio gate, consolidated
   review, `742`-case local gate, and all four structural builds also passed on
-  2026-08-28. Exact-final-SHA CI is cited at handoff. Phase 11 is complete and
-  Phase 12 remains unbegun.
+  2026-08-28. Exact-final-SHA CI is cited at handoff. Phase 11 is complete.
+  Phase 12's trusted Tower seam is server-only and adds no endpoint or rate
+  policy; its exact Studio, consolidated-review, `840`-case/`64`-suite local,
+  and four-build checks pass. Phase 12 is complete; Phase 13 is next but remains
+  unbegun.
 
 ## Official Roblox behavior that shapes the design
 
@@ -1097,3 +1100,21 @@ other mutation remain closed. Only `DefeatClosed` uses the exact recipient set
 captured during Phase 10 defeat preflight. Other states query live trusted
 recipients synchronously, and the publisher caches no Player, UserId, or
 recipient array.
+
+## Phase 12 Tower network boundary
+
+Phase 12 deliberately adds zero shared Tower protocol modules, zero client
+Tower controller, and zero production remote or rate-policy definition. A
+client cannot submit a TowerId, UnitId, RuntimeTowerId, CFrame, owner, slot,
+level, target mode, investment, cooldown, Model, or capability. Temporary
+loadouts are server-only snapshots; occupied-slot capabilities are opaque
+weak-key-authenticated server objects; trusted transforms come only from tests
+or the fixed Studio evidence boundary. Phase 13 must record and review any
+future placement query/request contract before it can alter this catalog.
+
+The Phase 12 structural and exact Studio checks both confirm the unchanged
+network: ten reliable Match-only endpoint definitions, six client-request rate
+policies, one `ATDNetwork/v1` root, sixteen resulting reliable RemoteEvent
+instances, zero RemoteFunctions, zero UnreliableRemoteEvents, and no name or
+source token for a tower mutation endpoint. Tower visual replication is normal
+server-owned Instance replication, not a gameplay protocol or client authority.

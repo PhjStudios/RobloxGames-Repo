@@ -397,6 +397,13 @@ local function fakeCreators(fixture: any): ({ any }, any)
 		loadoutActivateValue = true,
 		loadoutProbeMode = "ExactNotFound",
 		loadoutUserIds = {},
+		childFailureTrigger = nil,
+		childFailureMode = nil,
+		loadoutAbortFailureMode = nil,
+		loadoutChildFaulted = false,
+		runtimeChildFaulted = false,
+		loadoutCleaned = false,
+		runtimeCleaned = false,
 	}
 
 	local function mark(name: string)
@@ -407,6 +414,29 @@ local function fakeCreators(fixture: any): ({ any }, any)
 			state.triggerCallback = nil
 			callback()
 		end
+	end
+
+	local function injectedChildFailure(name: string, child: "Loadout" | "Runtime", operation: string): unknown?
+		if state.childFailureTrigger ~= name then
+			return nil
+		end
+		local mode = state.childFailureMode
+		if mode == "Throw" then
+			error("injected child throw", 0)
+		elseif mode == "Yield" then
+			coroutine.yield()
+			return nil
+		elseif mode == "Fatal" then
+			if child == "Loadout" then
+				state.loadoutChildFaulted = true
+			else
+				state.runtimeChildFaulted = true
+			end
+			return Result.err(table.freeze({ code = "COUNTER_FAULT", operation = operation }))
+		elseif mode == "Recoverable" then
+			return Result.err(table.freeze({ code = "INVALID_CFRAME", operation = operation }))
+		end
+		return nil
 	end
 
 	local factory: any = {}
@@ -521,6 +551,10 @@ local function fakeCreators(fixture: any): ({ any }, any)
 	end
 	function loadout:getLoadout(userId: unknown): unknown
 		mark("loadout.get")
+		local injected = injectedChildFailure("loadout.get", "Loadout", "getLoadout")
+		if injected ~= nil then
+			return injected
+		end
 		if state.loadoutUserIds[userId] == true then
 			return Result.ok(table.freeze({ userId = userId, revision = 1, slots = table.freeze({}) }))
 		end
@@ -547,10 +581,18 @@ local function fakeCreators(fixture: any): ({ any }, any)
 	end
 	function loadout:issueCreationCapability(_userId: unknown, _slot: unknown): unknown
 		mark("loadout.issue")
+		local injected = injectedChildFailure("loadout.issue", "Loadout", "issueCreationCapability")
+		if injected ~= nil then
+			return injected
+		end
 		return Result.ok(table.freeze({}))
 	end
 	function loadout:prepareCreationCapability(capability: unknown): unknown
 		mark("loadout.prepare")
+		local injected = injectedChildFailure("loadout.prepare", "Loadout", "prepareCreationCapability")
+		if injected ~= nil then
+			return injected
+		end
 		local token = table.freeze({})
 		state.preparedCapability = { token = token, capability = capability }
 		return Result.ok(token)
@@ -565,6 +607,16 @@ local function fakeCreators(fixture: any): ({ any }, any)
 	end
 	function loadout:abortPreparedCapability(_token: unknown): unknown
 		mark("loadout.abort")
+		local mode = state.loadoutAbortFailureMode
+		if mode == "Throw" then
+			error("injected abort throw", 0)
+		elseif mode == "Yield" then
+			coroutine.yield()
+			return nil
+		elseif mode == "Fatal" then
+			state.loadoutChildFaulted = true
+			return Result.err(table.freeze({ code = "COUNTER_FAULT", operation = "abortPreparedCapability" }))
+		end
 		state.preparedCapability = nil
 		return Result.ok(true)
 	end
@@ -577,15 +629,23 @@ local function fakeCreators(fixture: any): ({ any }, any)
 	function loadout:fault(): unknown
 		mark("loadout.fault")
 		state.faulted = true
+		state.loadoutChildFaulted = true
+		state.preparedCapability = nil
 		return Result.ok(true)
 	end
 	function loadout:getMetrics(): unknown
 		mark("loadout.metrics")
-		return table.freeze({ loadoutCount = 1, capabilityCount = 0 })
+		return table.freeze({
+			loadoutCount = 1,
+			capabilityCount = 0,
+			faulted = state.loadoutChildFaulted,
+			cleaned = state.loadoutCleaned,
+		})
 	end
 	function loadout:cleanup(): unknown
 		mark("loadout.cleanup")
 		state.cleaned = true
+		state.loadoutCleaned = true
 		return Result.ok(true)
 	end
 
@@ -597,6 +657,10 @@ local function fakeCreators(fixture: any): ({ any }, any)
 		placementCFrame: unknown
 	): unknown
 		mark("runtime.prepare")
+		local injected = injectedChildFailure("runtime.prepare", "Runtime", "prepareCreate")
+		if injected ~= nil then
+			return injected
+		end
 		local slot = expectedSlot :: number
 		local definition = fixture.configuration.towers.ordered[slot]
 		local runtimeTowerId = state.nextRuntimeTowerId
@@ -650,11 +714,19 @@ local function fakeCreators(fixture: any): ({ any }, any)
 	end
 	function runtime:get(runtimeTowerId: unknown): unknown
 		mark("runtime.get")
+		local injected = injectedChildFailure("runtime.get", "Runtime", "get")
+		if injected ~= nil then
+			return injected
+		end
 		local record = state.records[runtimeTowerId]
 		return if record == nil then Result.err(table.freeze({ code = "NOT_FOUND" })) else Result.ok(record)
 	end
 	function runtime:list(): unknown
 		mark("runtime.list")
+		local injected = injectedChildFailure("runtime.list", "Runtime", "list")
+		if injected ~= nil then
+			return injected
+		end
 		local values = {}
 		for runtimeTowerId = 1, state.nextRuntimeTowerId - 1 do
 			local record = state.records[runtimeTowerId]
@@ -679,6 +751,7 @@ local function fakeCreators(fixture: any): ({ any }, any)
 	function runtime:fault(): unknown
 		mark("runtime.fault")
 		state.faulted = true
+		state.runtimeChildFaulted = true
 		return Result.ok(true)
 	end
 	function runtime:getMetrics(): unknown
@@ -687,11 +760,16 @@ local function fakeCreators(fixture: any): ({ any }, any)
 		for _ in state.records do
 			count += 1
 		end
-		return table.freeze({ runtimeTowerCount = count })
+		return table.freeze({
+			runtimeTowerCount = count,
+			faulted = state.runtimeChildFaulted,
+			cleaned = state.runtimeCleaned,
+		})
 	end
 	function runtime:cleanup(): unknown
 		mark("runtime.cleanup")
 		state.cleaned = true
+		state.runtimeCleaned = true
 		table.clear(state.records)
 		return Result.ok(true)
 	end
@@ -1037,6 +1115,120 @@ return TestHarness.suite("TowerRuntimeService", {
 				assertions.equal(matchState.detachCount, 1)
 				definition.shutdown()
 				componentState.trackingFolder:Destroy()
+			end
+		end
+	),
+
+	TestHarness.case(
+		"adopts thrown yielding and fatal child-store failures before any repeated admission",
+		function(assertions)
+			local entries = {
+				{
+					trigger = "loadout.get",
+					operation = "getLoadout",
+					invoke = function(context: any, mode: string): unknown
+						context.componentState.childFailureTrigger = "loadout.get"
+						context.componentState.childFailureMode = mode
+						return context.service:getLoadout(101)
+					end,
+				},
+				{
+					trigger = "loadout.issue",
+					operation = "resolveOccupiedSlot",
+					invoke = function(context: any, mode: string): unknown
+						context.componentState.childFailureTrigger = "loadout.issue"
+						context.componentState.childFailureMode = mode
+						return context.service:resolveOccupiedSlot(101, 1)
+					end,
+				},
+				{
+					trigger = "loadout.prepare",
+					operation = "trustedCreate",
+					invoke = function(context: any, mode: string): unknown
+						local capability = success(assertions, context.service:resolveOccupiedSlot(101, 1))
+						context.componentState.childFailureTrigger = "loadout.prepare"
+						context.componentState.childFailureMode = mode
+						return context.service:trustedCreate(capability, CFrame.new())
+					end,
+				},
+				{
+					trigger = "runtime.prepare",
+					operation = "trustedCreate",
+					invoke = function(context: any, mode: string): unknown
+						local capability = success(assertions, context.service:resolveOccupiedSlot(101, 1))
+						context.componentState.childFailureTrigger = "runtime.prepare"
+						context.componentState.childFailureMode = mode
+						return context.service:trustedCreate(capability, CFrame.new())
+					end,
+				},
+				{
+					trigger = "runtime.get",
+					operation = "get",
+					invoke = function(context: any, mode: string): unknown
+						context.componentState.childFailureTrigger = "runtime.get"
+						context.componentState.childFailureMode = mode
+						return context.service:get(1)
+					end,
+				},
+				{
+					trigger = "runtime.list",
+					operation = "list",
+					invoke = function(context: any, mode: string): unknown
+						context.componentState.childFailureTrigger = "runtime.list"
+						context.componentState.childFailureMode = mode
+						return context.service:list()
+					end,
+				},
+			}
+
+			for _, entry in entries do
+				for _, mode in { "Throw", "Yield", "Fatal" } do
+					local context = configureFake(assertions)
+					local resultValue = entry.invoke(context, mode)
+					expectError(
+						assertions,
+						resultValue,
+						if mode == "Fatal" then "COUNTER_FAULT" else "INTERNAL_ERROR",
+						entry.operation
+					)
+					local metrics = context.service:getMetrics()
+					assertions.equal(metrics.ownershipState, "Faulted")
+					assertions.isFalse(metrics.admissionOpen)
+					assertions.equal(metrics.capabilityExpectationCount, 0)
+					expectError(
+						assertions,
+						context.service:resolveOccupiedSlot(101, 1),
+						"UNAVAILABLE",
+						"resolveOccupiedSlot"
+					)
+					assertions.isFalse(context.service:getMetrics().operationActive)
+					cleanupContext(context)
+				end
+			end
+
+			for _, abortMode in { "Throw", "Yield", "Fatal" } do
+				local context = configureFake(assertions)
+				local capability = success(assertions, context.service:resolveOccupiedSlot(101, 1))
+				context.componentState.childFailureTrigger = "runtime.prepare"
+				context.componentState.childFailureMode = "Recoverable"
+				context.componentState.loadoutAbortFailureMode = abortMode
+				expectError(
+					assertions,
+					context.service:trustedCreate(capability, CFrame.new()),
+					"CAPABILITY_ABORT_FAILED",
+					"trustedCreate"
+				)
+				local metrics = context.service:getMetrics()
+				assertions.equal(metrics.ownershipState, "Faulted")
+				assertions.isFalse(metrics.admissionOpen)
+				assertions.equal(metrics.capabilityExpectationCount, 0)
+				expectError(
+					assertions,
+					context.service:resolveOccupiedSlot(101, 1),
+					"UNAVAILABLE",
+					"resolveOccupiedSlot"
+				)
+				cleanupContext(context)
 			end
 		end
 	),

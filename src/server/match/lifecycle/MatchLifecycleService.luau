@@ -1074,7 +1074,15 @@ local function beginParticipantObserverOperation(
 		data.participantObserverReentryViolation = true
 		return makeParticipantObserverError("REENTRANT", operation)
 	end
-	if not data.available or not data.callbacksEnabled or (data.state ~= "Initialized" and data.state ~= "Started") then
+	-- BaseDefeat closes ordinary callbacks before it commits Results, but owners
+	-- must still be able to revoke an authentic participant-observer handle.
+	-- Detach is cleanup-only: it neither composes nor dispatches a snapshot.
+	local detachOnly = operation == "detachParticipantObserver"
+	if
+		not data.available
+		or (not detachOnly and not data.callbacksEnabled)
+		or (data.state ~= "Initialized" and data.state ~= "Started")
+	then
 		return makeParticipantObserverError("UNAVAILABLE", operation)
 	end
 	data.participantObserverOperationActive = true

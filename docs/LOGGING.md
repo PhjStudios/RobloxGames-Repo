@@ -35,7 +35,7 @@ Packet 06.4 adds only `protocolRejectionCount` and
 add request IDs, Players, payloads, handler errors, or response contents to the
 logging vocabulary.
 
-Phases 08–11 reuse this closed vocabulary without adding a gameplay telemetry
+Phases 08–12 reuse this closed vocabulary without adding a gameplay telemetry
 subsystem or high-frequency record. Phase 10 base arithmetic, endpoint outcomes,
 health, revisions, recipients, map markers, result seeds, and UI state are never
 logged. A fail-closed MatchLifecycle diagnostic uses only the existing
@@ -47,6 +47,8 @@ Phase 11 likewise never logs schedules, spawn events, enemy IDs, MatchIds,
 UserIds, voter identities, snapshot payloads, definitions, caught values, or a
 per-spawn/per-enemy/per-vote stream. Its sender, callback, clock, lifecycle,
 capacity, and cleanup failures use only static bounded codes and existing fields.
+Phase 12 likewise adds no Tower log subsystem, endpoint record, per-capability,
+per-player, per-record, per-model, per-slot, or per-level stream.
 
 ## Architecture boundary
 
@@ -480,7 +482,7 @@ report, privacy, bootstrap, and Studio evidence is recorded in
 Packets 06.1–06.5 make and test the narrow `network` vocabulary and
 aggregate-field extensions recorded above. Their registry-empty statement is a
 historical Phase 06 checkpoint; the current reviewed Match-only definitions are
-recorded in `docs/NETWORK_PROTOCOL.md`. Phases 08–11 add no log sink or
+recorded in `docs/NETWORK_PROTOCOL.md`. Phases 08–12 add no log sink or
 client-authored logging path. Phase 10 focused and exact Studio checks had zero
 accepted-run console errors on 2026-08-28; its consolidated review and complete
 local/structural gate also passed, and its base/defeat logging boundary is
@@ -502,5 +504,30 @@ assertion totals, processing/lateness/convergence measurements, publication and
 connection counts, revisions/states, and residue counts. Those diagnostics are
 not production logs. All accepted Phase 11 Studio runs recorded zero console
 errors; the one expected bootstrap/network warning is documented as a bounded
-test condition rather than gameplay telemetry. Phase 11 is complete and Phase
-12 logging remains unbegun.
+test condition rather than gameplay telemetry. Phase 11 is complete.
+
+## Phase 12 logging boundary (current)
+
+TowerRuntime, TemporaryLoadoutStore, TowerRuntimeStore, TowerModelOwner, the
+graybox factory, and the MatchLifecycle participant-observer seam reuse static
+bounded internal error codes and the existing lifecycle/cleanup reporting
+surface. They never log MatchIds, UserIds, TowerIds, UnitIds, RuntimeTowerIds,
+slots, capabilities, transforms, definitions, Models, templates, descendants,
+participants, or caught Roblox values. Fatal child Store and capability-
+rollback failures close admission and retain only bounded state/metric flags;
+they do not emit a per-attempt log.
+
+The Studio-only evidence boundary returns deep-frozen bounded service/loadout/
+runtime/model-owner diagnostics: state/revisions, participant UserIds, counts,
+issued-ID/cap-generation counters, constant observer/boundary/connection
+ownership, one exact unknown-user rejection summary, and residue state. The
+trusted Studio/MCP harness separately records operation timings and inspects
+replicated Instance/descendant/variant totals. Both are test evidence rather
+than production telemetry; the boundary is absent outside Studio and
+unavailable after cleanup.
+
+Both accepted Phase 12 two-client scenarios recorded zero console errors.
+Clients recorded no warnings; the server recorded only the expected bounded
+early `GetBaseSnapshot` `UNAVAILABLE` bootstrap/network aggregate. No Tower
+payload, identity, capability, model, or caught error appeared in the console.
+Phase 13 logging remains unbegun.

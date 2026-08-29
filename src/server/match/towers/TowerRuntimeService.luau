@@ -1361,13 +1361,54 @@ local function beginConfiguredOperation(data: ServiceData, operation: Operation)
 	return beginOperation(data, operation, true)
 end
 
-local function serviceStoreFailure(storeResult: unknown, operation: Operation): Result.Failure<ServiceError>
-	local code = if type(storeResult) == "table"
-			and (storeResult :: any).ok == false
-			and type((storeResult :: any).error) == "table"
-		then (storeResult :: any).error.code
+local function serviceStoreFailure(
+	data: ServiceData,
+	adapter: unknown,
+	called: boolean,
+	storeResult: unknown,
+	operation: Operation
+): Result.Failure<ServiceError>
+	if not called then
+		faultRuntime(data)
+		return failure("INTERNAL_ERROR", operation)
+	end
+	local errorValue = if type(storeResult) == "table" and (storeResult :: any).ok == false
+		then (storeResult :: any).error
 		else nil
-	return failure(if type(code) == "string" then code else "INTERNAL_ERROR", operation)
+	local code = if type(errorValue) == "table" and table.isfrozen(errorValue :: any)
+		then (errorValue :: any).code
+		else nil
+	if type(code) ~= "string" then
+		faultRuntime(data)
+		return failure("INTERNAL_ERROR", operation)
+	end
+
+	local metricsMethod = if type(adapter) == "table" then (adapter :: any).getMetrics else nil
+	if type(metricsMethod) ~= "function" then
+		faultRuntime(data)
+		return failure("INTERNAL_ERROR", operation)
+	end
+	local metricsCalled, metricsValue = callNonYielding(metricsMethod, adapter)
+	if not operationIntact(data) then
+		return operationInterruptedFailure(data, operation)
+	end
+	if
+		not metricsCalled
+		or type(metricsValue) ~= "table"
+		or not table.isfrozen(metricsValue :: any)
+		or type((metricsValue :: any).faulted) ~= "boolean"
+		or type((metricsValue :: any).cleaned) ~= "boolean"
+	then
+		faultRuntime(data)
+		return failure("INTERNAL_ERROR", operation)
+	end
+	if (metricsValue :: any).faulted or (metricsValue :: any).cleaned then
+		-- A child store may discover a fatal callback/counter/identity fault before
+		-- returning its bounded error. Adopt that state immediately so no sibling
+		-- store or previously issued capability remains usable.
+		faultRuntime(data)
+	end
+	return failure(code, operation)
 end
 
 local function issueCapabilityCore(data: ServiceData, userId: unknown, slot: unknown): unknown
@@ -1381,7 +1422,7 @@ local function issueCapabilityCore(data: ServiceData, userId: unknown, slot: unk
 		return operationInterruptedFailure(data, "resolveOccupiedSlot")
 	end
 	if not called or not isSuccess(resultValue) then
-		return serviceStoreFailure(resultValue, "resolveOccupiedSlot")
+		return serviceStoreFailure(data, loadout, called, resultValue, "resolveOccupiedSlot")
 	end
 	local capability = (resultValue :: any).value
 	if type(capability) ~= "table" or not table.isfrozen(capability) then
@@ -1437,7 +1478,7 @@ local function trustedCreateCore(data: ServiceData, capability: unknown, placeme
 		return operationInterruptedFailure(data, "trustedCreate")
 	end
 	if not capPrepared or not isSuccess(capPrepareResult) then
-		return serviceStoreFailure(capPrepareResult, "trustedCreate")
+		return serviceStoreFailure(data, loadout, capPrepared, capPrepareResult, "trustedCreate")
 	end
 	local capabilityToken = (capPrepareResult :: any).value
 	local runtimePrepared, runtimePrepareResult = callResult(
@@ -1459,8 +1500,15 @@ local function trustedCreateCore(data: ServiceData, capability: unknown, placeme
 		return operationInterruptedFailure(data, "trustedCreate")
 	end
 	if not runtimePrepared or not isSuccess(runtimePrepareResult) then
-		callResult(loadout.abortPreparedCapability, loadout, capabilityToken)
-		return serviceStoreFailure(runtimePrepareResult, "trustedCreate")
+		local aborted, abortResult = callResult(loadout.abortPreparedCapability, loadout, capabilityToken)
+		if not operationIntact(data) then
+			return operationInterruptedFailure(data, "trustedCreate")
+		end
+		if not aborted or not resultSucceeded(abortResult, true) then
+			faultRuntime(data)
+			return failure("CAPABILITY_ABORT_FAILED", "trustedCreate")
+		end
+		return serviceStoreFailure(data, runtime, runtimePrepared, runtimePrepareResult, "trustedCreate")
 	end
 	local preparedRuntime = (runtimePrepareResult :: any).value
 	local runtimeToken = if type(preparedRuntime) == "table" then (preparedRuntime :: any).token else nil
@@ -1546,9 +1594,8 @@ local function configuredStoreRead(data: ServiceData, methodName: string, argume
 	local operation: Operation = if methodName == "list" then "list" else "get"
 	if not operationIntact(data) then
 		return operationInterruptedFailure(data, operation)
-	elseif not called then
-		faultRuntime(data)
-		return failure("INTERNAL_ERROR", operation)
+	elseif not called or not isSuccess(resultValue) then
+		return serviceStoreFailure(data, runtime, called, resultValue, operation)
 	end
 	return resultValue
 end
@@ -1561,7 +1608,7 @@ local function removeVisualCore(data: ServiceData, runtimeTowerId: unknown): unk
 		return operationInterruptedFailure(data, "removeVisual")
 	end
 	if not found or not isSuccess(getResult) then
-		return serviceStoreFailure(getResult, "removeVisual")
+		return serviceStoreFailure(data, runtime, found, getResult, "removeVisual")
 	end
 	local removed, removeResult = callResult(modelOwner.removeVisual, modelOwner, runtimeTowerId)
 	if not operationIntact(data) then
@@ -1582,7 +1629,7 @@ local function recreateVisualCore(data: ServiceData, runtimeTowerId: unknown): u
 		return operationInterruptedFailure(data, "recreateVisual")
 	end
 	if not found or not isSuccess(getResult) then
-		return serviceStoreFailure(getResult, "recreateVisual")
+		return serviceStoreFailure(data, runtime, found, getResult, "recreateVisual")
 	end
 	local recreated, recreateResult = callResult(modelOwner.recreateVisual, modelOwner, (getResult :: any).value)
 	if not operationIntact(data) then
@@ -1603,7 +1650,7 @@ local function trustedRemoveCore(data: ServiceData, runtimeTowerId: unknown): un
 		return operationInterruptedFailure(data, "trustedRemove")
 	end
 	if not found or not isSuccess(getResult) then
-		return serviceStoreFailure(getResult, "trustedRemove")
+		return serviceStoreFailure(data, runtime, found, getResult, "trustedRemove")
 	end
 	local visualRemoved, visualResult = callResult(modelOwner.removeVisual, modelOwner, runtimeTowerId)
 	if not operationIntact(data) then
@@ -2065,11 +2112,11 @@ function ServiceMethods.getLoadout(self: Service, userId: unknown): unknown
 		finishOperation(data)
 		return interrupted
 	end
-	if not called then
-		faultRuntime(data)
-	end
+	local response = if called and isSuccess(resultValue)
+		then resultValue
+		else serviceStoreFailure(data, loadout, called, resultValue, operation)
 	finishOperation(data)
-	return if called then resultValue else failure("INTERNAL_ERROR", operation)
+	return response
 end
 
 function ServiceMethods.resolveOccupiedSlot(self: Service, userId: unknown, slot: unknown): unknown

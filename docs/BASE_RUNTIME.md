@@ -21,7 +21,9 @@ defect and one P2 Studio-count documentation gap; both were fixed and covered by
 the focused regression/evidence replay. Exact-final-SHA CI is cited at handoff
 rather than through a self-referential evidence commit. Phase 10 is complete;
 Phase 11 subsequently integrated this runtime through the authoritative
-[Wave Runtime](WAVE_RUNTIME.md) contract, and Phase 12 remains unbegun.
+[Wave Runtime](WAVE_RUNTIME.md) contract. Phase 12 now composes a separate
+server-only TowerRuntime without changing Base health, leak, replication, or
+defeat authority; Phase 13 remains unbegun.
 
 Phase 10 adds one match-scoped server-owned defender-base runtime, its bounded
 reliable replication, a minimal client-owned world bar, and the narrow defeat
@@ -37,7 +39,8 @@ player-count scaling, wave scheduling, spawn cadence, wave tracking, towers,
 combat, healing, repair, armor, rewards, persistence, a results screen, a global
 base HUD, audio, assets, or a client-to-server gameplay mutation. Phase 11 adds
 only its separate finite scheduler/difficulty integration; it does not widen
-BaseRuntime's damage authority. Phase 12 tower work remains unbegun.
+BaseRuntime's damage authority. Phase 12 Tower records and inert Models neither
+read nor mutate BaseRuntime; they add no combat or Battle Cash behavior.
 
 ## Engine constraints
 
@@ -881,8 +884,13 @@ builds each retain exactly one Script and one LocalScript, while Test has zero
 runnable scripts. The registry contains `7` reliable Match-only endpoints
 (`4` requests and `3` events) and `4` inbound rate policies.
 
-The Phase 11 verifier now authenticates the added Wave mappings and reliable
+The Phase 12 verifier now authenticates the added Wave and server-Tower mappings
+and unchanged reliable
 protocol while preserving all of those production-exclusion, empty-catalog,
 project-isolation, one-Script/one-LocalScript, and zero-runnable-test rules. Its
-actual final counts are taken only from the final gate and reported at task
-handoff. Phase 12 remains unbegun.
+final gate passes `840` tests across `64` suites and exact
+Default/Lobby/Match/Test ModuleScript counts `83/46/83/159`. The fresh Phase 12
+defeat session preserved exact Base
+`Defeated` revision `3`, Match `Results` revision `9`, one defeat/Results
+commit, and no later spawn while Tower truth remained unchanged until its own
+cleanup. Phase 13 remains unbegun.

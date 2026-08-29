@@ -28,14 +28,16 @@ only change through an explicit architecture decision recorded here.
   45-second initial Ready protocol, revisioned match/enemy/base recovery,
   deterministic fixed-lane placeholder enemies, a match-scoped defender base,
   a finite authenticated authored-wave scheduler, strict-majority skip voting,
-  and minimal Ready/enemy/world-base presentation plus a nonvisual Wave client
-  seam. It still has no combat, tower, placement, victory, reward, persistent
-  economy, persistence, matchmaking, or teleport implementation.
-- Current implementation phase: Phases 00–11 are complete. Phase 11 Packets
-  11.1–11.6, the exact unsaved Match Studio gate, consolidated review,
-  `742`-case/`56`-suite local gate, and all four structural builds passed on
-  2026-08-28. Exact-final-SHA CI is cited at handoff. Phase 12 is next and
-  remains unbegun.
+  one authenticated match-scoped TowerRuntime, server-created temporary
+  loadouts, and inert runtime-only tower Models. It has no tower client,
+  placement, targeting, combat, Battle Cash mutation, victory, reward,
+  persistent economy, persistence, matchmaking, or teleport implementation.
+- Current implementation phase: Phases 00–12 are complete. Phase 12 Packets
+  12.1–12.4, focused deterministic coverage, the consolidated independent
+  review, exact unsaved two-client Match Studio primary/defeat/cleanup
+  scenarios, the `840`-case/`64`-suite local gate, and all four structural
+  builds passed on 2026-08-28. Exact-final-SHA CI is reported at handoff.
+  Phase 13 is next and remains unbegun.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
   Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, 06.3, 06.4,
@@ -44,7 +46,8 @@ only change through an explicit architecture decision recorded here.
   completed on 2026-08-27. Packets 09.1–09.5 completed their implementation,
   deterministic, and exact Match Studio checks on 2026-08-27. Packets 10.1–10.4
   and their Phase 10 exit gate completed on 2026-08-28. Packets 11.1–11.6 and
-  their Phase 11 exit gate completed on 2026-08-28.
+  their Phase 11 exit gate completed on 2026-08-28. Packets 12.1–12.4 and their
+  Phase 12 local/Studio/review/structural exit gate completed on 2026-08-28.
 - Current checkpoint: Phase 06 and Gate A are complete. Its three exact current-tree
   canonical runs are byte-identical at 200 cases across 16 suites, all four
   structural builds pass, and the unsaved three-cycle Lobby, three-cycle Match,
@@ -95,7 +98,15 @@ only change through an explicit architecture decision recorded here.
   complete gate passes `742` tests across `56` suites and Default/Lobby/Match/
   Test module counts `77/46/77/144`, with `1/1`, `1/1`, `1/1`, and `0/0`
   Script/LocalScript counts. Production content remains empty. Phase 11 is
-  complete and Phase 12 remains unbegun.
+  complete. Phase 12 now adds only the authenticated fixture/runtime/loadout/
+  model systems in `docs/TOWER_RUNTIME.md`. The exact two-client Match Studio
+  gate proved distinct five-slot loadouts, trusted creation, per-owner caps,
+  inert model replication/tamper/recreation, healthy finite Wave coexistence,
+  one unchanged defeat path, and residue-free Tower cleanup. Production
+  `Assets` and `Towers` remain empty; networking remains ten endpoints and six
+  request policies; no Phase 13 source or behavior exists. The final local gate
+  is recorded in the current Phase 12 evidence; exact-final-SHA CI is cited at
+  handoff.
 - Publishing state: the user authorized the Packet 02.4 Match-place creation and
   one controlled Phase 07 Save To Cloud of the reviewed Match graybox. No
   release, public-audience, settings, service, Lobby, or unrelated publication
@@ -1137,41 +1148,80 @@ Healthy `FiniteComplete` is recorded once while MatchLifecycle stays
 still closes future work and commits exactly one `Results` transition. All
 material consolidated-review findings are resolved, the complete local and
 structural gate passes, and exact-final-SHA CI is cited at handoff. Phase 11 is
-complete; Phase 12 is next and remains unbegun.
+complete. Phase 12 was unbegun at that checkpoint; its current status follows.
 
 ## Phase 12 — Tower definitions and temporary match loadout
 
 **Objective:** Introduce tower runtime contracts before placement and combat.
 
+**Current status:** Complete on 2026-08-28. Packets 12.1–12.4, `90` dedicated
+focused cases, the `840`-case/`64`-suite complete local gate, consolidated
+independent review, all four structural builds, and the exact unsaved
+two-client Match Studio gates pass. Exact-final-SHA CI is reported at handoff.
+Phase 13 is next and remains unbegun. The authoritative decision, runtime
+contract, and evidence are in `docs/TOWER_RUNTIME.md`.
+
 ### Packet 12.1 — Test tower definitions
 
-- Define one single-target tower, one splash-capable fixture, and one support/economy
-  fixture placeholder.
-- Provide multiple upgrade levels without production balance promises.
-- Validate costs, cooldowns, range, footprint, target filters, and placement cap.
+- Define one single-target tower, one splash-capable fixture, and one fully
+  non-attacking support/economy fixture placeholder.
+- Authenticate one fresh complete Asset/Tower configuration through the real
+  schemas and `ConfigurationValidator`; retain only its exact canonical frozen
+  definitions and manifest identities.
+- Exercise multiple levels, placement/upgrade costs, cooldown/range/damage
+  metadata, authored footprint, placement caps, target-mode cross-rules,
+  symbolic behavior/status/merge seams, hostile inputs, and safe arithmetic.
+- Keep production `Assets.luau` and `Towers.luau` byte-identical empty.
 
 ### Packet 12.2 — Runtime tower model
 
-- Define placed-tower ID, owner UserId, definition ID, unit reference placeholder,
-  level, target mode, position, total investment, and cooldown state.
-- Keep persistent unit data out of match mutation.
+- Bind one non-restartable store to exact MatchId plus positive `towerEpoch`;
+  allocate monotonic numeric RuntimeTowerIds independently from canonical
+  TowerIds and temporary UnitIds.
+- Retain only detached server truth: owner UserId, occupied-slot identity,
+  canonical definition identity, level 1, target mode or nil,
+  `AllEligibleEnemies`, trusted finite CFrame, placement-cost investment,
+  available cooldown sentinel, and Active lifecycle state.
+- Enforce per-owner/per-TowerId `placementCap`, 128 active/4,096 lifetime
+  technical bounds, no ID reuse, fail-closed arithmetic, and idempotent cleanup.
+- Keep all Player and Instance identities outside runtime records.
 
 ### Packet 12.3 — Temporary development loadout
 
-- Give test players a server-created loadout while ProfileService does not exist.
-- Clearly mark the hook as temporary and isolated.
-- Prevent clients from inventing a tower definition ID.
+- Give only current Active participants one server-created, match-local frozen
+  five-slot snapshot: the three unique canonical fixtures in slots 1–3 and
+  explicit `Empty` records in slots 4–5.
+- Issue bounded temporary UnitIds, preserve the same slots across
+  disconnect/return, isolate UserIds, retain no Player or persistent UnitRecord,
+  and give spectators/unknown users no loadout.
+- Resolve an occupied slot only through a weak-key-authenticated, owner/slot/
+  match/epoch/definition-bound, single-use creation capability. No client
+  endpoint or client-selected runtime field exists.
 
 ### Packet 12.4 — Tower asset contract
 
-- Define required model primary part/pivot, footprint, aiming joint or pivot,
-  muzzle markers, animation hooks, and upgrade visual variants.
-- Allow graybox parts while production assets do not exist.
+- Implement the exact version-1 `Tower` Model hierarchy with required `Root`
+  PrimaryPart, inert `AnimationController`/`Animator` hooks, one `LevelNN`
+  variant per canonical level, per-level attack aim/muzzle cross-rules, strict
+  class/cardinality/depth/count bounds, and prohibited executable/network
+  descendants.
+- Privately clone and revalidate fresh graybox templates, pivot only from the
+  trusted runtime CFrame, make only the current variant visible, and keep
+  canonical `footprintRadiusStuds` independent of visual bounds.
+- Keep runtime truth independent from Workspace; explicit visual
+  remove/tamper/recreate cannot mutate the record, cap, identity, investment,
+  target mode, cooldown, or transform.
 
-**Exit gate:** Valid test towers and runtime instances can be created from a
-server-approved temporary loadout.
+**Exit gate:** Passed. Implementation, consolidated review, the complete
+local/structural gate, and exact Match Studio acceptance prove that valid
+test towers and inert Models are created only from a server-approved temporary
+loadout; production catalogs/networking remain unchanged; cleanup leaves no
+Tower state or Instance residue. Exact-final-SHA CI is reported at handoff.
 
 ## Phase 13 — Tower placement preview and server validation
+
+**Current status:** Unbegun. Phase 12 adds no placement query, preview, input,
+rotation, collision/zone validation, affordability check, or placement request.
 
 **Objective:** Deliver accurate cross-platform placement without trusting the
 client's chosen position.

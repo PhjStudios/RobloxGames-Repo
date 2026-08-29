@@ -18,6 +18,11 @@
   server-only activation API; its executable, exact unsaved Match Studio, and
   consolidated-review gates passed on 2026-08-28; exact final repository/CI
   counts are reported at task handoff
+- Phase 12 status: the separate TowerRuntime now uses one constant server-only
+  participant-observer reservation/refresh/activation/detach seam. Its focused
+  and exact unsaved primary/defeat/cleanup Studio checks, consolidated review,
+  `840`-case/`64`-suite local gate, and all four structural builds pass. Phase 12
+  is complete; exact-final-SHA CI is reported at handoff
 
 This is the authoritative Phase 08 lifecycle, roster, ready-protocol, minimal-UI,
 and four-client test decision. Phase 08 adds no enemies, waves, combat, towers,
@@ -36,7 +41,7 @@ Phase 11 subsequently adds the separate authenticated
 [Wave Runtime](WAVE_RUNTIME.md) and its exact `PreWave -> WaveActive`
 prepare/commit seam. Healthy `FiniteComplete` deliberately leaves this
 lifecycle in `WaveActive`; only Phase 10 defeat reaches `Results`. Phase 12
-remains unbegun.
+does not add a Match state or transition. Phase 13 remains unbegun.
 
 ## Official Roblox behavior that constrains the decision
 
@@ -570,6 +575,42 @@ used current live recipients, and the Wave publisher retained neither set.
 Accepted Phase 11 sessions recorded zero console errors and stopped without
 roster, transition-token, map, service, network, scheduler, or client residue.
 
+## Phase 12 participant-observer and defeat evidence — 2026-08-28
+
+TowerRuntime consumes roster truth through one constant, synchronous,
+server-only observer seam; it never subscribes per player and never retains a
+Player. `reserveParticipantObserver` atomically claims the sole handle and
+returns the current detached Match snapshot. Before the irreversible Wave
+activation sequence, `refreshParticipantObserver` closes any prepare/subscribe
+revision gap, Tower synchronizes only a strictly newer snapshot, and
+`activateParticipantObserver` begins future detached callbacks at that exact
+revision. The observer cannot mutate roster or Match state. A malformed,
+backwards, wrong-Match, throwing, yielding, re-entrant, or late callback faults
+Tower closed while preserving MatchLifecycle truth.
+
+The final-source accepted primary Phase 12 session used MatchId
+`match:52847c36-92d9-47c8-912a-52e2a7a8ca3e`, UserIds `-2/-1`, and exactly one
+participant observer. Both Active participants received isolated temporary
+loadouts; an unknown UserId received none. Healthy Wave completion left Match
+in `WaveActive` revision `8`, as before Phase 12. Tower cleanup detached the
+observer once and retained no roster snapshot, UserId index, callback, handle,
+loadout, or capability.
+
+The fresh final-source defeat session used MatchId
+`match:762fcd89-2459-4c68-b85c-bce0624682d9` and reached Match `Results`
+revision `9`, Wave `DefeatClosed` revision `3`, and Base `Defeated` revision `3`
+with exactly one defeat/Results commit. The three existing Tower records and
+Models remained unchanged until explicit cleanup. That run exposed one
+cleanup-only gate ordering defect: `beginBaseDefeat` correctly closes ordinary
+callbacks before committing Results, but the common observer-operation guard
+also rejected Tower's later authentic detach. The guard now permits only
+`detachParticipantObserver` after callback closure, while still requiring an
+available Initialized/Started service, the exact authentic handle, no re-entry,
+and all existing ownership checks. Reserve, refresh, and activate remain
+unavailable after defeat; detach after service shutdown remains unavailable.
+The focused MatchLifecycle regression passes `43/43`, and the fresh Studio rerun
+cleaned Tower state with zero errors or residue.
+
 ## Review and completion record
 
 The single focused architecture/security review completed on 2026-08-27 before
@@ -611,4 +652,5 @@ to the exact preflight set while all other Wave states use live recipients.
 These fixes were resolved in that same consolidated review rather than a new
 round. The exact current full-gate counts and exact-SHA Repository Verification
 run are cited at task handoff rather than copied into this tracked record by a
-self-referential evidence commit. Phase 12 remains unbegun.
+self-referential evidence commit. Phase 12's separate observer consumer and
+defeat-cleanup regression are recorded above; Phase 13 remains unbegun.

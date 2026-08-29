@@ -29,14 +29,21 @@ programmatic visuals. Phase 10 extends it to base state/outcome ledgers,
 coalesced publication, defeat coordination, marker watchers, a cancellable
   tween, and the world GUI. Phase 11 extends it to the Wave schedule/heap/cursors,
   origin ownership and terminal ledgers, votes/roster copies, publisher queue,
-  recovery requests, controller cache, and Studio-only trigger. Phase 08 is complete. Phase 09 code, exact Match Studio
+  recovery requests, controller cache, and Studio-only trigger. Phase 12
+  extends the same ownership contract to temporary loadouts/UnitIds,
+  single-use capabilities, RuntimeTower records/counters, private templates,
+  live graybox Models, the exact runtime root, one participant observer, and one
+  Wave-owned Studio boundary. Phase 08 is complete. Phase 09 code, exact Match Studio
 gate, consolidated review, 467-case local gate, and all four structural builds
 passed on 2026-08-27. Phase 09 is complete. Phase 10 focused and exact Studio
 cleanup checks, consolidated review, `593`-case local gate, and all four
 structural builds passed on 2026-08-28. Phase 10 is complete; exact-final-SHA CI
 is cited at handoff. Phase 11's exact Studio cleanup, consolidated review,
 `742`-case/`56`-suite local gate, and four structural builds also pass. Phase 11
-is complete; Phase 12 remains unbegun.
+is complete. Phase 12's focused and exact unsaved primary/defeat cleanup gates,
+consolidated review, `840`-case/`64`-suite local gate, and all four structural
+builds pass. Phase 12 is complete; exact-final-SHA CI is recorded at handoff,
+and Phase 13 is next but remains unbegun.
 
 ## Public contract
 
@@ -496,3 +503,43 @@ Enemy, Base, runtime-map, network-root, trigger, request, timer, connection, UI,
 cache, or retained-instance residue, and left Studio in Edit mode without save or
 publish. Headless cleanup repeats shutdown, invokes captured stale callbacks,
 and proves no post-clean mutation or publication.
+
+## Phase 12 Tower ownership and release order (current)
+
+While configured, TowerRuntime owns one exact canonical configuration
+reference; detached participant snapshot; four-user/five-slot loadout indexes;
+temporary UnitIds; issued/prepared capability ledgers; RuntimeTower identity,
+active/lifetime/cap counters, and records; three private graybox templates;
+live Models indexed by RuntimeTowerId; at most one privately authenticated
+`Workspace.ATDTowerRuntime` Folder; one MatchLifecycle observer; and one
+Studio-only Wave boundary. Runtime records own no Player or Instance, and the
+model owner owns no gameplay truth. There is no per-user, per-slot, per-tower,
+per-level, or per-model connection, task, timer, or loop.
+
+Cleanup first closes participant, create/remove/recreate, diagnostics mutation,
+and evidence admission. Normal lifecycle shutdown then detaches the Tower Wave
+boundary and revokes the exact participant handle. Wave-originated close skips
+the callback into Wave because Wave is already executing that boundary and
+invalidates it itself. Both paths revoke every capability, destroy prepared/live
+owned Models and the exact owned root, destroy private templates, clear records
+and cap counters, clear every loadout/slot/UnitId and canonical identity, and
+enter `Cleaned`. Captured observer callbacks and capabilities are inert after
+closure. Cleanup is idempotent and never adopts or destroys a foreign
+same-named Workspace object.
+
+The final-source accepted primary Studio cleanup removed twelve active
+records/Models and all supporting state in `0.0019925` seconds. The fresh
+final-source defeat rerun proved that
+the authentic cleanup-only participant detach remains available after ordinary
+Match callbacks close and removed three unchanged Tower records/Models in
+`0.0015069` seconds. Both returned exact all-zero residue receipts, rejected
+late creation with `UNAVAILABLE`, removed the runtime root on server and both
+clients, recorded zero console errors, and left the unchanged Match place in
+Edit mode without save or publish. The focused MatchLifecycle regression also
+proves reserve/refresh/activate remain unavailable after committed defeat and
+detach remains unavailable after lifecycle shutdown.
+
+Fatal child Store or rollback failure is now adopted at the Tower coordinator:
+admission closes, service capability expectations clear, both Stores fault, and
+later work is unavailable. Cleanup remains the sole owner of any prepared
+child residue; no failure reopens allocation.

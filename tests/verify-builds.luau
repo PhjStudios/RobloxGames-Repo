@@ -266,6 +266,14 @@ local EXPECTED_PRODUCTION_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/client/common/networking/ClientRequestTracker.luau",
 	},
 })
+local SHARED_SOURCE_PREFIX = "ReplicatedStorage.Shared."
+local EXPECTED_TEST_SHARED_SOURCES: { SourceDefinition } = {}
+for _, definition in EXPECTED_PRODUCTION_SOURCES do
+	if string.sub(definition.dataModelPath, 1, #SHARED_SOURCE_PREFIX) == SHARED_SOURCE_PREFIX then
+		table.insert(EXPECTED_TEST_SHARED_SOURCES, definition)
+	end
+end
+table.freeze(EXPECTED_TEST_SHARED_SOURCES)
 local EXPECTED_MATCH_SERVER_SOURCES: { SourceDefinition } = table.freeze({
 	{
 		dataModelPath = "ServerScriptService.Server.match.maps.MapContract",
@@ -338,6 +346,95 @@ local EXPECTED_MATCH_WAVE_SERVER_SOURCES: { SourceDefinition } = table.freeze({
 		className = "ModuleScript",
 		sourcePath = "src/server/match/waves/WaveRuntimeService.luau",
 	},
+})
+local EXPECTED_MATCH_TOWER_SERVER_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "ServerScriptService.Server.match.towers.TemporaryLoadoutStore",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/towers/TemporaryLoadoutStore.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.towers.TowerGrayboxFactory",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/towers/TowerGrayboxFactory.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.towers.TowerModelContract",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/towers/TowerModelContract.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.towers.TowerModelOwner",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/towers/TowerModelOwner.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.towers.TowerRuntimeService",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/towers/TowerRuntimeService.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.towers.TowerRuntimeStore",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/towers/TowerRuntimeStore.luau",
+	},
+})
+local EXPECTED_TOWER_NAMED_SOURCE_PATHS: { [string]: boolean } = table.freeze({
+	["src/server/match/towers/TemporaryLoadoutStore.luau"] = true,
+	["src/server/match/towers/TowerGrayboxFactory.luau"] = true,
+	["src/server/match/towers/TowerModelContract.luau"] = true,
+	["src/server/match/towers/TowerModelOwner.luau"] = true,
+	["src/server/match/towers/TowerRuntimeService.luau"] = true,
+	["src/server/match/towers/TowerRuntimeStore.luau"] = true,
+	["src/shared/config/Towers.luau"] = true,
+	["src/shared/config/TowerSchema.luau"] = true,
+})
+local EXPECTED_TOWER_RUNTIME_SERVICE_METHODS: { [string]: boolean } = table.freeze({
+	get = true,
+	getLifecycleState = true,
+	getLoadout = true,
+	getMetrics = true,
+	getServiceDefinition = true,
+	list = true,
+	recreateVisual = true,
+	removeVisual = true,
+	resolveOccupiedSlot = true,
+	trustedCreate = true,
+	trustedRemove = true,
+})
+local FORBIDDEN_PHASE13_SOURCE_PATH_TOKENS: { string } = table.freeze({
+	"hotbar",
+	"placement",
+	"preview",
+	"query",
+})
+local EXPECTED_PRODUCTION_REMOTE_NAMES: { [string]: boolean } = table.freeze({
+	BaseReplication = true,
+	EnemyReplication = true,
+	GetBaseSnapshot = true,
+	GetEnemySnapshot = true,
+	GetMatchSnapshot = true,
+	GetWaveSnapshot = true,
+	MatchSnapshot = true,
+	SubmitReady = true,
+	SubmitSkipVote = true,
+	WaveReplication = true,
+})
+local EXPECTED_PRODUCTION_RATE_POLICY_ENDPOINTS: { [string]: boolean } = table.freeze({
+	GetBaseSnapshot = true,
+	GetEnemySnapshot = true,
+	GetMatchSnapshot = true,
+	GetWaveSnapshot = true,
+	SubmitReady = true,
+	SubmitSkipVote = true,
+})
+local EXPECTED_PRODUCTION_REMOTE_COUNT = 10
+local EXPECTED_PRODUCTION_RATE_POLICY_COUNT = 6
+local GENERATED_ROBLOX_OUTPUT_EXTENSIONS: { [string]: boolean } = table.freeze({
+	[".rbxl"] = true,
+	[".rbxlx"] = true,
+	[".rbxm"] = true,
+	[".rbxmx"] = true,
 })
 local EXPECTED_MATCH_LIFECYCLE_SOURCES: { SourceDefinition } = table.freeze({
 	{
@@ -470,9 +567,19 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "tests/fixtures/NetworkFixtures.luau",
 	},
 	{
+		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.TowerFixtures",
+		className = "ModuleScript",
+		sourcePath = "tests/fixtures/TowerFixtures.luau",
+	},
+	{
 		dataModelPath = "ServerStorage.AutomatedTests.Fixtures.WaveFixtures",
 		className = "ModuleScript",
 		sourcePath = "tests/fixtures/WaveFixtures.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.AuthenticatedTowerFixtures.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/AuthenticatedTowerFixtures.spec.luau",
 	},
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.AuthenticatedWaveFixtures.spec",
@@ -720,6 +827,41 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "tests/specs/Smoke.spec.luau",
 	},
 	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.TemporaryLoadoutStore.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/TemporaryLoadoutStore.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerGrayboxFactory.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/TowerGrayboxFactory.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerModelContract.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/TowerModelContract.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerModelOwner.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/TowerModelOwner.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerRuntimeIntegration.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/TowerRuntimeIntegration.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerRuntimeService.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/TowerRuntimeService.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerRuntimeStore.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/TowerRuntimeStore.spec.luau",
+	},
+	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.WaveController.spec",
 		className = "ModuleScript",
 		sourcePath = "tests/specs/WaveController.spec.luau",
@@ -804,7 +946,303 @@ local function normalizeNewlines(value: string): string
 	return string.gsub(value, "\r\n", "\n")
 end
 
-local function verifyPhase11Scope(): boolean
+local function normalizeFilesystemPath(value: string): string
+	local normalized = string.gsub(value, "\\", "/")
+	while string.sub(normalized, 1, 2) == "./" do
+		normalized = string.sub(normalized, 3)
+	end
+	return normalized
+end
+
+local function repositoryRelativeSourcePath(value: string): string
+	local normalized = normalizeFilesystemPath(value)
+	if normalized == "src" or string.sub(normalized, 1, 4) == "src/" then
+		return normalized
+	end
+	local markerStart = string.find(string.lower(normalized), "/src/", 1, true)
+	if markerStart == nil then
+		return normalized
+	end
+	return string.sub(normalized, markerStart + 1)
+end
+
+local function resolveReadDirectoryEntry(directory: string, entry: string): string
+	local normalizedDirectory = normalizeFilesystemPath(directory)
+	local normalizedEntry = normalizeFilesystemPath(entry)
+	if string.match(normalizedEntry, "^[A-Za-z]:/") ~= nil or string.sub(normalizedEntry, 1, 1) == "/" then
+		return normalizedEntry
+	end
+	if normalizedDirectory == "." then
+		return normalizedEntry
+	end
+	if
+		normalizedEntry == normalizedDirectory
+		or string.sub(normalizedEntry, 1, #normalizedDirectory + 1) == `{normalizedDirectory}/`
+	then
+		return normalizedEntry
+	end
+	return `{normalizedDirectory}/{normalizedEntry}`
+end
+
+local function collectFilesRecursively(root: string): (boolean, { string })
+	local files: { string } = {}
+	local function visit(directory: string): boolean
+		local readSucceeded, entriesValue = pcall(fs.readDir, directory)
+		if not readSucceeded or type(entriesValue) ~= "table" then
+			return false
+		end
+		for _, entryValue in entriesValue :: { unknown } do
+			if type(entryValue) ~= "string" then
+				return false
+			end
+			local path = resolveReadDirectoryEntry(directory, entryValue)
+			if fs.isDir(path) then
+				if not visit(path) then
+					return false
+				end
+			elseif fs.isFile(path) then
+				table.insert(files, normalizeFilesystemPath(path))
+			else
+				return false
+			end
+		end
+		return true
+	end
+
+	local succeeded = visit(normalizeFilesystemPath(root))
+	table.sort(files)
+	return succeeded, files
+end
+
+local function hasGeneratedRobloxExtension(path: string): boolean
+	local loweredPath = string.lower(normalizeFilesystemPath(path))
+	for extension in GENERATED_ROBLOX_OUTPUT_EXTENSIONS do
+		if #loweredPath >= #extension and string.sub(loweredPath, -#extension) == extension then
+			return true
+		end
+	end
+	return false
+end
+
+local function hasGeneratedRobloxOutput(): boolean
+	local rootReadSucceeded, rootEntriesValue = pcall(fs.readDir, ".")
+	if not rootReadSucceeded or type(rootEntriesValue) ~= "table" then
+		return true
+	end
+	for _, entryValue in rootEntriesValue :: { unknown } do
+		if type(entryValue) ~= "string" then
+			return true
+		end
+		local path = resolveReadDirectoryEntry(".", entryValue)
+		if fs.isFile(path) and hasGeneratedRobloxExtension(path) then
+			return true
+		end
+	end
+
+	if fs.isDir(BUILD_DIRECTORY) then
+		local collected, files = collectFilesRecursively(BUILD_DIRECTORY)
+		if not collected then
+			return true
+		end
+		for _, path in files do
+			if hasGeneratedRobloxExtension(path) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function countPlainOccurrences(value: string, needle: string): number
+	local count = 0
+	local cursor = 1
+	while true do
+		local _, occurrenceEnd = string.find(value, needle, cursor, true)
+		if occurrenceEnd == nil then
+			break
+		end
+		count += 1
+		cursor = occurrenceEnd + 1
+	end
+	return count
+end
+
+local function verifyExactQuotedAssignmentSet(
+	source: string,
+	fieldName: string,
+	expectedValues: { [string]: boolean },
+	expectedCount: number
+): boolean
+	local assignmentPrefix = `{fieldName} = "`
+	local foundValues: { [string]: boolean } = {}
+	local actualCount = 0
+	local cursor = 1
+	while true do
+		local assignmentStart, assignmentEnd = string.find(source, assignmentPrefix, cursor, true)
+		if assignmentStart == nil or assignmentEnd == nil then
+			break
+		end
+		local closingQuote = string.find(source, '"', assignmentEnd + 1, true)
+		if closingQuote == nil then
+			return false
+		end
+		local value = string.sub(source, assignmentEnd + 1, closingQuote - 1)
+		if expectedValues[value] ~= true or foundValues[value] == true then
+			return false
+		end
+		foundValues[value] = true
+		actualCount += 1
+		cursor = closingQuote + 1
+	end
+	if actualCount ~= expectedCount or countPlainOccurrences(source, `{fieldName} =`) ~= expectedCount then
+		return false
+	end
+	for expectedValue in expectedValues do
+		if foundValues[expectedValue] ~= true then
+			return false
+		end
+	end
+	return true
+end
+
+local function verifyRemoteRecordFields(source: string, remoteName: string): boolean
+	local nameAssignment = `name = "{remoteName}"`
+	local assignmentStart = string.find(source, nameAssignment, 1, true)
+	if assignmentStart == nil then
+		return false
+	end
+	local recordEnd = string.find(source, "\n\t},", assignmentStart, true)
+	if recordEnd == nil then
+		return false
+	end
+	local record = string.sub(source, assignmentStart, recordEnd - 1)
+	local exactBoundary = countPlainOccurrences(record, "name =") == 1
+		and countPlainOccurrences(record, "transport =") == 1
+		and countPlainOccurrences(record, 'transport = "ReliableRemoteEvent"') == 1
+		and countPlainOccurrences(record, "placeRoles =") == 1
+		and countPlainOccurrences(record, 'placeRoles = { "Match" }') == 1
+	if not exactBoundary then
+		return false
+	end
+	if EXPECTED_PRODUCTION_RATE_POLICY_ENDPOINTS[remoteName] == true then
+		return countPlainOccurrences(record, 'direction = "ClientToServer"') == 1
+			and countPlainOccurrences(record, 'kind = "Request"') == 1
+	end
+	return true
+end
+
+local function verifyProductionNetworkBoundary(): boolean
+	local remotesReadSucceeded, remotesSourceValue = pcall(fs.readFile, "src/shared/network/ProductionRemotes.luau")
+	local ratesReadSucceeded, ratesSourceValue =
+		pcall(fs.readFile, "src/server/common/networking/ProductionRateLimits.luau")
+	if
+		not remotesReadSucceeded
+		or type(remotesSourceValue) ~= "string"
+		or not ratesReadSucceeded
+		or type(ratesSourceValue) ~= "string"
+	then
+		return false
+	end
+
+	local remotesSource = normalizeNewlines(remotesSourceValue :: string)
+	local ratesSource = normalizeNewlines(ratesSourceValue :: string)
+	if
+		not verifyExactQuotedAssignmentSet(
+			remotesSource,
+			"name",
+			EXPECTED_PRODUCTION_REMOTE_NAMES,
+			EXPECTED_PRODUCTION_REMOTE_COUNT
+		)
+		or countPlainOccurrences(remotesSource, "transport =") ~= EXPECTED_PRODUCTION_REMOTE_COUNT
+		or countPlainOccurrences(remotesSource, 'transport = "ReliableRemoteEvent"') ~= EXPECTED_PRODUCTION_REMOTE_COUNT
+		or countPlainOccurrences(remotesSource, "placeRoles =") ~= EXPECTED_PRODUCTION_REMOTE_COUNT
+		or countPlainOccurrences(remotesSource, 'placeRoles = { "Match" }') ~= EXPECTED_PRODUCTION_REMOTE_COUNT
+		or string.find(string.lower(remotesSource), "tower", 1, true) ~= nil
+	then
+		return false
+	end
+	for remoteName in EXPECTED_PRODUCTION_REMOTE_NAMES do
+		if not verifyRemoteRecordFields(remotesSource, remoteName) then
+			return false
+		end
+	end
+
+	return verifyExactQuotedAssignmentSet(
+		ratesSource,
+		"endpoint",
+		EXPECTED_PRODUCTION_RATE_POLICY_ENDPOINTS,
+		EXPECTED_PRODUCTION_RATE_POLICY_COUNT
+	) and string.find(string.lower(ratesSource), "tower", 1, true) == nil
+end
+
+local function verifyTowerRuntimeServicePublicMethods(): boolean
+	local readSucceeded, sourceValue = pcall(fs.readFile, "src/server/match/towers/TowerRuntimeService.luau")
+	if not readSucceeded or type(sourceValue) ~= "string" then
+		return false
+	end
+	local source = sourceValue :: string
+	local foundMethods: { [string]: boolean } = {}
+	local methodCount = 0
+	for methodName in string.gmatch(source, "function%s+ServiceMethods%.([%a_][%w_]*)%s*%(") do
+		if EXPECTED_TOWER_RUNTIME_SERVICE_METHODS[methodName] ~= true or foundMethods[methodName] == true then
+			return false
+		end
+		foundMethods[methodName] = true
+		methodCount += 1
+	end
+	if
+		methodCount ~= 11
+		or string.find(source, "function ServiceMethods:", 1, true) ~= nil
+		or string.find(source, "ServiceMethods[", 1, true) ~= nil
+		or countPlainOccurrences(source, "ServiceMethods.__index = ServiceMethods") ~= 1
+	then
+		return false
+	end
+	for fieldName in string.gmatch(source, "ServiceMethods%.([%a_][%w_]*)%s*=") do
+		if fieldName ~= "__index" then
+			return false
+		end
+	end
+	for expectedMethod in EXPECTED_TOWER_RUNTIME_SERVICE_METHODS do
+		if foundMethods[expectedMethod] ~= true then
+			return false
+		end
+	end
+	return true
+end
+
+local function verifyPhase12SourcePathBoundary(): boolean
+	local collected, sourceFiles = collectFilesRecursively("src")
+	if not collected then
+		return false
+	end
+	local foundTowerPaths: { [string]: boolean } = {}
+	for _, sourcePath in sourceFiles do
+		local normalizedPath = repositoryRelativeSourcePath(sourcePath)
+		local loweredPath = string.lower(normalizedPath)
+		if string.sub(loweredPath, -5) == ".luau" then
+			if string.find(loweredPath, "tower", 1, true) ~= nil then
+				if EXPECTED_TOWER_NAMED_SOURCE_PATHS[normalizedPath] ~= true then
+					return false
+				end
+				foundTowerPaths[normalizedPath] = true
+			end
+			for _, forbiddenToken in FORBIDDEN_PHASE13_SOURCE_PATH_TOKENS do
+				if string.find(loweredPath, forbiddenToken, 1, true) ~= nil then
+					return false
+				end
+			end
+		end
+	end
+	for expectedPath in EXPECTED_TOWER_NAMED_SOURCE_PATHS do
+		if foundTowerPaths[expectedPath] ~= true then
+			return false
+		end
+	end
+	return verifyTowerRuntimeServicePublicMethods()
+end
+
+local function verifyPhase12Scope(): boolean
 	local exactEmptyConfigs = {
 		{
 			path = "src/shared/config/Enemies.luau",
@@ -936,14 +1374,15 @@ local function verifyPhase11Scope(): boolean
 			return false
 		end
 	end
+	if not verifyProductionNetworkBoundary() or not verifyPhase12SourcePathBoundary() then
+		return false
+	end
 
-	for _, forbiddenDirectory in
-		{
-			"src/server/match/towers",
-			"src/client/match/towers",
-		}
-	do
-		if fs.isDir(forbiddenDirectory) then
+	if fs.isDir("src/client/match/towers") then
+		return false
+	end
+	for _, definition in EXPECTED_MATCH_TOWER_SERVER_SOURCES do
+		if not fs.isFile(definition.sourcePath) then
 			return false
 		end
 	end
@@ -971,18 +1410,8 @@ local function verifyPhase11Scope(): boolean
 			return false
 		end
 	end
-	for _, forbiddenOutput in
-		{
-			"build.rbxlx",
-			"build/default.rbxlx",
-			"build/lobby.rbxlx",
-			"build/match.rbxlx",
-			"build/test.rbxlx",
-		}
-	do
-		if fs.isFile(forbiddenOutput) then
-			return false
-		end
+	if hasGeneratedRobloxOutput() then
+		return false
 	end
 	return true
 end
@@ -1126,6 +1555,9 @@ local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): {
 		for _, source in EXPECTED_MATCH_WAVE_SERVER_SOURCES do
 			table.insert(expected, source)
 		end
+		for _, source in EXPECTED_MATCH_TOWER_SERVER_SOURCES do
+			table.insert(expected, source)
+		end
 		for _, source in EXPECTED_MATCH_LIFECYCLE_SOURCES do
 			table.insert(expected, source)
 		end
@@ -1230,6 +1662,72 @@ local function verifyProductionSources(dataModel: DataModel, definition: BuildDe
 		end
 	end
 
+	return true
+end
+
+local function verifyNestedMappedSources(
+	definition: BuildDefinition,
+	container: Instance?,
+	expectedSources: { SourceDefinition },
+	codePrefix: string
+): boolean
+	if container == nil or container.ClassName ~= "Folder" then
+		emit("FAIL", definition.name, `{codePrefix}_CONTAINER_MISSING`)
+		return false
+	end
+
+	local expectedByPath: { [string]: SourceDefinition } = {}
+	for _, expected in expectedSources do
+		if expectedByPath[expected.dataModelPath] ~= nil then
+			emit("FAIL", definition.name, `{codePrefix}_EXPECTED_PATH_DUPLICATE`, expected.dataModelPath)
+			return false
+		end
+		expectedByPath[expected.dataModelPath] = expected
+	end
+
+	local actualByPath: { [string]: LuaSourceContainer } = {}
+	local actualCount = 0
+	for _, descendant in collectDescendants(container) do
+		if isLuaSourceContainer(descendant) then
+			local source = descendant :: LuaSourceContainer
+			local path = source:GetFullName()
+			if actualByPath[path] ~= nil then
+				emit("FAIL", definition.name, `{codePrefix}_SOURCE_PATH_DUPLICATE`, path)
+				return false
+			end
+			if expectedByPath[path] == nil then
+				emit("FAIL", definition.name, `{codePrefix}_SOURCE_UNEXPECTED`, path)
+				return false
+			end
+			actualByPath[path] = source
+			actualCount += 1
+		end
+	end
+	if actualCount ~= #expectedSources then
+		emit("FAIL", definition.name, `{codePrefix}_SOURCE_COUNT_{actualCount}`)
+		return false
+	end
+
+	for _, expected in expectedSources do
+		local actual = actualByPath[expected.dataModelPath]
+		if actual == nil then
+			emit("FAIL", definition.name, `{codePrefix}_SOURCE_MISSING`, expected.dataModelPath)
+			return false
+		end
+		if actual.ClassName ~= expected.className then
+			emit("FAIL", definition.name, `{codePrefix}_SOURCE_CLASS_MISMATCH`, expected.dataModelPath)
+			return false
+		end
+		if not fs.isFile(expected.sourcePath) then
+			emit("FAIL", definition.name, `{codePrefix}_AUTHORITATIVE_SOURCE_MISSING`, expected.dataModelPath)
+			return false
+		end
+		local readSucceeded, expectedSource = pcall(fs.readFile, expected.sourcePath)
+		if not readSucceeded or actual.Source ~= expectedSource then
+			emit("FAIL", definition.name, `{codePrefix}_SOURCE_CONTENT_MISMATCH`, expected.dataModelPath)
+			return false
+		end
+	end
 	return true
 end
 
@@ -1389,7 +1887,7 @@ end
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
 	currentStage = `verify_counts_{definition.name}`
 	local modules, scripts, localScripts = countClasses(dataModel)
-	local expectedModules = if definition.role == "Lobby" then 46 else 77
+	local expectedModules = if definition.role == "Lobby" then 46 else 83
 	if modules ~= expectedModules or scripts ~= 1 or localScripts ~= 1 then
 		emit("FAIL", definition.name, `PRODUCTION_CLASS_COUNTS_{modules}_{scripts}_{localScripts}`)
 		return false
@@ -1415,7 +1913,7 @@ end
 
 local function verifyTest(dataModel: DataModel, definition: BuildDefinition): boolean
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 144 then
+	if modules ~= 159 then
 		emit("FAIL", definition.name, `TEST_MODULE_COUNT_{modules}`)
 		return false
 	end
@@ -1436,6 +1934,9 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	end
 	if sharedModules ~= 37 then
 		emit("FAIL", definition.name, "SHARED_MODULE_COUNT")
+		return false
+	end
+	if not verifyNestedMappedSources(definition, shared, EXPECTED_TEST_SHARED_SOURCES, "TEST_SHARED") then
 		return false
 	end
 
@@ -1468,6 +1969,9 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local productionServerWaves = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerWaves")
+	local productionServerTowers = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionServerTowers")
 	local productionServerMaps = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerMaps")
@@ -1596,6 +2100,16 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	if
 		not verifyMirroredSources(
 			definition,
+			productionServerTowers,
+			EXPECTED_MATCH_TOWER_SERVER_SOURCES,
+			"TEST_SERVER_TOWER"
+		)
+	then
+		return false
+	end
+	if
+		not verifyMirroredSources(
+			definition,
 			productionServerMatchLifecycle,
 			EXPECTED_MATCH_LIFECYCLE_SOURCES,
 			"TEST_MATCH_LIFECYCLE"
@@ -1662,6 +2176,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local serverBaseModules = #EXPECTED_MATCH_BASE_SERVER_SOURCES
 	local serverEnemyModules = #EXPECTED_MATCH_ENEMY_SERVER_SOURCES
 	local serverWaveModules = #EXPECTED_MATCH_WAVE_SERVER_SOURCES
+	local serverTowerModules = #EXPECTED_MATCH_TOWER_SERVER_SOURCES
 	local matchLifecycleModules = #EXPECTED_MATCH_LIFECYCLE_SOURCES
 	local matchRosterModules = #EXPECTED_MATCH_ROSTER_SOURCES
 	local matchReadyModules = #EXPECTED_MATCH_READY_SOURCES
@@ -1681,6 +2196,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			productionServerBase :: Instance,
 			productionServerEnemies :: Instance,
 			productionServerWaves :: Instance,
+			productionServerTowers :: Instance,
 			productionServerMaps :: Instance,
 			productionServerMatchLifecycle :: Instance,
 			productionServerMatchRoster :: Instance,
@@ -1694,15 +2210,15 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	emit(
 		"PASS",
 		definition.name,
-		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_MAPS_{mapModules}_SERVER_BASE_{serverBaseModules}_SERVER_ENEMIES_{serverEnemyModules}_SERVER_WAVES_{serverWaveModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_CLIENT_MATCH_{clientMatchModules}_CLIENT_BASE_{clientBaseModules}_CLIENT_ENEMIES_{clientEnemyModules}_CLIENT_WAVES_{clientWaveModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
+		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_ENDPOINTS_{EXPECTED_PRODUCTION_REMOTE_COUNT}_RATE_POLICIES_{EXPECTED_PRODUCTION_RATE_POLICY_COUNT}_MAPS_{mapModules}_SERVER_BASE_{serverBaseModules}_SERVER_ENEMIES_{serverEnemyModules}_SERVER_WAVES_{serverWaveModules}_SERVER_TOWERS_{serverTowerModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_CLIENT_MATCH_{clientMatchModules}_CLIENT_BASE_{clientBaseModules}_CLIENT_ENEMIES_{clientEnemyModules}_CLIENT_WAVES_{clientWaveModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
 	)
 	return true
 end
 
 local function run(): boolean
-	currentStage = "phase11_scope"
-	if not verifyPhase11Scope() then
-		emit("FAIL", "All", "PHASE11_SCOPE_BOUNDARY")
+	currentStage = "phase12_scope"
+	if not verifyPhase12Scope() then
+		emit("FAIL", "All", "PHASE12_SCOPE_BOUNDARY")
 		return false
 	end
 	currentStage = "build_directory"

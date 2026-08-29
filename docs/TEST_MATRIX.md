@@ -7,7 +7,7 @@ Ant Tower Defense. Packet 05.4 created it on 2026-08-26. It separates checks
 that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
-Phases 00–11 are complete. Gate A passed on 2026-08-26, and the Phase 07 exit
+Phases 00–12 are complete. Gate A passed on 2026-08-26, and the Phase 07 exit
 gate passed on 2026-08-27 after the exact Match Studio authoring, consolidated
 review, 241-case local suite, and all four structural builds. Phase 08's
 Packets 08.1–08.5, exact four-client Match Studio gate, consolidated final
@@ -21,7 +21,11 @@ consolidated final review, 467-case local gate, and all four structural builds
   deterministic focused checks and exact unsaved Match Studio gate, the one
   consolidated final review, the `742`-case/`56`-suite local gate, and all four
   structural builds also passed on 2026-08-28. Exact-final-SHA CI is cited at
-  handoff. Phase 11 is complete and Phase 12 remains unbegun.
+  handoff. Phase 11 is complete. Phase 12's `90` dedicated focused cases, exact
+  unsaved two-client primary/defeat Studio gate, consolidated review,
+  `840`-case/`64`-suite local gate, and all four structural builds pass. Phase 12
+  is complete; exact-final-SHA CI is cited at handoff, and Phase 13 is next but
+  remains unbegun.
 
 The current repository has a fixed remote-registry/network-ownership foundation,
 strict shared payload validators, a server-authoritative token-bucket limiter,
@@ -35,7 +39,9 @@ plus the Phase 09 server-owned enemy runtime, fixed-lane simulation, bounded
   scheduler, bounded skip voting, full-state Wave replication/recovery, and exact
   Base/Enemy/MatchLifecycle integration. Production content catalogs remain empty,
   so that scheduler is dormant outside authenticated test/Studio fixtures. The
-  repository still has no combat, towers, placement, results screen, rewards,
+  Phase 12 adds a server-only authenticated TowerRuntime, temporary match-local
+  loadouts, and inert runtime-only graybox Models. The repository still has no
+  tower client, combat, placement, targeting, Battle Cash mutation, results screen, rewards,
   persistence, matchmaking, teleports, or external-service implementation. A
   separate private test universe has not been created or configured. Later tests
   remain `Deferred`, `Unavailable`, or `Prohibited` when their exact systems or
@@ -93,10 +99,11 @@ linked historical document for the original Studio evidence.
 - **System or contract:** repository-owned deterministic runner, discovery,
   stable ordering, module loading, assertion reporting, privacy, and exit codes.
 - **Test category:** automated headless unit/runner test.
-- **Current status:** `Passed` for the complete Phase 11 exit run on Windows x64
-  on 2026-08-28: `742` cases across `56` suites. The eight dedicated Phase 11
-  authored-wave suites contain `123` focused cases, including the consolidated
-  review regressions.
+- **Current status:** `Passed` for the complete Phase 12 exit run on Windows x64
+  on 2026-08-28: `840` cases across `64` suites. The eight dedicated Phase 12
+  Tower suites contain `90` focused cases; the directly affected
+  MatchLifecycle suite passes `43/43`, including the consolidated-review
+  regression.
 - **Environment:** repository checkout with the versions pinned by `rokit.toml`;
   no Roblox Studio, network, publication, or external Roblox service.
 - **Command or procedure:** run `lune run tests/run.luau`. For isolated failure
@@ -202,12 +209,14 @@ linked historical document for the original Studio evidence.
   Lua source map, production runnable-entrypoint counts, place-role isolation,
   and absence of tests/test-only dependencies from production.
 - **Test category:** automated headless build and structural integration test.
-- **Current status:** `Passed` for the Phase 11 inventory on 2026-08-28. The
-  current Default/Lobby/Match/Test builds contain `77/46/77/144` ModuleScripts;
+- **Current status:** `Passed` for the completed Phase 12 inventory on
+  2026-08-28. The current Default/Lobby/Match/Test builds contain
+  `83/46/83/159` ModuleScripts;
   each production build has one Script and one LocalScript, Test has no runnable
-  source and exactly `70` test-owned modules, and the verifier authenticates ten
-  Match endpoints and six request policies. The Phase 06 audit-content run and
-  earlier inventories remain historical evidence.
+  source and exactly `79` test-owned modules, and the verifier authenticates ten
+  Match endpoints and six request policies. The Phase 11 `77/46/77/144` and
+  `70` Test-owned inventory, Phase 06 audit-content run, and earlier inventories
+  remain historical evidence.
 - **Environment:** current local Windows x64 plus the GitHub Actions
   `windows-2025` runner using pinned Rojo and Lune.
 - **Command or procedure:** run `lune run tests/verify-builds.luau`.
@@ -241,8 +250,8 @@ linked historical document for the original Studio evidence.
   generated-output residue, least-privilege workflow, and unambiguous negative
   controls.
 - **Test category:** automated local quality gate and GitHub Actions CI.
-- **Current status:** `Passed` for the complete Phase 11 local gate on
-  2026-08-28: formatting, lint, `742` tests across `56` suites, all four
+- **Current status:** `Passed` for the complete Phase 12 local gate on
+  2026-08-28: formatting, lint, `840` tests across `64` suites, all four
   structural builds, diff/scope/generated-output/test-exclusion/catalog/remote/
   rate/role-isolation checks. Exact-final-SHA Repository Verification is cited
   at handoff.
@@ -522,6 +531,54 @@ linked historical document for the original Studio evidence.
   [Authored Wave Runtime and Difficulty Scheduler](WAVE_RUNTIME.md). Headless
   evidence does not claim real engine transport, multi-client timing, or use of
   the authored Match lane; M-09 records that separate Studio gate.
+
+### H-14 — Phase 12 authenticated TowerRuntime, temporary loadout, and model contract
+
+- **System or contract:** one complete canonical Tower/Asset fixture
+  transaction; three inert fixture roles; exact MatchId/towerEpoch and identity
+  domains; five-slot Active-participant loadouts; opaque single-use occupied-
+  slot capabilities; RuntimeTower creation/removal/caps/bounds; version-1
+  template/live-model validation and ownership; service composition, fatal
+  child/rollback adoption, and residue-free cleanup.
+- **Test category:** deterministic headless unit, integration, hostile-input,
+  identity, authority/security, hierarchy, transaction-ordering, capacity,
+  arithmetic, callback, re-entry, fault-injection, and cleanup tests.
+- **Current status:** `Passed` on 2026-08-28 for `90` focused cases across the
+  eight dedicated Phase 12 suites. The directly affected MatchLifecycle suite
+  passes `43/43`, including authentic observer detach after committed defeat.
+  The complete repository gate passes `840/840` cases across `64` suites.
+- **Environment:** isolated Rojo Test DataModel under Lune. The six production
+  server-Match Tower modules are mapped at exact
+  `ProductionServerTowers` paths; shared configuration and affected
+  MatchLifecycle/Wave modules are exact production mirrors; `TowerFixtures` and
+  all eight specs are Test-owned. Test contains no Script or LocalScript.
+- **Command or procedure:** run `lune run tests/run.luau`; while iterating use
+  `--spec` for `AuthenticatedTowerFixtures`, `TemporaryLoadoutStore`,
+  `TowerRuntimeStore`, `TowerModelContract`, `TowerGrayboxFactory`,
+  `TowerModelOwner`, `TowerRuntimeService`, or `TowerRuntimeIntegration`, plus
+  directly affected `MatchLifecycleService` coverage.
+- **Required players or devices:** zero.
+- **Authorization/external/destructive risk:** none; no wall-clock wait,
+  Roblox service, production content, persistent data, saved Model, upload, or
+  publication is used.
+- **Expected evidence:** exact canonical root/catalog/manifest/definition
+  identities and rejected forgeries; single/splash/support cross-rules; stable
+  occupied/empty slot order and temporary UnitId isolation; forged/replayed/
+  stale/wrong-owner/wrong-match capability rejection; numeric RuntimeTowerId
+  separation and no reuse; per-owner placement caps and 128/4,096 technical
+  bounds; exact initial record values; nonfinite/arithmetic/counter closure;
+  strict attacking/non-attacking hierarchy and variant selection; clone/pivot/
+  parent/tamper/recreation adapters; coordinator adoption of child throw/yield/
+  fault and rollback failure; dormant empty production; no endpoint, Tower
+  client, placement, combat, economy, persistence, or Phase 13 behavior; and
+  idempotent cleanup with inert late work.
+- **Cleanup procedure:** every case closes all capabilities/records/models/
+  callbacks and the runner removes only its exact generated Test build.
+- **Phase or prerequisite:** Packets 12.1–12.4; authoritative contract is
+  [Tower Runtime and Temporary Loadout](TOWER_RUNTIME.md). Headless adapters do
+  not claim engine Model cloning, PrimaryPart/pivot, replication, visibility,
+  or Instance-destruction behavior; M-10 records that exact Studio gate. M-02
+  remains Deferred because placement/combat/transactions do not exist.
 
 ## Local Studio solo tests
 
@@ -1123,8 +1180,86 @@ linked historical document for the original Studio evidence.
   client/server, reset profiling/emulation, stop the task-owned Rojo process, and
   leave Studio in Edit mode without save or publish.
 - **Phase or prerequisite:** Packets 11.1–11.6. Production catalogs remain empty;
-  this fixture-backed gate does not start Phase 12 combat or authorize production
+  this fixture-backed gate does not start tower combat or authorize production
   content, save, or publication.
+
+### M-10 — Phase 12 temporary loadouts, RuntimeTowers, graybox Models, and cleanup
+
+- **System or contract:** exact Active-participant five-slot loadouts; distinct
+  TowerId/UnitId/RuntimeTowerId domains; server-capability creation and
+  per-owner caps; strict attacking/non-attacking version-1 Models; server/client
+  pivot and replication agreement; visual tamper/removal/recreation authority;
+  unchanged finite Wave and lethal-defeat paths; constant ownership; and exact
+  Tower cleanup.
+- **Test category:** unsaved Match Studio Server & Clients authority,
+  engine-Instance, replication, timing, cap, lifecycle, defeat, and residue
+  gate.
+- **Current status:** `Passed` on 2026-08-28 in fresh zero-error primary and
+  defeat sessions. A separate diagnostic session was discarded from acceptance
+  after an AssistantCommand error; only its bounded client-replication timing
+  observations are retained.
+- **Environment:** exact connected Match place, PlaceId `136401514513678`,
+  GameId `10757629094`, CreatorType `Group`, CreatorId `35420107`, owner
+  `PHJGAMES`, `ATDPlaceRole = Match`; one local server and exactly two fresh
+  simulated desktop clients with only reviewed `match.project.json` source
+  synchronized. Every accepted scenario began and ended in Edit mode.
+- **Command or procedure:** use the existing Wave-owned one-shot Studio trigger
+  and its fixed Tower boundary described in
+  [Tower Runtime and Temporary Loadout](TOWER_RUNTIME.md#executed-match-studio-evidence--2026-08-28).
+  Validate one fresh complete raw configuration once, create only predeclared
+  server CFrames, inspect server/client Models and bounded diagnostics, run the
+  fixed cap/tamper/recreation/invalid-template operations, then invoke exact
+  Tower cleanup. No client Tower operation exists.
+- **Required players or devices:** one local server and two simulated desktop
+  clients. UserIds were `-2` and `-1`; an unknown safe-integer UserId was probed
+  only through the server boundary.
+- **Authorization requirement:** current-branch Match Rojo synchronization and
+  runtime-only fixtures/grayboxes were authorized. No manual Studio
+  Script.Source edit, Script Sync, map/marker/asset/catalog mutation, save,
+  publish, upload, setting, Lobby, or unrelated place action is permitted.
+- **External service or publication requirement:** none.
+- **Destructive-data risk:** low and bounded to task-owned synchronized source
+  and runtime objects; exact pre/post persistent-root and mapped-source
+  inventories protect Studio/Team Create content.
+- **Primary evidence:** final-source MatchId
+  `match:52847c36-92d9-47c8-912a-52e2a7a8ca3e`, epoch `1`, loadout revisions
+  `1/2`, five exact slots per user, and unique `unit:p12-e1-n2-s1..s3` /
+  `unit:p12-e1-n1-s1..s3`. First allocations `1..6` matched every owner, slot,
+  canonical role, level/default mode-or-nil, eligibility, placement-cost
+  investment, cooldown sentinel, and X pivot `0..30` by six. Activation took
+  `0.0046535` seconds and the first six create transactions
+  `0.0006274`–`0.0011286` seconds. Both clients agreed on role hierarchies,
+  variants, and pivots. Removal/recreation/tamper repair took
+  `0.0001617`/`0.0010771`/`0.0006388` seconds without record mutation; an invalid
+  template rejected in `0.0000267` seconds with no count change.
+- **Cap/model evidence:** final active RuntimeTowerIds were `1..11,13`, with
+  exactly two single, three splash, and one support tower per owner. ID `12` was
+  removed and not reused; metrics were active/lifetime/next/issued-ID
+  `12/13/14/13`, capability generation `23`, zero outstanding capabilities,
+  and ten expected cap rejections. Both clients agreed on twelve Models, four
+  single/six splash/two support, `328` descendants, `48` BaseParts, `78`
+  Attachments, `36` variants, and `34` hooks. The ordinary schedule completed
+  once with Match still `WaveActive` and no Tower count/identity change.
+- **Defeat evidence:** final-source MatchId
+  `match:762fcd89-2459-4c68-b85c-bce0624682d9` created exact IDs `1..3` and
+  both clients saw all three role Models. One lethal spawn reached Match
+  `Results` revision `9`, Wave `DefeatClosed` revision `3`, and Base `Defeated`
+  revision `3`, with one defeat/Results commit, no later spawn, and all Tower
+  truth unchanged. The first run exposed the observer-detach cleanup gate;
+  after its cleanup-only fix and focused regression, the final-source rerun
+  activated in `0.0048356` seconds, created the three Models in `0.0031535`
+  seconds, and cleaned Tower state in `0.0015069` seconds.
+- **Cleanup procedure:** primary Tower cleanup took `0.0019925` seconds; both
+  accepted runs produced exact all-zero Tower receipts, no server/client
+  runtime root, late creation `UNAVAILABLE`, one completed assertion set with
+  zero failures, zero console errors, and only the expected early base-snapshot
+  server warning. Stop both clients/server, reset profiling/emulation, disconnect
+  and stop the task-owned Rojo process, confirm port `34872` has zero listener,
+  and leave the exact unchanged place in Edit mode without save or publish.
+- **Phase or prerequisite:** Packets 12.1–12.4 only. Production `Assets` and
+  `Towers` remain empty; networking remains ten endpoints/six policies; M-02
+  stays Deferred; no placement, combat, Battle Cash mutation, hotbar,
+  persistence, production content, or Phase 13 behavior began.
 
 ## Published-client and private-version tests
 

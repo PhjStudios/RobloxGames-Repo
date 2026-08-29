@@ -21,9 +21,9 @@ keys, cookies, or secrets.
 - Roblox publishing authorized: no
 
 Those fields record Packet 00.3. The exact Match identity was reconfirmed for
-the unsaved Phase 11 two-client gate on 2026-08-28. Only mapped branch source and
-runtime-created evidence objects changed during Play; Studio-authored content
-remained untouched and unsaved.
+the unsaved Phase 12 two-client primary and defeat gates on 2026-08-28. Only
+mapped branch source and runtime-created evidence objects changed during Play;
+Studio-authored content remained untouched and unsaved.
 
 ## Evidence sources
 
@@ -107,6 +107,11 @@ combined Rojo project name is `Ant Tower Defense`.
   `35420107`, official owner `PHJGAMES`, and `ATDPlaceRole = Match`. Exact
   scheduler, recovery, stress, completion, defeat, and cleanup evidence is in
   `docs/WAVE_RUNTIME.md#executed-studio-evidence--2026-08-28`.
+- Phase 12 two-client tower-runtime primary and defeat gate identity
+  reconfirmed on 2026-08-28 with the same PlaceId/GameId/Group/owner/role. Exact
+  loadout, runtime/model, cap, tamper/recreation, defeat, inventory, and cleanup
+  evidence is in
+  `docs/TOWER_RUNTIME.md#executed-match-studio-evidence--2026-08-28`.
 - Controlled Phase 07 Save To Cloud: succeeded at `2026-08-27T02:11:31Z` under
   the user's exact graybox authorization; it did not change visibility,
   settings, services, Lobby, or unrelated assets.
@@ -373,6 +378,13 @@ not created by Rojo-managed scripts.
 - Boss models and presentation anchors.
 - Animations uploaded with appropriate ownership/permissions.
 
+Those bullets describe future Studio/Team Create authority, not current
+production content. Phase 12 created only runtime-owned graybox Models from
+fresh authenticated Studio/test fixtures. They were never saved, published, or
+placed under `ServerStorage.ATDMapTemplates`; production `Assets` and `Towers`
+remain empty and no uploaded model, mesh, image, animation, sound, or asset ID
+was introduced.
+
 ### Media and presentation assets
 
 - Images, icons, portraits, thumbnails, and decals.
@@ -477,6 +489,44 @@ Roblox environment.
 - Both clients retained constant Wave ownership and converged within the declared
   bound. Accepted sessions had zero console errors, stopped without runtime
   residue, left Studio in Edit mode, and performed no save or publication.
+
+### Phase 12 tower-runtime and temporary-loadout gate
+
+- The exact connected Match place was reconfirmed as PlaceId
+  `136401514513678`, GameId `10757629094`, CreatorType `Group`, CreatorId
+  `35420107`, owner `PHJGAMES`, and `ATDPlaceRole = Match`. The unrelated
+  standalone Ant Tower Defense place was not synchronized or tested.
+- Before Phase 12 synchronization, the bounded persistent roots contained six
+  Workspace descendants (Camera, Baseplate, SpawnLocation and its Decal,
+  Terrain, Baseplate Texture), five Lighting descendants (Atmosphere, Bloom,
+  DepthOfField, Sky, SunRays), and zero SoundService, Teams, StarterGui, or
+  StarterPack descendants. The mapped Phase 11 Match source inventory was `77`
+  ModuleScripts, one Script, and one LocalScript.
+- Synchronizing only reviewed `match.project.json` source produced the expected
+  Phase 12 mapped inventory of `83` ModuleScripts, one Script, and one
+  LocalScript: the difference is exactly the six server-Match Tower modules.
+  The persistent Workspace/Lighting/other-root inventory remained byte-for-byte
+  and identity-for-identity unchanged.
+- Fresh exact two-client primary and defeat sessions exercised the one
+  authenticated runtime-only fixture transaction, distinct five-slot temporary
+  loadouts, trusted graybox creation/caps/tamper/recreation, healthy Wave
+  coexistence, unchanged lethal defeat, and explicit Tower cleanup. All Models,
+  templates, records, loadouts, UnitIds, capabilities, roots, observers,
+  boundaries, and caches were runtime-only. Accepted server/client consoles had
+  zero errors; only the expected early base-snapshot bootstrap warning appeared
+  on the server.
+- Final cleanup found no `Workspace.ATDTowerRuntime`, runtime map, enemy visual
+  root, `ReplicatedStorage.ATDNetwork`, Phase 11 trigger, Tower object, or client
+  Tower object. The exact persistent inventory remained Workspace `6`, Lighting
+  `5`, SoundService/Teams/StarterGui/StarterPack `0`, and mapped source
+  ModuleScript/Script/LocalScript `83/1/1`. The final Edit-mode source audit
+  measured `1,843,901` mapped source bytes, including the reviewed
+  `83,729`-byte `TowerRuntimeService` with both consolidated-review fixes.
+- Every server/client stopped, the task-owned Rojo process disconnected and
+  exited, port `34872` had zero listeners, emulation/profiling state was reset,
+  and the exact Match place was left in Edit mode. No Studio-owned instance was
+  edited, no lasting Script.Source change was made in Studio, and nothing was
+  saved, published, uploaded, or tested in Lobby.
 
 ### Needed before Phase 26 teleport testing
 

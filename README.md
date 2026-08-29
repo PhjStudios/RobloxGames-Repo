@@ -8,7 +8,7 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phases 00–11 are complete; Gate A passed on 2026-08-26 and the Phase
+order. Phases 00–12 are complete; Gate A passed on 2026-08-26 and the Phase
 07–09 exit gates passed on 2026-08-27. Phase 10 Packets 10.1–10.4 implement
 the server-owned defender-base runtime, exact-once leak damage, bounded reliable
 recovery, world-space base presentation, and one fail-closed defeat path into
@@ -21,13 +21,23 @@ consolidated review passed on 2026-08-28. Every material review finding was
 resolved. Exact-final-SHA CI is cited at handoff rather than through a
 self-referential evidence commit.
 
+Phase 12 Packets 12.1–12.4 are complete. They add
+three fresh authenticated test/runtime tower roles, one match-scoped
+server-owned `TowerRuntime`, a temporary five-slot development loadout with
+opaque single-use creation capabilities, and an exact version-1 inert graybox
+model contract. The deterministic focused suites, exact unsaved two-client
+Match Studio primary/defeat/cleanup scenarios, consolidated independent review,
+`840`-case/`64`-suite local gate, and all four structural builds pass. The exact
+final-SHA CI result is reported at handoff; Phase 13 is next and remains
+entirely unbegun.
+
 Production networking contains ten Match-only reliable endpoints and six
-client-request rate policies. `Enemies`, `Assets`, `Maps`, `Difficulties`,
+client-request rate policies. `Enemies`, `Assets`, `Towers`, `Maps`, `Difficulties`,
 `Waves`, and difficulty-specific `Economy` rules remain empty production
 catalogs, so the Wave runtime is production-dormant until authenticated content
 exists. Healthy finite completion deliberately leaves MatchLifecycle in
-`WaveActive`; victory, rewards, Results UI, economy balances, and all Phase 12
-systems remain unbegun. Phase 12 is next.
+`WaveActive`; victory, rewards, Results UI, economy balances, placement,
+targeting, combat, and tower transactions remain unbegun.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -51,6 +61,7 @@ systems remain unbegun. Phase 12 is next.
 - [Phase 09 enemy simulation, replication, rendering, and Studio evidence](docs/ENEMY_SIMULATION.md)
 - [Phase 10 defender-base runtime, replication, defeat, and Studio evidence](docs/BASE_RUNTIME.md)
 - [Phase 11 authored-wave runtime, difficulty scheduler, replication, and Studio evidence](docs/WAVE_RUNTIME.md)
+- [Phase 12 tower runtime, temporary loadout, model contract, and Studio evidence](docs/TOWER_RUNTIME.md)
 - [Economy, banner, and default-settings schemas](docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md)
 - [Whole-configuration validation and bootstrap gate](docs/CONFIGURATION_VALIDATION.md)
 - [Phase 04 exit-gate audit](docs/PHASE_04_EXIT_AUDIT.md)

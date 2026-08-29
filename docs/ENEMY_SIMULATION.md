@@ -19,8 +19,11 @@ it does not change Phase 09 movement, client enemy replication, or production
 enemy content. Phase 11 subsequently adds the separate authenticated finite
 [Wave Runtime](WAVE_RUNTIME.md), scheduler-owned spawn admission, difficulty
 composition, and terminal attribution while preserving this movement and
-replication contract. Combat, towers, placement, rewards, persistence,
-production art/content, and Lobby source remain absent; Phase 12 is unbegun.
+replication contract. Phase 12 now adds only separate server Tower records and
+inert runtime-owned Models; it does not change enemy movement, ownership,
+replication, presentation, or terminal outcomes. Combat, placement, rewards,
+persistence, production art/content, and Lobby source remain absent; Phase 13
+is unbegun.
 
 `src/shared/config/Enemies.luau` and `src/shared/config/Assets.luau` remain frozen
 empty arrays. `docs/TOWER_ENEMY_SCHEMAS.md` is the repository's existing enemy
@@ -862,4 +865,7 @@ reviewed endpoint consumer and passed focused and exact Studio checks on
 `docs/BASE_RUNTIME.md`. Phase 11 subsequently implemented the authenticated
 finite scheduler and passed its exact Match Studio and consolidated-review
 gates; its current contract and evidence are maintained in
-`docs/WAVE_RUNTIME.md`. Phase 12 remains unbegun.
+`docs/WAVE_RUNTIME.md`. Phase 12 subsequently passed its exact unsaved primary
+and defeat Studio checks without changing enemy spawn/movement/outcome truth;
+its current contract and evidence are maintained in `docs/TOWER_RUNTIME.md`.
+Phase 13 remains unbegun.

@@ -390,6 +390,37 @@ After changing these contracts:
 7. Leave both places in Edit mode. Remove exact generated builds and temporary
    harnesses only. Do not save or publish merely to test.
 
+## Phase 12 authenticated TowerSchema consumption — 2026-08-28
+
+Phase 12 consumes this unchanged Packet 04.2 schema; it does not add a field,
+ID family, target taxonomy, behavior implementation, or production definition.
+One fresh complete raw configuration supplies exactly three test/runtime-only
+Tower definitions and their six `TowerModel`/`Icon` manifest entries. The real
+`ConfigurationValidator` validates the whole root once in dependency order, and
+TowerRuntime accepts only the exact canonical frozen root, manifest, catalog,
+ordered records, by-ID records, definitions, and model-asset identities from
+that transaction. Raw tables, copied/frozen lookalikes, separately validated
+catalogs, mismatched manifests, and wrong ordered identities remain rejected.
+
+The consumed fixtures prove the existing cross-rules without expanding them:
+
+- `tower:phase12-single` and `tower:phase12-splash` have three levels, exact
+  supported/default target modes, placement/upgrade costs, finite range/damage/
+  cooldown metadata, positive authored footprints, per-owner placement caps,
+  and inert attack/status/merge references;
+- `tower:phase12-support` has three fully non-attacking levels, an empty target
+  mode list, no default target mode, and inert support/economy tags; and
+- runtime eligibility is the separate immutable value `AllEligibleEnemies`.
+  It is not authored into TowerSchema and creates no air/water/tag filter.
+
+The canonical `footprintRadiusStuds` remains the only runtime footprint
+authority. Phase 12 never derives it from a Model, bounding box, part, client
+visual, or Workspace state. `placementCost` seeds detached
+`totalInvestment`; no wallet is created or mutated. Attack, splash, support,
+economy, status, merge, range, damage, and cooldown values remain inert
+metadata. Lasting production `Assets.luau` and `Towers.luau` remain
+byte-identical empty, so normal production TowerRuntime is dormant.
+
 Phase 05 subsequently added deterministic test-only fixtures and headless schema
 coverage without populating lasting catalogs. Current commands and evidence are
 in `docs/TEST_RUNNER.md`, and environment-specific status is in

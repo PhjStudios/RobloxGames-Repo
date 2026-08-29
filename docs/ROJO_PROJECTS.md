@@ -34,7 +34,11 @@ focused and exact Studio checks, consolidated review, complete local gate, and
   11 adds only reviewed shared/server-Match/client-Match Wave modules and exact
   Test-only mirrors/specs; its Studio, consolidated-review, `742`-case local, and
   four-build gates pass. Exact-final-SHA CI is cited at handoff. Phase 11 is
-  complete and Phase 12 remains unbegun.
+  complete. Phase 12 adds only six server-Match Tower modules and their exact
+  Test mirrors/fixture/specs; focused and exact unsaved Studio checks,
+  consolidated review, the `840`-case/`64`-suite local gate, and all four
+  structural builds pass. Phase 12 is complete; exact-final-SHA CI is recorded
+  at handoff, and Phase 13 is next but remains unbegun.
 
 ## Project inventory
 
@@ -43,7 +47,7 @@ focused and exact Studio checks, consolidated review, complete local gate, and
 | `default.project.json` | Combined convenience project and documented `rojo serve` default | `common`, `lobby`, `match` | `common`, `lobby`, `match` | Existing development `servePlaceIds`; current role is `Development` |
 | `lobby.project.json` | Role-isolated lobby source | `common`, `lobby` | `common`, `lobby` | No ID binding; current role is `Lobby` |
 | `match.project.json` | Role-isolated match source | `common`, `match` | `common`, `match` | No ID binding; current role is `Match` |
-| `test.project.json` | Headless contract/runtime-module test DataModel | No runnable layer; exact networking, map, lifecycle, roster, ready, base, enemy, and Wave mirrors under `ServerStorage` | No runnable layer; exact networking, Match-ready, base, enemy, and Wave mirrors under `ServerStorage` | Build-only; no role or `servePlaceIds` |
+| `test.project.json` | Headless contract/runtime-module test DataModel | No runnable layer; exact networking, map, lifecycle, roster, ready, base, enemy, Wave, and Tower mirrors under `ServerStorage` | No runnable layer; exact networking, Match-ready, base, enemy, and Wave mirrors under `ServerStorage` | Build-only; no role or `servePlaceIds` |
 
 All four projects map `src/shared` to `ReplicatedStorage.Shared`. Only the test
 project additionally maps `tests/specs`, `tests/fixtures`, `tests/support`, and
@@ -420,7 +424,7 @@ place, run role-specific code, save Studio content, or publish. Packet 02.4 has
 since passed the real Lobby-versus-Match Studio isolation gate; current evidence
 is recorded in `docs/MULTI_PLACE_GATE.md`.
 
-## Current Phase 11 mapping boundary
+## Current Phase 12 mapping boundary
 
 Default and Match map the authoritative shared Wave protocol, three server Wave
 modules, and two client Wave modules through their existing trees. Lobby maps
@@ -429,12 +433,24 @@ runtime. Test maps exact Wave production mirrors under `ServerStorage` alongside
 the Phase 11 fixtures/specs; it remains build-only with zero Script and
 LocalScript. No project maps `tests/studio`, and no source is mapped twice.
 
-The final structural inventory is `77/46/77/144` ModuleScripts for
+Default and Match additionally map the six authoritative server-Match Tower
+modules under `ServerScriptService.Server.match.towers`. Lobby maps none of
+those six. Test maps exact byte-identical copies under
+`ServerStorage.AutomatedTests.ProductionServerTowers`, plus Test-owned
+`TowerFixtures` and eight Tower specs. There is no client Tower mapping, shared
+Tower protocol, production test fixture, manually mapped Studio harness, or
+second runnable entrypoint. The Studio-only graybox/runtime evidence seam is
+inside the reviewed production Tower service and remains
+`RunService:IsStudio()`-gated and dormant outside its one-shot transaction.
+
+The completed Phase 12 structural inventory is `83/46/83/159`
+ModuleScripts for
 Default/Lobby/Match/Test. Each production build retains exactly one Script and
 one LocalScript; Test retains zero. The current verifier also proves ten
-Match-only reliable definitions, six inbound rate policies, 70 exact Test-owned
-modules, byte-identical authoritative source, generated-output absence,
-Lobby/Match isolation, and zero production test/fixture/Studio-harness content.
-Production `Assets`, `Enemies`, `Maps`, `Difficulties`, `Waves`, and
-difficulty-specific `Economy` rules remain frozen empty. Phase 12 remains
-unbegun.
+Match-only reliable definitions, six inbound rate policies, 79 exact Test-owned
+modules, every shared and production-mirror path/class/source byte,
+generated-output absence, Lobby/Match isolation, and zero production
+test/fixture/manual-Studio-harness content. Production `Assets`, `Towers`,
+`Enemies`, `Maps`, `Difficulties`, `Waves`, and difficulty-specific `Economy`
+rules remain frozen empty. Exact Tower source/public-method allowlists reject
+any Phase 13 placement/query/preview/hotbar source or behavior.

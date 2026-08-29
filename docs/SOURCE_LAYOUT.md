@@ -17,13 +17,14 @@ place-isolated mappings recorded in `docs/ROJO_PROJECTS.md`.
 - Studio-authored content changed: no
 - Place saved or published: no
 
-Those fields record Packet 02.1. The current Phase 11 extension adds only
-ModuleScripts beneath the established shared/server-Match/client-Match layers
-and test-only mirrors/specs; it adds no runnable entrypoint. Focused and exact
-Studio checks passed on 2026-08-28. Phase 11 is complete and Phase 12 remains
-unbegun.
+Those fields record Packet 02.1. The current Phase 12 extension adds six
+server-Match Tower ModuleScripts plus exact Test-only mirrors, one fixture, and
+eight specs; it adds no shared Tower protocol, client Tower source, or runnable
+entrypoint. Focused and exact unsaved Studio checks, consolidated review, the
+`840`-case/`64`-suite local gate, and all four structural builds passed on
+2026-08-28. Phase 12 is complete; Phase 13 is next but remains unbegun.
 
-## Current Phase 11-relevant source tree excerpt
+## Current Phase 12-relevant source tree excerpt
 
 ```text
 src/
@@ -59,6 +60,7 @@ src/
       BaseProtocol.luau
       EnemyProtocol.luau
       MatchProtocol.luau
+      WaveProtocol.luau
     network/
       PayloadValidation.luau
       ProductionRemotes.luau
@@ -108,6 +110,17 @@ src/
         SnapshotBroadcaster.luau
       roster/
         ParticipantRoster.luau
+      waves/
+        WaveReplicationPublisher.luau
+        WaveRuntime.luau
+        WaveRuntimeService.luau
+      towers/
+        TemporaryLoadoutStore.luau
+        TowerGrayboxFactory.luau
+        TowerModelContract.luau
+        TowerModelOwner.luau
+        TowerRuntimeService.luau
+        TowerRuntimeStore.luau
       .gitkeep
   client/
     common/
@@ -132,6 +145,9 @@ src/
         EnemyPresentation.luau
         EnemyRenderer.luau
         EnemyReplicationState.luau
+      waves/
+        WaveController.luau
+        WaveStateReducer.luau
       MatchReadyController.luau
       MatchReadyView.luau
       MatchReadyViewModel.luau
@@ -142,6 +158,8 @@ tests/
     EnemyFixtures.luau
     MapFixtures.luau
     NetworkFixtures.luau
+    TowerFixtures.luau
+    WaveFixtures.luau
   negative/
   specs/
     BaseController.spec.luau
@@ -184,6 +202,14 @@ tests/
     ServerRateLimiter.spec.luau
     ServerRequestDispatcher.spec.luau
     SnapshotBroadcaster.spec.luau
+    AuthenticatedTowerFixtures.spec.luau
+    TemporaryLoadoutStore.spec.luau
+    TowerGrayboxFactory.spec.luau
+    TowerModelContract.spec.luau
+    TowerModelOwner.spec.luau
+    TowerRuntimeIntegration.spec.luau
+    TowerRuntimeService.spec.luau
+    TowerRuntimeStore.spec.luau
   studio/
     Phase06NetworkClient.client.luau
     Phase06NetworkServer.server.luau
@@ -192,7 +218,7 @@ tests/
   support/
 ```
 
-This excerpt shows every production source and the Phase 06–10 test areas
+This excerpt shows the production layers and the Phase 06–12 test areas
 relevant to the network, map, lifecycle, roster, ready, enemy simulation,
 defender-base, and client-presentation boundaries. It intentionally omits unrelated
 test fixtures, negative controls, older specs, support modules, and runner
@@ -202,7 +228,8 @@ Any remaining `.gitkeep` markers preserve otherwise empty architecture
 directories. They are not Luau modules or runnable scripts and create no Roblox
 Instance. Match now contains the Phase 07 map modules, the Phase 08
 server/client composition, the Phase 09 enemy modules, and the Phase 10 base
-modules shown above.
+modules, the Phase 11 Wave modules, and the Phase 12 server-only Tower modules
+shown above.
 
 `src/shared` remains the location for code that is safe and useful across both
 execution contexts and both place roles. Packet 02.3 added the typed place-role
@@ -737,7 +764,7 @@ passed on 2026-08-27 and are recorded in `docs/ENEMY_SIMULATION.md`. Phase 10's
 focused and exact Studio evidence is recorded in `docs/BASE_RUNTIME.md`. The
 exact-final-SHA CI evidence is cited at handoff.
 
-## Current Phase 11 source and Test boundary
+## Current Phase 12 source and Test boundary
 
 Phase 11 adds shared `match/WaveProtocol.luau`; server-Match
 `waves/WaveRuntime.luau`, `WaveReplicationPublisher.luau`, and
@@ -745,8 +772,16 @@ Phase 11 adds shared `match/WaveProtocol.luau`; server-Match
 `WaveController.luau`. Existing Match bootstraps compose those ModuleScripts but
 remain the only production Script and LocalScript. Narrow extensions to
 MatchLifecycle and EnemySimulation/Base integration preserve their established
-layers; no Phase 12 directory, tower runtime, HUD, economy service, or new
-runnable entrypoint exists.
+layers.
+
+Phase 12 adds exactly six production server-Match ModuleScripts under
+`match/towers`: `TemporaryLoadoutStore`, `TowerGrayboxFactory`,
+`TowerModelContract`, `TowerModelOwner`, `TowerRuntimeService`, and
+`TowerRuntimeStore`. The existing Match server bootstrap composes TowerRuntime
+after WaveRuntime; the existing Script remains the sole server runnable. There
+is no shared Tower protocol, `src/client/match/towers` directory, tower client
+controller, hotbar, placement/preview/query source, economy service, or new
+Script/LocalScript.
 
 Test maps exact production copies beneath `ProductionServerWaves` and
 `ProductionClientWaves`. The Phase 11-owned test surface is
@@ -757,10 +792,24 @@ narrow affected MatchLifecycle/Enemy/Base/network coverage. Studio evidence
 lives behind production `RunService:IsStudio()` triggers and bounded diagnostics,
 not in `tests/studio` or a production content catalog.
 
+Phase 12 Test additionally maps the exact six production modules beneath
+`ServerStorage.AutomatedTests.ProductionServerTowers`, plus Test-owned
+`TowerFixtures` and eight dedicated specs: `AuthenticatedTowerFixtures`,
+`TemporaryLoadoutStore`, `TowerRuntimeStore`, `TowerModelContract`,
+`TowerGrayboxFactory`, `TowerModelOwner`, `TowerRuntimeService`, and
+`TowerRuntimeIntegration`. The MatchLifecycle observer-detach regression stays
+in its existing exact production-mirror suite. No project maps a Phase 12
+manual Studio harness or a graybox factory from `tests/` into production; the
+runtime-only production factory remains dormant outside the Studio-gated
+evidence transaction.
+
 The current verified Default/Lobby/Match/Test ModuleScript inventory is
-`77/46/77/144`; Script/LocalScript counts are `1/1`, `1/1`, `1/1`, and `0/0`.
-Test contains 70 explicitly allowlisted Test-owned modules and no runnable
-source. The verifier authenticates both mapping directions and exact source
-bytes, ten Match-only reliable definitions, six inbound policies, role
-isolation, production test exclusion, and empty production `Assets`, `Enemies`,
-`Maps`, `Difficulties`, `Waves`, and difficulty-specific `Economy` rules.
+`83/46/83/159`; Script/LocalScript counts are `1/1`, `1/1`, `1/1`, and `0/0`.
+Test contains 79 explicitly allowlisted Test-owned modules and no runnable
+source. The verifier authenticates both mapping directions, every Test shared
+and production-mirror path/class/source byte, ten Match-only reliable
+definitions, six inbound policies, role isolation, generated-output and
+production-test exclusion, exact Tower source/public-surface allowlists, and
+empty production `Assets`, `Towers`, `Enemies`, `Maps`, `Difficulties`, `Waves`,
+and difficulty-specific `Economy` rules. It rejects any Phase 13 tower
+placement/query/preview/hotbar source or public TowerRuntime operation.

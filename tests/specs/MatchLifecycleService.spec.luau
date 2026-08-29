@@ -1362,6 +1362,58 @@ return TestHarness.suite("match lifecycle service", {
 		assertions.equal(service:getLifecycleState(), "Shutdown")
 	end),
 
+	TestHarness.case("permits only authentic observer cleanup after committed base defeat", function(assertions)
+		local service = newWaveActiveDefeatService(assertions)
+		local reserved = service:reserveParticipantObserver(participantObserverAdapter(function()
+			return true
+		end))
+		assertions.isTrue(reserved.ok)
+		if not reserved.ok then
+			error("[ATD_TEST][code=PARTICIPANT_OBSERVER_RESERVE_FAILED]", 0)
+		end
+		assertions.isTrue(
+			service:activateParticipantObserver(reserved.value.handle, reserved.value.snapshot.revision).ok
+		)
+
+		local began = service:beginBaseDefeat(MATCH_ID)
+		assertions.isTrue(began.ok)
+		if not began.ok then
+			error("[ATD_TEST][code=BASE_DEFEAT_BEGIN_REJECTED]", 0)
+		end
+		assertions.isTrue(service:commitBaseDefeat(began.value).ok)
+
+		local refresh = service:refreshParticipantObserver(reserved.value.handle)
+		assertions.isFalse(refresh.ok)
+		if not refresh.ok then
+			assertions.equal(refresh.error.code, "UNAVAILABLE")
+		end
+		local replacement = service:reserveParticipantObserver(participantObserverAdapter(function()
+			return true
+		end))
+		assertions.isFalse(replacement.ok)
+		if not replacement.ok then
+			assertions.equal(replacement.error.code, "UNAVAILABLE")
+		end
+
+		local detached = service:detachParticipantObserver(reserved.value.handle)
+		assertions.isTrue(detached.ok)
+		if detached.ok then
+			assertions.isTrue(detached.value)
+		end
+		local detachedAgain = service:detachParticipantObserver(reserved.value.handle)
+		assertions.isTrue(detachedAgain.ok)
+		if detachedAgain.ok then
+			assertions.isFalse(detachedAgain.value)
+		end
+
+		invoke(service:getServiceDefinition().shutdown)
+		local afterShutdown = service:detachParticipantObserver(reserved.value.handle)
+		assertions.isFalse(afterShutdown.ok)
+		if not afterShutdown.ok then
+			assertions.equal(afterShutdown.error.code, "UNAVAILABLE")
+		end
+	end),
+
 	TestHarness.case("rolls back only a prepared base defeat and clears it during shutdown", function(assertions)
 		local service, _environment = newWaveActiveDefeatService(assertions)
 		local before = successSnapshot(assertions, service)
