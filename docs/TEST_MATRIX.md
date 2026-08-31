@@ -24,13 +24,14 @@ consolidated final review, 467-case local gate, and all four structural builds
   handoff. Phase 11 is complete. Phase 12's `90` dedicated focused cases, exact
   unsaved two-client primary/defeat Studio gate, consolidated review,
   `840`-case/`64`-suite local gate, and all four structural builds pass. Phase 12
-  is complete; exact-final-SHA CI is cited at handoff, and Phase 13 is next but
-  remains unbegun.
+  is complete; exact-final-SHA CI is cited at handoff. Phase 13 implementation,
+  focused checks, and exact desktop/touch/gamepad two-client Studio acceptance
+  pass; its consolidated review and complete exit gate remain in progress.
 
 The current repository has a fixed remote-registry/network-ownership foundation,
 strict shared payload validators, a server-authoritative token-bucket limiter,
 and bounded asynchronous request/correlation/error contracts. Production now
-contains ten Match-only reliable endpoints and six exact client-request rate
+contains thirteen Match-only reliable endpoints and eight exact client-request rate
 policies. It has the Phase 08 lifecycle/roster/Ready system and minimal Ready UI,
 plus the Phase 09 server-owned enemy runtime, fixed-lane simulation, bounded
   replication, and client-created placeholder renderer, plus the Phase 10
@@ -40,9 +41,10 @@ plus the Phase 09 server-owned enemy runtime, fixed-lane simulation, bounded
   Base/Enemy/MatchLifecycle integration. Production content catalogs remain empty,
   so that scheduler is dormant outside authenticated test/Studio fixtures. The
   Phase 12 adds a server-only authenticated TowerRuntime, temporary match-local
-  loadouts, and inert runtime-only graybox Models. The repository still has no
-  tower client, combat, placement, targeting, Battle Cash mutation, results screen, rewards,
-  persistence, matchmaking, teleports, or external-service implementation. A
+  loadouts, and inert runtime-only graybox Models. Phase 13 adds the bounded
+  placement query, preview/input stack, and authoritative atomic transaction.
+  The repository still has no combat, targeting, Battle Cash mutation, results
+  screen, rewards, persistence, matchmaking, teleports, or external-service implementation. A
   separate private test universe has not been created or configured. Later tests
   remain `Deferred`, `Unavailable`, or `Prohibited` when their exact systems or
   environments do not exist; they are never presented as passing evidence.
@@ -578,7 +580,46 @@ linked historical document for the original Studio evidence.
   [Tower Runtime and Temporary Loadout](TOWER_RUNTIME.md). Headless adapters do
   not claim engine Model cloning, PrimaryPart/pivot, replication, visibility,
   or Instance-destruction behavior; M-10 records that exact Studio gate. M-02
-  remains Deferred because placement/combat/transactions do not exist.
+  now records the completed Phase 13 placement-race portion; combat and Phase
+  15 transactions remain deferred.
+
+### H-15 — Phase 13 placement preview, geometry, protocol, and atomic admission
+
+- **System or contract:** shared authored-footprint geometry and surface rules;
+  caller-private placement snapshots/revisions; exact reliable protocol/rate
+  policy; desktop/touch/gamepad input-reducer-view-controller state machines;
+  authoritative validation, reservation, affordability placeholder,
+  TowerRuntime capability/create/rollback integration, races, and cleanup.
+- **Test category:** deterministic headless unit, integration, hostile-input,
+  network, concurrency, re-entry, fault-injection, and cleanup tests.
+- **Current status:** `Passed` on 2026-08-30 for `99` focused cases across the
+  nine dedicated Phase 13 suites. The final complete case/suite and structural
+  counts are recorded after the one complete exit gate.
+- **Environment:** isolated Rojo Test DataModel under Lune. Shared, server, and
+  client placement modules are exact production mirrors; all fixtures/specs are
+  Test-owned, and Test contains no Script or LocalScript.
+- **Command or procedure:** run `lune run tests/run.luau`; while iterating use
+  `--spec` for `PlacementGeometry`, `PlacementProtocol`,
+  `PlacementInputAdapter`, `PlacementPreviewReducer`, `PlacementPreviewView`,
+  `TowerPlacementController`, `TowerPlacementQuery`,
+  `TowerPlacementService`, or `TowerPlacementNetwork`.
+- **Required players/devices/external/destructive risk:** zero; no Roblox
+  service, wall-clock wait, persistence, production content, saved Model,
+  upload, publication, wallet, or external dependency is used.
+- **Expected evidence:** exact graph/numeric bounds; tangency/containment/
+  exclusion/surface/height rules; private five-slot snapshots; bootstrap and
+  revision coalescing; one raycast per frame; gesture-safe touch; bounded
+  gamepad reticle; exact intent only; server-derived identity/definition/map/
+  transform/caps; replay/rate/privacy closure; overlapping and independent
+  races; every reservation/create/rollback fault seam; zero double placeholder
+  commit; and inert late callbacks/work after idempotent cleanup.
+- **Cleanup procedure:** every case closes trackers, callbacks, reservations,
+  placeholder tokens, capabilities, records, models, roots, and test state; the
+  runner removes only its exact generated Test build.
+- **Phase or prerequisite:** Packets 13.1–13.5; authoritative contract is
+  [Tower Placement](TOWER_PLACEMENT.md). Headless evidence does not claim live
+  input, engine raycasts/replication, or device layout; M-02 records those exact
+  Studio scenarios.
 
 ## Local Studio solo tests
 
@@ -860,19 +901,33 @@ linked historical document for the original Studio evidence.
   target/combat correctness, Battle Cash, upgrades, selling, and targeting
   transactions.
 - **Test category:** Studio multi-client correctness and exploit test.
-- **Current status:** `Deferred`; these gameplay systems do not exist.
-- **Environment:** future Match place with two or more Studio clients.
-- **Command or procedure:** none yet; use packet-specific procedures when added.
+- **Current status:** `Partially complete`. Phase 13 placement preview,
+  authoritative admission, overlap/non-overlap races, exploit/spam rejection,
+  replication, cross-input behavior, and cleanup passed exact unsaved
+  two-client Match Studio on 2026-08-30. Phase 14 combat and Phase 15 Battle
+  Cash/upgrade/sell/target-mode transaction races remain `Deferred` and do not
+  exist.
+- **Environment:** exact Match place `136401514513678`, two local Studio
+  clients, plus desktop, iPad Pro M5 13-inch, iPhone 17 Pro, and Xbox One
+  emulation.
+- **Command or procedure:** follow
+  [Executed Phase 13 Studio evidence](TOWER_PLACEMENT.md#executed-studio-evidence--2026-08-30).
 - **Required players or devices:** at least two clients; include concurrent
   placement and transaction attempts.
 - **Authorization requirement:** none for local in-memory Studio tests.
 - **External service or publication requirement:** none for the local Studio
   gate.
 - **Destructive-data risk:** none if Battle Cash and loadouts remain match-local.
-- **Expected evidence:** server rejects invalid/replayed/racing requests,
-  preserves authoritative balances and tower ownership, and produces consistent
-  simulation outcomes.
-- **Cleanup procedure:** stop simulation; no save/publish.
+- **Expected evidence:** placement portion passed: exactly one overlapping
+  success, both independent successes, no double placeholder commit, safe
+  malformed/forged/stale/replay/rate rejection, identical replicated Models,
+  eight constant client connections, natural recovery from two pre-activation
+  query rejections without a Studio refresh, safe-area phone layout, and zero
+  server/client runtime residue. Balance mutation and combat outcomes are not
+  claimed.
+- **Cleanup procedure:** every simulated client/server stopped, Xbox/iPad
+  emulation reset, final Edit probe found no runtime/evidence residue, and no
+  save/publish occurred.
 - **Phase or prerequisite:** Packets 13.5, 14.6, and 15.7 after Phase 06.
 
 ### M-03 — Party, queue, and captain concurrency

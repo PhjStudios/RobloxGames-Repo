@@ -48,7 +48,9 @@ export type Operation =
 	| "getStudioDiagnostics"
 	| "closeFromWave"
 	| "getLoadout"
+	| "getPlacementView"
 	| "resolveOccupiedSlot"
+	| "trustedDiscardCapability"
 	| "trustedCreate"
 	| "get"
 	| "list"
@@ -194,6 +196,35 @@ export type ServiceMetrics = {
 	loadout: unknown?,
 	runtime: unknown?,
 	model: unknown?,
+}
+
+export type PlacementSlotView = {
+	kind: "Empty" | "Occupied",
+	slot: number,
+	towerId: Ids.TowerId?,
+	displayName: string?,
+	iconAssetKey: string?,
+	placementCost: number?,
+	footprintRadiusStuds: number?,
+	placementCap: number?,
+	rangeStuds: number?,
+}
+
+export type PlacementTowerView = {
+	runtimeTowerId: number,
+	ownerUserId: number,
+	towerId: Ids.TowerId,
+	placementCFrame: CFrame,
+	footprintRadiusStuds: number,
+}
+
+export type PlacementView = {
+	matchId: Ids.MatchId,
+	towerEpoch: number,
+	userId: number,
+	loadoutRevision: number,
+	slots: { PlacementSlotView },
+	towers: { PlacementTowerView },
 }
 
 type PreparedConfigurationToken = {}
@@ -1455,6 +1486,33 @@ local function consumeExpectation(data: ServiceData, capability: unknown): Capab
 	return expectation
 end
 
+local function trustedDiscardCapabilityCore(data: ServiceData, capability: unknown): unknown
+	local expectation = consumeExpectation(data, capability)
+	if expectation == nil then
+		return failure("INVALID_CAPABILITY", "trustedDiscardCapability")
+	end
+	local loadout = data.loadout :: LoadoutStoreAdapter
+	local prepared, prepareResult = callResult(loadout.prepareCreationCapability, loadout, capability)
+	if not operationIntact(data) then
+		if prepared and isSuccess(prepareResult) then
+			callResult(loadout.abortPreparedCapability, loadout, (prepareResult :: any).value)
+		end
+		return operationInterruptedFailure(data, "trustedDiscardCapability")
+	end
+	if not prepared or not isSuccess(prepareResult) then
+		return serviceStoreFailure(data, loadout, prepared, prepareResult, "trustedDiscardCapability")
+	end
+	local aborted, abortResult = callResult(loadout.abortPreparedCapability, loadout, (prepareResult :: any).value)
+	if not operationIntact(data) then
+		return operationInterruptedFailure(data, "trustedDiscardCapability")
+	end
+	if not aborted or not resultSucceeded(abortResult, true) then
+		faultRuntime(data)
+		return failure("CAPABILITY_ABORT_FAILED", "trustedDiscardCapability")
+	end
+	return Result.ok(true)
+end
+
 local function impossibleFinalizerFailure(data: ServiceData): Result.Failure<ServiceError>
 	faultRuntime(data)
 	cleanupRuntimeResources(data)
@@ -1598,6 +1656,136 @@ local function configuredStoreRead(data: ServiceData, methodName: string, argume
 		return serviceStoreFailure(data, runtime, called, resultValue, operation)
 	end
 	return resultValue
+end
+
+local function placementViewCore(data: ServiceData, userId: unknown): unknown
+	local loadout = data.loadout :: LoadoutStoreAdapter
+	local runtime = data.runtime :: RuntimeStoreAdapter
+	local configuration = data.configuration :: ConfigTypes.CoreConfiguration
+	local matchId = data.matchId :: Ids.MatchId
+
+	local loadoutCalled, loadoutResult = callResult(loadout.getLoadout, loadout, userId)
+	if not operationIntact(data) then
+		return operationInterruptedFailure(data, "getPlacementView")
+	end
+	if not loadoutCalled or not isSuccess(loadoutResult) then
+		return serviceStoreFailure(data, loadout, loadoutCalled, loadoutResult, "getPlacementView")
+	end
+
+	local listCalled, listResult = callResult(runtime.list, runtime)
+	if not operationIntact(data) then
+		return operationInterruptedFailure(data, "getPlacementView")
+	end
+	if not listCalled or not isSuccess(listResult) then
+		return serviceStoreFailure(data, runtime, listCalled, listResult, "getPlacementView")
+	end
+
+	local snapshot = (loadoutResult :: any).value
+	local runtimeTowers = (listResult :: any).value
+	if
+		type(snapshot) ~= "table"
+		or not table.isfrozen(snapshot :: any)
+		or (snapshot :: any).matchId ~= matchId
+		or (snapshot :: any).userId ~= userId
+		or type((snapshot :: any).revision) ~= "number"
+		or not Validation.isSafeInteger((snapshot :: any).revision)
+		or (snapshot :: any).revision < 1
+		or type((snapshot :: any).slots) ~= "table"
+		or #(snapshot :: any).slots ~= 5
+		or type(runtimeTowers) ~= "table"
+		or not table.isfrozen(runtimeTowers :: any)
+		or #runtimeTowers > 128
+	then
+		faultRuntime(data)
+		return failure("INTERNAL_ERROR", "getPlacementView")
+	end
+
+	local slots: { PlacementSlotView } = table.create(5)
+	for index = 1, 5 do
+		local slot = (snapshot :: any).slots[index]
+		if
+			type(slot) ~= "table"
+			or not table.isfrozen(slot :: any)
+			or (slot :: any).slot ~= index
+			or ((slot :: any).kind ~= "Empty" and (slot :: any).kind ~= "Occupied")
+		then
+			faultRuntime(data)
+			return failure("INTERNAL_ERROR", "getPlacementView")
+		end
+		if (slot :: any).kind == "Empty" then
+			table.insert(
+				slots,
+				table.freeze({
+					kind = "Empty",
+					slot = index,
+				})
+			)
+		else
+			local towerId = (slot :: any).towerId
+			local definition = if type(towerId) == "string" then configuration.towers.byId[towerId] else nil
+			local firstLevel = if definition ~= nil then definition.levels[1] else nil
+			if
+				definition == nil
+				or firstLevel == nil
+				or configuration.towers.byId[definition.id] ~= definition
+				or definition.id ~= towerId
+			then
+				faultRuntime(data)
+				return failure("INTERNAL_ERROR", "getPlacementView")
+			end
+			table.insert(
+				slots,
+				table.freeze({
+					kind = "Occupied",
+					slot = index,
+					towerId = definition.id,
+					displayName = definition.displayName,
+					iconAssetKey = definition.iconAssetKey,
+					placementCost = definition.placementCost,
+					footprintRadiusStuds = definition.footprintRadiusStuds,
+					placementCap = definition.placementCap,
+					rangeStuds = firstLevel.rangeStuds,
+				})
+			)
+		end
+	end
+
+	local towers: { PlacementTowerView } = table.create(#runtimeTowers)
+	for _, tower in runtimeTowers do
+		local towerId = if type(tower) == "table" then (tower :: any).towerId else nil
+		local definition = if type(towerId) == "string" then configuration.towers.byId[towerId] else nil
+		if
+			type(tower) ~= "table"
+			or not table.isfrozen(tower :: any)
+			or definition == nil
+			or configuration.towers.byId[definition.id] ~= definition
+			or type((tower :: any).runtimeTowerId) ~= "number"
+			or type((tower :: any).ownerUserId) ~= "number"
+			or typeof((tower :: any).placementCFrame) ~= "CFrame"
+		then
+			faultRuntime(data)
+			return failure("INTERNAL_ERROR", "getPlacementView")
+		end
+		table.insert(
+			towers,
+			table.freeze({
+				runtimeTowerId = (tower :: any).runtimeTowerId,
+				ownerUserId = (tower :: any).ownerUserId,
+				towerId = definition.id,
+				placementCFrame = (tower :: any).placementCFrame,
+				footprintRadiusStuds = definition.footprintRadiusStuds,
+			})
+		)
+	end
+
+	return Result.ok(table.freeze({
+		matchId = matchId,
+		towerEpoch = TOWER_EPOCH,
+		userId = userId :: number,
+		loadoutRevision = (snapshot :: any).revision,
+		slots = table.freeze(slots),
+		towers = table.freeze(towers),
+	}))
 end
 
 local function removeVisualCore(data: ServiceData, runtimeTowerId: unknown): unknown
@@ -2119,6 +2307,18 @@ function ServiceMethods.getLoadout(self: Service, userId: unknown): unknown
 	return response
 end
 
+function ServiceMethods.getPlacementView(self: Service, userId: unknown): unknown
+	local data = requireData(self)
+	local operation: Operation = "getPlacementView"
+	local operationError = beginConfiguredOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	local resultValue = placementViewCore(data, userId)
+	finishOperation(data)
+	return resultValue
+end
+
 function ServiceMethods.resolveOccupiedSlot(self: Service, userId: unknown, slot: unknown): unknown
 	local data = requireData(self)
 	local operation: Operation = "resolveOccupiedSlot"
@@ -2127,6 +2327,18 @@ function ServiceMethods.resolveOccupiedSlot(self: Service, userId: unknown, slot
 		return Result.err(operationError)
 	end
 	local resultValue = issueCapabilityCore(data, userId, slot)
+	finishOperation(data)
+	return resultValue
+end
+
+function ServiceMethods.trustedDiscardCapability(self: Service, capability: unknown): unknown
+	local data = requireData(self)
+	local operation: Operation = "trustedDiscardCapability"
+	local operationError = beginConfiguredOperation(data, operation)
+	if operationError ~= nil then
+		return Result.err(operationError)
+	end
+	local resultValue = trustedDiscardCapabilityCore(data, capability)
 	finishOperation(data)
 	return resultValue
 end

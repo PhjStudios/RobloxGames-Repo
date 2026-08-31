@@ -8,18 +8,22 @@ this document defines the evidence and approval record that a concrete endpoint
 must have before it can enter `ProductionRemotes.luau`; every C2S endpoint must
 also enter `ProductionRateLimits.luau`, while an S2C endpoint must not.
 
-- Recorded: 2026-08-26 during Packet 06.5; current catalog reconciled during
-  Phase 09 on 2026-08-27
+- Recorded: 2026-08-26 during Packet 06.5; current catalog reconciled through
+  Phase 13 on 2026-08-30
 - Applies to: every production `RemoteEvent` definition and every server or
   client binding that uses it
-- Current production endpoint records: `GetMatchSnapshot`, `SubmitReady`,
-  `MatchSnapshot`, `GetEnemySnapshot`, and `EnemyReplication`; all are reliable
-  Match-only definitions
-- Current production rate-policy list: exactly `GetEnemySnapshot` `2 / 0.25`,
-  `GetMatchSnapshot` `2 / 1`, and `SubmitReady` `2 / 0.5`; outbound events have
-  no inbound policy
-- Phase 06 and Phase 07 authorized no feature endpoint. Phase 08 owns the three
-  Match-ready records; Phase 09 owns only the two enemy records.
+- Current production catalog: thirteen reliable Match-only definitions—the
+  eight C2S requests `GetBaseSnapshot`, `GetEnemySnapshot`, `GetMatchSnapshot`,
+  `GetTowerPlacementQuery`, `GetWaveSnapshot`, `SubmitReady`,
+  `SubmitSkipVote`, and `SubmitTowerPlacement`, plus five S2C replication/
+  revision events
+- Current production rate-policy list: `2/0.25` for base/enemy/wave Gets,
+  `2/1` for Match Get, `4/1` for placement Get, `2/0.5` for Ready/skip, and
+  `3/0.5` for placement submit; outbound events have no inbound policy
+- Phase 06 and Phase 07 authorized no feature endpoint. Phase 08 owns three
+  Match-ready records, Phase 09 owns two enemy records, Phase 10 owns two base
+  records, Phase 11 owns three Wave records, and Phase 13 owns three placement
+  records. Phase 12 added none.
 
 No checklist item is satisfied merely because the shared foundation implements
 it in general. The endpoint owner must prove the behavior for that endpoint's
@@ -411,6 +415,9 @@ transition.
 | `MatchSnapshot` | S2C Event, no response | `MatchProtocol.MatchSnapshotSchema`; no inbound policy | server derives current participants and snapshot; `SnapshotBroadcaster`/`MatchLifecycle` owns bounded emission and cleanup | Phase 08 approved in `MATCH_LIFECYCLE_READY.md` |
 | `GetEnemySnapshot` | C2S Request, required response | `EnemyProtocol.GetEnemySnapshotPayloadSchema` exact empty record; capacity `2`, refill `0.25/s` | actual live sender only; `NetworkRegistry` dispatcher to `EnemySimulation`; origin-only receipt plus recipient-specific bounded snapshot event stream | Phase 09 approved; executable, security, Studio, consolidated-review, complete-local, and structural evidence passes in `ENEMY_SIMULATION.md`; exact-SHA CI is cited at handoff |
 | `EnemyReplication` | S2C Event, no response | `EnemyProtocol.EnemyReplicationSchema`; no inbound policy | server derives sorted recipients and every enemy field; `EnemyReplicationPublisher` owns cadence, sequences, queues, fan-out, and cleanup | Phase 09 approved under the same authoritative record as `GetEnemySnapshot` |
+| `GetTowerPlacementQuery` | C2S Request, required response | exact empty `PlacementProtocol.GetQueryPayloadSchema`; capacity `4`, refill `1/s` | actual Active sender only; server derives caller loadout, map regions, footprints, caps, and affordability; origin-only bounded snapshot | Phase 13 implemented and exact Studio acceptance passed; final completion evidence is in `TOWER_PLACEMENT.md` |
+| `SubmitTowerPlacement` | C2S Request, required response | exact bounded `PlacementProtocol.SubmitPlacementPayloadSchema`; capacity `3`, refill `0.5/s` | actual sender plus server Match/loadout/definition/map/geometry/cap/affordability/reservation/capability authority; origin-only receipt | Phase 13 implemented with replay, spam, race, malformed, forged, stale, and rollback coverage |
+| `TowerPlacementRevision` | S2C Event, no response | exact MatchId/revision schema; no inbound policy | authoritative `PreWave`/`WaveActive` lifecycle delivery publishes the current revision to the same recipient, and each committed placement publishes the advanced revision; event is refresh advice and never placement authority | Phase 13 implemented with natural bootstrap recovery, coalescing, and cleanup coverage |
 
 The Phase 08 record defines the exact Ready payloads, response/public errors,
 rate rationale, authorization, coalescing, recipient limits, client behavior,
@@ -423,8 +430,8 @@ server-only mutation, sequence/epoch rules, snapshot/delta convergence,
 recipient-specific sends, publication budgets, client recovery, adversarial
 tests, unsaved two-client stress evidence, and cleanup in
 [Enemy Simulation and Replication](ENEMY_SIMULATION.md#production-network-contract).
-The exact registry source is `src/shared/network/ProductionRemotes.luau`; the
-three C2S bindings are frozen in
-`src/server/common/networking/ProductionRateLimits.luau`. The final Phase 09
+The exact registry source is `src/shared/network/ProductionRemotes.luau`; all
+eight current C2S policies are frozen in
+`src/server/common/networking/ProductionRateLimits.luau`. The final Phase 13
 review and exact-SHA CI references are intentionally cited at handoff rather
 than added through a self-referential evidence commit.

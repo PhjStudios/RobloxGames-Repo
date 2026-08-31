@@ -14,6 +14,12 @@ return TestHarness.suite("map tag and attribute contract", {
 		assertions.equal(MapContract.Tags.MapRoot, "ATD_MapRoot_v1")
 		assertions.equal(MapContract.Attributes.MapId, "ATD_MapId")
 		assertions.equal(MapContract.Attributes.NodeOrder, "ATD_NodeOrder")
+		assertions.equal(MapContract.Attributes.SurfaceCategory, "ATD_SurfaceCategory")
+		assertions.isTrue(MapContract.isSurfaceCategory("Land"))
+		assertions.isTrue(MapContract.isSurfaceCategory("Elevated"))
+		assertions.isTrue(MapContract.isSurfaceCategory("Water"))
+		assertions.isFalse(MapContract.isSurfaceCategory("land"))
+		assertions.isFalse(MapContract.isSurfaceCategory(nil))
 
 		local roles = {}
 		for _, definition in MapContract.listDefinitions() do
@@ -59,8 +65,10 @@ return TestHarness.suite("map tag and attribute contract", {
 	TestHarness.case("defines exact attribute types and numeric bounds", function(assertions)
 		local root = MapContract.getDefinition("MapRoot")
 		local node = MapContract.getDefinition("PathNode")
+		local placement = MapContract.getDefinition("PlacementZone")
 		assertions.isNotNil(root)
 		assertions.isNotNil(node)
+		assertions.isNotNil(placement)
 		assertions.equal((root :: any).attributes[1].kind, "MapId")
 		assertions.equal((root :: any).attributes[2].minimum, 1)
 		assertions.equal((root :: any).attributes[2].maximum, 1)
@@ -69,6 +77,8 @@ return TestHarness.suite("map tag and attribute contract", {
 		assertions.equal((node :: any).attributes[2].minimum, 1)
 		assertions.equal((node :: any).attributes[2].maximum, 256)
 		assertions.isTrue((node :: any).attributes[2].integer)
+		assertions.equal((placement :: any).attributes[2].kind, "SurfaceCategory")
+		assertions.isTrue((placement :: any).attributes[2].optional)
 	end),
 
 	TestHarness.case("formats only canonical map and marker names", function(assertions)

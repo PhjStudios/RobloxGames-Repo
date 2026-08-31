@@ -46,6 +46,7 @@ MapFixtures.Attributes = table.freeze({
 	LaneId = "ATD_LaneId",
 	NodeOrder = "ATD_NodeOrder",
 	ZoneId = "ATD_ZoneId",
+	SurfaceCategory = "ATD_SurfaceCategory",
 	AnchorId = "ATD_AnchorId",
 	SpawnId = "ATD_SpawnId",
 })
@@ -168,6 +169,7 @@ function MapFixtures.createValidMap(): Fixture
 		Vector3.new(90, 2, 70)
 	) :: Part
 	placementZone:SetAttribute(MapFixtures.Attributes.ZoneId, "land")
+	placementZone:SetAttribute(MapFixtures.Attributes.SurfaceCategory, "Land")
 
 	local noPlacementZone = newTaggedPart(
 		"Part",
@@ -260,7 +262,13 @@ function MapFixtures.addEnemySpawn(fixture: Fixture, laneId: string, position: V
 	return spawn
 end
 
-function MapFixtures.addPlacementZone(fixture: Fixture, zoneId: string, cframe: CFrame, size: Vector3): Part
+function MapFixtures.addPlacementZone(
+	fixture: Fixture,
+	zoneId: string,
+	cframe: CFrame,
+	size: Vector3,
+	surfaceCategory: string?
+): Part
 	assertHelperCapacity(fixture.placementZones)
 	local zone = newTaggedPart(
 		"Part",
@@ -271,6 +279,7 @@ function MapFixtures.addPlacementZone(fixture: Fixture, zoneId: string, cframe: 
 		size
 	) :: Part
 	zone:SetAttribute(MapFixtures.Attributes.ZoneId, zoneId)
+	zone:SetAttribute(MapFixtures.Attributes.SurfaceCategory, surfaceCategory or "Land")
 	return zone
 end
 

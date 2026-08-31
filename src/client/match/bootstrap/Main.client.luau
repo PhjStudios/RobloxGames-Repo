@@ -7,6 +7,7 @@ local ClientBootstrap = require(script.Parent.ClientBootstrap)
 local MatchReadyController = require(script.Parent.Parent.Parent.match.MatchReadyController)
 local BaseController = require(script.Parent.Parent.Parent.match.base.BaseController)
 local EnemyController = require(script.Parent.Parent.Parent.match.enemies.EnemyController)
+local TowerPlacementController = require(script.Parent.Parent.Parent.match.placement.TowerPlacementController)
 local WaveController = require(script.Parent.Parent.Parent.match.waves.WaveController)
 
 local MATCH_ROLE = "Match" :: PlaceRoles.PlaceRole
@@ -35,6 +36,12 @@ local handle = ClientBootstrap.run(MATCH_ROLE, function(configuration)
 		error("[ATD_MATCH_CLIENT_BOOTSTRAP][code=WAVE_CONTROLLER_CREATION_FAILED]", 0)
 	end
 	configuration.lifecycleRunner:register(waveControllerResult.value:getServiceDefinition())
+
+	local towerPlacementControllerResult = TowerPlacementController.new(configuration.log)
+	if not towerPlacementControllerResult.ok then
+		error("[ATD_MATCH_CLIENT_BOOTSTRAP][code=TOWER_PLACEMENT_CONTROLLER_CREATION_FAILED]", 0)
+	end
+	configuration.lifecycleRunner:register(towerPlacementControllerResult.value:getServiceDefinition())
 end)
 
 if handle ~= nil then

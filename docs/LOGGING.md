@@ -530,4 +530,20 @@ Both accepted Phase 12 two-client scenarios recorded zero console errors.
 Clients recorded no warnings; the server recorded only the expected bounded
 early `GetBaseSnapshot` `UNAVAILABLE` bootstrap/network aggregate. No Tower
 payload, identity, capability, model, or caught error appeared in the console.
-Phase 13 logging remains unbegun.
+
+## Phase 13 placement logging boundary (current)
+
+Placement reuses the existing dispatcher/network aggregate logger. It adds no
+per-query, per-preview, per-frame, per-raycast, per-player, per-position,
+per-reservation, per-capability, per-charge-placeholder, per-race, or per-tower
+log stream. Public receipts contain only bounded domain reasons or the accepted
+RuntimeTowerId/transform/revision; aggregate warnings retain endpoint and
+static code/count/window fields without payload, MatchId, UserId, slot,
+position, transform, definition, or another player's state.
+
+Lifecycle-owned Studio diagnostics return only bounded counters/state to the
+invoking local harness and are absent outside Studio. Accepted desktop/tablet/
+Xbox sessions recorded no client errors or warnings and no server errors; the
+server showed only the expected bounded early `GetBaseSnapshot` `UNAVAILABLE`
+network aggregate. The exploit/spam run produced only bounded aggregate
+protocol/rate warnings, never raw hostile payloads or cross-player data.

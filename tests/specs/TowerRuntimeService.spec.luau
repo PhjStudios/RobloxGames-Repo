@@ -879,6 +879,15 @@ return TestHarness.suite("TowerRuntimeService", {
 		assertions.equal(matchState.refreshCount, 1)
 		assertions.equal(matchState.activateCount, 1)
 		assertions.equal(service:getMetrics().participantRevision, 1)
+		local discardedCapability = success(assertions, service:resolveOccupiedSlot(101, 1))
+		assertions.isTrue(success(assertions, service:trustedDiscardCapability(discardedCapability)))
+		assertions.equal(service:getMetrics().capabilityExpectationCount, 0)
+		expectError(
+			assertions,
+			service:trustedCreate(discardedCapability, CFrame.new()),
+			"INVALID_CAPABILITY",
+			"trustedCreate"
+		)
 
 		local firstLoadout = success(assertions, service:getLoadout(101))
 		assertions.equal(firstLoadout.userId, 101)
@@ -897,6 +906,22 @@ return TestHarness.suite("TowerRuntimeService", {
 		assertions.equal(queried.towerId, created.towerId)
 		assertions.equal(queried.placementCFrame, created.placementCFrame)
 		assertions.equal(#success(assertions, service:list()), 1)
+		local placementView = success(assertions, service:getPlacementView(101))
+		assertions.equal(placementView.matchId, MATCH_ID)
+		assertions.equal(placementView.towerEpoch, 1)
+		assertions.equal(placementView.userId, 101)
+		assertions.equal(placementView.loadoutRevision, firstLoadout.revision)
+		assertions.equal(#placementView.slots, 5)
+		assertions.equal(placementView.slots[1].towerId, fixture.single.id)
+		assertions.equal(placementView.slots[1].footprintRadiusStuds, fixture.single.footprintRadiusStuds)
+		assertions.equal(placementView.slots[1].rangeStuds, fixture.single.levels[1].rangeStuds)
+		assertions.isNil((placementView.slots[1] :: any).unitId)
+		assertions.isNil((placementView.slots[1] :: any).modelAssetKey)
+		assertions.equal(#placementView.towers, 1)
+		assertions.equal(placementView.towers[1].runtimeTowerId, created.runtimeTowerId)
+		assertions.equal(placementView.towers[1].placementCFrame, created.placementCFrame)
+		assertions.equal(placementView.towers[1].footprintRadiusStuds, fixture.single.footprintRadiusStuds)
+		assertions.isTrue(isDeepFrozen(placementView))
 		assertions.isTrue(success(assertions, service:removeVisual(created.runtimeTowerId)))
 		local recreated = success(assertions, service:recreateVisual(created.runtimeTowerId))
 		assertions.isTrue(recreated.recreated)
@@ -904,6 +929,7 @@ return TestHarness.suite("TowerRuntimeService", {
 			success(assertions, service:trustedRemove(created.runtimeTowerId)).runtimeTowerId,
 			created.runtimeTowerId
 		)
+		assertions.equal(#success(assertions, service:getPlacementView(101)).towers, 0)
 		expectError(assertions, service:trustedCreate(capability, CFrame.new()), "INVALID_CAPABILITY", "trustedCreate")
 
 		assertions.isTrue(success(assertions, boundary:dispatchStudioEvidence("TowerCreateNext")).accepted)

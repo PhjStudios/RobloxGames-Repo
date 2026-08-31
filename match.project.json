@@ -71,6 +71,11 @@
             "$ignoreUnknownInstances": true
           },
 
+          "placement": {
+            "$path": "src/server/match/placement",
+            "$ignoreUnknownInstances": true
+          },
+
           "lifecycle": {
             "$path": "src/server/match/lifecycle",
             "$ignoreUnknownInstances": true
@@ -145,6 +150,11 @@
 
             "enemies": {
               "$path": "src/client/match/enemies",
+              "$ignoreUnknownInstances": true
+            },
+
+            "placement": {
+              "$path": "src/client/match/placement",
               "$ignoreUnknownInstances": true
             },
 

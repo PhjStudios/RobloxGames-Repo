@@ -23,6 +23,7 @@ export type RegionSnapshot = {
 	id: string,
 	cframe: CFrame,
 	size: Vector3,
+	surfaceCategory: MapContract.SurfaceCategory?,
 }
 
 export type NamedPointSnapshot = {
@@ -790,6 +791,9 @@ local function validateAttributeValue(
 	local value = node.attributeValues[attribute.name]
 	local attributePath = pathWith(path, attribute.name)
 	if value == nil then
+		if attribute.optional then
+			return nil
+		end
 		addIssue("MISSING_FIELD", attributePath, "Required map attribute is missing")
 		return nil
 	end
@@ -825,6 +829,12 @@ local function validateAttributeValue(
 			return nil
 		end
 		return symbolic
+	elseif attribute.kind == "SurfaceCategory" then
+		if not MapContract.isSurfaceCategory(value) then
+			addIssue("INVALID_ENUM", attributePath, "Placement surface category is not recognized")
+			return nil
+		end
+		return value :: MapContract.SurfaceCategory
 	end
 
 	local numeric = value :: number
@@ -1296,6 +1306,13 @@ local function validateRegions(
 	for _, member in canonicalMembers(folder, role, path) do
 		local values, shellValid = validateMemberShell(member, role, expectedMapId)
 		local id = values[MapContract.Attributes.ZoneId]
+		local surfaceCategory: MapContract.SurfaceCategory? = nil
+		if role == "PlacementZone" then
+			local authoredSurface = values[MapContract.Attributes.SurfaceCategory]
+			surfaceCategory = if type(authoredSurface) == "string"
+				then authoredSurface :: MapContract.SurfaceCategory
+				else "Land"
+		end
 		local expectedName = MapContract.formatMemberName(role, id, nil)
 		local nameValid = validateExactName(member.node, expectedName, member.path)
 		local cframe: CFrame? = nil
@@ -1309,6 +1326,7 @@ local function validateRegions(
 					id = id,
 					cframe = cframe,
 					size = size,
+					surfaceCategory = surfaceCategory,
 				}),
 				path = member.path,
 			})

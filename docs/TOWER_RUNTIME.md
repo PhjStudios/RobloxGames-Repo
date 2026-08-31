@@ -11,7 +11,8 @@ executable work; its material corrections are incorporated here. Executable
 source, focused coverage, consolidated independent review, the exact unsaved
 Match Studio gate, the `840`-case/`64`-suite complete local gate, and all four
 structural builds pass. Phase 12 is complete; exact-final-SHA CI is recorded at
-handoff, and Phase 13 is next but remains entirely unbegun.
+handoff. Phase 13 now consumes only the narrow placement seams recorded below;
+the Phase 12 authority and model contracts remain unchanged.
 
 Phase 12 creates trusted server contracts and inert presentation only. It does
 not implement placement queries, previews, rotation input, collision or zone
@@ -813,3 +814,19 @@ Studio sessions above pass with zero errors and residue. The final local gate
 passes formatting, lint, all `840` tests across `64` suites, all four exact
 structural builds, diff/scope/exclusion checks, and an inspected Rojo build with
 the generated artifact removed. Exact-final-SHA CI is recorded at handoff.
+
+## Phase 13 placement integration
+
+`TowerPlacement` reads one detached caller-private `getPlacementView`, resolves
+only the authenticated occupied slot through `resolveOccupiedSlot`, and then
+uses the pre-existing single-use capability with `trustedCreate`. A failure
+after creation can call the new trusted rollback seam `trustedRemove`; an
+unconsumed capability is closed through `trustedDiscardCapability`. None of
+these methods accepts a client-selected owner, TowerId, UnitId, definition,
+cost, model, RuntimeTowerId, target mode, or CFrame.
+
+Placement views expose only the five caller slots, canonical preview metadata,
+current owned counts, and detached active footprint records. Runtime truth,
+models, caps, capability authentication, monotonic IDs, and cleanup remain
+server-owned. Phase 13 adds no attack, targeting, cooldown, upgrade, sell,
+Battle Cash, persistence, or production tower content behavior.

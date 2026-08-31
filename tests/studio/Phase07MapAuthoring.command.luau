@@ -61,6 +61,7 @@ local Attributes = table.freeze({
 	LaneId = "ATD_LaneId",
 	NodeOrder = "ATD_NodeOrder",
 	ZoneId = "ATD_ZoneId",
+	SurfaceCategory = "ATD_SurfaceCategory",
 	AnchorId = "ATD_AnchorId",
 	SpawnId = "ATD_SpawnId",
 })
@@ -291,7 +292,7 @@ local EXPECTED_MANIFEST: { ManifestRecord } = table.freeze({
 		`{MARKERS_PATH}.PlacementZones.PlacementZone_land`,
 		"Part",
 		oneTag(Tags.PlacementZone),
-		frozenDictionary({ [Attributes.ZoneId] = "land" }),
+		frozenDictionary({ [Attributes.ZoneId] = "land", [Attributes.SurfaceCategory] = "Land" }),
 		REGION_PROPERTIES(PLACEMENT_CFRAME, PLACEMENT_SIZE)
 	),
 	manifestRecord(`{MARKERS_PATH}.NoPlacementZones`, "Folder"),
@@ -685,6 +686,7 @@ local function buildDetachedCandidate(): (Folder, Model)
 	local placementZone =
 		newMarkerPart("PlacementZone_land", Tags.PlacementZone, placementZones, PLACEMENT_CFRAME, PLACEMENT_SIZE)
 	placementZone:SetAttribute(Attributes.ZoneId, "land")
+	placementZone:SetAttribute(Attributes.SurfaceCategory, "Land")
 	local noPlacementZone = newMarkerPart(
 		"NoPlacementZone_lane",
 		Tags.NoPlacementZone,

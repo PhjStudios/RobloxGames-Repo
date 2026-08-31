@@ -40,6 +40,7 @@ local Attributes = table.freeze({
 	LaneId = "ATD_LaneId",
 	NodeOrder = "ATD_NodeOrder",
 	ZoneId = "ATD_ZoneId",
+	SurfaceCategory = "ATD_SurfaceCategory",
 	AnchorId = "ATD_AnchorId",
 	SpawnId = "ATD_SpawnId",
 })
@@ -164,6 +165,7 @@ local function createTemplate(): (Model, Part, Part)
 		Vector3.new(90, 2, 70)
 	)
 	placement:SetAttribute(Attributes.ZoneId, "land")
+	placement:SetAttribute(Attributes.SurfaceCategory, "Land")
 
 	local noPlacement = newTaggedPart(
 		"Part",

@@ -17,7 +17,8 @@ export type Role =
 	| "PlayerSpawn"
 
 export type AttributeValueType = "string" | "number"
-export type AttributeKind = "MapId" | "SymbolicKey" | "ContractVersion" | "NodeOrder"
+export type AttributeKind = "MapId" | "SymbolicKey" | "ContractVersion" | "NodeOrder" | "SurfaceCategory"
+export type SurfaceCategory = "Land" | "Elevated" | "Water"
 
 export type AttributeDefinition = {
 	name: string,
@@ -26,6 +27,7 @@ export type AttributeDefinition = {
 	minimum: number?,
 	maximum: number?,
 	integer: boolean,
+	optional: boolean,
 }
 
 export type MarkerDefinition = {
@@ -59,6 +61,7 @@ local Attributes = table.freeze({
 	LaneId = "ATD_LaneId",
 	NodeOrder = "ATD_NodeOrder",
 	ZoneId = "ATD_ZoneId",
+	SurfaceCategory = "ATD_SurfaceCategory",
 	AnchorId = "ATD_AnchorId",
 	SpawnId = "ATD_SpawnId",
 })
@@ -134,13 +137,20 @@ local GrayboxGeometryClasses = table.freeze({
 	Part = true,
 })
 
+local SurfaceCategories: { [SurfaceCategory]: boolean } = table.freeze({
+	Land = true,
+	Elevated = true,
+	Water = true,
+})
+
 local function attribute(
 	name: string,
 	valueType: AttributeValueType,
 	kind: AttributeKind,
 	minimum: number?,
 	maximum: number?,
-	integer: boolean
+	integer: boolean,
+	optional: boolean?
 ): AttributeDefinition
 	return table.freeze({
 		name = name,
@@ -149,6 +159,7 @@ local function attribute(
 		minimum = minimum,
 		maximum = maximum,
 		integer = integer,
+		optional = optional == true,
 	})
 end
 
@@ -203,7 +214,10 @@ local definitions: { MarkerDefinition } = table.freeze({
 		tag = Tags.PlacementZone,
 		className = "Part",
 		parentName = Names.PlacementZones,
-		attributes = frozenAttributes({ attribute(Attributes.ZoneId, "string", "SymbolicKey", nil, nil, false) }),
+		attributes = frozenAttributes({
+			attribute(Attributes.ZoneId, "string", "SymbolicKey", nil, nil, false),
+			attribute(Attributes.SurfaceCategory, "string", "SurfaceCategory", nil, nil, false, true),
+		}),
 	}),
 	table.freeze({
 		role = "NoPlacementZone",
@@ -255,7 +269,12 @@ local MapContract = {
 	Limits = Limits,
 	GeometryClasses = GeometryClasses,
 	GrayboxGeometryClasses = GrayboxGeometryClasses,
+	SurfaceCategories = SurfaceCategories,
 }
+
+function MapContract.isSurfaceCategory(value: unknown): boolean
+	return type(value) == "string" and SurfaceCategories[value :: SurfaceCategory] == true
+end
 
 function MapContract.listDefinitions(): { MarkerDefinition }
 	return definitions

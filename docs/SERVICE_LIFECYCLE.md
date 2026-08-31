@@ -27,7 +27,9 @@ validation. Phase 08 added the Match-only `MatchLifecycle` server service and
 `EnemyController`; Phase 10 added `BaseRuntime` and `BaseController` between
 those Match owners. Phase 11 adds `WaveRuntime` after EnemySimulation and
 `WaveController` after EnemyController. Phase 12 adds the server-only
-`TowerRuntime` after WaveRuntime and no client controller. Phase 08 and its Studio, consolidated-review, and
+`TowerRuntime` after WaveRuntime and no client controller at that checkpoint.
+Phase 13 adds `TowerPlacement` after TowerRuntime and
+`TowerPlacementController` after WaveController. Phase 08 and its Studio, consolidated-review, and
 complete-local-gate evidence passed on 2026-08-27. Phase 09 code, exact Match
 Studio gate, consolidated review, 467-case local gate, and all four structural
 builds passed on 2026-08-27. Phase 09 is complete. Phase 10 focused and exact
@@ -38,7 +40,7 @@ is cited at handoff. Phase 11's exact Studio, consolidated-review,
 Phase 12 focused and exact unsaved Studio lifecycle/cleanup checks,
 consolidated review, `840`-case/`64`-suite local gate, and all four structural
 builds pass. Phase 12 is complete; exact-final-SHA CI is recorded at handoff,
-and Phase 13 is next but remains unbegun.
+and the current Phase 13 composition is recorded below.
 
 ## Public contract
 
@@ -545,3 +547,28 @@ placement-cap, and active-cap rejection pass through only while exact bounded
 child metrics prove both Stores remain healthy. Focused injected
 throw/yield/fatal-child and rollback-failure coverage proves no repeated
 capability can be issued after such a fault.
+
+## Phase 13 placement composition
+
+Server registration is now `MatchLifecycle -> BaseRuntime -> EnemySimulation ->
+WaveRuntime -> TowerRuntime -> TowerPlacement`. Reverse shutdown therefore
+closes placement admission, its reservation/affordability state, revision
+publication, and Studio trigger before TowerRuntime revokes capabilities or
+destroys records/models. `TowerPlacement` depends explicitly on
+`NetworkRegistry`, `MatchLifecycle`, `WaveRuntime`, and `TowerRuntime`; it owns
+no timer, loop, Heartbeat, Player, or Instance model.
+
+The Match bootstrap decorates the existing MatchLifecycle snapshot sender with
+the current `TowerPlacement` query revision. Only after one canonical
+`PreWave`/`WaveActive` Match snapshot is accepted for its authenticated
+recipient does the same composition send that recipient the bounded revision
+event. This lifecycle publication lets an early rejected placement query
+recover without a timer, retry loop, client authority, or Studio evidence hook.
+
+Client registration appends `TowerPlacementController` after `WaveController`.
+The controller owns exactly eight constant connections, one query and one
+submit tracker at most, one reducer/input/view stack, and—only in Studio—one
+bounded evidence trigger. Reverse shutdown cancels trackers, destroys the
+trigger, disconnects all eight callbacks, and destroys local preview UI/world
+parts. Captured response, revision, render, input, and trigger callbacks are
+inert after shutdown.

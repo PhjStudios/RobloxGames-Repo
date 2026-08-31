@@ -14,10 +14,11 @@
 - Transport decision: fixed, reliable, asynchronous `RemoteEvent` endpoints
 - Phase 06 checkpoint endpoints: none; that completed checkpoint used an empty
   authenticated registry
-- Current Phase 12 endpoints (unchanged from Phase 11): `GetMatchSnapshot`, `SubmitReady`,
+- Current Phase 13 endpoints: `GetMatchSnapshot`, `SubmitReady`,
   `MatchSnapshot`, `GetEnemySnapshot`, `EnemyReplication`, `GetBaseSnapshot`,
   `BaseReplication`, `GetWaveSnapshot`, `SubmitSkipVote`, and
-  `WaveReplication`, all Match-only reliable `RemoteEvent` contracts
+  `WaveReplication`, plus `GetTowerPlacementQuery`, `SubmitTowerPlacement`, and
+  `TowerPlacementRevision`, all Match-only reliable `RemoteEvent` contracts
 - `RemoteFunction`: prohibited unless a later recorded concrete need changes the
   decision
 - Generic remote bus, client-selected action, service, handler, or path: prohibited
@@ -40,8 +41,8 @@ review, `593`-case local gate, and all four structural builds passed on
   2026-08-28. Exact-final-SHA CI is cited at handoff. Phase 11 is complete.
   Phase 12's trusted Tower seam is server-only and adds no endpoint or rate
   policy; its exact Studio, consolidated-review, `840`-case/`64`-suite local,
-  and four-build checks pass. Phase 12 is complete; Phase 13 is next but remains
-  unbegun.
+  and four-build checks pass. Phase 12 is complete; the current Phase 13
+  placement extension is recorded below.
 
 ## Official Roblox behavior that shapes the design
 
@@ -1109,8 +1110,8 @@ client cannot submit a TowerId, UnitId, RuntimeTowerId, CFrame, owner, slot,
 level, target mode, investment, cooldown, Model, or capability. Temporary
 loadouts are server-only snapshots; occupied-slot capabilities are opaque
 weak-key-authenticated server objects; trusted transforms come only from tests
-or the fixed Studio evidence boundary. Phase 13 must record and review any
-future placement query/request contract before it can alter this catalog.
+or the fixed Studio evidence boundary. Phase 13 preserves those rules through
+the narrow placement contract below.
 
 The Phase 12 structural and exact Studio checks both confirm the unchanged
 network: ten reliable Match-only endpoint definitions, six client-request rate
@@ -1118,3 +1119,30 @@ policies, one `ATDNetwork/v1` root, sixteen resulting reliable RemoteEvent
 instances, zero RemoteFunctions, zero UnreliableRemoteEvents, and no name or
 source token for a tower mutation endpoint. Tower visual replication is normal
 server-owned Instance replication, not a gameplay protocol or client authority.
+
+## Phase 13 placement network boundary
+
+Phase 13 adds exactly three reliable Match-only definitions:
+`GetTowerPlacementQuery` and `SubmitTowerPlacement` are correlated C2S requests
+with required origin-only responses, while `TowerPlacementRevision` is an S2C
+event containing only MatchId and query revision. The two inbound policies are
+respectively capacity/refill `4/1s` and `3/0.5s`. The resulting catalog is 13
+endpoint definitions and eight inbound policies; no RemoteFunction,
+UnreliableRemoteEvent, generic bus, client-selected recipient, or second
+network root is introduced.
+
+The existing authenticated MatchLifecycle sender emits the current placement
+revision to the same recipient after each canonical `PreWave` or `WaveActive`
+Match snapshot. That is the production initial-recovery source when a client's
+startup query reached the server during `ReadyCheck`; committed placements then
+broadcast the advanced revision. Neither path trusts a client revision, and the
+Studio-only refresh trigger is not part of production recovery.
+
+The query payload is exactly empty. The submit payload contains only MatchId,
+observed query revision, temporary loadout revision, slot `1..5`, bounded
+finite `Vector2` XZ, and bounded finite yaw. It cannot express owner, TowerId,
+UnitId, RuntimeTowerId, Y/pitch/roll/CFrame, definition/model/cost/cap, target
+mode, capability, or recipient. The dispatcher performs exact graph/schema,
+rate, sender-context, replay/correlation, and privacy checks before the server
+recomputes every placement rule. Full wire contracts and receipts are in
+`docs/TOWER_PLACEMENT.md`.

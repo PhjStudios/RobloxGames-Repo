@@ -528,6 +528,32 @@ Roblox environment.
   edited, no lasting Script.Source change was made in Studio, and nothing was
   saved, published, uploaded, or tested in Lobby.
 
+### Phase 13 placement and cross-input gate
+
+- The exact target was reconfirmed as Studio display name
+  `fishytiger7's Place: 08252026_1`, PlaceId `136401514513678`, GameId
+  `10757629094`, Group CreatorId `35420107`, owner `PHJGAMES`, and Match role.
+  MCP Studio session IDs are transient connection handles, not place identity;
+  the current parent handle differed from the earlier prompt while every stable
+  identifier and mapped Match source agreed. The separately open place at
+  PlaceId `100561454756026` was never synchronized, edited, or tested.
+- Only reviewed Rojo-managed source and runtime-only UI, preview parts, tower
+  Models, runtime roots, and evidence BindableFunctions changed. Fresh
+  two-client desktop, iPad Pro M5 13-inch touch, and Xbox One sessions exercised
+  valid/blocked/unaffordable/capped feedback, rotation/cancel/confirm, touch
+  gesture non-confirmation, deterministic gamepad reticle movement, race and
+  exploit rejection, replication, Wave/Base/Enemy coexistence, and cleanup.
+- The final gamepad session used MatchId
+  `match:af96c9ce-1900-47ea-b2bc-1bc82456fece`; RuntimeTowerId `1` was placed
+  for simulated UserId `-2` at `(12.0139, 0, 38.3514)` with `15°` yaw and
+  replicated as one 28-instance runtime tree to both clients. Cleanup returned
+  zero RuntimeTowers, UnitIds, loadouts, capabilities, models, templates,
+  observers, boundaries, and connections.
+- The final Edit/default-viewport probe counted eight persistent Workspace
+  descendants and found no runtime map, tower root, client preview, wave
+  evidence, placement evidence, or client evidence object. Every simulated
+  server/client stopped; no Studio content was saved or published.
+
 ### Needed before Phase 26 teleport testing
 
 - With explicit approval, publish the private test Lobby and Match places.

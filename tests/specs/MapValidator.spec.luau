@@ -117,8 +117,10 @@ return TestHarness.suite("deterministic server map validator", {
 			assertions.equal(snapshot.lanes[1].nodes[2].position, MapFixtures.Positions.Node2)
 			assertions.equal(#snapshot.placementZones, 1)
 			assertions.equal(snapshot.placementZones[1].id, "land")
+			assertions.equal(snapshot.placementZones[1].surfaceCategory, "Land")
 			assertions.equal(#snapshot.noPlacementZones, 1)
 			assertions.equal(snapshot.noPlacementZones[1].id, "lane")
+			assertions.isNil(snapshot.noPlacementZones[1].surfaceCategory)
 			assertions.equal(snapshot.cameraAnchors[1].id, "overview")
 			assertions.equal(snapshot.playerSpawns[1].id, "primary")
 
@@ -134,6 +136,41 @@ return TestHarness.suite("deterministic server map validator", {
 			assertions.equal(snapshot.lanes[1].nodes[2].position, MapFixtures.Positions.Node2)
 		end
 	),
+
+	TestHarness.case("normalizes legacy placement surfaces and preserves each bounded category", function(assertions)
+		MapFixtures.withValidMap(function(fixture)
+			fixture.placementZone:SetAttribute(MapFixtures.Attributes.SurfaceCategory, nil)
+			local elevated = MapFixtures.addPlacementZone(
+				fixture,
+				"elevated",
+				CFrame.new(50, -3, 30),
+				Vector3.new(4, 2, 4),
+				"Elevated"
+			)
+			local water =
+				MapFixtures.addPlacementZone(fixture, "water", CFrame.new(-50, -3, -30), Vector3.new(4, 2, 4), "Water")
+			local result = MapValidator.validate(fixture.root, MapFixtures.MAP_ID) :: any
+			assertions.isTrue(result.ok)
+			if result.ok then
+				assertions.equal(result.value.placementZones[1].id, "elevated")
+				assertions.equal(result.value.placementZones[1].surfaceCategory, "Elevated")
+				assertions.equal(result.value.placementZones[2].id, "land")
+				assertions.equal(result.value.placementZones[2].surfaceCategory, "Land")
+				assertions.equal(result.value.placementZones[3].id, "water")
+				assertions.equal(result.value.placementZones[3].surfaceCategory, "Water")
+			end
+			assertions.equal(elevated:GetAttribute(MapFixtures.Attributes.SurfaceCategory), "Elevated")
+			assertions.equal(water:GetAttribute(MapFixtures.Attributes.SurfaceCategory), "Water")
+		end)
+
+		rejectedAfter(assertions, function(fixture)
+			fixture.placementZone:SetAttribute(MapFixtures.Attributes.SurfaceCategory, "Lava")
+		end, "INVALID_ENUM", "ATD_SurfaceCategory")
+
+		rejectedAfter(assertions, function(fixture)
+			fixture.placementZone:SetAttribute(MapFixtures.Attributes.SurfaceCategory, 1)
+		end, "INVALID_TYPE", "ATD_SurfaceCategory")
+	end),
 
 	TestHarness.case(
 		"scopes discovery to the selected root and ignores unrelated parent siblings",

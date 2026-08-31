@@ -1,10 +1,12 @@
 --!strict
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
 local EnemyProtocol = require(ReplicatedStorage.Shared.match.EnemyProtocol)
 local BaseProtocol = require(ReplicatedStorage.Shared.match.BaseProtocol)
 local MatchProtocol = require(ReplicatedStorage.Shared.match.MatchProtocol)
+local PlacementProtocol = require(ReplicatedStorage.Shared.match.PlacementProtocol)
 local WaveProtocol = require(ReplicatedStorage.Shared.match.WaveProtocol)
 local PlaceRoles = require(ReplicatedStorage.Shared.config.PlaceRoles)
 local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
@@ -13,6 +15,7 @@ local ServerRequestDispatcher = require(script.Parent.Parent.networking.ServerRe
 local BaseRuntimeService = require(script.Parent.Parent.Parent.match.base.BaseRuntimeService)
 local EnemySimulationService = require(script.Parent.Parent.Parent.match.enemies.EnemySimulationService)
 local MatchLifecycleService = require(script.Parent.Parent.Parent.match.lifecycle.MatchLifecycleService)
+local TowerPlacementService = require(script.Parent.Parent.Parent.match.placement.TowerPlacementService)
 local WaveRuntimeService = require(script.Parent.Parent.Parent.match.waves.WaveRuntimeService)
 local TowerRuntimeService = require(script.Parent.Parent.Parent.match.towers.TowerRuntimeService)
 
@@ -41,6 +44,14 @@ local function authorizeContext(context: ServerRequestDispatcher.ServerContext):
 	return ServerRequestDispatcher.isContext(context)
 end
 
+local function authorizeLivePlacementContext(context: ServerRequestDispatcher.ServerContext): boolean
+	if not ServerRequestDispatcher.isContext(context) then
+		return false
+	end
+	local player = context.player
+	return player.Parent == Players and Players:GetPlayerByUserId(player.UserId) == player
+end
+
 local function rejectEnemySnapshot(code: unknown): ServerRequestDispatcher.HandlerOutcome
 	if code == "INVALID_RECIPIENT" then
 		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.NOT_AUTHORIZED)
@@ -52,6 +63,15 @@ end
 
 local function rejectBaseSnapshot(code: unknown): ServerRequestDispatcher.HandlerOutcome
 	if code == "INTERNAL_ERROR" then
+		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.INTERNAL_ERROR)
+	end
+	return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+end
+
+local function rejectPlacementQuery(code: unknown): ServerRequestDispatcher.HandlerOutcome
+	if code == "NOT_ELIGIBLE" or code == "INVALID_ARGUMENT" then
+		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.NOT_AUTHORIZED)
+	elseif code == "INTERNAL_ERROR" then
 		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.INTERNAL_ERROR)
 	end
 	return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
@@ -71,7 +91,19 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		network:registerServerEvent(BaseProtocol.BASE_REPLICATION_ENDPOINT, BaseProtocol.BaseReplicationSchema)
 	local sendWaveReplication =
 		network:registerServerEvent(WaveProtocol.WAVE_REPLICATION_ENDPOINT, WaveProtocol.WaveSnapshotSchema)
-	local matchLifecycle = MatchLifecycleService.new(configuration.log, sendSnapshot)
+	local sendPlacementRevision =
+		network:registerServerEvent(PlacementProtocol.REVISION_ENDPOINT, PlacementProtocol.RevisionEventSchema)
+	local queryRevisionProvider: () -> unknown = function(): unknown
+		return nil
+	end
+	local sendLifecycleSnapshot = TowerPlacementService.createRevisionAwareSnapshotSender(
+		sendSnapshot,
+		sendPlacementRevision,
+		function(): unknown
+			return queryRevisionProvider()
+		end
+	)
+	local matchLifecycle = MatchLifecycleService.new(configuration.log, sendLifecycleSnapshot)
 	local baseRuntime =
 		BaseRuntimeService.new(matchLifecycle, configuration.coreConfiguration.difficulties, sendBaseReplication)
 	local enemySimulation = EnemySimulationService.new(
@@ -89,6 +121,19 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		sendWaveReplication
 	)
 	local towerRuntime = TowerRuntimeService.new(matchLifecycle, waveRuntime, configuration.coreConfiguration)
+	local towerPlacement = TowerPlacementService.new(matchLifecycle, towerRuntime, function(matchId, queryRevision)
+		local payload = table.freeze({ matchId = matchId, queryRevision = queryRevision })
+		local sent = true
+		for _, player in Players:GetPlayers() do
+			if not sendPlacementRevision(player, payload) then
+				sent = false
+			end
+		end
+		return sent
+	end)
+	queryRevisionProvider = function(): unknown
+		return towerPlacement:getMetrics().queryRevision
+	end
 
 	network:registerRequest(
 		MatchProtocol.GET_MATCH_SNAPSHOT_ENDPOINT,
@@ -172,9 +217,43 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			return rejectCode(voteResult.error.code)
 		end
 	)
+	network:registerRequest(
+		PlacementProtocol.GET_QUERY_ENDPOINT,
+		PlacementProtocol.GetQueryPayloadSchema,
+		PlacementProtocol.QuerySnapshotSchema,
+		authorizeLivePlacementContext,
+		function(context, _payload)
+			if not authorizeLivePlacementContext(context) then
+				return ServerRequestDispatcher.reject(PUBLIC_ERRORS.NOT_AUTHORIZED)
+			end
+			local queryResult = towerPlacement:getQuery(context.player.UserId)
+			if queryResult.ok then
+				return ServerRequestDispatcher.success(queryResult.value)
+			end
+			return rejectPlacementQuery(queryResult.error.code)
+		end
+	)
+	network:registerRequest(
+		PlacementProtocol.SUBMIT_PLACEMENT_ENDPOINT,
+		PlacementProtocol.SubmitPlacementPayloadSchema,
+		PlacementProtocol.PlacementReceiptSchema,
+		authorizeLivePlacementContext,
+		function(context, payload)
+			if not authorizeLivePlacementContext(context) then
+				return ServerRequestDispatcher.reject(PUBLIC_ERRORS.NOT_AUTHORIZED)
+			end
+			local placementResult =
+				towerPlacement:submitPlacement(context.player.UserId, payload :: PlacementProtocol.PlacementIntent)
+			if placementResult.ok then
+				return ServerRequestDispatcher.success(placementResult.value)
+			end
+			return rejectPlacementQuery(placementResult.error.code)
+		end
+	)
 	configuration.lifecycleRunner:register(matchLifecycle:getServiceDefinition())
 	configuration.lifecycleRunner:register(baseRuntime:getServiceDefinition())
 	configuration.lifecycleRunner:register(enemySimulation:getServiceDefinition())
 	configuration.lifecycleRunner:register(waveRuntime:getServiceDefinition())
 	configuration.lifecycleRunner:register(towerRuntime:getServiceDefinition())
+	configuration.lifecycleRunner:register(towerPlacement:getServiceDefinition())
 end)

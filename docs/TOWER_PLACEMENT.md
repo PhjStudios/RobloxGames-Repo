@@ -24,11 +24,24 @@ The client-safe contract version is `1`. A query revision starts at `1` after
 all dependencies are available and increases once after each committed
 placement. A `TowerPlacementRevision` event contains only the current MatchId
 and revision and tells clients to coalesce one refresh. It is not placement
-authority. Future revisions and revisions more than four commits behind are
+authority. A valid first revision observed before any snapshot is an explicit
+bootstrap signal: the reducer marks refresh required and the controller issues
+one authenticated query. Later advanced revisions received while that query is
+pending set one queued refresh, so an early rejected query cannot strand the
+client and a burst cannot create unbounded requests. Future revisions and
+revisions more than four commits behind are
 rejected; a lag of at most four is admitted so up to four clients can submit
 non-overlapping intents from the same snapshot. Every such intent is still
 recomputed against current committed and reserved footprints. MatchId and
 loadout revision must always match exactly.
+
+The Match composition wraps its existing authenticated lifecycle snapshot
+sender. After a canonical `PreWave` or `WaveActive` snapshot is delivered to one
+recipient, the wrapper delivers the current placement revision to that same
+recipient through the registered reliable event. `Loading` and `ReadyCheck`
+snapshots do not emit a placement revision. This production lifecycle transition
+is the source of initial recovery; the Studio-only `Refresh` evidence operation
+is diagnostic and is neither required nor called by the production path.
 
 `GetTowerPlacementQuery` has an exact empty payload. Its detached, deeply
 frozen result contains only:
@@ -36,8 +49,8 @@ frozen result contains only:
 - contract version, MatchId, MapId, query revision, and the caller's temporary
   loadout revision;
 - MapBounds;
-- at most 32 placement zones with CFrame, Size, and surface category;
-- at most 32 exclusion boxes;
+- at most 24 placement zones with CFrame, Size, and surface category;
+- at most 24 exclusion boxes;
 - at most 128 existing footprints encoded as `Vector3(centerX, radius, centerZ)`;
 - exactly five caller-owned slot records; and
 - for occupied slots only the tower ID, bounded display/icon metadata, level-1
@@ -146,6 +159,10 @@ unaffordable, and capped states use text/icon/shape feedback as well as color.
 - Phone and tablet use a completed single-touch tap only to position. A
   separate on-screen Confirm action is the sole touch confirmation. Drag,
   pinch, multi-touch, camera gestures, and UI navigation never dispatch it.
+- The bottom panel respects Roblox GUI insets, keeps 12-pixel horizontal margins,
+  caps at 700 pixels, and scales every horizontal child proportionally. Its
+  five slot targets remain at least 44 pixels wide at the supported 375-pixel
+  phone viewport, while the tablet and desktop layouts retain the capped width.
 - Gamepad owns a bounded deterministic virtual reticle moved by the thumbstick,
   explicit confirm/cancel/rotate, slot cycling, and selectable focus.
 - Preferred-device changes update hints only; they do not recreate bindings,
@@ -206,8 +223,8 @@ boundary with its own reviewed atomic Battle Cash transaction.
 The service depends on NetworkRegistry, MatchLifecycle, WaveRuntime, and
 TowerRuntime and shuts down before TowerRuntime. It retains no per-player task,
 timer, loop, Heartbeat, Player, model, preview, or canonical client table.
-Technical ceilings are four active participants, five slots, 32 query zones,
-32 exclusions, 128 committed footprints, 32 active towers per owner, four
+Technical ceilings are four active participants, five slots, 24 query zones,
+24 exclusions, 128 committed footprints, 32 active towers per owner, four
 accepted stale-revision distance, one operation/reservation per synchronous
 admission, and bounded linear validation work over those collections.
 
@@ -217,6 +234,102 @@ placeholder tokens, clears revisions/caches/metrics, disconnects publication
 ownership through the normal network lifecycle, and rejects late work. Client
 cleanup additionally leaves no hotbar, hint, confirmation UI, ghost, range
 indicator, binding, connection, pending request, cache, or preview folder.
+
+Two lifecycle-owned evidence triggers exist only when `RunService:IsStudio()`:
+the server trigger can publish one current revision or return bounded placement
+metrics, while the client trigger accepts only diagnostics and the exact
+gamepad operations `CycleNext`, `CyclePrevious`, `Axis`, `Rotate`, `Confirm`,
+and `Cancel`. Axis components are finite and limited to `[-1, 1]`; extra fields
+and every other operation fail closed. The triggers expose no production
+remote, authority, arbitrary callback, or source mutation. Server and client
+shutdown detach and destroy them before clearing owned placement state.
+
+## Executed Studio evidence — 2026-08-30
+
+All scenarios used the exact unsaved Match place named
+`fishytiger7's Place: 08252026_1`: PlaceId `136401514513678`, GameId
+`10757629094`, Group CreatorId `35420107`. The separately open place at
+PlaceId `100561454756026` was untouched. Studio/MCP connection IDs are
+transient; the stable place, universe, creator, role, and byte-identical Rojo
+source determined the target.
+
+- Desktop/exploit session MatchId
+  `match:bf10b8c2-3e1a-4c26-a788-e1a9a862e926` activated the Primary fixture
+  in `0.0040514s`; the bounded Studio evidence operation then explicitly
+  refreshed query revision `1` in `0.0001231s`. Actual hotbar, pointer, `R`,
+  `Q`, and click input proved valid, exclusion-blocked, unaffordable, capped,
+  `15°` rotation, cancel, and placement presentation. This session proves the
+  interaction scenarios; the final-source run below separately proves that
+  production bootstrap recovery does not depend on that Studio operation.
+- The same-position race at `(-20, 35)` used request IDs
+  `p13e-race-n2-0001` and `p13e-race-n1-0001`: RuntimeTowerId `2` committed in
+  `0.0507238s`, while the peer received `Occupied` at revision `3` in
+  `0.0495762s`. Independent simultaneous requests both committed, followed by
+  a fifth valid tower. Both clients converged on five models/126 descendants;
+  prepare/commit were exactly `5/5`, abort/outstanding/reservations were zero,
+  and publication was `6/0` success/failure.
+- Stale, future-revision, capped, unaffordable, outside-bounds, partial-zone,
+  exclusion, wrong-Match, and empty-slot domain attempts rejected safely.
+  Extra-key, NaN, infinity, oversized, and pitch/roll payloads failed exact
+  validation; duplicate `p13e-replay-n1-0001` returned `STALE_REQUEST`. Each
+  client's eight-request burst produced exactly three domain receipts and five
+  `RATE_LIMITED` responses. After the late post-cleanup request, accepted/
+  rejected placement counts were `5/18`; query counts were `15/2` accepted/
+  rejected before cleanup.
+- iPad Pro M5 (13-inch), `1375x1032`, LandscapeLeft proved a camera drag did
+  not position or submit; a separate tap positioned, Rotate reached `15°`,
+  Cancel cleared, and a new tap plus the visible Confirm button placed one
+  Support tower at `(44.9873, 0, 40.0126)`. Both clients replicated one model,
+  with prepare/commit `1/1` and zero rejection/reservation/outstanding state.
+- Xbox One, `1919x1079`, showed the gamepad hint and centered bottom layout
+  without clipping. The bounded Studio-only input evidence path exercised the
+  same controller actions used by Gamepad1: slot cycling, axis-driven reticle
+  movement from `(1, 1)` to a valid `(877, 552)`, explicit `15°` rotate,
+  cancel with no placement, reselection, confirm, and successful placement.
+  MatchId `match:af96c9ce-1900-47ea-b2bc-1bc82456fece` assigned
+  RuntimeTowerId `1` at `(12.0139, 0, 38.3514)`; both clients replicated one
+  28-instance tower tree. Each controller retained eight connections and one
+  Studio trigger; server prepare/commit were `1/1`, with zero abort,
+  reservation, rejection, or publication failure.
+- Final-source natural-bootstrap MatchId
+  `match:e6120c59-0ade-4498-91cf-7ae4f927eabb` used two iPhone 17 Pro
+  LandscapeLeft clients. Before activation, the server recorded zero accepted
+  and two rejected placement queries at revision `1`. The authoritative
+  `PreWave` lifecycle publication delivered one placement-revision event to
+  each client without invoking `Refresh`; both clients issued exactly one
+  bounded retry and populated their loadouts. Final counts were two accepted/
+  two rejected queries, two requests and one revision event per client,
+  `studioRefreshCount=0`, and zero placement-publication failures. The runtime
+  ScreenGui reported `CoreUISafeInsets`, clipping enabled,
+  `SafeAreaCompatibility.None`, a `750x303` safe canvas, a centered `700x154`
+  panel at `(25, 131)`, and `90x90` slots; no control or text crossed the
+  Dynamic Island or bottom safe boundary.
+- Explicit Tower cleanup returned all-zero runtime/loadout/model/capability/
+  observer/connection residue in `0.0015286s` for the desktop session and
+  `0.0006657s` for Xbox; the final natural-bootstrap recheck also returned all
+  eleven residue counts as zero. The desktop late request rejected
+  `Unavailable`. Accepted sessions had no console errors; clients had no
+  warnings, and the server emitted only bounded expected bootstrap/protocol
+  aggregates. All clients/servers stopped, emulation reset through
+  `StopSimulationAsync()` to device `default` and `LandscapeLeft`, and the
+  final Edit probe found eight persistent Workspace descendants with no
+  runtime map, tower root, preview, or evidence trigger. Nothing was saved or
+  published.
+
+## Consolidated review — 2026-08-30
+
+The single bounded independent reviewer found no Phase 14 scope expansion and
+identified four completion gaps. The production client could remain stranded
+after its pre-activation query, the structural TowerRuntime allowlist omitted
+`getPlacementView`, the reducer's revision-apply type omitted `Bootstrap`, and
+the map document confused the 24-record query ceiling with the 64-record
+authoring ceiling. The fixes add lifecycle-authenticated initial revision
+delivery, authenticate the thirteenth TowerRuntime method in every structural
+build, complete the reducer type, and state both map bounds accurately. The
+same closure pass also added a bounded responsive phone layout and explicit
+safe-area properties. Focused controller, view, reducer, placement-service,
+and structural-source checks pass after the fixes; the complete exit gate is
+recorded only after it runs.
 
 ## Verification and exclusions
 

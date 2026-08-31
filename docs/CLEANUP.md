@@ -43,7 +43,7 @@ is cited at handoff. Phase 11's exact Studio cleanup, consolidated review,
 is complete. Phase 12's focused and exact unsaved primary/defeat cleanup gates,
 consolidated review, `840`-case/`64`-suite local gate, and all four structural
 builds pass. Phase 12 is complete; exact-final-SHA CI is recorded at handoff,
-and Phase 13 is next but remains unbegun.
+and the current Phase 13 placement ownership extension is recorded below.
 
 ## Public contract
 
@@ -543,3 +543,23 @@ Fatal child Store or rollback failure is now adopted at the Tower coordinator:
 admission closes, service capability expectations clear, both Stores fault, and
 later work is unavailable. Cleanup remains the sole owner of any prepared
 child residue; no failure reopens allocation.
+
+## Phase 13 placement ownership and release order
+
+Placement cleanup first closes query/submit/Studio-evidence admission and
+invalidates the operation guard. It aborts every outstanding placeholder token,
+revokes every private footprint reservation, discards any unconsumed Tower
+capability, clears query revision/cache state, and destroys the server Studio
+trigger. It then becomes unavailable before TowerRuntime cleanup begins. A
+post-create failure removes the exact just-created RuntimeTower/model before
+returning; rollback failure faults closed and leaves ordinary lifecycle cleanup
+as the final owner.
+
+Client cleanup cancels both correlation trackers, clears queued revision work,
+zeros the gamepad axis, destroys the Studio-only input trigger, disconnects all
+eight callbacks, cleans reducer/input/view state, and removes the temporary
+hotbar, hints, touch controls, reticle, ghost, range indicator, and preview
+folder. The final exact Studio probe returned to Edit/default viewport with
+eight persistent Workspace descendants and no runtime map, tower root, preview,
+wave trigger, placement trigger, or client evidence residue. No save or publish
+occurred.

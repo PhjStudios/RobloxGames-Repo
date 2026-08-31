@@ -28,16 +28,24 @@ opaque single-use creation capabilities, and an exact version-1 inert graybox
 model contract. The deterministic focused suites, exact unsaved two-client
 Match Studio primary/defeat/cleanup scenarios, consolidated independent review,
 `840`-case/`64`-suite local gate, and all four structural builds pass. The exact
-final-SHA CI result is reported at handoff; Phase 13 is next and remains
-entirely unbegun.
+final-SHA CI result for that checkpoint is reported at its handoff.
 
-Production networking contains ten Match-only reliable endpoints and six
+Phase 13 Packets 13.1–13.5 are implemented and their exact unsaved two-client
+Match Studio acceptance passes across desktop, iPad touch, iPhone safe-area,
+and Xbox gamepad emulation. They add a bounded caller-private placement query,
+shared authored-footprint geometry, advisory local preview/input state
+machines, and one atomic server-authoritative placement transaction with
+replay/rate/race closure. The single consolidated review is complete and every
+material finding is resolved; the complete exit gate is the remaining
+branch-local completion step. Phase 14 remains unbegun.
+
+Production networking contains thirteen Match-only reliable endpoints and eight
 client-request rate policies. `Enemies`, `Assets`, `Towers`, `Maps`, `Difficulties`,
 `Waves`, and difficulty-specific `Economy` rules remain empty production
 catalogs, so the Wave runtime is production-dormant until authenticated content
 exists. Healthy finite completion deliberately leaves MatchLifecycle in
-`WaveActive`; victory, rewards, Results UI, economy balances, placement,
-targeting, combat, and tower transactions remain unbegun.
+`WaveActive`; victory, rewards, Results UI, Battle Cash balances, targeting,
+combat, upgrades, and selling remain unbegun.
 
 - [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
@@ -62,6 +70,7 @@ targeting, combat, and tower transactions remain unbegun.
 - [Phase 10 defender-base runtime, replication, defeat, and Studio evidence](docs/BASE_RUNTIME.md)
 - [Phase 11 authored-wave runtime, difficulty scheduler, replication, and Studio evidence](docs/WAVE_RUNTIME.md)
 - [Phase 12 tower runtime, temporary loadout, model contract, and Studio evidence](docs/TOWER_RUNTIME.md)
+- [Phase 13 placement preview, server validation, races, and Studio evidence](docs/TOWER_PLACEMENT.md)
 - [Economy, banner, and default-settings schemas](docs/ECONOMY_BANNER_SETTINGS_SCHEMAS.md)
 - [Whole-configuration validation and bootstrap gate](docs/CONFIGURATION_VALIDATION.md)
 - [Phase 04 exit-gate audit](docs/PHASE_04_EXIT_AUDIT.md)

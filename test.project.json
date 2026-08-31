@@ -41,6 +41,10 @@
           "$path": "src/client/match/enemies"
         },
 
+        "ProductionClientPlacement": {
+          "$path": "src/client/match/placement"
+        },
+
         "ProductionClientBase": {
           "$path": "src/client/match/base"
         },
@@ -67,6 +71,10 @@
 
         "ProductionServerMaps": {
           "$path": "src/server/match/maps"
+        },
+
+        "ProductionServerPlacement": {
+          "$path": "src/server/match/placement"
         },
 
         "ProductionServerBase": {

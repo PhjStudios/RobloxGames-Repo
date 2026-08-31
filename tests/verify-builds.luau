@@ -151,6 +151,16 @@ local EXPECTED_PRODUCTION_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/shared/match/MatchProtocol.luau",
 	},
 	{
+		dataModelPath = "ReplicatedStorage.Shared.match.PlacementGeometry",
+		className = "ModuleScript",
+		sourcePath = "src/shared/match/PlacementGeometry.luau",
+	},
+	{
+		dataModelPath = "ReplicatedStorage.Shared.match.PlacementProtocol",
+		className = "ModuleScript",
+		sourcePath = "src/shared/match/PlacementProtocol.luau",
+	},
+	{
 		dataModelPath = "ReplicatedStorage.Shared.match.BaseProtocol",
 		className = "ModuleScript",
 		sourcePath = "src/shared/match/BaseProtocol.luau",
@@ -379,6 +389,18 @@ local EXPECTED_MATCH_TOWER_SERVER_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "src/server/match/towers/TowerRuntimeStore.luau",
 	},
 })
+local EXPECTED_MATCH_PLACEMENT_SERVER_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "ServerScriptService.Server.match.placement.PlacementAffordability",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/placement/PlacementAffordability.luau",
+	},
+	{
+		dataModelPath = "ServerScriptService.Server.match.placement.TowerPlacementService",
+		className = "ModuleScript",
+		sourcePath = "src/server/match/placement/TowerPlacementService.luau",
+	},
+})
 local EXPECTED_TOWER_NAMED_SOURCE_PATHS: { [string]: boolean } = table.freeze({
 	["src/server/match/towers/TemporaryLoadoutStore.luau"] = true,
 	["src/server/match/towers/TowerGrayboxFactory.luau"] = true,
@@ -386,6 +408,8 @@ local EXPECTED_TOWER_NAMED_SOURCE_PATHS: { [string]: boolean } = table.freeze({
 	["src/server/match/towers/TowerModelOwner.luau"] = true,
 	["src/server/match/towers/TowerRuntimeService.luau"] = true,
 	["src/server/match/towers/TowerRuntimeStore.luau"] = true,
+	["src/server/match/placement/TowerPlacementService.luau"] = true,
+	["src/client/match/placement/TowerPlacementController.luau"] = true,
 	["src/shared/config/Towers.luau"] = true,
 	["src/shared/config/TowerSchema.luau"] = true,
 })
@@ -394,19 +418,24 @@ local EXPECTED_TOWER_RUNTIME_SERVICE_METHODS: { [string]: boolean } = table.free
 	getLifecycleState = true,
 	getLoadout = true,
 	getMetrics = true,
+	getPlacementView = true,
 	getServiceDefinition = true,
 	list = true,
 	recreateVisual = true,
 	removeVisual = true,
 	resolveOccupiedSlot = true,
+	trustedDiscardCapability = true,
 	trustedCreate = true,
 	trustedRemove = true,
 })
-local FORBIDDEN_PHASE13_SOURCE_PATH_TOKENS: { string } = table.freeze({
-	"hotbar",
-	"placement",
-	"preview",
-	"query",
+local FORBIDDEN_PHASE14_SOURCE_PATH_TOKENS: { string } = table.freeze({
+	"attack",
+	"combat",
+	"cooldown",
+	"damage",
+	"sell",
+	"targeting",
+	"upgrade",
 })
 local EXPECTED_PRODUCTION_REMOTE_NAMES: { [string]: boolean } = table.freeze({
 	BaseReplication = true,
@@ -414,22 +443,27 @@ local EXPECTED_PRODUCTION_REMOTE_NAMES: { [string]: boolean } = table.freeze({
 	GetBaseSnapshot = true,
 	GetEnemySnapshot = true,
 	GetMatchSnapshot = true,
+	GetTowerPlacementQuery = true,
 	GetWaveSnapshot = true,
 	MatchSnapshot = true,
 	SubmitReady = true,
 	SubmitSkipVote = true,
+	SubmitTowerPlacement = true,
+	TowerPlacementRevision = true,
 	WaveReplication = true,
 })
 local EXPECTED_PRODUCTION_RATE_POLICY_ENDPOINTS: { [string]: boolean } = table.freeze({
 	GetBaseSnapshot = true,
 	GetEnemySnapshot = true,
 	GetMatchSnapshot = true,
+	GetTowerPlacementQuery = true,
 	GetWaveSnapshot = true,
 	SubmitReady = true,
 	SubmitSkipVote = true,
+	SubmitTowerPlacement = true,
 })
-local EXPECTED_PRODUCTION_REMOTE_COUNT = 10
-local EXPECTED_PRODUCTION_RATE_POLICY_COUNT = 6
+local EXPECTED_PRODUCTION_REMOTE_COUNT = 13
+local EXPECTED_PRODUCTION_RATE_POLICY_COUNT = 8
 local GENERATED_ROBLOX_OUTPUT_EXTENSIONS: { [string]: boolean } = table.freeze({
 	[".rbxl"] = true,
 	[".rbxlx"] = true,
@@ -538,6 +572,28 @@ local EXPECTED_MATCH_WAVE_CLIENT_SOURCES: { SourceDefinition } = table.freeze({
 		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.waves.WaveStateReducer",
 		className = "ModuleScript",
 		sourcePath = "src/client/match/waves/WaveStateReducer.luau",
+	},
+})
+local EXPECTED_MATCH_PLACEMENT_CLIENT_SOURCES: { SourceDefinition } = table.freeze({
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.placement.PlacementInputAdapter",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/placement/PlacementInputAdapter.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.placement.PlacementPreviewReducer",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/placement/PlacementPreviewReducer.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.placement.PlacementPreviewView",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/placement/PlacementPreviewView.luau",
+	},
+	{
+		dataModelPath = "StarterPlayer.StarterPlayerScripts.Client.match.placement.TowerPlacementController",
+		className = "ModuleScript",
+		sourcePath = "src/client/match/placement/TowerPlacementController.luau",
 	},
 })
 local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
@@ -787,6 +843,31 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		sourcePath = "tests/specs/ParticipantRoster.spec.luau",
 	},
 	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.PlacementGeometry.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/PlacementGeometry.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.PlacementInputAdapter.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/PlacementInputAdapter.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.PlacementPreviewReducer.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/PlacementPreviewReducer.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.PlacementPreviewView.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/PlacementPreviewView.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.PlacementProtocol.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/PlacementProtocol.spec.luau",
+	},
+	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.RemoteRegistry.spec",
 		className = "ModuleScript",
 		sourcePath = "tests/specs/RemoteRegistry.spec.luau",
@@ -845,6 +926,26 @@ local EXPECTED_TEST_OWNED_SOURCES: { SourceDefinition } = table.freeze({
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerModelOwner.spec",
 		className = "ModuleScript",
 		sourcePath = "tests/specs/TowerModelOwner.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerPlacementController.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/TowerPlacementController.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerPlacementNetwork.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/TowerPlacementNetwork.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerPlacementQuery.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/TowerPlacementQuery.spec.luau",
+	},
+	{
+		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerPlacementService.spec",
+		className = "ModuleScript",
+		sourcePath = "tests/specs/TowerPlacementService.spec.luau",
 	},
 	{
 		dataModelPath = "ServerStorage.AutomatedTests.Specs.TowerRuntimeIntegration.spec",
@@ -1157,7 +1258,6 @@ local function verifyProductionNetworkBoundary(): boolean
 		or countPlainOccurrences(remotesSource, 'transport = "ReliableRemoteEvent"') ~= EXPECTED_PRODUCTION_REMOTE_COUNT
 		or countPlainOccurrences(remotesSource, "placeRoles =") ~= EXPECTED_PRODUCTION_REMOTE_COUNT
 		or countPlainOccurrences(remotesSource, 'placeRoles = { "Match" }') ~= EXPECTED_PRODUCTION_REMOTE_COUNT
-		or string.find(string.lower(remotesSource), "tower", 1, true) ~= nil
 	then
 		return false
 	end
@@ -1172,7 +1272,7 @@ local function verifyProductionNetworkBoundary(): boolean
 		"endpoint",
 		EXPECTED_PRODUCTION_RATE_POLICY_ENDPOINTS,
 		EXPECTED_PRODUCTION_RATE_POLICY_COUNT
-	) and string.find(string.lower(ratesSource), "tower", 1, true) == nil
+	)
 end
 
 local function verifyTowerRuntimeServicePublicMethods(): boolean
@@ -1191,7 +1291,7 @@ local function verifyTowerRuntimeServicePublicMethods(): boolean
 		methodCount += 1
 	end
 	if
-		methodCount ~= 11
+		methodCount ~= 13
 		or string.find(source, "function ServiceMethods:", 1, true) ~= nil
 		or string.find(source, "ServiceMethods[", 1, true) ~= nil
 		or countPlainOccurrences(source, "ServiceMethods.__index = ServiceMethods") ~= 1
@@ -1211,7 +1311,7 @@ local function verifyTowerRuntimeServicePublicMethods(): boolean
 	return true
 end
 
-local function verifyPhase12SourcePathBoundary(): boolean
+local function verifyPhase13SourcePathBoundary(): boolean
 	local collected, sourceFiles = collectFilesRecursively("src")
 	if not collected then
 		return false
@@ -1227,7 +1327,7 @@ local function verifyPhase12SourcePathBoundary(): boolean
 				end
 				foundTowerPaths[normalizedPath] = true
 			end
-			for _, forbiddenToken in FORBIDDEN_PHASE13_SOURCE_PATH_TOKENS do
+			for _, forbiddenToken in FORBIDDEN_PHASE14_SOURCE_PATH_TOKENS do
 				if string.find(loweredPath, forbiddenToken, 1, true) ~= nil then
 					return false
 				end
@@ -1242,7 +1342,7 @@ local function verifyPhase12SourcePathBoundary(): boolean
 	return verifyTowerRuntimeServicePublicMethods()
 end
 
-local function verifyPhase12Scope(): boolean
+local function verifyPhase13Scope(): boolean
 	local exactEmptyConfigs = {
 		{
 			path = "src/shared/config/Enemies.luau",
@@ -1374,7 +1474,7 @@ local function verifyPhase12Scope(): boolean
 			return false
 		end
 	end
-	if not verifyProductionNetworkBoundary() or not verifyPhase12SourcePathBoundary() then
+	if not verifyProductionNetworkBoundary() or not verifyPhase13SourcePathBoundary() then
 		return false
 	end
 
@@ -1558,6 +1658,9 @@ local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): {
 		for _, source in EXPECTED_MATCH_TOWER_SERVER_SOURCES do
 			table.insert(expected, source)
 		end
+		for _, source in EXPECTED_MATCH_PLACEMENT_SERVER_SOURCES do
+			table.insert(expected, source)
+		end
 		for _, source in EXPECTED_MATCH_LIFECYCLE_SOURCES do
 			table.insert(expected, source)
 		end
@@ -1577,6 +1680,9 @@ local function expectedProductionSources(role: "Default" | "Lobby" | "Match"): {
 			table.insert(expected, source)
 		end
 		for _, source in EXPECTED_MATCH_WAVE_CLIENT_SOURCES do
+			table.insert(expected, source)
+		end
+		for _, source in EXPECTED_MATCH_PLACEMENT_CLIENT_SOURCES do
 			table.insert(expected, source)
 		end
 	end
@@ -1887,7 +1993,7 @@ end
 local function verifyProduction(dataModel: DataModel, definition: BuildDefinition): boolean
 	currentStage = `verify_counts_{definition.name}`
 	local modules, scripts, localScripts = countClasses(dataModel)
-	local expectedModules = if definition.role == "Lobby" then 46 else 83
+	local expectedModules = if definition.role == "Lobby" then 48 else 89
 	if modules ~= expectedModules or scripts ~= 1 or localScripts ~= 1 then
 		emit("FAIL", definition.name, `PRODUCTION_CLASS_COUNTS_{modules}_{scripts}_{localScripts}`)
 		return false
@@ -1913,7 +2019,7 @@ end
 
 local function verifyTest(dataModel: DataModel, definition: BuildDefinition): boolean
 	local modules, scripts, localScripts = countClasses(dataModel)
-	if modules ~= 159 then
+	if modules ~= 176 then
 		emit("FAIL", definition.name, `TEST_MODULE_COUNT_{modules}`)
 		return false
 	end
@@ -1932,7 +2038,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			end
 		end
 	end
-	if sharedModules ~= 37 then
+	if sharedModules ~= 39 then
 		emit("FAIL", definition.name, "SHARED_MODULE_COUNT")
 		return false
 	end
@@ -1960,6 +2066,9 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local productionClientWaves = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionClientWaves")
+	local productionClientPlacement = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionClientPlacement")
 	local productionServerEnemies = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerEnemies")
@@ -1972,6 +2081,9 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local productionServerTowers = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerTowers")
+	local productionServerPlacement = if automatedTests == nil
+		then nil
+		else automatedTests:FindFirstChild("ProductionServerPlacement")
 	local productionServerMaps = if automatedTests == nil
 		then nil
 		else automatedTests:FindFirstChild("ProductionServerMaps")
@@ -2080,9 +2192,29 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	if
 		not verifyMirroredSources(
 			definition,
+			productionServerPlacement,
+			EXPECTED_MATCH_PLACEMENT_SERVER_SOURCES,
+			"TEST_SERVER_PLACEMENT"
+		)
+	then
+		return false
+	end
+	if
+		not verifyMirroredSources(
+			definition,
 			productionServerEnemies,
 			EXPECTED_MATCH_ENEMY_SERVER_SOURCES,
 			"TEST_SERVER_ENEMY"
+		)
+	then
+		return false
+	end
+	if
+		not verifyMirroredSources(
+			definition,
+			productionClientPlacement,
+			EXPECTED_MATCH_PLACEMENT_CLIENT_SOURCES,
+			"TEST_CLIENT_PLACEMENT"
 		)
 	then
 		return false
@@ -2177,6 +2309,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local serverEnemyModules = #EXPECTED_MATCH_ENEMY_SERVER_SOURCES
 	local serverWaveModules = #EXPECTED_MATCH_WAVE_SERVER_SOURCES
 	local serverTowerModules = #EXPECTED_MATCH_TOWER_SERVER_SOURCES
+	local serverPlacementModules = #EXPECTED_MATCH_PLACEMENT_SERVER_SOURCES
 	local matchLifecycleModules = #EXPECTED_MATCH_LIFECYCLE_SOURCES
 	local matchRosterModules = #EXPECTED_MATCH_ROSTER_SOURCES
 	local matchReadyModules = #EXPECTED_MATCH_READY_SOURCES
@@ -2184,6 +2317,7 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	local clientBaseModules = #EXPECTED_MATCH_BASE_CLIENT_SOURCES
 	local clientEnemyModules = #EXPECTED_MATCH_ENEMY_CLIENT_SOURCES
 	local clientWaveModules = #EXPECTED_MATCH_WAVE_CLIENT_SOURCES
+	local clientPlacementModules = #EXPECTED_MATCH_PLACEMENT_CLIENT_SOURCES
 	if
 		not verifyTestOwnedSources(dataModel, definition, {
 			shared :: Instance,
@@ -2193,10 +2327,12 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 			productionClientBase :: Instance,
 			productionClientEnemies :: Instance,
 			productionClientWaves :: Instance,
+			productionClientPlacement :: Instance,
 			productionServerBase :: Instance,
 			productionServerEnemies :: Instance,
 			productionServerWaves :: Instance,
 			productionServerTowers :: Instance,
+			productionServerPlacement :: Instance,
 			productionServerMaps :: Instance,
 			productionServerMatchLifecycle :: Instance,
 			productionServerMatchRoster :: Instance,
@@ -2210,15 +2346,15 @@ local function verifyTest(dataModel: DataModel, definition: BuildDefinition): bo
 	emit(
 		"PASS",
 		definition.name,
-		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_ENDPOINTS_{EXPECTED_PRODUCTION_REMOTE_COUNT}_RATE_POLICIES_{EXPECTED_PRODUCTION_RATE_POLICY_COUNT}_MAPS_{mapModules}_SERVER_BASE_{serverBaseModules}_SERVER_ENEMIES_{serverEnemyModules}_SERVER_WAVES_{serverWaveModules}_SERVER_TOWERS_{serverTowerModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_CLIENT_MATCH_{clientMatchModules}_CLIENT_BASE_{clientBaseModules}_CLIENT_ENEMIES_{clientEnemyModules}_CLIENT_WAVES_{clientWaveModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
+		`MODULES_{modules}_SHARED_{sharedModules}_NETWORKING_{networkingModules}_ENDPOINTS_{EXPECTED_PRODUCTION_REMOTE_COUNT}_RATE_POLICIES_{EXPECTED_PRODUCTION_RATE_POLICY_COUNT}_MAPS_{mapModules}_SERVER_BASE_{serverBaseModules}_SERVER_ENEMIES_{serverEnemyModules}_SERVER_WAVES_{serverWaveModules}_SERVER_TOWERS_{serverTowerModules}_SERVER_PLACEMENT_{serverPlacementModules}_MATCH_LIFECYCLE_{matchLifecycleModules}_MATCH_ROSTER_{matchRosterModules}_MATCH_READY_{matchReadyModules}_CLIENT_MATCH_{clientMatchModules}_CLIENT_BASE_{clientBaseModules}_CLIENT_ENEMIES_{clientEnemyModules}_CLIENT_WAVES_{clientWaveModules}_CLIENT_PLACEMENT_{clientPlacementModules}_TEST_OWNED_{testOwnedModules}_RUNNABLE_SCRIPTS_0`
 	)
 	return true
 end
 
 local function run(): boolean
-	currentStage = "phase12_scope"
-	if not verifyPhase12Scope() then
-		emit("FAIL", "All", "PHASE12_SCOPE_BOUNDARY")
+	currentStage = "phase13_scope"
+	if not verifyPhase13Scope() then
+		emit("FAIL", "All", "PHASE13_SCOPE_BOUNDARY")
 		return false
 	end
 	currentStage = "build_directory"

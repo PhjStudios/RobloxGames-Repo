@@ -49,6 +49,10 @@
             "$path": "src/server/match/maps"
           },
 
+          "placement": {
+            "$path": "src/server/match/placement"
+          },
+
           "lifecycle": {
             "$path": "src/server/match/lifecycle"
           },
@@ -100,6 +104,10 @@
 
             "enemies": {
               "$path": "src/client/match/enemies"
+            },
+
+            "placement": {
+              "$path": "src/client/match/placement"
             },
 
             "waves": {

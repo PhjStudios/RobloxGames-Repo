@@ -22,7 +22,8 @@ server-Match Tower ModuleScripts plus exact Test-only mirrors, one fixture, and
 eight specs; it adds no shared Tower protocol, client Tower source, or runnable
 entrypoint. Focused and exact unsaved Studio checks, consolidated review, the
 `840`-case/`64`-suite local gate, and all four structural builds passed on
-2026-08-28. Phase 12 is complete; Phase 13 is next but remains unbegun.
+2026-08-28. Phase 12 is complete; the current Phase 13 extension is recorded
+below.
 
 ## Current Phase 12-relevant source tree excerpt
 
@@ -812,4 +813,24 @@ definitions, six inbound policies, role isolation, generated-output and
 production-test exclusion, exact Tower source/public-surface allowlists, and
 empty production `Assets`, `Towers`, `Enemies`, `Maps`, `Difficulties`, `Waves`,
 and difficulty-specific `Economy` rules. It rejects any Phase 13 tower
-placement/query/preview/hotbar source or public TowerRuntime operation.
+placement/query/preview/hotbar source or public TowerRuntime operation at the
+historical Phase 12 checkpoint.
+
+## Current Phase 13 source and Test boundary
+
+Phase 13 adds exactly two shared Match modules (`PlacementGeometry` and
+`PlacementProtocol`), two server-Match modules (`PlacementAffordability` and
+`TowerPlacementService`), and four client-Match modules under
+`match/placement` (`PlacementInputAdapter`, `PlacementPreviewReducer`,
+`PlacementPreviewView`, and `TowerPlacementController`). The existing Match
+Script and LocalScript compose them; no runnable source is added.
+
+Test maps byte-identical production mirrors plus nine Test-owned placement
+specs covering geometry, protocol, input, reducer, view, controller, query,
+service, and real network integration. Studio acceptance uses lifecycle-owned
+`RunService:IsStudio()` evidence triggers inside the reviewed production
+services, not a mapped fixture/spec/manual harness. Lobby maps no Match
+placement source. Production catalogs remain frozen empty, and Phase 14 combat,
+targeting, upgrade, selling, economy, persistence, and content modules remain
+absent. Final module and Test-owned counts are recorded after the Phase 13
+structural gate.

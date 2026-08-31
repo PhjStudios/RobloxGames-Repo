@@ -542,3 +542,22 @@ services, Lobby content, or unrelated assets to change.
 - Task handoff additionally requires one genuine Repository Verification run for
   the exact final SHA. Its run ID is intentionally cited in the handoff rather
   than copied into this tracked record by a self-referential commit.
+
+## Phase 13 placement-surface extension
+
+Placement-zone records now accept the optional bounded
+`ATD_SurfaceCategory` attribute with the closed values `Land`, `Elevated`, and
+`Water`. Missing version-1 values normalize to `Land` for compatibility; the
+current graybox fixture authors `Land` explicitly. Map validation rejects an
+unknown type/value and retains the authoring maximum of 64 placement zones and
+64 exclusions. The placement query fails closed above its narrower 24-zone and
+24-exclusion wire ceilings rather than returning a partial surface. `Water` is
+represented for future content but is not approved for any current tower.
+
+The server derives each candidate Y from the containing zone's top face and
+requires the complete authored tower footprint to remain inside MapBounds and
+one zone, outside every exclusion, and non-overlapping with committed or
+reserved footprints. The same pure geometry advises the client, but only the
+current authenticated MapRuntime snapshot is authoritative. The Studio-owned
+graybox, terrain, models, and unmapped Instances were not edited or saved for
+Phase 13.
