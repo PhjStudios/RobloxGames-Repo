@@ -3,6 +3,7 @@
 local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local NetworkFixtures = require(script.Parent.Parent.Fixtures.NetworkFixtures)
 local Shared = game:GetService("ReplicatedStorage").Shared
+local LobbyProtocol = require(Shared.lobby.LobbyProtocol)
 local ProductionRemotes = require(Shared.network.ProductionRemotes)
 local RemoteRegistry = require(Shared.network.RemoteRegistry)
 
@@ -64,7 +65,7 @@ end
 
 return TestHarness.suite("remote registry contract", {
 	TestHarness.case(
-		"exports fixed protocol constants and the complete Match production remote boundary",
+		"exports fixed protocol constants and the complete Match and Lobby production remote boundary",
 		function(assertions)
 			assertions.equal(RemoteRegistry.ROOT_NAME, "ATDNetwork")
 			assertions.equal(RemoteRegistry.VERSION_NAME, "v1")
@@ -73,19 +74,29 @@ return TestHarness.suite("remote registry contract", {
 			assertions.isTrue(table.isfrozen(RemoteRegistry))
 
 			assertions.isTrue(RemoteRegistry.isRegistry(ProductionRemotes))
-			assertions.equal(ProductionRemotes:count(), 22)
+			assertions.equal(ProductionRemotes:count(), 34)
 			assertNames(assertions, ProductionRemotes:list(), {
 				"BaseReplication",
 				"CombatAttackEvent",
 				"EnemyReplication",
+				LobbyProtocol.ENDPOINTS.EQUIP_TOWER,
+				LobbyProtocol.ENDPOINTS.FAVORITE_TOWER,
 				"GetBaseSnapshot",
 				"GetEnemySnapshot",
+				LobbyProtocol.ENDPOINTS.GET_BANNER,
+				LobbyProtocol.ENDPOINTS.GET_INVENTORY,
+				LobbyProtocol.ENDPOINTS.GET_PROFILE,
 				"GetMatchSnapshot",
 				"GetPlayableMatchSnapshot",
 				"GetTowerPlacementQuery",
 				"GetWaveSnapshot",
+				LobbyProtocol.ENDPOINTS.INVENTORY_REPLICATION,
+				LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION,
+				LobbyProtocol.ENDPOINTS.LOCK_TOWER,
 				"MatchSnapshot",
 				"PlayableMatchReplication",
+				LobbyProtocol.ENDPOINTS.PULL_CHEST,
+				LobbyProtocol.ENDPOINTS.RETRY_PROFILE,
 				"SubmitPlayablePlacement",
 				"SubmitPlayableReady",
 				"SubmitPlayableReplay",
@@ -96,20 +107,32 @@ return TestHarness.suite("remote registry contract", {
 				"SubmitTowerTargetMode",
 				"SubmitTowerUpgrade",
 				"TowerPlacementRevision",
+				LobbyProtocol.ENDPOINTS.UNEQUIP_TOWER,
+				LobbyProtocol.ENDPOINTS.UPDATE_SETTINGS,
 				"WaveReplication",
 			})
 			assertNames(assertions, ProductionRemotes:listForRole("Development"), {
 				"BaseReplication",
 				"CombatAttackEvent",
 				"EnemyReplication",
+				LobbyProtocol.ENDPOINTS.EQUIP_TOWER,
+				LobbyProtocol.ENDPOINTS.FAVORITE_TOWER,
 				"GetBaseSnapshot",
 				"GetEnemySnapshot",
+				LobbyProtocol.ENDPOINTS.GET_BANNER,
+				LobbyProtocol.ENDPOINTS.GET_INVENTORY,
+				LobbyProtocol.ENDPOINTS.GET_PROFILE,
 				"GetMatchSnapshot",
 				"GetPlayableMatchSnapshot",
 				"GetTowerPlacementQuery",
 				"GetWaveSnapshot",
+				LobbyProtocol.ENDPOINTS.INVENTORY_REPLICATION,
+				LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION,
+				LobbyProtocol.ENDPOINTS.LOCK_TOWER,
 				"MatchSnapshot",
 				"PlayableMatchReplication",
+				LobbyProtocol.ENDPOINTS.PULL_CHEST,
+				LobbyProtocol.ENDPOINTS.RETRY_PROFILE,
 				"SubmitPlayablePlacement",
 				"SubmitPlayableReady",
 				"SubmitPlayableReplay",
@@ -120,9 +143,24 @@ return TestHarness.suite("remote registry contract", {
 				"SubmitTowerTargetMode",
 				"SubmitTowerUpgrade",
 				"TowerPlacementRevision",
+				LobbyProtocol.ENDPOINTS.UNEQUIP_TOWER,
+				LobbyProtocol.ENDPOINTS.UPDATE_SETTINGS,
 				"WaveReplication",
 			})
-			assertions.equal(rawlen(ProductionRemotes:listForRole("Lobby")), 0)
+			assertNames(assertions, ProductionRemotes:listForRole("Lobby"), {
+				LobbyProtocol.ENDPOINTS.EQUIP_TOWER,
+				LobbyProtocol.ENDPOINTS.FAVORITE_TOWER,
+				LobbyProtocol.ENDPOINTS.GET_BANNER,
+				LobbyProtocol.ENDPOINTS.GET_INVENTORY,
+				LobbyProtocol.ENDPOINTS.GET_PROFILE,
+				LobbyProtocol.ENDPOINTS.INVENTORY_REPLICATION,
+				LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION,
+				LobbyProtocol.ENDPOINTS.LOCK_TOWER,
+				LobbyProtocol.ENDPOINTS.PULL_CHEST,
+				LobbyProtocol.ENDPOINTS.RETRY_PROFILE,
+				LobbyProtocol.ENDPOINTS.UNEQUIP_TOWER,
+				LobbyProtocol.ENDPOINTS.UPDATE_SETTINGS,
+			})
 			assertNames(assertions, ProductionRemotes:listForRole("Match"), {
 				"BaseReplication",
 				"CombatAttackEvent",
@@ -249,6 +287,46 @@ return TestHarness.suite("remote registry contract", {
 			assertions.equal(placementRevision.response, "None")
 			assertions.equal(rawlen(placementRevision.placeRoles), 1)
 			assertions.equal(placementRevision.placeRoles[1], "Match")
+
+			for _, endpoint in
+				{
+					LobbyProtocol.ENDPOINTS.GET_PROFILE,
+					LobbyProtocol.ENDPOINTS.RETRY_PROFILE,
+					LobbyProtocol.ENDPOINTS.GET_INVENTORY,
+					LobbyProtocol.ENDPOINTS.EQUIP_TOWER,
+					LobbyProtocol.ENDPOINTS.UNEQUIP_TOWER,
+					LobbyProtocol.ENDPOINTS.FAVORITE_TOWER,
+					LobbyProtocol.ENDPOINTS.LOCK_TOWER,
+					LobbyProtocol.ENDPOINTS.GET_BANNER,
+					LobbyProtocol.ENDPOINTS.PULL_CHEST,
+					LobbyProtocol.ENDPOINTS.UPDATE_SETTINGS,
+				}
+			do
+				local definition = ProductionRemotes:get(endpoint) :: RemoteRegistry.Definition
+				assertions.isNotNil(definition)
+				assertions.equal(definition.transport, "ReliableRemoteEvent")
+				assertions.equal(definition.direction, "ClientToServer")
+				assertions.equal(definition.kind, "Request")
+				assertions.equal(definition.response, "Required")
+				assertions.equal(rawlen(definition.placeRoles), 1)
+				assertions.equal(definition.placeRoles[1], "Lobby")
+			end
+
+			for _, endpoint in
+				{
+					LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION,
+					LobbyProtocol.ENDPOINTS.INVENTORY_REPLICATION,
+				}
+			do
+				local definition = ProductionRemotes:get(endpoint) :: RemoteRegistry.Definition
+				assertions.isNotNil(definition)
+				assertions.equal(definition.transport, "ReliableRemoteEvent")
+				assertions.equal(definition.direction, "ServerToClient")
+				assertions.equal(definition.kind, "Event")
+				assertions.equal(definition.response, "None")
+				assertions.equal(rawlen(definition.placeRoles), 1)
+				assertions.equal(definition.placeRoles[1], "Lobby")
+			end
 		end
 	),
 

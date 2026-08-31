@@ -6,6 +6,7 @@ local ClientRequestTracker = require(script.Parent.Parent.ProductionClientNetwor
 local PlayableMatchController = require(script.Parent.Parent.ProductionClientPlayable.PlayableMatchController)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local DefaultSettings = require(ReplicatedStorage.Shared.config.DefaultSettings)
 local EnvironmentContext = require(ReplicatedStorage.Shared.logging.EnvironmentContext)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
@@ -31,8 +32,10 @@ end
 
 local logger = Log.new(EnvironmentContext.new("client", "Match", 0, false))
 
-local function towerOption(towerId: string, displayName: string, cost: number): any
+local function towerOption(slot: number, towerId: string, displayName: string, cost: number): any
 	return {
+		slot = slot,
+		unitId = `unit:controller-{slot}`,
 		towerId = towerId,
 		displayName = displayName,
 		placementCost = cost,
@@ -47,6 +50,7 @@ local function snapshot(revision: number, state: string?): any
 	return {
 		matchId = "match:playable-controller",
 		revision = revision,
+		loadoutRevision = 6,
 		state = selectedState,
 		result = if isResults then "Victory" else "None",
 		mapId = "map:phase07-graybox",
@@ -64,9 +68,9 @@ local function snapshot(revision: number, state: string?): any
 		battleCash = 245,
 		participants = { readyCount = if isReady then 0 else 1, participantCount = 1 },
 		towerOptions = {
-			towerOption("tower:dart-ant", "Dart Ant", 120),
-			towerOption("tower:rapid-ant", "Rapid Ant", 165),
-			towerOption("tower:guard-ant", "Guard Ant", 225),
+			towerOption(1, "tower:dart-ant", "Dart Ant", 120),
+			towerOption(2, "tower:rapid-ant", "Rapid Ant", 165),
+			towerOption(3, "tower:guard-ant", "Guard Ant", 225),
 		},
 		towers = if isReady or isResults
 			then {}
@@ -114,6 +118,7 @@ local function snapshot(revision: number, state: string?): any
 			sells = 0,
 			baseHealthRemaining = 27,
 		},
+		settings = table.clone(DefaultSettings),
 	}
 end
 
@@ -161,6 +166,7 @@ local function makeRig(): any
 		renders = {},
 		worlds = {},
 		effects = {},
+		appliedSettings = {},
 		contexts = {},
 		disconnectCount = 0,
 		clock = 20,
@@ -309,6 +315,9 @@ local function makeRig(): any
 		restoreCamera = function()
 			rig.restored += 1
 		end,
+		applySettings = function(settings)
+			table.insert(rig.appliedSettings, settings)
+		end,
 	}
 
 	local controllerResult = (newControllerForTests :: PlayableMatchController.TestConstructor)(logger, dependencies)
@@ -348,7 +357,13 @@ return TestHarness.suite("playable Match production client controller", {
 		assertions.equal(rig.renders[1].inputHint, "Connecting to the authoritative match.")
 		assertions.equal(#rig.worlds[1].towers, 0)
 		assertions.equal(#rig.worlds[1].enemies, 0)
-		deliverInitial(rig, snapshot(7))
+		local saved = snapshot(7)
+		saved.settings.uiScale = 1.25
+		saved.settings.reducedMotionEnabled = true
+		saved.settings.enemyHealthBarsEnabled = false
+		saved.settings.lowDetailEnabled = true
+		saved.settings.towerRangeEnabled = false
+		deliverInitial(rig, saved)
 		local metrics = rig.controller:getMetrics()
 		assertions.equal(metrics.matchId, "match:playable-controller")
 		assertions.equal(metrics.revision, 7)
@@ -359,6 +374,14 @@ return TestHarness.suite("playable Match production client controller", {
 		assertions.equal(rig.renders[2].wave.enemiesRemaining, 1)
 		assertions.equal(#rig.worlds[2].towers, 1)
 		assertions.equal(#rig.worlds[2].enemies, 1)
+		assertions.equal(rig.worlds[2].towers[1].range, 27)
+		assertions.equal(rig.renders[2].uiScale, 1.25)
+		assertions.isTrue(rig.renders[2].reducedMotion)
+		assertions.isTrue(rig.renders[2].lowEffects)
+		assertions.isFalse(rig.renders[2].enemyHealthBars)
+		assertions.isFalse(rig.renders[2].towerRange)
+		assertions.equal(#rig.appliedSettings, 1)
+		assertions.equal(rig.appliedSettings[1].uiScale, 1.25)
 		cleanupRig(rig)
 	end),
 
@@ -458,6 +481,8 @@ return TestHarness.suite("playable Match production client controller", {
 			assertions.equal(#rig.fires[endpoint], 1)
 			local request = rig.fires[endpoint][1]
 			assertions.equal(request.payload.matchId, "match:playable-controller")
+			assertions.equal(request.payload.loadoutRevision, 6)
+			assertions.equal(request.payload.slot, 1)
 			assertions.equal(request.payload.towerId, "tower:dart-ant")
 			assertions.equal(request.payload.position, Vector3.new(8, 0, 9))
 			assertions.equal(request.payload.rotationDegrees, 15)
@@ -593,6 +618,27 @@ return TestHarness.suite("playable Match production client controller", {
 			assertions.equal(#rig.effects, 1)
 			assertions.equal(rig.effects[1].towerId, "tower-runtime:1")
 			assertions.equal(rig.effects[1].targetId, "enemy-runtime:3")
+			assertions.equal(rig.effects[1].damage, 12)
+			assertions.equal(rig.controller:getMetrics().attackEventCount, 1)
+
+			local muted = snapshot(9)
+			muted.settings.otherPlayerEffectsEnabled = false
+			muted.towers[1].ownerUserId = 99
+			rig.events[PlayableMatchProtocol.ENDPOINTS.REPLICATION]:fire({ payload = muted })
+			rig.events[PlayableMatchProtocol.ENDPOINTS.ATTACK_EVENT]:fire({
+				payload = {
+					matchId = "match:playable-controller",
+					sequence = 2,
+					runtimeTowerId = 1,
+					runtimeEnemyId = 3,
+					sourcePosition = Vector3.new(4, 1, 7),
+					targetPosition = Vector3.new(-8, 2, 3),
+					actualDamage = 8,
+					killed = false,
+					serverTime = 112,
+				},
+			})
+			assertions.equal(#rig.effects, 1)
 			assertions.equal(rig.controller:getMetrics().attackEventCount, 1)
 			cleanupRig(rig)
 		end

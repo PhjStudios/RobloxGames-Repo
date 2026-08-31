@@ -8,11 +8,13 @@ local ConfigurationValidator = require(ReplicatedStorage.Shared.config.Configura
 local EnvironmentContext = require(ReplicatedStorage.Shared.logging.EnvironmentContext)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
+local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
 local Cleanup = require(ReplicatedStorage.Shared.util.Cleanup)
 
 export type Configuration = {
 	role: PlaceRoles.PlaceRole,
 	log: Log.Logger,
+	coreConfiguration: ConfigTypes.CoreConfiguration,
 	lifecycleRunner: ServiceLifecycle.Runner,
 }
 
@@ -21,6 +23,7 @@ export type Configure = (configuration: Configuration) -> ()
 export type Handle = {
 	role: PlaceRoles.PlaceRole,
 	log: Log.Logger,
+	coreConfiguration: ConfigTypes.CoreConfiguration,
 	lifecycleRunner: ServiceLifecycle.Runner,
 	cleanup: Cleanup.Container,
 }
@@ -83,6 +86,7 @@ function ClientBootstrap.run(expectedRole: PlaceRoles.PlaceRole?, configure: Con
 		configure({
 			role = roleResult.role,
 			log = log,
+			coreConfiguration = coreConfigurationResult.value,
 			lifecycleRunner = lifecycleRunner,
 		})
 	end
@@ -106,6 +110,7 @@ function ClientBootstrap.run(expectedRole: PlaceRoles.PlaceRole?, configure: Con
 	return table.freeze({
 		role = roleResult.role,
 		log = log,
+		coreConfiguration = coreConfigurationResult.value,
 		lifecycleRunner = lifecycleRunner,
 		cleanup = bootstrapCleanup,
 	})

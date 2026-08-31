@@ -315,8 +315,11 @@ return TestHarness.suite("playable match service integration", {
 		local playing = makeRig()
 		startRig(playing)
 		ready(assertions, playing, playing.first)
+		local playingSnapshot = currentSnapshot(assertions, playing, playing.first)
 		local placed = playing.service:submitPlacement(playing.first, {
-			matchId = currentSnapshot(assertions, playing, playing.first).matchId,
+			matchId = playingSnapshot.matchId,
+			loadoutRevision = playingSnapshot.loadoutRevision,
+			slot = 1,
 			towerId = "tower:dart-ant",
 			position = Vector3.new(0, 0, 8),
 			rotationDegrees = 0,
@@ -324,6 +327,7 @@ return TestHarness.suite("playable match service integration", {
 		assertions.isTrue((placed :: any).accepted)
 		removeActive(playing.active, playing.first)
 		playing.fireRemoving(playing.first)
+		assertions.equal(playing.service:getMetrics().frozenLoadoutCount, 0)
 		assertions.equal((playing.service:getMetrics().runtime :: any).participantCount, 0)
 		assertions.equal((playing.service:getMetrics().runtime :: any).activeTowerCount, 0)
 		table.insert(playing.active, playing.second)
@@ -341,11 +345,29 @@ return TestHarness.suite("playable match service integration", {
 		runToResults(assertions, results)
 		removeActive(results.active, results.first)
 		results.fireRemoving(results.first)
+		assertions.equal(results.service:getMetrics().frozenLoadoutCount, 0)
 		assertions.equal((results.service:getMetrics().runtime :: any).participantCount, 0)
 		table.insert(results.active, results.second)
 		results.fireAdded(results.second)
 		assertions.equal(currentSnapshot(assertions, results, results.second).state, "Ready")
 		assertions.equal(results.service:getMetrics().generation, 2)
 		cleanupRig(results)
+	end),
+
+	TestHarness.case("bounds frozen loadouts across rejected joins and player churn", function(assertions)
+		local rig = makeRig()
+		startRig(rig)
+		ready(assertions, rig, rig.first)
+		assertions.equal(rig.service:getMetrics().frozenLoadoutCount, 1)
+		table.insert(rig.active, rig.second)
+		rig.fireAdded(rig.second)
+		assertions.equal((rig.service:getMetrics().runtime :: any).participantCount, 1)
+		assertions.equal(rig.service:getMetrics().frozenLoadoutCount, 1)
+		removeActive(rig.active, rig.second)
+		rig.fireRemoving(rig.second)
+		removeActive(rig.active, rig.first)
+		rig.fireRemoving(rig.first)
+		assertions.equal(rig.service:getMetrics().frozenLoadoutCount, 0)
+		cleanupRig(rig)
 	end),
 })

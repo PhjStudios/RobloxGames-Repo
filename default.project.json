@@ -31,7 +31,19 @@
         },
 
         "lobby": {
-          "$path": "src/server/lobby"
+          "$className": "Folder",
+
+          "inventory": {
+            "$path": "src/server/lobby/inventory"
+          },
+
+          "acquisition": {
+            "$path": "src/server/lobby/acquisition"
+          },
+
+          "settings": {
+            "$path": "src/server/lobby/settings"
+          }
         },
 
         "match": {
@@ -96,7 +108,15 @@
           },
 
           "lobby": {
-            "$path": "src/client/lobby"
+            "$className": "Folder",
+
+            "LobbyController": {
+              "$path": "src/client/lobby/LobbyController.luau"
+            },
+
+            "ui": {
+              "$path": "src/client/lobby/ui"
+            }
           },
 
           "match": {

@@ -15,6 +15,7 @@ local SETTINGS_FIELDS: { [string]: boolean } = table.freeze({
 	masterVolume = true,
 	musicVolume = true,
 	otherPlayerEffectsEnabled = true,
+	reducedMotionEnabled = true,
 	sfxVolume = true,
 	towerRangeEnabled = true,
 	uiScale = true,
@@ -32,7 +33,7 @@ local SETTINGS_RUNTIME_FIELDS: { [string]: boolean } = table.freeze({
 	userId = true,
 })
 
-local CURRENT_VERSION = 1
+local CURRENT_VERSION = 2
 local MIN_VOLUME = 0
 local MAX_VOLUME = 1
 local MIN_CAMERA_SHAKE_INTENSITY = 0
@@ -132,6 +133,12 @@ function SettingsSchema.validateDefaults(
 		return Result.err(lowDetailIssue)
 	end
 
+	local reducedMotionEnabled, reducedMotionIssue =
+		SchemaPrimitives.requiredBoolean(record :: Validation.RawObject, "reducedMotionEnabled", ROOT_PATH)
+	if reducedMotionIssue ~= nil then
+		return Result.err(reducedMotionIssue)
+	end
+
 	local towerRangeEnabled, towerRangeIssue =
 		SchemaPrimitives.requiredBoolean(record :: Validation.RawObject, "towerRangeEnabled", ROOT_PATH)
 	if towerRangeIssue ~= nil then
@@ -155,6 +162,7 @@ function SettingsSchema.validateDefaults(
 		enemyHealthBarsEnabled = enemyHealthBarsEnabled :: boolean,
 		otherPlayerEffectsEnabled = otherPlayerEffectsEnabled :: boolean,
 		lowDetailEnabled = lowDetailEnabled :: boolean,
+		reducedMotionEnabled = reducedMotionEnabled :: boolean,
 		towerRangeEnabled = towerRangeEnabled :: boolean,
 		uiScale = uiScale :: number,
 	})

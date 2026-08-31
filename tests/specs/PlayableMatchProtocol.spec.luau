@@ -2,10 +2,14 @@
 
 local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 
-local Protocol = require(game:GetService("ReplicatedStorage").Shared.match.PlayableMatchProtocol)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local DefaultSettings = require(ReplicatedStorage.Shared.config.DefaultSettings)
+local Protocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
 
-local function towerOption(towerId: string, name: string, cost: number)
+local function towerOption(slot: number, towerId: string, name: string, cost: number)
 	return {
+		slot = slot,
+		unitId = `unit:protocol-{slot}`,
 		towerId = towerId,
 		displayName = name,
 		placementCost = cost,
@@ -17,6 +21,7 @@ local function validSnapshot()
 	return {
 		matchId = "match:playable-protocol",
 		revision = 7,
+		loadoutRevision = 4,
 		state = "Playing",
 		result = "None",
 		mapId = "map:phase07-graybox",
@@ -34,9 +39,9 @@ local function validSnapshot()
 		battleCash = 245,
 		participants = { readyCount = 1, participantCount = 1 },
 		towerOptions = {
-			towerOption("tower:dart-ant", "Dart Ant", 120),
-			towerOption("tower:rapid-ant", "Rapid Ant", 165),
-			towerOption("tower:guard-ant", "Guard Ant", 225),
+			towerOption(1, "tower:dart-ant", "Dart Ant", 120),
+			towerOption(2, "tower:rapid-ant", "Rapid Ant", 165),
+			towerOption(3, "tower:guard-ant", "Guard Ant", 225),
 		},
 		towers = {
 			{
@@ -80,6 +85,7 @@ local function validSnapshot()
 			sells = 0,
 			baseHealthRemaining = 27,
 		},
+		settings = table.clone(DefaultSettings),
 	}
 end
 
@@ -106,12 +112,19 @@ return TestHarness.suite("playable match wire protocol", {
 		assertions.isTrue(table.isfrozen(result.value))
 		assertions.isTrue(table.isfrozen(result.value.towers))
 		assertions.isTrue(table.isfrozen(result.value.enemies))
+		assertions.isTrue(table.isfrozen(result.value.settings))
 		assertions.notEqual(result.value, raw)
 		assertions.notEqual(result.value.towers[1], raw.towers[1])
 		raw.battleCash = 9_999
 		raw.towers[1].level = 9
 		assertions.equal(result.value.battleCash, 245)
 		assertions.equal(result.value.towers[1].level, 2)
+		raw.settings.uiScale = 0.75
+		assertions.equal(result.value.settings.uiScale, 1)
+
+		local malformedSettings = validSnapshot()
+		malformedSettings.settings.uiScale = 9
+		assertions.isFalse(Protocol.validateSnapshot(malformedSettings).ok)
 	end),
 	TestHarness.case("rejects inconsistent health counts and result state", function(assertions)
 		local health = validSnapshot()
@@ -133,7 +146,7 @@ return TestHarness.suite("playable match wire protocol", {
 		healthyResult.wavePhase = "Results"
 		assertions.isTrue(Protocol.validateSnapshot(healthyResult).ok)
 	end),
-	TestHarness.case("bounds arrays and requires exactly three tower options", function(assertions)
+	TestHarness.case("bounds arrays and accepts one through five ordered tower options", function(assertions)
 		local full = validSnapshot()
 		local towerTemplate = full.towers[1]
 		local enemyTemplate = full.enemies[1]
@@ -153,8 +166,16 @@ return TestHarness.suite("playable match wire protocol", {
 		assertions.isTrue(Protocol.validateSnapshot(full).ok)
 
 		local tooFew = validSnapshot()
-		table.remove(tooFew.towerOptions)
+		table.clear(tooFew.towerOptions)
 		assertions.isFalse(Protocol.SnapshotSchema:validate(tooFew).ok)
+		local one = validSnapshot()
+		while #one.towerOptions > 1 do
+			table.remove(one.towerOptions)
+		end
+		assertions.isTrue(Protocol.validateSnapshot(one).ok)
+		local unordered = validSnapshot()
+		unordered.towerOptions[2].slot = 3
+		assertions.isFalse(Protocol.validateSnapshot(unordered).ok)
 
 		local tooManyEnemies = validSnapshot()
 		local entry = tooManyEnemies.enemies[1]
@@ -166,6 +187,8 @@ return TestHarness.suite("playable match wire protocol", {
 	TestHarness.case("accepts only intent fields and rejects client combat authority", function(assertions)
 		local placement = {
 			matchId = "match:playable-protocol",
+			loadoutRevision = 4,
+			slot = 1,
 			towerId = "tower:dart-ant",
 			position = Vector3.new(1, 2, 3),
 			rotationDegrees = 90,

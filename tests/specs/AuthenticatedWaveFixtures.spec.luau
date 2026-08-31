@@ -101,7 +101,7 @@ return TestHarness.suite("authenticated authored-wave fixtures", {
 		assertions.equal(#first.configuration.waves.ordered, 2)
 		assertions.equal(#first.configuration.economy.ordered, 2)
 		assertions.equal(#first.configuration.banners.ordered, 0)
-		assertions.equal(first.configuration.defaultSettings.version, 1)
+		assertions.equal(first.configuration.defaultSettings.version, 2)
 	end),
 	TestHarness.case("preserves exact canonical aliases and deep frozen runtime metadata", function(assertions)
 		local fixture = Fixtures.createAuthenticatedFixture()

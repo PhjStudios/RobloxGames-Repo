@@ -2,6 +2,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local PlaceRoles = require(ReplicatedStorage.Shared.config.PlaceRoles)
 local BaseProtocol = require(ReplicatedStorage.Shared.match.BaseProtocol)
@@ -9,11 +10,14 @@ local EnemyProtocol = require(ReplicatedStorage.Shared.match.EnemyProtocol)
 local MatchProtocol = require(ReplicatedStorage.Shared.match.MatchProtocol)
 local PlacementProtocol = require(ReplicatedStorage.Shared.match.PlacementProtocol)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
+local MatchLoadoutProtocol = require(ReplicatedStorage.Shared.match.MatchLoadoutProtocol)
 local WaveProtocol = require(ReplicatedStorage.Shared.match.WaveProtocol)
 local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
 
 local ServerBootstrap = require(script.Parent.ServerBootstrap)
 local ServerRequestDispatcher = require(script.Parent.Parent.networking.ServerRequestDispatcher)
+local ProfileService = require(script.Parent.Parent.profile.ProfileService)
+local ProfileStoreAdapter = require(script.Parent.Parent.profile.ProfileStoreAdapter)
 local MatchLifecycleService = require(script.Parent.Parent.Parent.match.lifecycle.MatchLifecycleService)
 local PlayableMatchService = require(script.Parent.Parent.Parent.match.playable.PlayableMatchService)
 
@@ -74,12 +78,50 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 	)
 
 	local matchLifecycle = MatchLifecycleService.new(configuration.log, sendMatchSnapshot)
+	local storeResult = if RunService:IsStudio()
+		then ProfileStoreAdapter.newStudioDevelopment()
+		else ProfileStoreAdapter.newProduction()
+	if not storeResult.ok then
+		error("[ATD_MATCH_BOOTSTRAP][code=PROFILE_STORE_UNAVAILABLE]", 0)
+	end
+	local profileResult = ProfileService.new(configuration.coreConfiguration.towers, storeResult.value, nil)
+	if not profileResult.ok then
+		error("[ATD_MATCH_BOOTSTRAP][code=PROFILE_SERVICE_CREATION_FAILED]", 0)
+	end
+	local profile = profileResult.value
+	local function loadoutFor(userId: number): MatchLoadoutProtocol.Snapshot?
+		local readResult = profile:read(userId)
+		if not readResult.ok then
+			return nil
+		end
+		local saved = readResult.value
+		local slots = table.create(#saved.equippedUnitIds)
+		for slot, unitId in saved.equippedUnitIds do
+			local unit = saved.units[unitId]
+			if unit == nil then
+				return nil
+			end
+			slots[slot] = {
+				slot = slot,
+				unitId = unit.unitId,
+				towerId = unit.towerId,
+			}
+		end
+		local validated = MatchLoadoutProtocol.validate({
+			userId = userId,
+			revision = saved.revision,
+			slots = slots,
+			settings = saved.settings,
+		}, configuration.coreConfiguration)
+		return if validated.ok then validated.value else nil
+	end
 	local playable = PlayableMatchService.new(
 		configuration.log,
 		matchLifecycle,
 		configuration.coreConfiguration,
 		sendPlayableSnapshot,
-		sendAttack
+		sendAttack,
+		loadoutFor
 	)
 
 	-- Preserve the Phase 8 ready/snapshot compatibility boundary. Superseded
@@ -224,6 +266,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		end
 	)
 
+	configuration.lifecycleRunner:register(profile:getServiceDefinition())
 	configuration.lifecycleRunner:register(matchLifecycle:getServiceDefinition())
 	configuration.lifecycleRunner:register(playable:getServiceDefinition())
 end)

@@ -326,6 +326,7 @@ export type PlayerSettingsDefaults = {
 	enemyHealthBarsEnabled: boolean,
 	otherPlayerEffectsEnabled: boolean,
 	lowDetailEnabled: boolean,
+	reducedMotionEnabled: boolean,
 	towerRangeEnabled: boolean,
 	uiScale: number,
 }

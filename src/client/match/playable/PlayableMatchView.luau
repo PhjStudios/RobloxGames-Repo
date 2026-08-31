@@ -117,6 +117,8 @@ export type RenderSnapshot = {
 	uiScale: number?,
 	reducedMotion: boolean?,
 	lowEffects: boolean?,
+	enemyHealthBars: boolean?,
+	towerRange: boolean?,
 }
 
 export type TowerVisual = {
@@ -125,6 +127,7 @@ export type TowerVisual = {
 	position: Vector3,
 	rotationDegrees: number?,
 	selected: boolean?,
+	range: number?,
 }
 
 export type EnemyVisual = {
@@ -148,6 +151,7 @@ export type AttackEvent = {
 	targetId: string,
 	origin: Vector3?,
 	target: Vector3?,
+	damage: number?,
 }
 
 export type ResponsiveLayout = {
@@ -270,6 +274,7 @@ type TowerRecord = {
 	primaryPart: BasePart,
 	definitionId: string,
 	selection: Highlight?,
+	rangeIndicator: Part?,
 	isPrimitiveFallback: boolean,
 }
 
@@ -279,6 +284,7 @@ type EnemyRecord = {
 	definitionId: string,
 	healthFill: Frame?,
 	healthText: TextLabel?,
+	healthDisplay: BillboardGui?,
 	isPrimitiveFallback: boolean,
 }
 
@@ -296,6 +302,8 @@ type ViewData = {
 	inputFamily: InputFamily,
 	reducedMotion: boolean,
 	lowEffects: boolean,
+	enemyHealthBars: boolean,
+	towerRange: boolean,
 	renderCount: number,
 	actionCount: number,
 	cleaned: boolean,
@@ -320,8 +328,8 @@ local WORLD_FOLDER_NAME = "_ATDPlayablePresentation"
 local TEMPLATE_FOLDER_NAME = "ATDPlayableTemplates"
 local CONTENT_CONTRACT = "playable-local-match-v1"
 local CONTENT_VERSION = 1
-local HOTBAR_SLOTS = 3
-local BUTTON_CONNECTION_COUNT = 13
+local HOTBAR_SLOTS = 5
+local BUTTON_CONNECTION_COUNT = 15
 local MAX_TOWERS = 64
 local MAX_ENEMIES = 256
 local MAX_ATTACK_EFFECTS = 32
@@ -717,12 +725,12 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	end
 
 	local hotbarCount = denseCount(hotbarValue :: { [any]: unknown }, HOTBAR_SLOTS)
-	if hotbarCount ~= HOTBAR_SLOTS then
+	if hotbarCount == nil or hotbarCount < 1 then
 		return nil
 	end
-	local hotbar = table.create(HOTBAR_SLOTS) :: { HotbarSlot }
+	local hotbar = table.create(hotbarCount) :: { HotbarSlot }
 	local selectedCount = 0
-	for index = 1, HOTBAR_SLOTS do
+	for index = 1, hotbarCount do
 		local slotValue = rawget(hotbarValue :: { [any]: unknown }, index)
 		if type(slotValue) ~= "table" or getmetatable(slotValue) ~= nil then
 			return nil
@@ -819,6 +827,8 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	local uiScale = rawget(snapshot, "uiScale")
 	local reducedMotion = rawget(snapshot, "reducedMotion")
 	local lowEffects = rawget(snapshot, "lowEffects")
+	local enemyHealthBars = rawget(snapshot, "enemyHealthBars")
+	local towerRange = rawget(snapshot, "towerRange")
 	if inputHint ~= nil and not safeText(inputHint, 120, true) then
 		return nil
 	end
@@ -835,6 +845,12 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 		return nil
 	end
 	if lowEffects ~= nil and type(lowEffects) ~= "boolean" then
+		return nil
+	end
+	if enemyHealthBars ~= nil and type(enemyHealthBars) ~= "boolean" then
+		return nil
+	end
+	if towerRange ~= nil and type(towerRange) ~= "boolean" then
 		return nil
 	end
 
@@ -862,6 +878,8 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 		uiScale = uiScale :: number?,
 		reducedMotion = reducedMotion :: boolean?,
 		lowEffects = lowEffects :: boolean?,
+		enemyHealthBars = enemyHealthBars :: boolean?,
+		towerRange = towerRange :: boolean?,
 	})
 end
 
@@ -1096,11 +1114,19 @@ local function makeSelectionHighlight(model: Model, applyProductionStyle: boolea
 	return highlight
 end
 
+local function makeRangeIndicator(model: Model, applyProductionStyle: boolean): Part
+	local indicator = makeWorldPart("RangeIndicator", model, applyProductionStyle)
+	indicator.Shape = Enum.PartType.Cylinder
+	indicator.Color = COLORS.Effect
+	indicator.Transparency = 1
+	return indicator
+end
+
 local function makeEnemyHealthDisplay(
 	model: Model,
 	primaryPart: BasePart,
 	applyProductionStyle: boolean
-): (Frame, TextLabel)
+): (BillboardGui, Frame, TextLabel)
 	local display = Instance.new("BillboardGui")
 	display.Name = "HealthDisplay"
 	display.Adornee = primaryPart
@@ -1129,7 +1155,7 @@ local function makeEnemyHealthDisplay(
 		label.TextStrokeColor3 = COLORS.Background
 		label.TextStrokeTransparency = 0.2
 	end
-	return fill, label
+	return display, fill, label
 end
 
 local function manualPivot(model: Model, primaryPart: BasePart, target: CFrame)
@@ -1338,16 +1364,20 @@ local function applyLayout(instances: ViewInstances, layout: ResponsiveLayout)
 	instances.baseFill.Position = UDim2.fromScale(0, 1)
 	instances.baseFill.Size = UDim2.fromScale(1, 0.12)
 
-	local hotbarHeight = if layout.mode == "TenFoot" then 132 else 112
+	local hotbarHeight = if layout.mode == "Compact" then 170 elseif layout.mode == "TenFoot" then 132 else 112
 	instances.hotbar.AnchorPoint = Vector2.new(0.5, 1)
 	instances.hotbar.Position = UDim2.new(0.5, 0, 1, -12)
 	instances.hotbar.Size = UDim2.fromOffset(layout.hotbarWidth, hotbarHeight)
 	instances.hotbar.BackgroundTransparency = 0.08
 	local slotGap = 8
-	local buttonWidth = (layout.hotbarWidth - 24 - slotGap * 2) / 3
-	local buttonHeight = math.max(layout.touchTarget, hotbarHeight - 38)
+	local columns = if layout.mode == "Compact" then 3 else HOTBAR_SLOTS
+	local rows = math.ceil(HOTBAR_SLOTS / columns)
+	local buttonWidth = (layout.hotbarWidth - 24 - slotGap * (columns - 1)) / columns
+	local buttonHeight = math.max(layout.touchTarget, (hotbarHeight - 38 - slotGap * (rows - 1)) / rows)
 	for slot, button in instances.hotbarButtons do
-		button.Position = UDim2.fromOffset(12 + (slot - 1) * (buttonWidth + slotGap), 8)
+		local column = (slot - 1) % columns
+		local row = math.floor((slot - 1) / columns)
+		button.Position = UDim2.fromOffset(12 + column * (buttonWidth + slotGap), 8 + row * (buttonHeight + slotGap))
 		button.Size = UDim2.fromOffset(buttonWidth, buttonHeight)
 		button.TextSize = layout.textSize - 1
 	end
@@ -1683,6 +1713,8 @@ local function construct(
 		inputFamily = "Desktop",
 		reducedMotion = false,
 		lowEffects = false,
+		enemyHealthBars = true,
+		towerRange = true,
 		renderCount = 0,
 		actionCount = 0,
 		cleaned = false,
@@ -1708,14 +1740,16 @@ end
 local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 	local instances = data.instances
 	local viewport = snapshot.viewport or Vector2.new(1280, 720)
-	local layout = resolveResponsiveLayout(viewport.X, viewport.Y)
+	local uiScale = snapshot.uiScale or 1
+	local layout = resolveResponsiveLayout(viewport.X / uiScale, viewport.Y / uiScale)
 	if layout == nil then
 		error("invalid responsive layout", 0)
 	end
+	instances.root.Size = UDim2.fromScale(1 / uiScale, 1 / uiScale)
 	if data.applyProductionStyle then
 		applyLayout(instances, layout)
 	end
-	instances.uiScale.Scale = snapshot.uiScale or 1
+	instances.uiScale.Scale = uiScale
 
 	if snapshot.state == "Loading" then
 		instances.waveLabel.Text = "◆ MATCH LOADING"
@@ -1739,6 +1773,13 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 		else COLORS.Good
 	setButtonEnabled(instances.baseButton, snapshot.state ~= "Loading" and snapshot.state ~= "Closing")
 
+	for slot, button in instances.hotbarButtons do
+		local visible = snapshot.hotbar[slot] ~= nil
+		button.Visible = visible
+		if not visible then
+			setButtonEnabled(button, false)
+		end
+	end
 	for slot, metadata in snapshot.hotbar do
 		local button = instances.hotbarButtons[slot]
 		local availabilityText = if metadata.available then "AVAILABLE" else (metadata.reason or "UNAVAILABLE")
@@ -1835,6 +1876,8 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 	data.inputFamily = snapshot.inputFamily
 	data.reducedMotion = snapshot.reducedMotion == true
 	data.lowEffects = snapshot.lowEffects == true
+	data.enemyHealthBars = snapshot.enemyHealthBars ~= false
+	data.towerRange = snapshot.towerRange ~= false
 end
 
 function ViewMethods.render(self: View, value: unknown): Outcome<Metrics>
@@ -1915,6 +1958,7 @@ local function canonicalWorld(value: unknown): ({ TowerVisual }?, { EnemyVisual 
 		local position = rawget(tower, "position")
 		local rotationDegrees = rawget(tower, "rotationDegrees")
 		local selected = rawget(tower, "selected")
+		local range = rawget(tower, "range")
 		if
 			not safeId(id)
 			or identifiers[id :: string]
@@ -1922,6 +1966,7 @@ local function canonicalWorld(value: unknown): ({ TowerVisual }?, { EnemyVisual 
 			or not finiteVector3(position)
 			or (rotationDegrees ~= nil and (not finiteNumber(rotationDegrees) or math.abs(rotationDegrees :: number) > 360))
 			or (selected ~= nil and type(selected) ~= "boolean")
+			or (range ~= nil and (not finiteNumber(range) or (range :: number) < 0 or (range :: number) > 10_000))
 		then
 			return nil, nil
 		end
@@ -1932,6 +1977,7 @@ local function canonicalWorld(value: unknown): ({ TowerVisual }?, { EnemyVisual 
 			position = position :: Vector3,
 			rotationDegrees = rotationDegrees :: number?,
 			selected = selected :: boolean?,
+			range = range :: number?,
 		})
 	end
 	for index = 1, enemyCount do
@@ -2002,6 +2048,7 @@ function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
 					primaryPart = primaryPart,
 					definitionId = tower.definitionId,
 					selection = makeSelectionHighlight(model, data.applyProductionStyle),
+					rangeIndicator = makeRangeIndicator(model, data.applyProductionStyle),
 					isPrimitiveFallback = isPrimitiveFallback,
 				}
 			end
@@ -2016,13 +2063,15 @@ function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
 				end
 				table.insert(createdModels, model)
 				model.Name = enemy.id
-				local healthFill, healthText = makeEnemyHealthDisplay(model, primaryPart, data.applyProductionStyle)
+				local healthDisplay, healthFill, healthText =
+					makeEnemyHealthDisplay(model, primaryPart, data.applyProductionStyle)
 				stagedEnemies[enemy.id] = {
 					model = model,
 					primaryPart = primaryPart,
 					definitionId = enemy.definitionId,
 					healthFill = healthFill,
 					healthText = healthText,
+					healthDisplay = healthDisplay,
 					isPrimitiveFallback = isPrimitiveFallback,
 				}
 			end
@@ -2059,6 +2108,17 @@ function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
 			if record.selection ~= nil then
 				record.selection.Enabled = tower.selected == true
 			end
+			if record.rangeIndicator ~= nil then
+				local radius = tower.range or 0
+				record.rangeIndicator.Size = Vector3.new(0.08, radius * 2, radius * 2)
+				record.rangeIndicator.CFrame = CFrame.new(tower.position + Vector3.new(0, 0.04, 0))
+					* CFrame.Angles(0, 0, math.pi / 2)
+				record.rangeIndicator.Transparency = if data.towerRange
+						and tower.selected == true
+						and radius > 0
+					then 0.82
+					else 1
+			end
 		end
 		for id, record in data.towerRecords do
 			if not seenTowers[id] then
@@ -2085,6 +2145,9 @@ function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
 			pivotVisual(data, record.model, record.primaryPart, CFrame.new(enemy.position))
 			local healthRatio = enemy.health / enemy.maxHealth
 			if record.healthFill ~= nil and record.healthText ~= nil then
+				if record.healthDisplay ~= nil then
+					record.healthDisplay.Enabled = data.enemyHealthBars
+				end
 				if data.applyProductionStyle then
 					record.healthFill.Size = UDim2.fromScale(healthRatio, 1)
 				end
@@ -2148,6 +2211,7 @@ function ViewMethods.playAttackEffect(self: View, value: unknown): Outcome<boole
 		targetId = rawget(record, "targetId") :: any,
 		origin = rawget(record, "origin") :: any,
 		target = rawget(record, "target") :: any,
+		damage = rawget(record, "damage") :: any,
 	}
 	if
 		not safeId(event.matchId)
@@ -2156,6 +2220,7 @@ function ViewMethods.playAttackEffect(self: View, value: unknown): Outcome<boole
 		or not safeId(event.targetId)
 		or (event.origin ~= nil and not finiteVector3(event.origin))
 		or (event.target ~= nil and not finiteVector3(event.target))
+		or (event.damage ~= nil and not safeInteger(event.damage, 1, 1_000_000))
 	then
 		return failure("INVALID_ARGUMENT")
 	end
@@ -2184,6 +2249,22 @@ function ViewMethods.playAttackEffect(self: View, value: unknown): Outcome<boole
 		effect.Transparency = if data.reducedMotion then 0.35 else 0.12
 		if data.applyProductionStyle then
 			effect.Material = Enum.Material.Neon
+		end
+		if event.damage ~= nil then
+			local display = Instance.new("BillboardGui")
+			display.Name = "DamageNumber"
+			display.Adornee = effect
+			display.AlwaysOnTop = true
+			display.LightInfluence = 0
+			display.Size = UDim2.fromOffset(80, 28)
+			display.StudsOffsetWorldSpace = Vector3.new(0, 1.5, 0)
+			display.Parent = effect
+			local label = makeLabel("Value", display, data.applyProductionStyle)
+			label.Size = UDim2.fromScale(1, 1)
+			label.BackgroundTransparency = 1
+			label.Text = `-{event.damage}`
+			label.TextColor3 = COLORS.Warning
+			label.TextScaled = true
 		end
 		return effect
 	end)

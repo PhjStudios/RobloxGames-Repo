@@ -105,7 +105,7 @@ local ACTION_KINDS: { [ActionKind]: boolean } = table.freeze({
 
 local HINTS: { [Context]: { [InputFamily]: string } } = table.freeze({
 	Match = table.freeze({
-		Desktop = "1–3 Select Tower • F Focus Base",
+		Desktop = "1–5 Select Tower • F Focus Base",
 		Touch = "Tap a tower card • Tap Base to focus",
 		Gamepad = "A Select Tower • LB/RB Build • D-Pad Left/Right Tower • D-Pad Down Toggle Base",
 	}),
@@ -139,7 +139,7 @@ local ERRORS: { [ErrorCode]: InputError } = table.freeze({
 })
 
 local PlayableInputMap = {
-	HOTBAR_SLOTS = 3,
+	HOTBAR_SLOTS = 5,
 	newForTests = nil :: TestConstructor?,
 }
 
@@ -236,7 +236,12 @@ local function canonicalAction(
 	local directionValue = rawget(fields :: any, "direction")
 	local positionValue = rawget(fields :: any, "screenPosition")
 	if kind == "SelectHotbar" then
-		if type(slotValue) ~= "number" or slotValue % 1 ~= 0 or slotValue < 1 or slotValue > 3 then
+		if
+			type(slotValue) ~= "number"
+			or slotValue % 1 ~= 0
+			or slotValue < 1
+			or slotValue > PlayableInputMap.HOTBAR_SLOTS
+		then
 			return nil
 		end
 	elseif slotValue ~= nil then
@@ -269,6 +274,10 @@ local function hotbarAction(keyCode: string): (ActionKind?, { [string]: unknown 
 		return "SelectHotbar", { slot = 2 }
 	elseif keyCode == "Three" or keyCode == "KeypadThree" then
 		return "SelectHotbar", { slot = 3 }
+	elseif keyCode == "Four" or keyCode == "KeypadFour" then
+		return "SelectHotbar", { slot = 4 }
+	elseif keyCode == "Five" or keyCode == "KeypadFive" then
+		return "SelectHotbar", { slot = 5 }
 	elseif keyCode == "ButtonL1" then
 		return "CycleHotbar", { direction = -1 }
 	elseif keyCode == "ButtonR1" then

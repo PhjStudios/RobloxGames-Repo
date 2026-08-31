@@ -26,13 +26,55 @@
         "$ignoreUnknownInstances": true,
 
         "common": {
-          "$path": "src/server/common",
-          "$ignoreUnknownInstances": true
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true,
+
+          "bootstrap": {
+            "$className": "Folder",
+            "$ignoreUnknownInstances": true,
+
+            "Main": {
+              "$path": "src/server/lobby/bootstrap/Main.server.luau"
+            },
+
+            "ServerBootstrap": {
+              "$path": "src/server/common/bootstrap/ServerBootstrap.luau"
+            },
+
+            "Shutdown": {
+              "$path": "src/server/common/bootstrap/Shutdown.luau"
+            }
+          },
+
+          "networking": {
+            "$path": "src/server/common/networking",
+            "$ignoreUnknownInstances": true
+          },
+
+          "profile": {
+            "$path": "src/server/common/profile",
+            "$ignoreUnknownInstances": true
+          }
         },
 
         "lobby": {
-          "$path": "src/server/lobby",
-          "$ignoreUnknownInstances": true
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true,
+
+          "inventory": {
+            "$path": "src/server/lobby/inventory",
+            "$ignoreUnknownInstances": true
+          },
+
+          "acquisition": {
+            "$path": "src/server/lobby/acquisition",
+            "$ignoreUnknownInstances": true
+          },
+
+          "settings": {
+            "$path": "src/server/lobby/settings",
+            "$ignoreUnknownInstances": true
+          }
         }
       }
     },
@@ -50,13 +92,45 @@
           "$ignoreUnknownInstances": true,
 
           "common": {
-            "$path": "src/client/common",
-            "$ignoreUnknownInstances": true
+            "$className": "Folder",
+            "$ignoreUnknownInstances": true,
+
+            "bootstrap": {
+              "$className": "Folder",
+              "$ignoreUnknownInstances": true,
+
+              "Main": {
+                "$path": "src/client/lobby/bootstrap/Main.client.luau"
+              },
+
+              "ClientBootstrap": {
+                "$path": "src/client/common/bootstrap/ClientBootstrap.luau"
+              }
+            },
+
+            "networking": {
+              "$path": "src/client/common/networking",
+              "$ignoreUnknownInstances": true
+            },
+
+            "ui": {
+              "$path": "src/client/common/ui",
+              "$ignoreUnknownInstances": true
+            }
           },
 
           "lobby": {
-            "$path": "src/client/lobby",
-            "$ignoreUnknownInstances": true
+            "$className": "Folder",
+            "$ignoreUnknownInstances": true,
+
+            "LobbyController": {
+              "$path": "src/client/lobby/LobbyController.luau"
+            },
+
+            "ui": {
+              "$path": "src/client/lobby/ui",
+              "$ignoreUnknownInstances": true
+            }
           }
         }
       }

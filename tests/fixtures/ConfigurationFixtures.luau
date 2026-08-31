@@ -274,7 +274,7 @@ function ConfigurationFixtures.validSources(): { [string]: any }
 			},
 		},
 		defaultSettings = {
-			version = 1,
+			version = 2,
 			masterVolume = 1,
 			musicVolume = 0.75,
 			sfxVolume = 0.8,
@@ -284,6 +284,7 @@ function ConfigurationFixtures.validSources(): { [string]: any }
 			enemyHealthBarsEnabled = true,
 			otherPlayerEffectsEnabled = true,
 			lowDetailEnabled = false,
+			reducedMotionEnabled = false,
 			towerRangeEnabled = true,
 			uiScale = 1,
 		},

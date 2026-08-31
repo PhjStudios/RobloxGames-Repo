@@ -61,7 +61,7 @@ return TestHarness.suite("playable Match semantic input map", {
 			assertions.equal(metrics.context, "Match")
 			assertions.equal(metrics.preferredInput, "Desktop")
 			assertions.equal(metrics.connectionCount, 2)
-			assertions.contains(metrics.hint, "1–3")
+			assertions.contains(metrics.hint, "1–5")
 			assertions.equal(metrics.actionCount, 0)
 		end)
 	end),
@@ -199,6 +199,7 @@ return TestHarness.suite("playable Match semantic input map", {
 			assertions.isTrue(slot.ok)
 			assertions.equal(slot.value.source, "Touch")
 			assertions.equal(slot.value.slot, 3)
+			assertions.isTrue(inputMap:emit("SelectHotbar", { slot = 5 }).ok)
 			assertions.isFalse(inputMap:emit("Confirm").ok)
 
 			inputMap:setContext("Tower")
@@ -206,7 +207,7 @@ return TestHarness.suite("playable Match semantic input map", {
 			assertions.equal(inputMap:emit("Retarget").value.kind, "Retarget")
 			assertions.equal(inputMap:emit("Sell").value.kind, "Sell")
 			assertions.equal(inputMap:emit("Cancel").value.kind, "Cancel")
-			assertions.equal(#actions, 5)
+			assertions.equal(#actions, 6)
 		end)
 	end),
 

@@ -79,7 +79,7 @@ return TestHarness.suite("configuration schemas valid fixtures", {
 		assertions.equal(#canonical.waves.ordered, 2)
 		assertions.equal(#canonical.economy.ordered, 2)
 		assertions.equal(#canonical.banners.ordered, 1)
-		assertions.equal(canonical.settings.version, 1)
+		assertions.equal(canonical.settings.version, 2)
 
 		assertions.equal(canonical.waves.ordered[1].kind, "AuthoredFinite")
 		assertions.equal(canonical.waves.ordered[2].kind, "GeneratedEndless")

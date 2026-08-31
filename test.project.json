@@ -33,8 +33,40 @@
           "$path": "src/server/common/networking"
         },
 
+        "ProductionServerProfile": {
+          "$path": "src/server/common/profile"
+        },
+
+        "ProductionServerLobbyInventory": {
+          "$path": "src/server/lobby/inventory"
+        },
+
+        "ProductionServerLobbyAcquisition": {
+          "$path": "src/server/lobby/acquisition"
+        },
+
+        "ProductionServerLobbySettings": {
+          "$path": "src/server/lobby/settings"
+        },
+
         "ProductionClientNetworking": {
           "$path": "src/client/common/networking"
+        },
+
+        "ProductionClientCommonUi": {
+          "$path": "src/client/common/ui"
+        },
+
+        "ProductionClientLobbyUi": {
+          "$path": "src/client/lobby/ui"
+        },
+
+        "ProductionClientLobby": {
+          "$className": "Folder",
+
+          "LobbyController": {
+            "$path": "src/client/lobby/LobbyController.luau"
+          }
         },
 
         "ProductionClientEnemies": {

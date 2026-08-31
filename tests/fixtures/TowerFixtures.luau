@@ -186,7 +186,7 @@ function TowerFixtures.rawSources(): RawSources
 		},
 		banners = {},
 		defaultSettings = {
-			version = 1,
+			version = 2,
 			masterVolume = 1,
 			musicVolume = 0.75,
 			sfxVolume = 0.8,
@@ -196,6 +196,7 @@ function TowerFixtures.rawSources(): RawSources
 			enemyHealthBarsEnabled = true,
 			otherPlayerEffectsEnabled = true,
 			lowDetailEnabled = false,
+			reducedMotionEnabled = false,
 			towerRangeEnabled = true,
 			uiScale = 1,
 		},

@@ -306,6 +306,51 @@ return TestHarness.suite("authoritative playable match runtime", {
 	end),
 
 	TestHarness.case(
+		"freezes a variable equipped loadout and rejects stale or unequipped placement refs",
+		function(assertions)
+			local runtime = success(
+				assertions,
+				PlayableMatchRuntime.new({
+					matchId = MATCH_ID,
+					configuration = CONFIGURATION,
+					runtimeMap = makeRuntimeMap(),
+					participantLoadouts = {
+						{
+							userId = USER_ONE,
+							revision = 9,
+							settings = CONFIGURATION.defaultSettings,
+							slots = {
+								{ slot = 1, unitId = "unit:runtime-dart", towerId = "tower:dart-ant" },
+							},
+						},
+					},
+				})
+			)
+			local initial = snapshot(assertions, runtime, USER_ONE, 10)
+			assertions.equal(initial.loadoutRevision, 9)
+			assertions.equal(#initial.towerOptions, 1)
+			assertions.equal(initial.towerOptions[1].slot, 1)
+			assertions.equal(initial.towerOptions[1].unitId, "unit:runtime-dart")
+			readyAll(assertions, runtime, { USER_ONE }, 100)
+			expectRejected(
+				assertions,
+				runtime:placeTower(USER_ONE, MATCH_ID, "tower:dart-ant", 1, 8, Vector3.new(0, 0, 0), 0, 100),
+				"StaleLoadout"
+			)
+			expectRejected(
+				assertions,
+				runtime:placeTower(USER_ONE, MATCH_ID, "tower:rapid-ant", 1, 9, Vector3.new(0, 0, 0), 0, 100),
+				"UnequippedTower"
+			)
+			expectAccepted(
+				assertions,
+				runtime:placeTower(USER_ONE, MATCH_ID, "tower:dart-ant", 1, 9, Vector3.new(0, 0, 0), 0, 100)
+			)
+			assertions.isTrue(success(assertions, runtime:cleanup()))
+		end
+	),
+
+	TestHarness.case(
 		"spends for valid geometry and enforces occupancy affordability and the global cap",
 		function(assertions)
 			local runtime = newRuntime(assertions)

@@ -49,6 +49,11 @@
           "networking": {
             "$path": "src/server/common/networking",
             "$ignoreUnknownInstances": true
+          },
+
+          "profile": {
+            "$path": "src/server/common/profile",
+            "$ignoreUnknownInstances": true
           }
         },
 

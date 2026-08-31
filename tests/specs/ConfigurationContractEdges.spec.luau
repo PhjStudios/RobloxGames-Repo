@@ -519,7 +519,7 @@ return TestHarness.suite("configuration public contract edges", {
 			sources.maps[1].modelAssetKey = "tower.worker-model"
 			sources.economy.difficultyRules[1].damageIncome.battleCashNumerator = 2
 			sources.economy.difficultyRules[1].damageIncome.healthRemovedDenominator = 10
-			sources.defaultSettings.version = 2
+			sources.defaultSettings.version = 3
 
 			local report = expectConfigurationReport(assertions, sources)
 			assertions.isNotNil(report)

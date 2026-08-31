@@ -40,6 +40,26 @@ local MAX_BUILT_PLACE_PATH_BYTES = 240
 local ownsOutput = false
 local createdBuildDirectory = false
 
+local function hasRequiredLoaderGlobals(): boolean
+	for _, value in
+		{
+			roblox.CFrame,
+			roblox.Color3,
+			roblox.Enum,
+			roblox.Instance,
+			roblox.UDim,
+			roblox.UDim2,
+			roblox.Vector2,
+			roblox.Vector3,
+		}
+	do
+		if value == nil then
+			return false
+		end
+	end
+	return true
+end
+
 local function record(code: string, category: string, path: string)
 	print(`[ATD_TEST][FAIL][category={category}][code={code}][path={path}]`)
 end
@@ -304,7 +324,11 @@ local function createModuleLoader(dataModel: DataModel): (ModuleScript) -> unkno
 
 		local environment = {
 			CFrame = roblox.CFrame,
+			Color3 = roblox.Color3,
+			Enum = roblox.Enum,
 			Instance = roblox.Instance,
+			UDim = roblox.UDim,
+			UDim2 = roblox.UDim2,
 			Vector2 = roblox.Vector2,
 			Vector3 = roblox.Vector3,
 			game = dataModel,
@@ -353,6 +377,10 @@ local function main(): number
 	local options = parseSelection()
 	if options == nil then
 		record("INVALID_ARGUMENTS", "runner", "tests/run.luau")
+		return EXIT_RUNNER_FAILURE
+	end
+	if not hasRequiredLoaderGlobals() then
+		record("LOADER_GLOBALS_MISSING", "runner", "tests/run.luau")
 		return EXIT_RUNNER_FAILURE
 	end
 

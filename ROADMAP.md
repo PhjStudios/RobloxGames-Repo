@@ -1,9 +1,9 @@
 # Ant Tower Defense Roadmap
 
-This is the current delivery roadmap. Phases 00–13 and the Playable Local Match
-outcome are complete; the Persistent Lobby Loop has not begun. The detailed
-historical packet plan remains useful for requirements and design context, but
-delivery now targets playable outcomes.
+This is the current delivery roadmap. Phases 00–23, the Playable Local Match,
+and the Persistent Lobby Loop outcomes are complete; the Squad Travel Loop has
+not begun. The detailed historical packet plan remains useful for requirements
+and design context, but delivery now targets playable outcomes.
 
 ## Delivery outcomes
 
@@ -12,8 +12,9 @@ delivery now targets playable outcomes.
    victory/defeat/replay, and the vertical-slice gate. Pull forward only the
    minimum real map, tower, enemy, and wave content needed to make that local
    match genuinely playable and testable.
-2. **Persistent lobby loop — Phases 19–23.** Add safe profiles, shared UI and
-   settings, persistent inventory/loadouts, acquisition, and a coherent lobby.
+2. **Complete: Persistent lobby loop — Phases 19–23.** Safe profiles, shared UI
+   and settings, persistent inventory/loadouts, earn-only acquisition, and a
+   coherent lobby now form one player loop.
 3. **Squad travel loop — Phases 24–28.** Add parties, physical queues, safe match
    tickets and travel, persistent rewards/return, reconnect, and spectating.
 4. **Content and onboarding — remaining Phases 29–33.** Finish the production

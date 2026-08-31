@@ -36,6 +36,46 @@ local bindings: { ServerRateLimiter.PolicyBinding } = {
 		policy = requirePolicy(2, 0.25),
 	}),
 	table.freeze({
+		endpoint = "GetLobbyProfile",
+		policy = requirePolicy(4, 2),
+	}),
+	table.freeze({
+		endpoint = "RetryLobbyProfile",
+		policy = requirePolicy(1, 0.1),
+	}),
+	table.freeze({
+		endpoint = "GetLobbyInventory",
+		policy = requirePolicy(4, 1),
+	}),
+	table.freeze({
+		endpoint = "EquipLobbyTower",
+		policy = requirePolicy(4, 1),
+	}),
+	table.freeze({
+		endpoint = "UnequipLobbyTower",
+		policy = requirePolicy(4, 1),
+	}),
+	table.freeze({
+		endpoint = "FavoriteLobbyTower",
+		policy = requirePolicy(4, 1),
+	}),
+	table.freeze({
+		endpoint = "LockLobbyTower",
+		policy = requirePolicy(4, 1),
+	}),
+	table.freeze({
+		endpoint = "GetLobbyBanner",
+		policy = requirePolicy(3, 0.5),
+	}),
+	table.freeze({
+		endpoint = "PullLobbyChest",
+		policy = requirePolicy(2, 0.2),
+	}),
+	table.freeze({
+		endpoint = "UpdateLobbySettings",
+		policy = requirePolicy(4, 1),
+	}),
+	table.freeze({
 		endpoint = "SubmitReady",
 		policy = requirePolicy(2, 0.5),
 	}),

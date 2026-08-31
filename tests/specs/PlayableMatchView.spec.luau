@@ -184,7 +184,9 @@ return TestHarness.suite("playable local Match presentation", {
 		"renders wave enemies numeric base health cash and three actionable tower cards",
 		function(assertions)
 			withView(function(view, fixture)
-				assertions.isTrue(view:render(snapshot()).ok)
+				local scaled = snapshot()
+				scaled.uiScale = 1.25
+				assertions.isTrue(view:render(scaled).ok)
 				local metrics = view:getMetrics()
 				assertions.contains(metrics.waveText, "2 / 5")
 				assertions.contains(metrics.enemyText, "7")
@@ -194,13 +196,15 @@ return TestHarness.suite("playable local Match presentation", {
 				assertions.contains(metrics.cashText, "BATTLE CASH")
 
 				local _, root = guiTree(fixture)
+				assertions.isTrue(math.abs(root.Size.X.Scale - 0.8) < 1e-5)
+				assertions.isTrue(math.abs(root.Size.Y.Scale - 0.8) < 1e-5)
 				local hotbarPanel = child(root, "TowerHotbar", "Frame") :: Frame
 				assertions.contains((child(hotbarPanel, "TowerSlot1", "TextButton") :: TextButton).Text, "Scout")
 				assertions.contains((child(hotbarPanel, "TowerSlot2", "TextButton") :: TextButton).Text, "$175")
 				assertions.contains((child(hotbarPanel, "TowerSlot3", "TextButton") :: TextButton).Text, "NEED CASH")
 
 				fixture.activations[1]()
-				fixture.activations[4]()
+				fixture.activations[6]()
 				assertions.equal(#fixture.actions, 2)
 				assertions.equal(fixture.actions[1].kind, "SelectHotbar")
 				assertions.equal(fixture.actions[1].slot, 1)
@@ -210,6 +214,54 @@ return TestHarness.suite("playable local Match presentation", {
 			end)
 		end
 	),
+
+	TestHarness.case("hides absent slots for one-slot desktop and shrinking touch loadouts", function(assertions)
+		withView(function(view, fixture)
+			local oneSlot = snapshot()
+			oneSlot.hotbar = {
+				{ slot = 1, displayName = "Scout", cost = 100, available = true, selected = false },
+			}
+			assertions.isTrue(view:render(oneSlot).ok)
+
+			local _, root = guiTree(fixture)
+			local hotbarPanel = child(root, "TowerHotbar", "Frame") :: Frame
+			assertions.isTrue((child(hotbarPanel, "TowerSlot1", "TextButton") :: TextButton).Visible)
+			for slot = 2, PlayableMatchView.HOTBAR_SLOTS do
+				local button = child(hotbarPanel, `TowerSlot{slot}`, "TextButton") :: TextButton
+				assertions.isFalse(button.Visible)
+				assertions.isFalse(button.Active)
+			end
+
+			local fiveSlots = snapshot()
+			fiveSlots.hotbar = {
+				{ slot = 1, displayName = "Scout", cost = 100, available = true, selected = false },
+				{ slot = 2, displayName = "Ranger", cost = 175, available = true, selected = false },
+				{ slot = 3, displayName = "Cannon", cost = 300, available = true, selected = false },
+				{ slot = 4, displayName = "Guard", cost = 400, available = true, selected = false },
+				{ slot = 5, displayName = "Rapid", cost = 500, available = true, selected = false },
+			}
+			assertions.isTrue(view:render(fiveSlots).ok)
+			for slot = 1, PlayableMatchView.HOTBAR_SLOTS do
+				assertions.isTrue((child(hotbarPanel, `TowerSlot{slot}`, "TextButton") :: TextButton).Visible)
+			end
+
+			local twoSlotTouch = snapshot()
+			twoSlotTouch.inputFamily = "Touch"
+			twoSlotTouch.hotbar = {
+				{ slot = 1, displayName = "Scout", cost = 100, available = true, selected = false },
+				{ slot = 2, displayName = "Ranger", cost = 175, available = true, selected = false },
+			}
+			assertions.isTrue(view:render(twoSlotTouch).ok)
+			for slot = 1, 2 do
+				assertions.isTrue((child(hotbarPanel, `TowerSlot{slot}`, "TextButton") :: TextButton).Visible)
+			end
+			for slot = 3, PlayableMatchView.HOTBAR_SLOTS do
+				local button = child(hotbarPanel, `TowerSlot{slot}`, "TextButton") :: TextButton
+				assertions.isFalse(button.Visible)
+				assertions.isFalse(button.Active)
+			end
+		end)
+	end),
 
 	TestHarness.case("shows a Ready overlay and gives gamepad focus to its enabled action", function(assertions)
 		withView(function(view, fixture)
@@ -226,7 +278,7 @@ return TestHarness.suite("playable local Match presentation", {
 			assertions.contains((child(overlay, "Status", "TextLabel") :: TextLabel).Text, "Waiting")
 			assertions.equal(fixture.selected, child(overlay, "Ready", "TextButton"))
 
-			fixture.activations[5]()
+			fixture.activations[7]()
 			assertions.equal(#fixture.actions, 1)
 			assertions.equal(fixture.actions[1].kind, "Ready")
 			assertions.equal(fixture.actions[1].source, "Gamepad")
@@ -248,7 +300,7 @@ return TestHarness.suite("playable local Match presentation", {
 				assertions.contains((child(panel, "Stats", "TextLabel") :: TextLabel).Text, "Cooldown 0.80s")
 				assertions.contains((child(panel, "TargetMode", "TextLabel") :: TextLabel).Text, "FIRST")
 
-				for index = 6, 9 do
+				for index = 8, 11 do
 					fixture.activations[index]()
 				end
 				assertions.equal(#fixture.actions, 4)
@@ -281,10 +333,10 @@ return TestHarness.suite("playable local Match presentation", {
 					assertions.isFalse(button.Active)
 					assertions.isFalse(button.Selectable)
 				end
-				fixture.activations[6]()
-				fixture.activations[7]()
 				fixture.activations[8]()
 				fixture.activations[9]()
+				fixture.activations[10]()
+				fixture.activations[11]()
 				assertions.equal(#fixture.actions, 1)
 				assertions.equal(fixture.actions[1].kind, "Cancel")
 			end)
@@ -309,7 +361,7 @@ return TestHarness.suite("playable local Match presentation", {
 			local results = child(root, "ResultsOverlay", "Frame") :: Frame
 			assertions.contains((child(results, "ResultTitle", "TextLabel") :: TextLabel).Text, "✓")
 			assertions.contains((child(results, "ResultTitle", "TextLabel") :: TextLabel).Text, "VICTORY")
-			fixture.activations[10]()
+			fixture.activations[12]()
 			assertions.equal(fixture.actions[1].kind, "Replay")
 
 			local defeat = snapshot()
@@ -319,7 +371,7 @@ return TestHarness.suite("playable local Match presentation", {
 			assertions.isTrue(view:render(defeat).ok)
 			assertions.equal(view:getMetrics().resultKind, "Defeat")
 			assertions.contains((child(results, "ResultTitle", "TextLabel") :: TextLabel).Text, "✕")
-			fixture.activations[10]()
+			fixture.activations[12]()
 			assertions.equal(#fixture.actions, 1)
 
 			local replayReady = snapshot()
@@ -381,9 +433,9 @@ return TestHarness.suite("playable local Match presentation", {
 				assertions.isFalse(confirm.Active)
 				assertions.isTrue(rotate.Active)
 				assertions.isTrue(cancel.Active)
-				fixture.activations[11]()
-				fixture.activations[12]()
 				fixture.activations[13]()
+				fixture.activations[14]()
+				fixture.activations[15]()
 				assertions.equal(#fixture.actions, 2)
 				assertions.equal(fixture.actions[1].kind, "Rotate")
 				assertions.equal(fixture.actions[2].kind, "Cancel")
@@ -394,7 +446,7 @@ return TestHarness.suite("playable local Match presentation", {
 				assertions.isTrue(confirm.Active)
 				assertions.contains(view:getMetrics().touchPlacementText, "POSITION SELECTED")
 				assertions.contains(view:getMetrics().touchPlacementText, "15")
-				fixture.activations[11]()
+				fixture.activations[13]()
 				assertions.equal(fixture.actions[3].kind, "Confirm")
 
 				local invalidDesktop = snapshot()
@@ -432,6 +484,7 @@ return TestHarness.suite("playable local Match presentation", {
 						definitionId = "tower:dart-ant",
 						position = Vector3.new(0, 0, 0),
 						selected = true,
+						range = 24,
 					},
 				},
 				enemies = {
@@ -455,18 +508,55 @@ return TestHarness.suite("playable local Match presentation", {
 			}).ok)
 			assertions.equal(view:getMetrics().worldTowerCount, 1)
 			assertions.equal(view:getMetrics().worldEnemyCount, 2)
+			local world = fixture.worldParent:FindFirstChild(PlayableMatchView.WORLD_FOLDER_NAME) :: Folder
+			local towerModel = (world:FindFirstChild("Towers") :: Folder):FindFirstChild("tower:one") :: Model
+			assertions.isTrue(
+				math.abs((towerModel:FindFirstChild("RangeIndicator") :: Part).Transparency - 0.82) < 1e-5
+			)
+			local enemyModel = (world:FindFirstChild("Enemies") :: Folder):FindFirstChild("enemy:one") :: Model
+			assertions.isTrue((enemyModel:FindFirstChild("HealthDisplay") :: BillboardGui).Enabled)
 
 			local attack = {
 				matchId = "match:playable-view",
 				sequence = 1,
 				towerId = "tower:one",
 				targetId = "enemy:one",
+				damage = 12,
 			}
 			assertions.isTrue(view:playAttackEffect(attack).ok)
 			assertions.equal(view:getMetrics().attackEffectCount, 1)
+			local effects = world:FindFirstChild("AttackEffects") :: Folder
+			assertions.isNotNil((effects:GetChildren()[1] :: Part):FindFirstChild("DamageNumber"))
 			assertions.isFalse(view:playAttackEffect(attack).ok)
 			fixture.clock = 11
 			assertions.equal(view:stepEffects(11).value, 0)
+
+			local preferences = snapshot()
+			preferences.enemyHealthBars = false
+			preferences.towerRange = false
+			assertions.isTrue(view:render(preferences).ok)
+			assertions.isTrue(view:syncWorld({
+				towers = {
+					{
+						id = "tower:one",
+						definitionId = "tower:dart-ant",
+						position = Vector3.new(0, 0, 0),
+						selected = true,
+						range = 24,
+					},
+				},
+				enemies = {
+					{
+						id = "enemy:one",
+						definitionId = "enemy:scout-ant",
+						position = Vector3.new(0, 2, 12),
+						health = 6,
+						maxHealth = 10,
+					},
+				},
+			}).ok)
+			assertions.equal((towerModel:FindFirstChild("RangeIndicator") :: Part).Transparency, 1)
+			assertions.isFalse((enemyModel:FindFirstChild("HealthDisplay") :: BillboardGui).Enabled)
 
 			local replay = snapshot()
 			replay.matchId = "match:playable-replay"

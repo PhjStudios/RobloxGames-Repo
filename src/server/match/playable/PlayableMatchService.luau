@@ -8,6 +8,7 @@ local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 
 local Log = require(ReplicatedStorage.Shared.logging.Log)
+local MatchLoadoutProtocol = require(ReplicatedStorage.Shared.match.MatchLoadoutProtocol)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
 local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
@@ -30,6 +31,7 @@ export type LifecycleAdapter = {
 
 export type SnapshotSender = (recipient: unknown, snapshot: PlayableMatchProtocol.Snapshot) -> boolean
 export type AttackSender = (recipient: unknown, event: PlayableMatchProtocol.AttackEvent) -> boolean
+export type LoadoutProvider = (userId: number) -> MatchLoadoutProtocol.Snapshot?
 export type LifecycleState = "Constructed" | "Initialized" | "Started" | "Shutdown" | "Failed"
 
 export type Environment = {
@@ -51,6 +53,7 @@ export type Metrics = {
 	publishPending: boolean,
 	publishCount: number,
 	attackPublishCount: number,
+	frozenLoadoutCount: number,
 	runtime: PlayableMatchRuntime.Metrics?,
 }
 
@@ -73,6 +76,9 @@ type ServiceData = {
 	publishCount: number,
 	attackPublishCount: number,
 	legacyDefeatAttempted: boolean,
+	loadoutProvider: LoadoutProvider,
+	frozenLoadouts: { [number]: MatchLoadoutProtocol.Snapshot },
+	admittedUserIds: { [number]: boolean },
 }
 
 local SERVICE_NAME = "PlayableMatch"
@@ -91,7 +97,8 @@ export type TestConstructor = (
 	ConfigTypes.CoreConfiguration,
 	SnapshotSender,
 	AttackSender,
-	Environment
+	Environment,
+	LoadoutProvider?
 ) -> Service
 
 local DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ServiceData }
@@ -154,18 +161,39 @@ local PRODUCTION_ENVIRONMENT: Environment = table.freeze({
 	contentRoot = ReplicatedStorage,
 })
 
-local function participantUserIds(data: ServiceData): { number }
-	local output: { number } = {}
+local function resolveLoadout(data: ServiceData, userId: number): MatchLoadoutProtocol.Snapshot?
+	local retained = data.frozenLoadouts[userId]
+	if retained ~= nil then
+		return retained
+	end
+	local called, value = pcall(data.loadoutProvider, userId)
+	if not called then
+		return nil
+	end
+	local validated = MatchLoadoutProtocol.validate(value, data.configuration)
+	if not validated.ok or validated.value.userId ~= userId then
+		return nil
+	end
+	data.frozenLoadouts[userId] = validated.value
+	return validated.value
+end
+
+local function participantLoadouts(data: ServiceData): { MatchLoadoutProtocol.Snapshot }
+	local output: { MatchLoadoutProtocol.Snapshot } = {}
 	for _, player in data.environment.getActivePlayers() do
 		if #output >= 4 then
 			break
 		end
 		local userId = data.environment.getUserId(player)
-		if userId ~= 0 then
-			table.insert(output, userId)
+		local loadout = if userId == 0 then nil else resolveLoadout(data, userId)
+		if loadout ~= nil then
+			table.insert(output, loadout)
+			data.admittedUserIds[userId] = true
 		end
 	end
-	table.sort(output)
+	table.sort(output, function(left, right)
+		return left.userId < right.userId
+	end)
 	return output
 end
 
@@ -283,7 +311,7 @@ local function constructRuntime(data: ServiceData): PlayableMatchRuntime.Runtime
 		matchId = matchId,
 		configuration = data.configuration,
 		runtimeMap = runtimeMap,
-		participantUserIds = participantUserIds(data),
+		participantLoadouts = participantLoadouts(data),
 	})
 	return if result.ok then result.value else nil
 end
@@ -338,18 +366,29 @@ local function handlePlayerAdded(data: ServiceData, player: Player)
 		end
 		return
 	end
-	local outcome = runtime:addParticipant(data.environment.getUserId(player))
+	local userId = data.environment.getUserId(player)
+	local loadout = resolveLoadout(data, userId)
+	if loadout == nil then
+		return
+	end
+	local outcome = runtime:addParticipant(loadout)
 	if outcome.accepted then
+		data.admittedUserIds[userId] = true
 		data.publishPending = true
+	else
+		data.frozenLoadouts[userId] = nil
 	end
 end
 
 local function handlePlayerRemoving(data: ServiceData, player: Player)
+	local userId = data.environment.getUserId(player)
+	data.admittedUserIds[userId] = nil
+	data.frozenLoadouts[userId] = nil
 	local runtime = data.runtime
 	if data.state ~= "Started" or runtime == nil then
 		return
 	end
-	local outcome = runtime:removeParticipant(data.environment.getUserId(player), data.environment.now())
+	local outcome = runtime:removeParticipant(userId, data.environment.now())
 	if outcome.accepted then
 		data.publishPending = true
 	end
@@ -427,6 +466,14 @@ local function heartbeat(data: ServiceData)
 	if runtime == nil then
 		data.state = "Failed"
 		return
+	end
+	if runtime:getMetrics().state == "Ready" then
+		for _, player in data.environment.getActivePlayers() do
+			local userId = data.environment.getUserId(player)
+			if userId ~= 0 and data.admittedUserIds[userId] ~= true then
+				handlePlayerAdded(data, player)
+			end
+		end
 	end
 	local serverTime = data.environment.now()
 	local stepped = runtime:step(serverTime)
@@ -518,6 +565,8 @@ local function shutdown(data: ServiceData)
 		runtime:cleanup()
 	end
 	data.runtimeMap = nil
+	table.clear(data.frozenLoadouts)
+	table.clear(data.admittedUserIds)
 	data.publishPending = false
 	data.replayBusy = false
 end
@@ -563,6 +612,8 @@ function Methods.submitPlacement(
 		data.environment.getUserId(player),
 		payload.matchId,
 		payload.towerId,
+		payload.slot,
+		payload.loadoutRevision,
 		payload.position,
 		payload.rotationDegrees,
 		data.environment.now()
@@ -668,6 +719,10 @@ end
 function Methods.getMetrics(self: Service): Metrics
 	local data = requireData(self)
 	local runtime = data.runtime
+	local frozenLoadoutCount = 0
+	for _ in data.frozenLoadouts do
+		frozenLoadoutCount += 1
+	end
 	return table.freeze({
 		state = data.state,
 		generation = data.generation,
@@ -675,6 +730,7 @@ function Methods.getMetrics(self: Service): Metrics
 		publishPending = data.publishPending,
 		publishCount = data.publishCount,
 		attackPublishCount = data.attackPublishCount,
+		frozenLoadoutCount = frozenLoadoutCount,
 		runtime = if runtime == nil then nil else runtime:getMetrics(),
 	})
 end
@@ -685,7 +741,8 @@ local function construct(
 	configuration: ConfigTypes.CoreConfiguration,
 	snapshotSender: SnapshotSender,
 	attackSender: AttackSender,
-	environment: Environment
+	environment: Environment,
+	loadoutProvider: LoadoutProvider
 ): Service
 	local data: ServiceData = {
 		logger = logger,
@@ -706,12 +763,15 @@ local function construct(
 		publishCount = 0,
 		attackPublishCount = 0,
 		legacyDefeatAttempted = false,
+		loadoutProvider = loadoutProvider,
+		frozenLoadouts = {},
+		admittedUserIds = {},
 	}
 	local service = setmetatable({}, Methods) :: Service
 	table.freeze(service)
 	data.serviceDefinition = table.freeze({
 		name = SERVICE_NAME,
-		dependencies = table.freeze({ "NetworkRegistry", "MatchLifecycle" }),
+		dependencies = table.freeze({ "NetworkRegistry", "ProfileService", "MatchLifecycle" }),
 		initialize = function()
 			initialize(data)
 		end,
@@ -731,9 +791,21 @@ function PlayableMatchService.new(
 	lifecycle: LifecycleAdapter,
 	configuration: ConfigTypes.CoreConfiguration,
 	snapshotSender: SnapshotSender,
-	attackSender: AttackSender
+	attackSender: AttackSender,
+	loadoutProvider: LoadoutProvider
 ): Service
-	return construct(logger, lifecycle, configuration, snapshotSender, attackSender, PRODUCTION_ENVIRONMENT)
+	if type(loadoutProvider) ~= "function" then
+		error("[ATD_PLAYABLE_MATCH_SERVICE][code=LOADOUT_PROVIDER_MISSING]", 0)
+	end
+	return construct(
+		logger,
+		lifecycle,
+		configuration,
+		snapshotSender,
+		attackSender,
+		PRODUCTION_ENVIRONMENT,
+		loadoutProvider
+	)
 end
 
 local function isExactTestModule(): boolean
@@ -752,7 +824,38 @@ local function isExactTestModule(): boolean
 end
 
 if isExactTestModule() then
-	PlayableMatchService.newForTests = construct
+	PlayableMatchService.newForTests = function(
+		logger: Log.Logger,
+		lifecycle: LifecycleAdapter,
+		configuration: ConfigTypes.CoreConfiguration,
+		snapshotSender: SnapshotSender,
+		attackSender: AttackSender,
+		environment: Environment,
+		loadoutProvider: LoadoutProvider?
+	): Service
+		local provider = loadoutProvider
+			or function(userId: number): MatchLoadoutProtocol.Snapshot?
+				local slots = {}
+				for index, definition in configuration.towers.ordered do
+					if index > MatchLoadoutProtocol.MAX_SLOTS then
+						break
+					end
+					table.insert(slots, {
+						slot = index,
+						unitId = `unit:test-{userId}-{index}`,
+						towerId = definition.id,
+					})
+				end
+				local result = MatchLoadoutProtocol.validate({
+					userId = userId,
+					revision = 1,
+					slots = slots,
+					settings = configuration.defaultSettings,
+				}, configuration)
+				return if result.ok then result.value else nil
+			end
+		return construct(logger, lifecycle, configuration, snapshotSender, attackSender, environment, provider)
+	end
 end
 
 table.freeze(Methods)

@@ -428,7 +428,7 @@ return TestHarness.suite("configuration schema failures", {
 		)
 
 		local settings = Fixtures.clone(sources.defaultSettings)
-		settings.version = 2
+		settings.version = 3
 		expectIssue(
 			assertions,
 			SettingsSchema.validateDefaults(settings),
@@ -497,7 +497,7 @@ return TestHarness.suite("configuration schema failures", {
 		for _ = 1, 5 do
 			local sources = Fixtures.validSources()
 			sources.assets = "invalid assets"
-			sources.defaultSettings.version = 2
+			sources.defaultSettings.version = 3
 			local result = ConfigurationValidator.validate(sources)
 			assertions.isFalse(result.ok)
 			if result.ok then

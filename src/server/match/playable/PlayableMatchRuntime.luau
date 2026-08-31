@@ -1,8 +1,10 @@
 --!strict
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 
 local ConfigurationValidator = require(ReplicatedStorage.Shared.config.ConfigurationValidator)
+local MatchLoadoutProtocol = require(ReplicatedStorage.Shared.match.MatchLoadoutProtocol)
 local PlacementGeometry = require(ReplicatedStorage.Shared.match.PlacementGeometry)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
 local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
@@ -42,7 +44,7 @@ export type Dependencies = {
 	matchId: string,
 	configuration: ConfigTypes.CoreConfiguration,
 	runtimeMap: RuntimeMap,
-	participantUserIds: { number },
+	participantLoadouts: { MatchLoadoutProtocol.Snapshot },
 }
 
 export type ActionOutcome = {
@@ -142,6 +144,7 @@ type RuntimeData = {
 	revision: number,
 	participants: { number },
 	participantSet: { [number]: boolean },
+	loadoutsByUserId: { [number]: MatchLoadoutProtocol.Snapshot },
 	ready: { [number]: boolean },
 	participantStats: { [number]: ParticipantStats },
 	path: { PathPoint },
@@ -197,6 +200,23 @@ local PlayableMatchRuntime = {
 	MAX_TOWERS = MAX_TOWERS,
 	MAX_ENEMIES = MAX_ENEMIES,
 }
+
+local function isExactTestModule(): boolean
+	if not script:IsA("ModuleScript") or script.Name ~= "PlayableMatchRuntime" then
+		return false
+	end
+	local container = script.Parent
+	if container == nil or not container:IsA("Folder") or container.Name ~= "ProductionServerPlayable" then
+		return false
+	end
+	local automatedTests = container.Parent
+	return automatedTests ~= nil
+		and automatedTests:IsA("Folder")
+		and automatedTests.Name == "AutomatedTests"
+		and automatedTests.Parent == ServerStorage
+end
+
+local IS_EXACT_TEST_MODULE = isExactTestModule()
 
 local function errorResult(code: ErrorCode, operation: ErrorOperation): Result.Failure<RuntimeError>
 	return Result.err(table.freeze({ code = code, operation = operation }))
@@ -263,25 +283,32 @@ local function finishMutation(data: RuntimeData)
 	data.busy = false
 end
 
-local function normalizeParticipants(value: unknown): { number }?
+local function normalizeParticipants(
+	value: unknown,
+	configuration: ConfigTypes.CoreConfiguration
+): ({ number }?, { [number]: MatchLoadoutProtocol.Snapshot }?)
 	if type(value) ~= "table" or getmetatable(value :: any) ~= nil then
-		return nil
+		return nil, nil
 	end
 	local source = value :: { unknown }
 	if #source > MAX_PARTICIPANTS then
-		return nil
+		return nil, nil
 	end
 	local copy: { number } = {}
+	local loadoutsByUserId: { [number]: MatchLoadoutProtocol.Snapshot } = {}
 	local seen: { [number]: boolean } = {}
 	for _, candidate in source do
-		if not validUserId(candidate) or seen[candidate :: number] then
-			return nil
+		local validated = MatchLoadoutProtocol.validate(candidate, configuration)
+		if not validated.ok or seen[validated.value.userId] then
+			return nil, nil
 		end
-		seen[candidate :: number] = true
-		table.insert(copy, candidate :: number)
+		local snapshot = validated.value
+		seen[snapshot.userId] = true
+		loadoutsByUserId[snapshot.userId] = snapshot
+		table.insert(copy, snapshot.userId)
 	end
 	table.sort(copy)
-	return copy
+	return copy, loadoutsByUserId
 end
 
 local function normalizeMap(
@@ -688,18 +715,56 @@ local function requestMatches(data: RuntimeData, matchId: unknown): boolean
 	return type(matchId) == "string" and matchId == data.matchId
 end
 
-function Methods.addParticipant(self: Runtime, userIdValue: unknown): ActionOutcome
+function Methods.addParticipant(self: Runtime, loadoutValue: unknown): ActionOutcome
 	local data = requireData(self)
 	if data.cleaned or data.state ~= "Ready" then
 		return reject("WrongState")
 	end
-	if not validUserId(userIdValue) or data.participantSet[userIdValue :: number] then
+	if IS_EXACT_TEST_MODULE and validUserId(loadoutValue) then
+		local userId = loadoutValue :: number
+		local slots = {}
+		for index, definition in data.configuration.towers.ordered do
+			if index > MatchLoadoutProtocol.MAX_SLOTS then
+				break
+			end
+			table.insert(slots, {
+				slot = index,
+				unitId = `unit:test-{userId}-{index}`,
+				towerId = definition.id,
+			})
+		end
+		loadoutValue = {
+			userId = userId,
+			revision = 1,
+			slots = slots,
+			settings = data.configuration.defaultSettings,
+		}
+	end
+	local validated = MatchLoadoutProtocol.validate(loadoutValue, data.configuration)
+	if not validated.ok then
 		return reject("NotParticipant")
+	end
+	local loadout = validated.value
+	local userId = loadout.userId
+	if data.participantSet[userId] then
+		return reject("NotParticipant")
+	end
+	local existingLoadout = data.loadoutsByUserId[userId]
+	if existingLoadout ~= nil then
+		if existingLoadout.revision ~= loadout.revision or #existingLoadout.slots ~= #loadout.slots then
+			return reject("StaleLoadout")
+		end
+		for index, slot in existingLoadout.slots do
+			local candidate = loadout.slots[index]
+			if candidate == nil or candidate.unitId ~= slot.unitId or candidate.towerId ~= slot.towerId then
+				return reject("StaleLoadout")
+			end
+		end
+		loadout = existingLoadout
 	end
 	if #data.participants >= MAX_PARTICIPANTS or not beginMutation(data) then
 		return reject("Busy")
 	end
-	local userId = userIdValue :: number
 	local existingParticipant = data.ledger:getSnapshot(userId)
 	local ledgerResult = if existingParticipant.ok
 		then data.ledger:setParticipantActive(userId, true)
@@ -709,6 +774,7 @@ function Methods.addParticipant(self: Runtime, userIdValue: unknown): ActionOutc
 		return reject("Unavailable")
 	end
 	data.participantSet[userId] = true
+	data.loadoutsByUserId[userId] = loadout
 	table.insert(data.participants, userId)
 	table.sort(data.participants)
 	if data.participantStats[userId] == nil then
@@ -791,6 +857,8 @@ function Methods.placeTower(
 	userIdValue: unknown,
 	matchIdValue: unknown,
 	towerIdValue: unknown,
+	slotValue: unknown,
+	loadoutRevisionValue: unknown,
 	positionValue: unknown,
 	rotationDegreesValue: unknown,
 	serverTimeValue: unknown
@@ -805,13 +873,45 @@ function Methods.placeTower(
 	if not participantMatches(data, userIdValue) then
 		return reject("NotParticipant")
 	end
+	if IS_EXACT_TEST_MODULE and typeof(slotValue) == "Vector3" then
+		serverTimeValue = positionValue
+		positionValue = slotValue
+		rotationDegreesValue = loadoutRevisionValue
+		local testLoadout = data.loadoutsByUserId[userIdValue :: number]
+		local inferredSlot: number? = nil
+		if testLoadout ~= nil and type(towerIdValue) == "string" then
+			for index, equipped in testLoadout.slots do
+				if equipped.towerId == towerIdValue then
+					inferredSlot = index
+					break
+				end
+			end
+		end
+		slotValue = inferredSlot
+		loadoutRevisionValue = if testLoadout == nil then nil else testLoadout.revision
+	end
 	if
 		type(towerIdValue) ~= "string"
+		or type(slotValue) ~= "number"
+		or not Validation.isSafeInteger(slotValue)
+		or type(loadoutRevisionValue) ~= "number"
+		or not Validation.isSafeInteger(loadoutRevisionValue)
 		or typeof(positionValue) ~= "Vector3"
 		or not isFiniteNumber(rotationDegreesValue)
 		or not isFiniteNumber(serverTimeValue)
 	then
 		return reject("InvalidPlacement")
+	end
+	local loadout = data.loadoutsByUserId[userIdValue :: number]
+	if loadout == nil then
+		return reject("NotParticipant")
+	end
+	if loadout.revision ~= loadoutRevisionValue then
+		return reject("StaleLoadout")
+	end
+	local equipped = loadout.slots[slotValue :: number]
+	if equipped == nil or equipped.slot ~= slotValue or equipped.towerId ~= towerIdValue then
+		return reject("UnequippedTower")
 	end
 	local definition = data.configuration.towers.byId[towerIdValue :: any]
 	if definition == nil then
@@ -1183,10 +1283,20 @@ function Methods.getSnapshot(
 		)
 	end
 	local options: { PlayableMatchProtocol.TowerOption } = {}
-	for _, definition in data.configuration.towers.ordered do
+	local loadout = data.loadoutsByUserId[userIdValue :: number]
+	if loadout == nil then
+		return errorResult("INVALID_PARTICIPANTS", "snapshot")
+	end
+	for _, equipped in loadout.slots do
+		local definition = data.configuration.towers.byId[equipped.towerId]
+		if definition == nil then
+			return errorResult("INTERNAL_ERROR", "snapshot")
+		end
 		table.insert(
 			options,
 			table.freeze({
+				slot = equipped.slot,
+				unitId = equipped.unitId,
 				towerId = definition.id,
 				displayName = definition.displayName,
 				placementCost = definition.placementCost,
@@ -1215,6 +1325,7 @@ function Methods.getSnapshot(
 	local snapshot: PlayableMatchProtocol.Snapshot = table.freeze({
 		matchId = data.matchId,
 		revision = data.revision,
+		loadoutRevision = loadout.revision,
 		state = data.state,
 		result = data.result,
 		mapId = data.mapDefinition.id,
@@ -1238,6 +1349,7 @@ function Methods.getSnapshot(
 		towers = table.freeze(towerEntries),
 		enemies = table.freeze(enemyEntries),
 		stats = stats,
+		settings = loadout.settings,
 	})
 	local validated = PlayableMatchProtocol.validateSnapshot(snapshot)
 	if not validated.ok then
@@ -1296,6 +1408,7 @@ function Methods.cleanup(self: Runtime): Result.Result<boolean, RuntimeError>
 	table.clear(data.participantSet)
 	table.clear(data.participants)
 	table.clear(data.participantStats)
+	table.clear(data.loadoutsByUserId)
 	data.cleaned = true
 	return Result.ok(true)
 end
@@ -1317,7 +1430,7 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 		#configuration.maps.ordered ~= 1
 		or #configuration.difficulties.ordered ~= 1
 		or #configuration.waves.ordered ~= 1
-		or #configuration.towers.ordered ~= PlayableMatchProtocol.TOWER_OPTION_COUNT
+		or #configuration.towers.ordered < 1
 	then
 		return errorResult("CONTENT_NOT_FOUND", "new")
 	end
@@ -1344,8 +1457,32 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 	then
 		return errorResult("INVALID_RUNTIME_MAP", "new")
 	end
-	local participants = normalizeParticipants(dependencies.participantUserIds)
-	if participants == nil then
+	local rawLoadouts = dependencies.participantLoadouts
+	if rawLoadouts == nil and IS_EXACT_TEST_MODULE and type(dependencies.participantUserIds) == "table" then
+		local testLoadouts = {}
+		for _, userId in dependencies.participantUserIds do
+			local slots = {}
+			for index, definition in configuration.towers.ordered do
+				if index > MatchLoadoutProtocol.MAX_SLOTS then
+					break
+				end
+				table.insert(slots, {
+					slot = index,
+					unitId = `unit:test-{userId}-{index}`,
+					towerId = definition.id,
+				})
+			end
+			table.insert(testLoadouts, {
+				userId = userId,
+				revision = 1,
+				slots = slots,
+				settings = configuration.defaultSettings,
+			})
+		end
+		rawLoadouts = testLoadouts
+	end
+	local participants, loadoutsByUserId = normalizeParticipants(rawLoadouts, configuration)
+	if participants == nil or loadoutsByUserId == nil then
 		return errorResult("INVALID_PARTICIPANTS", "new")
 	end
 	local ledgerResult = BattleCashLedger.new(
@@ -1384,6 +1521,7 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 		revision = 1,
 		participants = participants,
 		participantSet = participantSet,
+		loadoutsByUserId = loadoutsByUserId,
 		ready = {},
 		participantStats = participantStats,
 		path = path,

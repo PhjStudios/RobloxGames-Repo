@@ -2232,7 +2232,7 @@ local function buildStudioSources(scenario: string, mapIdentity: StudioMapIdenti
 		},
 		banners = {},
 		defaultSettings = {
-			version = 1,
+			version = 2,
 			masterVolume = 1,
 			musicVolume = 0.75,
 			sfxVolume = 0.8,
@@ -2242,6 +2242,7 @@ local function buildStudioSources(scenario: string, mapIdentity: StudioMapIdenti
 			enemyHealthBarsEnabled = true,
 			otherPlayerEffectsEnabled = true,
 			lowDetailEnabled = false,
+			reducedMotionEnabled = false,
 			towerRangeEnabled = true,
 			uiScale = 1,
 		},

@@ -1,6 +1,7 @@
 --!strict
 
 local PayloadValidation = require(script.Parent.Parent.network.PayloadValidation)
+local SettingsProtocol = require(script.Parent.Parent.settings.SettingsProtocol)
 local Result = require(script.Parent.Parent.util.Result)
 local Validation = require(script.Parent.Parent.util.Validation)
 
@@ -12,8 +13,10 @@ export type ActionReason =
 	"Accepted"
 	| "WrongState"
 	| "StaleMatch"
+	| "StaleLoadout"
 	| "StaleTower"
 	| "NotParticipant"
+	| "UnequippedTower"
 	| "InvalidPlacement"
 	| "InsufficientCash"
 	| "TowerCap"
@@ -30,6 +33,8 @@ export type ParticipantSummary = {
 }
 
 export type TowerOption = {
+	slot: number,
+	unitId: string,
 	towerId: string,
 	displayName: string,
 	placementCost: number,
@@ -80,6 +85,7 @@ export type ResultStats = {
 export type Snapshot = {
 	matchId: string,
 	revision: number,
+	loadoutRevision: number,
 	state: MatchState,
 	result: MatchResult,
 	mapId: string,
@@ -100,6 +106,7 @@ export type Snapshot = {
 	towers: { TowerSnapshot },
 	enemies: { EnemySnapshot },
 	stats: ResultStats,
+	settings: SettingsProtocol.Settings,
 }
 
 export type GetSnapshotPayload = {}
@@ -107,6 +114,8 @@ export type ReadyPayload = { matchId: string }
 export type ReplayPayload = { matchId: string }
 export type PlacementPayload = {
 	matchId: string,
+	loadoutRevision: number,
+	slot: number,
 	towerId: string,
 	position: Vector3,
 	rotationDegrees: number,
@@ -142,7 +151,8 @@ local MAX_COORDINATE = 100_000
 -- Keep a worst-case snapshot within PayloadValidation's global 512-node budget.
 local MAX_ACTIVE_TOWERS = 12
 local MAX_ACTIVE_ENEMIES = 20
-local TOWER_OPTION_COUNT = 3
+local MIN_TOWER_OPTIONS = 1
+local MAX_TOWER_OPTIONS = 5
 local MAX_LEVEL = 10
 local MAX_WAVES = 1_000
 local MAX_NAME_BYTES = 64
@@ -173,8 +183,10 @@ local ACTION_REASONS: { ActionReason } = table.freeze({
 	"Accepted",
 	"WrongState",
 	"StaleMatch",
+	"StaleLoadout",
 	"StaleTower",
 	"NotParticipant",
+	"UnequippedTower",
 	"InvalidPlacement",
 	"InsufficientCash",
 	"TowerCap",
@@ -197,6 +209,8 @@ local PARTICIPANT_SUMMARY = PayloadValidation.record({
 })
 
 local TOWER_OPTION = PayloadValidation.record({
+	slot = PayloadValidation.integer(1, MAX_TOWER_OPTIONS),
+	unitId = PayloadValidation.id("unit"),
 	towerId = PayloadValidation.id("tower"),
 	displayName = PayloadValidation.string(MAX_NAME_BYTES, 1),
 	placementCost = NONNEGATIVE_SAFE_INTEGER,
@@ -247,6 +261,7 @@ local RESULT_STATS = PayloadValidation.record({
 local SNAPSHOT = PayloadValidation.record({
 	matchId = PayloadValidation.id("match"),
 	revision = POSITIVE_SAFE_INTEGER,
+	loadoutRevision = POSITIVE_SAFE_INTEGER,
 	state = PayloadValidation.enum({ "Ready", "Playing", "Results" }),
 	result = PayloadValidation.enum({ "None", "Victory", "Defeat" }),
 	mapId = PayloadValidation.id("map"),
@@ -263,10 +278,11 @@ local SNAPSHOT = PayloadValidation.record({
 	enemiesAlive = PayloadValidation.integer(0, MAX_ACTIVE_ENEMIES),
 	battleCash = NONNEGATIVE_SAFE_INTEGER,
 	participants = PARTICIPANT_SUMMARY,
-	towerOptions = PayloadValidation.array(TOWER_OPTION, TOWER_OPTION_COUNT, TOWER_OPTION_COUNT),
+	towerOptions = PayloadValidation.array(TOWER_OPTION, MAX_TOWER_OPTIONS, MIN_TOWER_OPTIONS),
 	towers = PayloadValidation.array(TOWER_SNAPSHOT, MAX_ACTIVE_TOWERS),
 	enemies = PayloadValidation.array(ENEMY_SNAPSHOT, MAX_ACTIVE_ENEMIES),
 	stats = RESULT_STATS,
+	settings = SettingsProtocol.SettingsValidator,
 })
 
 local GetSnapshotPayloadSchema = PayloadValidation.schema(PayloadValidation.record({}))
@@ -276,6 +292,8 @@ local ReadyPayloadSchema = PayloadValidation.schema(PayloadValidation.record({
 local ReplayPayloadSchema = ReadyPayloadSchema
 local PlacementPayloadSchema = PayloadValidation.schema(PayloadValidation.record({
 	matchId = PayloadValidation.id("match"),
+	loadoutRevision = POSITIVE_SAFE_INTEGER,
+	slot = PayloadValidation.integer(1, MAX_TOWER_OPTIONS),
 	towerId = PayloadValidation.id("tower"),
 	position = PayloadValidation.vector3(),
 	rotationDegrees = PayloadValidation.number(-360, 360),
@@ -349,7 +367,8 @@ local PlayableMatchProtocol = {
 	ACTION_REASONS = ACTION_REASONS,
 	MAX_ACTIVE_TOWERS = MAX_ACTIVE_TOWERS,
 	MAX_ACTIVE_ENEMIES = MAX_ACTIVE_ENEMIES,
-	TOWER_OPTION_COUNT = TOWER_OPTION_COUNT,
+	MIN_TOWER_OPTIONS = MIN_TOWER_OPTIONS,
+	MAX_TOWER_OPTIONS = MAX_TOWER_OPTIONS,
 	GetSnapshotPayloadSchema = GetSnapshotPayloadSchema,
 	ReadyPayloadSchema = ReadyPayloadSchema,
 	ReplayPayloadSchema = ReplayPayloadSchema,
@@ -388,6 +407,30 @@ function PlayableMatchProtocol.validateSnapshot(value: unknown): Result.Result<S
 		return Result.err(
 			Validation.issue("INVALID_TOTAL", { "payload", "waveNumber" }, "Wave number exceeds total waves")
 		)
+	end
+	local seenTowerIds: { [string]: boolean } = {}
+	local seenUnitIds: { [string]: boolean } = {}
+	for index, option in snapshot.towerOptions do
+		if option.slot ~= index then
+			return Result.err(
+				Validation.issue(
+					"INVALID_ORDER",
+					{ "payload", "towerOptions", index, "slot" },
+					"Tower option slots must be dense and ordered"
+				)
+			)
+		end
+		if seenTowerIds[option.towerId] or seenUnitIds[option.unitId] then
+			return Result.err(
+				Validation.issue(
+					"DUPLICATE_VALUE",
+					{ "payload", "towerOptions", index },
+					"Tower options must reference unique equipped towers and units"
+				)
+			)
+		end
+		seenTowerIds[option.towerId] = true
+		seenUnitIds[option.unitId] = true
 	end
 	if
 		(snapshot.state == "Results") ~= (snapshot.result ~= "None")

@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
+local SoundService = game:GetService("SoundService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
@@ -11,6 +12,7 @@ local Log = require(ReplicatedStorage.Shared.logging.Log)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
 local RemoteRegistry = require(ReplicatedStorage.Shared.network.RemoteRegistry)
 local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
+local SettingsProtocol = require(ReplicatedStorage.Shared.settings.SettingsProtocol)
 local Result = require(ReplicatedStorage.Shared.util.Result)
 
 local PlayableInputMap = require(script.Parent.PlayableInputMap)
@@ -98,6 +100,7 @@ export type Dependencies = {
 	pickTower: (Vector2, { PlayableMatchProtocol.TowerSnapshot }, PlayableInputMap.InputFamily) -> number?,
 	focusBase: () -> boolean,
 	restoreCamera: () -> (),
+	applySettings: (SettingsProtocol.Settings) -> (),
 }
 
 export type Metrics = {
@@ -389,6 +392,7 @@ local function validateDependencies(value: unknown): boolean
 		or type(dependencies.pickTower) ~= "function"
 		or type(dependencies.focusBase) ~= "function"
 		or type(dependencies.restoreCamera) ~= "function"
+		or type(dependencies.applySettings) ~= "function"
 	then
 		return false
 	end
@@ -561,8 +565,8 @@ local function renderSnapshot(data: ControllerData): boolean
 				viewport = candidate
 			end
 		end
-		local loadingHotbar = table.create(PlayableMatchProtocol.TOWER_OPTION_COUNT)
-		for slot = 1, PlayableMatchProtocol.TOWER_OPTION_COUNT do
+		local loadingHotbar = table.create(PlayableMatchProtocol.MAX_TOWER_OPTIONS)
+		for slot = 1, PlayableMatchProtocol.MAX_TOWER_OPTIONS do
 			loadingHotbar[slot] = {
 				slot = slot,
 				displayName = "Loading",
@@ -629,7 +633,7 @@ local function renderSnapshot(data: ControllerData): boolean
 		end
 	end
 
-	local hotbar = table.create(PlayableMatchProtocol.TOWER_OPTION_COUNT)
+	local hotbar = table.create(#snapshot.towerOptions)
 	for slot, option in snapshot.towerOptions do
 		local available = snapshot.state == "Playing"
 		local reason: string? = nil
@@ -724,9 +728,11 @@ local function renderSnapshot(data: ControllerData): boolean
 			else nil,
 		inputHint = hint,
 		viewport = viewport,
-		uiScale = 1,
-		reducedMotion = false,
-		lowEffects = false,
+		uiScale = snapshot.settings.uiScale,
+		reducedMotion = snapshot.settings.reducedMotionEnabled,
+		lowEffects = snapshot.settings.lowDetailEnabled,
+		enemyHealthBars = snapshot.settings.enemyHealthBarsEnabled,
+		towerRange = snapshot.settings.towerRangeEnabled,
 	})
 	if not isSuccess(renderResult) then
 		return false
@@ -740,6 +746,7 @@ local function renderSnapshot(data: ControllerData): boolean
 			position = tower.position,
 			rotationDegrees = tower.rotationDegrees,
 			selected = tower.runtimeTowerId == data.selectedTowerId,
+			range = tower.rangeStuds,
 		}
 	end
 	local enemyVisuals = table.create(#snapshot.enemies)
@@ -801,6 +808,7 @@ local function applySnapshot(
 		end
 	end
 	data.snapshot = snapshot
+	pcall((data.dependencies :: Dependencies).applySettings, snapshot.settings)
 	data.lastSnapshotAt = (data.dependencies :: Dependencies).now()
 	data.acceptedSnapshotCount += 1
 	data.renderPending = true
@@ -956,6 +964,8 @@ local function submitPlacement(data: ControllerData, action: PlayableInputMap.Se
 	end
 	return issueAction(data, "Placement", {
 		matchId = snapshot.matchId,
+		loadoutRevision = snapshot.loadoutRevision,
+		slot = option.slot,
 		towerId = option.towerId,
 		position = position :: Vector3,
 		rotationDegrees = data.rotationDegrees,
@@ -995,10 +1005,14 @@ local function cycleHotbar(data: ControllerData, direction: number?): boolean
 	if direction ~= -1 and direction ~= 1 then
 		return false
 	end
-	local current = data.selectedSlot or (if direction == 1 then 0 else PlayableMatchProtocol.TOWER_OPTION_COUNT + 1)
-	for offset = 1, PlayableMatchProtocol.TOWER_OPTION_COUNT do
-		local slot = ((current - 1 + direction * offset) % PlayableMatchProtocol.TOWER_OPTION_COUNT) + 1
-		local snapshot = data.snapshot
+	local snapshot = data.snapshot
+	local optionCount = if snapshot == nil then 0 else #snapshot.towerOptions
+	if optionCount == 0 then
+		return false
+	end
+	local current = data.selectedSlot or (if direction == 1 then 0 else optionCount + 1)
+	for offset = 1, optionCount do
+		local slot = ((current - 1 + direction * offset) % optionCount) + 1
 		local option = if snapshot == nil then nil else findOption(snapshot, slot)
 		if snapshot ~= nil and option ~= nil and option.placementCost <= snapshot.battleCash then
 			return selectHotbar(data, slot)
@@ -1224,6 +1238,13 @@ local function onAttack(data: ControllerData, generation: number, value: unknown
 		return
 	end
 	local event = validated.value
+	local settings = data.snapshot.settings
+	if not settings.otherPlayerEffectsEnabled then
+		local tower = findTower(data.snapshot, event.runtimeTowerId)
+		if tower == nil or tower.ownerUserId ~= (data.dependencies :: Dependencies).localUserId then
+			return
+		end
+	end
 	local effect = (data.dependencies :: Dependencies).view:playAttackEffect({
 		matchId = event.matchId,
 		sequence = event.sequence,
@@ -1231,6 +1252,7 @@ local function onAttack(data: ControllerData, generation: number, value: unknown
 		targetId = `enemy-runtime:{event.runtimeEnemyId}`,
 		origin = event.sourcePosition,
 		target = event.targetPosition,
+		damage = if settings.damageNumbersEnabled then event.actualDamage else nil,
 	})
 	if isSuccess(effect) then
 		data.attackEventCount += 1
@@ -1731,6 +1753,20 @@ local function makeProductionDependencies(
 		baseFocused = false
 		return true
 	end
+	local function applySettings(settings: SettingsProtocol.Settings)
+		for name, volume in
+			{
+				Music = settings.masterVolume * settings.musicVolume,
+				SFX = settings.masterVolume * settings.sfxVolume,
+				UI = settings.masterVolume * settings.uiVolume,
+			}
+		do
+			local group = SoundService:FindFirstChild(name)
+			if group ~= nil and group:IsA("SoundGroup") then
+				group.Volume = volume
+			end
+		end
+	end
 
 	return {
 		localUserId = player.UserId,
@@ -1830,6 +1866,7 @@ local function makeProductionDependencies(
 		restoreCamera = function()
 			restoreInitialCamera()
 		end,
+		applySettings = applySettings,
 	}
 end
 
