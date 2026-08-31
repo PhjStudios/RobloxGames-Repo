@@ -177,7 +177,7 @@ return TestHarness.suite("Phase 13 placement network integration", {
 			assertions.equal(#state.sent, 3)
 			assertions.equal(responseCode(state.sent[1].envelope), "Success")
 			assertions.equal(responseCode(state.sent[2].envelope), "STALE_REQUEST")
-		assertions.equal(responseCode(state.sent[3].envelope), "INVALID_PAYLOAD")
+			assertions.equal(responseCode(state.sent[3].envelope), "INVALID_PAYLOAD")
 			cleanupRuntime(state, { player })
 		end
 	),

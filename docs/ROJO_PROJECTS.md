@@ -471,5 +471,6 @@ The structural verifier now authenticates both mapping directions and exact
 source bytes, one Script/one LocalScript per production build and zero in Test,
 thirteen reliable Match-only endpoint definitions, eight inbound policies,
 Lobby/Match isolation, empty production catalogs, and absence of Phase 14
-source. Final Default/Lobby/Match/Test module and Test-owned counts are recorded
-after the complete Phase 13 gate.
+source. The completed Phase 13 inventory is `91/48/91/176` ModuleScripts for
+Default/Lobby/Match/Test, with `88` explicitly owned Test modules. Production
+builds remain `1/1` Script/LocalScript and Test remains `0/0`.

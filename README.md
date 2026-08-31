@@ -8,7 +8,7 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 The project is in structured pre-production. The complete game specification has
 been converted into a long-horizon roadmap made of small, independently
 verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phases 00–12 are complete; Gate A passed on 2026-08-26 and the Phase
+order. Phases 00–13 are complete; Gate A passed on 2026-08-26 and the Phase
 07–09 exit gates passed on 2026-08-27. Phase 10 Packets 10.1–10.4 implement
 the server-owned defender-base runtime, exact-once leak damage, bounded reliable
 recovery, world-space base presentation, and one fail-closed defeat path into
@@ -30,14 +30,15 @@ Match Studio primary/defeat/cleanup scenarios, consolidated independent review,
 `840`-case/`64`-suite local gate, and all four structural builds pass. The exact
 final-SHA CI result for that checkpoint is reported at its handoff.
 
-Phase 13 Packets 13.1–13.5 are implemented and their exact unsaved two-client
+Phase 13 Packets 13.1–13.5 are complete. Their exact unsaved two-client
 Match Studio acceptance passes across desktop, iPad touch, iPhone safe-area,
 and Xbox gamepad emulation. They add a bounded caller-private placement query,
 shared authored-footprint geometry, advisory local preview/input state
 machines, and one atomic server-authoritative placement transaction with
-replay/rate/race closure. The single consolidated review is complete and every
-material finding is resolved; the complete exit gate is the remaining
-branch-local completion step. Phase 14 remains unbegun.
+replay/rate/race closure. The single consolidated review resolved every
+material finding; the complete gate passes `941` cases across `73` suites and
+all four structural builds at `91/48/91/176` ModuleScripts. Exact-final-SHA CI
+is cited at handoff. Phase 14 is next and remains entirely unbegun.
 
 Production networking contains thirteen Match-only reliable endpoints and eight
 client-request rate policies. `Enemies`, `Assets`, `Towers`, `Maps`, `Difficulties`,

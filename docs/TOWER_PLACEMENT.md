@@ -2,8 +2,8 @@
 
 ## Decision status and scope
 
-This is the authoritative Phase 13 decision for Packets 13.1–13.5. Phase 13
-adds an advisory cross-platform preview and one synchronous authoritative
+This is the authoritative completed Phase 13 decision for Packets 13.1–13.5.
+Phase 13 adds an advisory cross-platform preview and one synchronous authoritative
 placement transaction. It consumes the Phase 07 map snapshot and Phase 12
 temporary loadout/TowerRuntime; it does not begin Phase 14 combat or Phase 15
 Battle Cash.
@@ -327,9 +327,28 @@ authoring ceiling. The fixes add lifecycle-authenticated initial revision
 delivery, authenticate the thirteenth TowerRuntime method in every structural
 build, complete the reducer type, and state both map bounds accurately. The
 same closure pass also added a bounded responsive phone layout and explicit
-safe-area properties. Focused controller, view, reducer, placement-service,
-and structural-source checks pass after the fixes; the complete exit gate is
-recorded only after it runs.
+safe-area properties. Focused controller, view, reducer, placement-service, and
+structural-source checks pass after the fixes. The complete exit gate below
+passes on the final reviewed tree.
+
+## Complete local exit gate — 2026-08-30
+
+The uninterrupted final gate passes formatting, formatting verification,
+Selene configuration validation, and Selene with zero errors, warnings, or
+parse errors. The canonical runner passes `941/941` cases across `73` suites;
+the nine dedicated placement suites contain `100` focused cases. The
+structural verifier passes Default/Lobby/Match/Test at `91/48/91/176`
+ModuleScripts, with production Script/LocalScript counts `1/1` and Test `0/0`.
+Test contains `39` shared modules, `88` explicitly owned modules, exact mirrors
+for two server and four client placement modules, thirteen reliable Match-only
+endpoints, and eight inbound policies.
+
+The same gate passes diff, scope, generated-output, empty-catalog,
+production-test exclusion, Lobby/Match isolation, and Phase 14 source checks.
+The final `rojo build -o build.rbxlx` produced a `2,061,999`-byte default place
+with class counts `91/1/1`; it was parsed/inspected and only that exact generated
+file was safely removed. No generated Roblox output remains. Exact-final-SHA CI
+is reported at handoff instead of creating a self-referential evidence commit.
 
 ## Verification and exclusions
 
@@ -344,5 +363,5 @@ rejections, coexistence, and zero residue.
 Phase 13 does not add target queries, attacks, cooldown stepping, damage,
 splash/support/status execution, upgrades, selling, target-mode transactions,
 Battle Cash mutation, persistence, matchmaking, rewards, production tower
-content, uploaded assets/animations, or lasting Studio content. Phase 14 remains
-unbegun.
+content, uploaded assets/animations, or lasting Studio content. Phase 13 is
+complete. Phase 14 is next and remains entirely unbegun.

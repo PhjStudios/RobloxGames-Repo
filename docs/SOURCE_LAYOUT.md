@@ -832,5 +832,6 @@ service, and real network integration. Studio acceptance uses lifecycle-owned
 services, not a mapped fixture/spec/manual harness. Lobby maps no Match
 placement source. Production catalogs remain frozen empty, and Phase 14 combat,
 targeting, upgrade, selling, economy, persistence, and content modules remain
-absent. Final module and Test-owned counts are recorded after the Phase 13
-structural gate.
+absent. The completed structural gate records `91/48/91/176` ModuleScripts for
+Default/Lobby/Match/Test, `88` explicitly owned Test modules, production
+Script/LocalScript counts `1/1`, and Test `0/0`.

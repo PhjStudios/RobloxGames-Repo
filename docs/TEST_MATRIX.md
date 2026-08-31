@@ -7,7 +7,7 @@ Ant Tower Defense. Packet 05.4 created it on 2026-08-26. It separates checks
 that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
-Phases 00–12 are complete. Gate A passed on 2026-08-26, and the Phase 07 exit
+Phases 00–13 are complete. Gate A passed on 2026-08-26, and the Phase 07 exit
 gate passed on 2026-08-27 after the exact Match Studio authoring, consolidated
 review, 241-case local suite, and all four structural builds. Phase 08's
 Packets 08.1–08.5, exact four-client Match Studio gate, consolidated final
@@ -24,9 +24,11 @@ consolidated final review, 467-case local gate, and all four structural builds
   handoff. Phase 11 is complete. Phase 12's `90` dedicated focused cases, exact
   unsaved two-client primary/defeat Studio gate, consolidated review,
   `840`-case/`64`-suite local gate, and all four structural builds pass. Phase 12
-  is complete; exact-final-SHA CI is cited at handoff. Phase 13 implementation,
-  focused checks, and exact desktop/touch/gamepad two-client Studio acceptance
-  pass; its consolidated review and complete exit gate remain in progress.
+  is complete; exact-final-SHA CI is cited at handoff. Phase 13's `100` focused
+  cases, exact desktop/touch/gamepad two-client Studio acceptance, single
+  consolidated review, `941`-case/`73`-suite complete gate, and all four
+  structural builds pass. Phase 13 is complete; exact-final-SHA CI is cited at
+  handoff, and Phase 14 remains unbegun.
 
 The current repository has a fixed remote-registry/network-ownership foundation,
 strict shared payload validators, a server-authoritative token-bucket limiter,
@@ -592,9 +594,9 @@ linked historical document for the original Studio evidence.
   TowerRuntime capability/create/rollback integration, races, and cleanup.
 - **Test category:** deterministic headless unit, integration, hostile-input,
   network, concurrency, re-entry, fault-injection, and cleanup tests.
-- **Current status:** `Passed` on 2026-08-30 for `99` focused cases across the
-  nine dedicated Phase 13 suites. The final complete case/suite and structural
-  counts are recorded after the one complete exit gate.
+- **Current status:** `Passed` on 2026-08-30 for `100` focused cases across the
+  nine dedicated Phase 13 suites. The complete gate passes `941` cases across
+  `73` suites and all four structural builds at `91/48/91/176` ModuleScripts.
 - **Environment:** isolated Rojo Test DataModel under Lune. Shared, server, and
   client placement modules are exact production mirrors; all fixtures/specs are
   Test-owned, and Test contains no Script or LocalScript.

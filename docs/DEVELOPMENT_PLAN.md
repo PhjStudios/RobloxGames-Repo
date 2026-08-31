@@ -34,11 +34,10 @@ only change through an explicit architecture decision recorded here.
   transaction. It has no targeting, combat, Battle Cash mutation, victory,
   reward, persistent economy, persistence, matchmaking, or teleport
   implementation.
-- Current implementation phase: Phases 00–12 are complete. Phase 13 Packets
-  13.1–13.5 are implemented, and their exact unsaved desktop/touch/gamepad
-  two-client Match Studio acceptance passes. The single consolidated review is
-  complete and all material findings are resolved; the one complete exit gate
-  remains before Phase 13 can be marked complete. Phase 14 remains unbegun.
+- Current implementation phase: Phases 00–13 are complete. Phase 13 Packets
+  13.1–13.5, exact unsaved desktop/touch/gamepad two-client Match Studio
+  acceptance, the single consolidated review, and the complete exit gate pass.
+  Phase 14 is next and remains entirely unbegun.
 - Completed packets: 00.1 on 2026-08-24; 00.2, 00.3, 01.1, 01.2, 01.3, 02.1,
   02.2, 02.3, 02.4, 03.1, 03.2, 03.3, 03.4, 04.1, and 04.2 on 2026-08-25.
   Packets 04.3, 04.4, 04.5, 05.1, 05.2, 05.3, 05.4, 06.1, 06.2, 06.3, 06.4,
@@ -49,9 +48,8 @@ only change through an explicit architecture decision recorded here.
   and their Phase 10 exit gate completed on 2026-08-28. Packets 11.1–11.6 and
   their Phase 11 exit gate completed on 2026-08-28. Packets 12.1–12.4 and their
   Phase 12 local/Studio/review/structural exit gate completed on 2026-08-28.
-  Packets 13.1–13.5 implementation and exact Studio acceptance stabilized on
-  2026-08-30; their consolidated review is complete and their completion gate
-  is still in progress.
+  Packets 13.1–13.5 and their exact Studio, review, local, and structural exit
+  gate completed on 2026-08-30.
 - Current checkpoint: Phase 06 and Gate A are complete. Its three exact current-tree
   canonical runs are byte-identical at 200 cases across 16 suites, all four
   structural builds pass, and the unsaved three-cycle Lobby, three-cycle Match,
@@ -113,7 +111,10 @@ only change through an explicit architecture decision recorded here.
   Phase 14 behavior. Its exact two-client desktop, touch/tablet, phone safe-area,
   gamepad, exploit/race, replication, coexistence, and cleanup Studio scenarios
   pass. The one bounded consolidated review found four completion gaps; all are
-  resolved, and only the complete local/structural gate remains pending.
+  resolved. The complete gate passes `941` cases across `73` suites and
+  Default/Lobby/Match/Test ModuleScript counts `91/48/91/176`, with production
+  Script/LocalScript counts `1/1` and Test `0/0`. Phase 13 is complete;
+  exact-final-SHA CI is cited at handoff.
 - Publishing state: the user authorized the Packet 02.4 Match-place creation and
   one controlled Phase 07 Save To Cloud of the reviewed Match graybox. No
   release, public-audience, settings, service, Lobby, or unrelated publication
@@ -1227,12 +1228,13 @@ Tower state or Instance residue. Exact-final-SHA CI is reported at handoff.
 
 ## Phase 13 — Tower placement preview and server validation
 
-**Current status:** Packets 13.1–13.5 are implemented. Focused deterministic
+**Current status:** Complete — 2026-08-30. Focused deterministic
 coverage and exact unsaved two-client Match Studio desktop, iPad touch, iPhone
 safe-area, Xbox gamepad, race/exploit, replication, coexistence, and cleanup
 acceptance pass on 2026-08-30. The single consolidated review is complete and
-all material findings are resolved; the complete local/structural exit gate is
-pending. Phase 14 remains unbegun. The authoritative contract is
+all material findings are resolved. The complete gate passes `941` cases across
+`73` suites and all four structural builds. Phase 14 is next and remains
+unbegun. The authoritative contract is
 `docs/TOWER_PLACEMENT.md`.
 
 **Objective:** Deliver accurate cross-platform placement without trusting the
@@ -1274,10 +1276,14 @@ client's chosen position.
   nonexistent towers, and insufficient funds.
 - Verify that only one overlapping placement succeeds.
 
-**Exit gate:** All three input families can place valid towers, while malformed or
-stale requests cannot create or charge for a tower.
+**Exit gate:** Passed — 2026-08-30. All three input families place valid towers,
+while malformed or stale requests cannot create or charge for a tower. The
+single review, exact Match Studio acceptance, `941`-case/`73`-suite local gate,
+and Default/Lobby/Match/Test `91/48/91/176` structural inventory pass.
 
 ## Phase 14 — Target acquisition and authoritative combat
+
+**Current status:** Next; entirely unbegun.
 
 **Objective:** Make towers select and damage enemies predictably at scale.
 
