@@ -2,8 +2,14 @@ name: Repository Verification
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -123,10 +129,7 @@ jobs:
       - name: Lint Luau
         run: selene src tests
 
-      - name: Run deterministic unit tests
-        run: lune run tests/run.luau
-
-      - name: Build and inspect all Rojo projects
+      - name: Run full headless suite and inspect all Rojo projects
         run: lune run tests/verify-builds.luau
 
       - name: Confirm generated outputs are absent

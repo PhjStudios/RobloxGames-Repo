@@ -1,43 +1,58 @@
 # Roblox project instructions
 
-## Project
+## Ownership
 
-Roblox Luau project using Git, GitHub, Rojo, Team Create, Rokit, StyLua, and Selene.
+- `src/` is authoritative for Rojo-managed scripts. Server-only authority lives
+  under `src/server`, shared contracts under `src/shared`, and client interface,
+  camera, input, and visuals under `src/client`.
+- Roblox Studio and Team Create are authoritative for maps, terrain, models,
+  animations, and other instances not mapped by Rojo.
+- Never make lasting Studio edits to Rojo-managed scripts or enable Script Sync
+  on folders managed by Rojo.
+- `tests/` is test-only. Default, Lobby, and Match builds must remain free of
+  test sources, fixtures, controls, and harnesses.
 
-## Source of truth
+## Tool routing
 
-- `src/` is authoritative for scripts.
-- Do not make lasting edits to Rojo-managed scripts inside Roblox Studio.
-- Roblox Studio and Team Create are authoritative for maps, terrain, models, animations, and unmapped instances.
-- Never use Roblox Script Sync on folders currently managed by Rojo.
+- Use repository and CLI tools for source edits, formatting, linting, headless
+  tests, builds, Git, and process management.
+- Use Roblox Studio's built-in MCP tools first for DataModel inspection, Luau
+  execution, play/stop, output, screenshots, navigation, and simulated input.
+- Efficient Windows UI control is allowed when direct tools do not expose the
+  exact action, including initial MCP/Rojo connection, Server & Clients,
+  emulators, and engine-only windows. Perform the action, verify it, then return
+  to direct tools.
+- For Studio work, start one managed background `rojo serve` session for the
+  correct project, check readiness, connect once, reuse the Studio instance ID,
+  batch related assertions/logs/screenshots/cleanup, and terminate Rojo
+  deliberately. Never wait on a foreground server.
+- Keep reusable Studio harnesses under `tests/studio` or another test-only path;
+  do not add phase-evidence machinery to production services.
 
-## Structure
+## Verification ladder
 
-- `src/server`: server-only and authoritative game logic
-- `src/shared`: modules shared between client and server
-- `src/client`: client-only interface, camera, input, and visual code
-
-## Commands
-
-- Install tools: `rokit install`
-- Development sync: `rojo serve`
-- Format code and tests: `stylua src tests`
-- Check formatting: `stylua --check --verify src tests`
-- Validate lint configuration: `selene validate-config`
-- Lint code and tests: `selene src tests`
-- Run headless tests: `lune run tests/run.luau`
-- Verify all project builds: `lune run tests/verify-builds.luau`
-- Build project: `rojo build -o build.rbxlx`
+- Fast iteration: run `stylua <changed .luau files>` and
+  `selene <changed .luau files>`, then run selected nearby specs in one
+  `lune run tests/run.luau` invocation using repeated `--spec` or `--group`
+  selectors.
+- Feature verification: run affected specs/integrations together, then build the
+  affected project, for example
+  `lune run tests/verify-builds.luau --builds-only --project Match`.
+- Full milestone gate: run `stylua --check --verify src tests`,
+  `selene validate-config`, `selene src tests`, then
+  `lune run tests/verify-builds.luau`. The verifier runs the complete headless
+  suite and builds Default, Lobby, Match, and Test once each.
+- Do not repeat a passing gate unless a failure-affecting change requires it.
+  See `docs/TEST_RUNNER.md` for selector details.
 
 ## Safety
 
-- Never commit secrets, API keys, cookies, passwords, or `.env` files.
-- Do not publish the game without explicit approval.
-- Validate all client requests on the server.
-- Do not trust values sent by a client.
-
-## Before finishing a change
-
-- Format and lint changed code and tests.
-- Run the canonical headless suite and all-project structural verifier.
-- Summarize changed files and required Roblox Studio testing.
+- Preserve server authority, validate every client request, and never trust
+  client-supplied values.
+- Preserve lifecycle ownership, cleanup correctness, source isolation, and
+  production/test separation.
+- Never commit secrets, credentials, cookies, passwords, or `.env` files.
+- Do not publish, migrate production data, purchase, merge, or rewrite history
+  without explicit approval.
+- Follow `ROADMAP.md`; historical phase packets are reference material, not
+  mandatory delivery cycles.

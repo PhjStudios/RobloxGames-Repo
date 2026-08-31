@@ -5,50 +5,19 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 
 ## Project status
 
-The project is in structured pre-production. The complete game specification has
-been converted into a long-horizon roadmap made of small, independently
-verifiable work packets. Gameplay implementation should follow that roadmap in
-order. Phases 00–13 are complete; Gate A passed on 2026-08-26 and the Phase
-07–09 exit gates passed on 2026-08-27. Phase 10 Packets 10.1–10.4 implement
-the server-owned defender-base runtime, exact-once leak damage, bounded reliable
-recovery, world-space base presentation, and one fail-closed defeat path into
-Results. Phase 11 Packets 11.1–11.6 add the authenticated finite authored-wave
-runtime, exact server-time scheduler, per-origin ownership and outcomes,
-difficulty composition, strict-majority skip voting, and bounded full-state
-client recovery. Its deterministic `742`-case/`56`-suite local gate, all four
-structural builds, exact unsaved two-client Match Studio scenarios, and one
-consolidated review passed on 2026-08-28. Every material review finding was
-resolved. Exact-final-SHA CI is cited at handoff rather than through a
-self-referential evidence commit.
+Phases 00–13 are complete. The project has a server-authoritative graybox match
+foundation through tower placement, with `941` headless cases across `73`
+suites and isolated Default, Lobby, Match, and Test projects. Phase 14 gameplay
+work remains unbegun.
 
-Phase 12 Packets 12.1–12.4 are complete. They add
-three fresh authenticated test/runtime tower roles, one match-scoped
-server-owned `TowerRuntime`, a temporary five-slot development loadout with
-opaque single-use creation capabilities, and an exact version-1 inert graybox
-model contract. The deterministic focused suites, exact unsaved two-client
-Match Studio primary/defeat/cleanup scenarios, consolidated independent review,
-`840`-case/`64`-suite local gate, and all four structural builds pass. The exact
-final-SHA CI result for that checkpoint is reported at its handoff.
+Current delivery is organized around playable outcomes rather than one prompt,
+branch, review, audit, and full gate per historical packet. The next outcome is
+a playable local match combining Phases 14–18 with only the minimum real map,
+tower, enemy, and wave content pulled forward from Phases 29–31.
 
-Phase 13 Packets 13.1–13.5 are complete. Their exact unsaved two-client
-Match Studio acceptance passes across desktop, iPad touch, iPhone safe-area,
-and Xbox gamepad emulation. They add a bounded caller-private placement query,
-shared authored-footprint geometry, advisory local preview/input state
-machines, and one atomic server-authoritative placement transaction with
-replay/rate/race closure. The single consolidated review resolved every
-material finding; the complete gate passes `941` cases across `73` suites and
-all four structural builds at `91/48/91/176` ModuleScripts. Exact-final-SHA CI
-is cited at handoff. Phase 14 is next and remains entirely unbegun.
-
-Production networking contains thirteen Match-only reliable endpoints and eight
-client-request rate policies. `Enemies`, `Assets`, `Towers`, `Maps`, `Difficulties`,
-`Waves`, and difficulty-specific `Economy` rules remain empty production
-catalogs, so the Wave runtime is production-dormant until authenticated content
-exists. Healthy finite completion deliberately leaves MatchLifecycle in
-`WaveActive`; victory, rewards, Results UI, Battle Cash balances, targeting,
-combat, upgrades, and selling remain unbegun.
-
-- [Detailed development roadmap](docs/DEVELOPMENT_PLAN.md)
+- [Current delivery roadmap](ROADMAP.md)
+- [Current contributor workflow](AGENTS.md)
+- [Historical detailed development plan](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
 - [Roblox place and test-environment inventory](docs/PLACE_INVENTORY.md)
 - [Verified toolchain baseline](docs/TOOLCHAIN.md)
@@ -133,29 +102,26 @@ source modules.
 3. Open the repository in VS Code.
 4. Run `rokit install`.
 5. Run `rojo plugin install`.
-6. Run `rojo serve`.
-7. Open the development place in Roblox Studio.
-8. Connect through the Rojo plugin.
+6. When Studio work is required, start the correct Rojo project as a managed
+   background process and confirm it is ready.
+7. Open the matching place in Roblox Studio.
+8. Connect Rojo and the built-in Studio MCP once, then reuse those connections.
 
-## Development commands
+## Development workflow
 
-- Install tools: `rokit install`
-- Start combined Studio synchronization: `rojo serve`
-- Start lobby-only synchronization: `rojo serve lobby.project.json`
-- Start match-only synchronization: `rojo serve match.project.json`
-- Format source and tests: `stylua src tests`
-- Check formatting: `stylua --check --verify src tests`
-- Validate Selene configuration: `selene validate-config`
-- Lint source and tests: `selene src tests`
-- Run deterministic headless tests: `lune run tests/run.luau`
-- Build and inspect all production/test projects: `lune run tests/verify-builds.luau`
-- Build the combined project: `rojo build default.project.json -o build.rbxlx`
-- Build the lobby project: `rojo build lobby.project.json -o lobby.rbxlx`
-- Build the match project: `rojo build match.project.json -o match.rbxlx`
-- Build the isolated test project: `rojo build test.project.json -o test.rbxlx`
+Use the risk-based ladder in `AGENTS.md` and selector details in
+`docs/TEST_RUNNER.md`. The main entry points are:
 
-Every implementation packet must format and lint changed Luau code, build its
-applicable Rojo project, and describe any required Roblox Studio testing.
+- Selected headless specs/groups: `lune run tests/run.luau` with repeated
+  `--spec` or `--group` selectors.
+- Affected structural build, such as Match:
+  `lune run tests/verify-builds.luau --builds-only --project Match`.
+- Full headless suite plus all four project builds, once each:
+  `lune run tests/verify-builds.luau`.
+
+Run the correct `rojo serve` project only as a managed background process for
+Studio validation; check readiness, connect once, reuse it, and stop it
+deliberately.
 
 `test.project.json` is build-only and has no place binding. Test specs,
 fixtures, support modules, negative controls, and Lune never appear in Default,

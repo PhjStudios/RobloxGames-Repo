@@ -1,5 +1,9 @@
 # Continuous integration
 
+> **Historical evidence:** This records the Packet 05.3 CI design and its original
+> runs. The active contract is `.github/workflows/ci.yml`; current verification
+> commands are in `../AGENTS.md` and `TEST_RUNNER.md`.
+
 ## Packet status
 
 - Packet: 05.3

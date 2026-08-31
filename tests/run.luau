@@ -8,6 +8,18 @@ local taskLibrary = require("@lune/task")
 
 type Selection = "normal" | "assertion" | "malformed" | "malformed-root" | "module-load" | "zero"
 
+type SelectionFilter = {
+	specs: { string },
+	groups: { string },
+}
+
+type RunOptions = {
+	selection: Selection,
+	simulateCrash: boolean,
+	filter: SelectionFilter?,
+	builtPlacePath: string?,
+}
+
 type ModuleRecord = {
 	state: "Loading" | "Loaded" | "Failed",
 	value: unknown,
@@ -22,6 +34,8 @@ local EXIT_RUNNER_FAILURE = 3
 local PROJECT_PATH = "test.project.json"
 local BUILD_DIRECTORY = "build"
 local OUTPUT_PATH = "build/phase05-test-runtime.rbxlx"
+local MAX_SELECTOR_BYTES = 64
+local MAX_BUILT_PLACE_PATH_BYTES = 240
 
 local ownsOutput = false
 local createdBuildDirectory = false
@@ -30,37 +44,110 @@ local function record(code: string, category: string, path: string)
 	print(`[ATD_TEST][FAIL][category={category}][code={code}][path={path}]`)
 end
 
-local function parseSelection(): (Selection?, boolean, string?)
+local function isSafeSelector(value: unknown): boolean
+	return type(value) == "string"
+		and #value >= 1
+		and #value <= MAX_SELECTOR_BYTES
+		and string.match(value, "^[A-Za-z][A-Za-z0-9]*$") ~= nil
+end
+
+local function isSafeBuiltPlacePath(value: unknown): boolean
+	return type(value) == "string"
+		and #value >= 1
+		and #value <= MAX_BUILT_PLACE_PATH_BYTES
+		and string.match(value, "^build/[A-Za-z0-9][A-Za-z0-9_./-]*%.rbxlx$") ~= nil
+		and string.find(value, "..", 1, true) == nil
+		and string.find(value, "//", 1, true) == nil
+end
+
+local function parseSelection(): RunOptions?
 	if #process.args == 0 then
-		return "normal", false, nil
+		return {
+			selection = "normal",
+			simulateCrash = false,
+			filter = nil,
+			builtPlacePath = nil,
+		}
 	end
-	if #process.args ~= 2 then
-		return nil, false, nil
-	end
-	if process.args[1] == "--spec" then
-		local specName = process.args[2]
-		if #specName < 1 or #specName > 64 or string.match(specName, "^[A-Za-z][A-Za-z0-9]*$") == nil then
-			return nil, false, nil
+
+	if process.args[1] == "--control" then
+		if #process.args ~= 2 then
+			return nil
 		end
-		return "normal", false, specName
-	elseif process.args[1] ~= "--control" then
-		return nil, false, nil
+		local control = process.args[2]
+		if
+			control == "zero"
+			or control == "assertion"
+			or control == "malformed"
+			or control == "malformed-root"
+			or control == "module-load"
+		then
+			return {
+				selection = control :: Selection,
+				simulateCrash = false,
+				filter = nil,
+				builtPlacePath = nil,
+			}
+		elseif control == "runner-crash" then
+			return {
+				selection = "normal",
+				simulateCrash = true,
+				filter = nil,
+				builtPlacePath = nil,
+			}
+		end
+		return nil
 	end
 
-	local control = process.args[2]
-	if
-		control == "zero"
-		or control == "assertion"
-		or control == "malformed"
-		or control == "malformed-root"
-		or control == "module-load"
-	then
-		return control :: Selection, false, nil
-	elseif control == "runner-crash" then
-		return "normal", true, nil
+	local specs: { string } = {}
+	local groups: { string } = {}
+	local seenSpecs: { [string]: boolean } = {}
+	local seenGroups: { [string]: boolean } = {}
+	local builtPlacePath: string? = nil
+	local argumentIndex = 1
+	while argumentIndex <= #process.args do
+		local option = process.args[argumentIndex]
+		local value = process.args[argumentIndex + 1]
+		if value == nil then
+			return nil
+		end
+
+		if option == "--spec" then
+			if not isSafeSelector(value) or seenSpecs[value] then
+				return nil
+			end
+			seenSpecs[value] = true
+			table.insert(specs, value)
+		elseif option == "--group" then
+			if not isSafeSelector(value) or seenGroups[value] then
+				return nil
+			end
+			seenGroups[value] = true
+			table.insert(groups, value)
+		elseif option == "--built-place" then
+			if builtPlacePath ~= nil or not isSafeBuiltPlacePath(value) then
+				return nil
+			end
+			builtPlacePath = value
+		else
+			return nil
+		end
+		argumentIndex += 2
 	end
 
-	return nil, false, nil
+	local filter: SelectionFilter? = nil
+	if #specs > 0 or #groups > 0 then
+		filter = {
+			specs = specs,
+			groups = groups,
+		}
+	end
+	return {
+		selection = "normal",
+		simulateCrash = false,
+		filter = filter,
+		builtPlacePath = builtPlacePath,
+	}
 end
 
 local function cleanupGeneratedOutput(): boolean
@@ -263,27 +350,35 @@ local function createModuleLoader(dataModel: DataModel): (ModuleScript) -> unkno
 end
 
 local function main(): number
-	local selection, simulateCrash, specName = parseSelection()
-	if selection == nil then
+	local options = parseSelection()
+	if options == nil then
 		record("INVALID_ARGUMENTS", "runner", "tests/run.luau")
 		return EXIT_RUNNER_FAILURE
 	end
-	if not buildTestPlace() then
+
+	local placePath = options.builtPlacePath
+	if placePath == nil then
+		if not buildTestPlace() then
+			return EXIT_RUNNER_FAILURE
+		end
+		placePath = OUTPUT_PATH
+	elseif not fs.isFile(placePath) then
+		record("BUILT_PLACE_MISSING", "runner", placePath)
 		return EXIT_RUNNER_FAILURE
 	end
 
-	local readSucceeded, placeContents = pcall(fs.readFile, OUTPUT_PATH)
+	local readSucceeded, placeContents = pcall(fs.readFile, placePath)
 	if not readSucceeded then
-		record("TEST_BUILD_READ_FAILED", "runner", OUTPUT_PATH)
+		record("TEST_BUILD_READ_FAILED", "runner", placePath)
 		return EXIT_RUNNER_FAILURE
 	end
 	local deserialized, dataModel = pcall(roblox.deserializePlace, placeContents)
 	if not deserialized then
-		record("TEST_BUILD_DESERIALIZE_FAILED", "runner", OUTPUT_PATH)
+		record("TEST_BUILD_DESERIALIZE_FAILED", "runner", placePath)
 		return EXIT_RUNNER_FAILURE
 	end
 
-	if simulateCrash then
+	if options.simulateCrash then
 		error("INTENTIONAL_RUNNER_CRASH_PRIVATE_VALUE", 0)
 	end
 
@@ -304,7 +399,7 @@ local function main(): number
 		return EXIT_RUNNER_FAILURE
 	end
 
-	local ran, result = pcall((testRunner :: any).run, game, selection, specName)
+	local ran, result = pcall((testRunner :: any).run, game, options.selection, options.filter)
 	if
 		not ran
 		or type(result) ~= "table"

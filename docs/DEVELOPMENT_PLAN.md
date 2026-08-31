@@ -1,9 +1,14 @@
 # Ant Tower Defense — Long-Horizon Development Roadmap
 
+> **Historical reference:** This packet-by-packet plan records requirements and
+> evidence through Phase 13. `../ROADMAP.md` is the current delivery authority;
+> packets no longer mandate separate prompts, branches, audits, reviews, or full
+> verification cycles.
+
 ## Document purpose
 
-This is the authoritative implementation roadmap for Ant Tower Defense. It
-converts the approved design specification into small work packets intended to
+This was the authoritative implementation roadmap through Phase 13. It
+converted the approved design specification into small work packets intended to
 be completed across many separate prompts over a long period.
 
 This document is deliberately more granular than a normal milestone list:

@@ -1,5 +1,35 @@
 # Automated test runner
 
+## Current workflow interface
+
+- Run the complete headless suite alone with
+  `lune run tests/run.luau`.
+- Select multiple exact spec modules in one Test build with repeated selectors,
+  for example
+  `lune run tests/run.luau --spec TowerRuntimeService --spec TowerRuntimeIntegration`.
+  A spec name is the case-sensitive ModuleScript basename before `.spec`.
+- Select subsystem groups with repeated case-sensitive basename prefixes, for
+  example `lune run tests/run.luau --group Tower --group Placement`.
+- Exact specs and groups may be combined, for example
+  `lune run tests/run.luau --group Tower --spec PlacementProtocol`. Overlap is
+  deduplicated so each suite runs once. Duplicate selectors, a missing exact
+  spec, or a selection that discovers zero tests fails the run.
+- Run an affected structural build with
+  `lune run tests/verify-builds.luau --builds-only --project Match`. `Default`,
+  `Lobby`, and `Test` are the other project names.
+- Run the full repository gate with
+  `lune run tests/verify-builds.luau`. It builds Default, Lobby, Match, and Test
+  once each, verifies their structural and source-isolation contracts, and runs
+  the complete suite against that same Test build.
+
+The full-gate verifier supplies its Test output to the runner through the
+internal `--built-place` option, avoiding a second Test build. Permanent
+`--control` modes remain isolated negative checks and cannot be combined with
+normal selectors or `--built-place`.
+
+The dated decision and packet evidence below are retained as historical context;
+the interface above and `../AGENTS.md` define the current workflow.
+
 ## Decision record
 
 - Status: Phases 00–06 complete; Gate A passed — 2026-08-26
@@ -8,7 +38,7 @@
 - Rokit tool identifier: `lune-org/lune@0.10.5`
 - Release commit: `e173211a3b529eb53624137931fc11f0a02ff867`
 - License: Mozilla Public License 2.0
-- Canonical local command: `lune run tests/run.luau`
+- Standalone full-suite command: `lune run tests/run.luau`
 
 This decision was recorded before Lune or any test-runner code was added to the
 repository. Lune is the only new third-party development dependency justified
@@ -192,16 +222,18 @@ exposes no injection seam.
 The coordinator:
 
 1. confirm it is running from the repository root;
-2. invoke the pinned Rojo build for the isolated test project;
-3. deserialize the exact generated DataModel;
+2. use the caller-owned Test build supplied by `--built-place`, or invoke the
+   pinned Rojo build for the isolated test project when none is supplied;
+3. deserialize the selected exact DataModel;
 4. load ModuleScripts by Instance identity with cycle detection and caching;
 5. inject only the standard Luau globals, `script`, the isolated `game`,
    Instance-aware `require`, Roblox `Instance`, `Vector2`, `Vector3`, `CFrame`,
    and the Lune task scheduler;
-6. discover normal specs in canonical bytewise path order;
+6. discover normal specs in canonical bytewise path order and apply any exact
+   spec/group selectors;
 7. execute cases in their declared order with stable suite and case names;
 8. emit privacy-safe classifications and paths; and
-9. remove only its exact generated test build before returning an exit code.
+9. remove only a test build it created itself before returning an exit code.
 
 The ModuleScript environment will not expose filesystem, network, process,
 authentication, or secret APIs. A production or test ModuleScript cannot use a
@@ -254,27 +286,27 @@ The permanent negative controls are reproduced with:
 
 ## Generated-output and shipping policy
 
-The runner may create one exact `.rbxlx` under the ignored `build/` directory
-while executing. It removes that file on success and on protected failure. Rojo
-verification may create other explicitly named files under `build/`; they are
-never tracked or retained as CI artifacts and are removed only by exact path.
-`sourcemap.json` remains ignored under the existing policy.
+Without `--built-place`, the runner may create one exact `.rbxlx` under the
+ignored `build/` directory and removes it on success or protected failure. A
+caller owns and cleans a supplied build. Full verification creates one output
+for each project under `build/`, passes its Test output to the runner, and
+removes every exact output. Builds are never tracked or retained as CI
+artifacts. `sourcemap.json` remains ignored under the existing policy.
 
 Default, Lobby, and Match project definitions do not map `tests/`, the runner,
-fixtures, negative controls, or a third-party test package. Packet verification
-builds all projects independently and requires every production
-`LuaSourceContainer` to match a fixed positive map of its exact DataModel path,
-class, authoritative `src/` file, and byte-for-byte source. Missing, unexpected,
-renamed, replaced, or altered source containers fail. Exact class counts, role
-isolation, test path/name checks, and test-only source markers remain additional
-defenses. Tests cannot ship merely because they exist in the repository.
+fixtures, negative controls, or a third-party test package. Full verification
+builds all projects once and dynamically verifies role layers, one server and
+one client entrypoint per production place, byte-identical shared sources,
+absence of test markers, and zero runnable scripts in Test. Test specs and
+support structure must be present, and every production module mirrored into
+Test must match a source found in a production build. This preserves the
+boundary without hard-coding phase-specific filenames or module totals.
 
-The two Packet 06.1 production runtime modules mapped into the Test build are
-explicit source-under-test, not test dependencies. The verifier requires each at
-one exact test-only `ServerStorage` path with source identical to its
-authoritative `src/` file. It also requires all three production builds to
-contain those modules only at their normal common client/server paths and to
-remain completely free of test modules and fixtures.
+The verifier also checks the production remote boundary from current source:
+client requests must be reliable, request/response shaped, explicitly scoped to
+Lobby and/or Match, and covered one-for-one by server rate-limit policies;
+server events must be explicitly scoped and use an allowed transport. Tests
+cannot ship merely because they exist in the repository.
 
 ## Packet 05.1 verification evidence
 

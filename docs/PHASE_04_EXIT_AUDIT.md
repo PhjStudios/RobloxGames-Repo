@@ -1,5 +1,8 @@
 # Phase 04 Exit-Gate Audit
 
+> **Historical evidence:** This completed exit record is retained for reference.
+> See `../ROADMAP.md` and `../AGENTS.md` for the current roadmap and workflow.
+
 ## Purpose
 
 This document records the fresh, combined-state exit audit for Phase 04 of

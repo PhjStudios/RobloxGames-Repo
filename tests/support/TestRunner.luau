@@ -13,6 +13,11 @@ export type RunResult = {
 	failedCount: number,
 }
 
+export type SelectionFilter = {
+	specs: { string },
+	groups: { string },
+}
+
 type LoadedSuite = {
 	definition: TestHarness.Suite,
 	modulePath: string,
@@ -23,6 +28,8 @@ local TestRunner = {}
 local SPEC_SUFFIX = ".spec"
 local SAFE_NAME_PATTERN = "^[A-Za-z0-9][A-Za-z0-9 _.:-]*$"
 local MAX_NAME_BYTES = 120
+local SAFE_SELECTOR_PATTERN = "^[A-Za-z][A-Za-z0-9]*$"
+local MAX_SELECTOR_BYTES = 64
 
 local function record(kind: string, fields: { [string]: string | number })
 	local names = {}
@@ -78,6 +85,61 @@ local function hasOnlyFields(value: { [any]: unknown }, allowedFields: { [string
 		end
 	end
 	return true
+end
+
+local function isSafeSelector(value: unknown): boolean
+	return type(value) == "string"
+		and #value >= 1
+		and #value <= MAX_SELECTOR_BYTES
+		and string.match(value, SAFE_SELECTOR_PATTERN) ~= nil
+end
+
+local function validateSelectorArray(value: unknown): ({ string }?, string?)
+	if not isDenseArray(value) then
+		return nil, "INVALID_SPEC_FILTER"
+	end
+
+	local selectors: { string } = {}
+	local seen: { [string]: boolean } = {}
+	for index = 1, rawlen(value :: { unknown }) do
+		local selector = rawget(value :: { unknown }, index)
+		if not isSafeSelector(selector) or seen[selector :: string] then
+			return nil, "INVALID_SPEC_FILTER"
+		end
+		seen[selector :: string] = true
+		table.insert(selectors, selector :: string)
+	end
+	return selectors, nil
+end
+
+local function validateFilter(value: unknown): (SelectionFilter?, string?)
+	if value == nil then
+		return nil, nil
+	end
+	if type(value) ~= "table" or getmetatable(value :: any) ~= nil then
+		return nil, "INVALID_SPEC_FILTER"
+	end
+
+	local rawFilter = value :: { [any]: unknown }
+	if not hasOnlyFields(rawFilter, { specs = true, groups = true }) then
+		return nil, "INVALID_SPEC_FILTER"
+	end
+	local specs, specsError = validateSelectorArray(rawFilter.specs)
+	if specs == nil then
+		return nil, specsError
+	end
+	local groups, groupsError = validateSelectorArray(rawFilter.groups)
+	if groups == nil then
+		return nil, groupsError
+	end
+	if #specs == 0 and #groups == 0 then
+		return nil, "ZERO_SELECTION"
+	end
+
+	return {
+		specs = specs,
+		groups = groups,
+	}, nil
 end
 
 local function validateSuite(value: unknown): (TestHarness.Suite?, string?)
@@ -179,7 +241,7 @@ local function discover(root: Instance): ({ ModuleScript }?, string?, string?)
 	return modules, nil, nil
 end
 
-function TestRunner.run(dataModel: DataModel, selection: Selection, specName: string?): RunResult
+function TestRunner.run(dataModel: DataModel, selection: Selection, rawFilter: unknown): RunResult
 	local root = getRoot(dataModel, selection)
 	if root == nil then
 		record("FAIL", {
@@ -207,26 +269,52 @@ function TestRunner.run(dataModel: DataModel, selection: Selection, specName: st
 		})
 		return { exitCode = 2, suiteCount = 0, testCount = 0, passedCount = 0, failedCount = 0 }
 	end
-	if specName ~= nil then
-		if
-			selection ~= "normal"
-			or #specName < 1
-			or #specName > 64
-			or string.match(specName, "^[A-Za-z][A-Za-z0-9]*$") == nil
-		then
-			record("FAIL", {
-				category = "discovery",
-				code = "INVALID_SPEC_FILTER",
-				path = safePath(root),
-			})
-			return { exitCode = 2, suiteCount = 0, testCount = 0, passedCount = 0, failedCount = 0 }
+	local filter, filterError = validateFilter(rawFilter)
+	if filterError ~= nil or (selection ~= "normal" and rawFilter ~= nil) then
+		record("FAIL", {
+			category = "discovery",
+			code = filterError or "INVALID_SPEC_FILTER",
+			path = safePath(root),
+		})
+		return { exitCode = 2, suiteCount = 0, testCount = 0, passedCount = 0, failedCount = 0 }
+	end
+	if filter ~= nil then
+		local requestedSpecs: { [string]: boolean } = {}
+		local foundSpecs: { [string]: boolean } = {}
+		for _, specName in filter.specs do
+			requestedSpecs[specName] = true
 		end
 
-		local expectedName = specName .. SPEC_SUFFIX
 		local filteredModules: { ModuleScript } = {}
 		for _, module in modules do
-			if module.Name == expectedName then
+			local moduleName = string.sub(module.Name, 1, #module.Name - #SPEC_SUFFIX)
+			local selected = requestedSpecs[moduleName] == true
+			if selected then
+				foundSpecs[moduleName] = true
+			else
+				for _, groupPrefix in filter.groups do
+					if string.sub(moduleName, 1, #groupPrefix) == groupPrefix then
+						selected = true
+						break
+					end
+				end
+			end
+			if selected then
 				table.insert(filteredModules, module)
+			end
+		end
+
+		local sortedSpecs = table.clone(filter.specs)
+		table.sort(sortedSpecs)
+		for _, specName in sortedSpecs do
+			if foundSpecs[specName] ~= true then
+				record("FAIL", {
+					category = "discovery",
+					code = "SPEC_NOT_FOUND",
+					path = safePath(root),
+					spec = specName,
+				})
+				return { exitCode = 2, suiteCount = 0, testCount = 0, passedCount = 0, failedCount = 0 }
 			end
 		end
 		modules = filteredModules
