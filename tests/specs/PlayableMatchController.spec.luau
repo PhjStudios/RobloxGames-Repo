@@ -1,0 +1,716 @@
+--!strict
+
+local TestHarness = require(script.Parent.Parent.Support.TestHarness)
+local RobloxAdapter = require(script.Parent.Parent.Support.RobloxAdapter)
+local ClientRequestTracker = require(script.Parent.Parent.ProductionClientNetworking.ClientRequestTracker)
+local PlayableMatchController = require(script.Parent.Parent.ProductionClientPlayable.PlayableMatchController)
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local EnvironmentContext = require(ReplicatedStorage.Shared.logging.EnvironmentContext)
+local Log = require(ReplicatedStorage.Shared.logging.Log)
+local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
+local ProductionRemotes = require(ReplicatedStorage.Shared.network.ProductionRemotes)
+
+type Signal = {
+	connect: (self: Signal, (unknown, ...unknown) -> ()) -> RBXScriptConnection,
+	fire: (self: Signal, unknown, ...unknown) -> (),
+}
+
+local newTrackerForTests = ClientRequestTracker.newForTests
+local newControllerForTests = PlayableMatchController.newForTests
+local invokeActionForTests = PlayableMatchController.invokeSemanticActionForTests
+local invokePointerForTests = PlayableMatchController.invokeWorldPointerForTests
+if
+	newTrackerForTests == nil
+	or newControllerForTests == nil
+	or invokeActionForTests == nil
+	or invokePointerForTests == nil
+then
+	error("[ATD_TEST_FIXTURE][code=PLAYABLE_CONTROLLER_TEST_SEAM_MISSING]", 0)
+end
+
+local logger = Log.new(EnvironmentContext.new("client", "Match", 0, false))
+
+local function towerOption(towerId: string, displayName: string, cost: number): any
+	return {
+		towerId = towerId,
+		displayName = displayName,
+		placementCost = cost,
+		description = `Place {displayName}.`,
+	}
+end
+
+local function snapshot(revision: number, state: string?): any
+	local selectedState = state or "Playing"
+	local isResults = selectedState == "Results"
+	local isReady = selectedState == "Ready"
+	return {
+		matchId = "match:playable-controller",
+		revision = revision,
+		state = selectedState,
+		result = if isResults then "Victory" else "None",
+		mapId = "map:phase07-graybox",
+		mapDisplayName = "Backyard Graybox",
+		difficultyId = "difficulty:local",
+		difficultyDisplayName = "Local",
+		serverTime = 110,
+		waveNumber = if isReady then 0 else 2,
+		totalWaves = 5,
+		wavePhase = if isResults then "Results" elseif isReady then "Ready" else "Resolving",
+		nextWaveServerTime = 0,
+		baseHealth = 27,
+		maximumBaseHealth = 30,
+		enemiesAlive = if isResults or isReady then 0 else 1,
+		battleCash = 245,
+		participants = { readyCount = if isReady then 0 else 1, participantCount = 1 },
+		towerOptions = {
+			towerOption("tower:dart-ant", "Dart Ant", 120),
+			towerOption("tower:rapid-ant", "Rapid Ant", 165),
+			towerOption("tower:guard-ant", "Guard Ant", 225),
+		},
+		towers = if isReady or isResults
+			then {}
+			else {
+				{
+					runtimeTowerId = 1,
+					revision = 4,
+					towerId = "tower:dart-ant",
+					displayName = "Dart Ant",
+					ownerUserId = 42,
+					level = 2,
+					targetMode = "First",
+					position = Vector3.new(4, 1, 7),
+					rotationDegrees = 90,
+					totalInvestment = 230,
+					cooldownEndsServerTime = 110.4,
+					damage = 22,
+					cooldownSeconds = 0.7,
+					rangeStuds = 27,
+					upgradeCost = 190,
+					sellValue = 161,
+				},
+			},
+		enemies = if isReady or isResults
+			then {}
+			else {
+				{
+					runtimeEnemyId = 3,
+					enemyId = "enemy:worker-ant",
+					displayName = "Worker Ant",
+					currentHealth = 21,
+					maximumHealth = 45,
+					position = Vector3.new(-8, 2, 3),
+					pathProgress = 18,
+				},
+			},
+		stats = {
+			durationSeconds = 10,
+			wavesCompleted = if isResults then 5 else 1,
+			damageDealt = 24,
+			battleCashEarned = 76,
+			battleCashSpent = 230,
+			placements = 1,
+			upgrades = 1,
+			sells = 0,
+			baseHealthRemaining = 27,
+		},
+	}
+end
+
+local function successWire(request: any, payload: unknown): any
+	return { requestId = request.requestId, state = "Success", payload = payload }
+end
+
+local function rejectedWire(request: any, code: string): any
+	return { requestId = request.requestId, state = "Rejected", error = { code = code } }
+end
+
+local function replayReplacement(): any
+	local value = snapshot(1, "Ready")
+	value.matchId = "match:playable-replacement"
+	return value
+end
+
+local function makeSignal(rig: any): Signal
+	local listener: ((unknown, ...unknown) -> ())? = nil
+	local active = false
+	local signal = {} :: Signal
+	function signal:connect(nextListener)
+		listener = nextListener
+		active = true
+		return RobloxAdapter.createConnection(function()
+			if active then
+				active = false
+				rig.disconnectCount += 1
+			end
+		end) :: RBXScriptConnection
+	end
+	function signal:fire(value, ...)
+		if active and listener ~= nil then
+			(listener :: (unknown, ...unknown) -> ())(value, ...)
+		end
+	end
+	return signal
+end
+
+local function makeRig(): any
+	local rig: any = {
+		fires = {},
+		responses = {},
+		events = {},
+		renders = {},
+		worlds = {},
+		effects = {},
+		contexts = {},
+		disconnectCount = 0,
+		clock = 20,
+		pointer = Vector2.new(100, 200),
+		viewport = Vector2.new(1280, 720),
+		raycastPosition = Vector3.new(8, 0, 9),
+		raycastScreenPosition = nil,
+		pickedTowerId = 1,
+		focused = 0,
+		restored = 0,
+		renderListener = nil,
+		worldPointerListener = nil,
+		viewInputFamily = "Desktop",
+		inputFamily = "Desktop",
+		renderFailuresRemaining = 0,
+		viewCleaned = 0,
+		inputCleaned = 0,
+	}
+	local requestCounter = 0
+	local trackerResult = (newTrackerForTests :: ClientRequestTracker.TestConstructor)(
+		ProductionRemotes,
+		"Match",
+		function(): string
+			requestCounter += 1
+			return `play{string.format("%04d", requestCounter)}`
+		end
+	)
+	if not trackerResult.ok then
+		error("playable tracker fixture failed", 0)
+	end
+
+	local function requestEndpoint(name: string): any
+		local definition = ProductionRemotes:get(name)
+		local response = makeSignal(rig)
+		rig.responses[name] = response
+		rig.fires[name] = {}
+		return {
+			definition = definition,
+			connectResponse = function(listener)
+				return response:connect(listener)
+			end,
+			fire = function(envelope)
+				table.insert(rig.fires[name], envelope)
+			end,
+		}
+	end
+
+	local function eventEndpoint(name: string): any
+		local definition = ProductionRemotes:get(name)
+		local event = makeSignal(rig)
+		rig.events[name] = event
+		return {
+			definition = definition,
+			connectEvent = function(listener)
+				return event:connect(listener)
+			end,
+		}
+	end
+
+	local dependencies: any = {
+		localUserId = 42,
+		tracker = trackerResult.value,
+		getSnapshot = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT),
+		submitReady = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.SUBMIT_READY),
+		submitPlacement = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.SUBMIT_PLACEMENT),
+		submitUpgrade = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.SUBMIT_UPGRADE),
+		submitSell = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.SUBMIT_SELL),
+		submitTargetMode = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.SUBMIT_TARGET_MODE),
+		submitReplay = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.SUBMIT_REPLAY),
+		replicationEvent = eventEndpoint(PlayableMatchProtocol.ENDPOINTS.REPLICATION),
+		attackEvent = eventEndpoint(PlayableMatchProtocol.ENDPOINTS.ATTACK_EVENT),
+		view = {
+			render = function(_self, value)
+				table.insert(rig.renders, value)
+				rig.viewInputFamily = value.inputFamily
+				if rig.renderFailuresRemaining > 0 then
+					rig.renderFailuresRemaining -= 1
+					return { ok = false, error = { code = "RENDER_FAILED" } }
+				end
+				return { ok = true, value = true }
+			end,
+			syncWorld = function(_self, value)
+				table.insert(rig.worlds, value)
+				return { ok = true, value = true }
+			end,
+			playAttackEffect = function(_self, value)
+				table.insert(rig.effects, value)
+				return { ok = true, value = true }
+			end,
+			getMetrics = function()
+				return { inputFamily = rig.viewInputFamily }
+			end,
+			cleanup = function()
+				rig.viewCleaned += 1
+				return { ok = true, value = true }
+			end,
+		},
+		input = {
+			setContext = function(_self, value)
+				table.insert(rig.contexts, value)
+				return { ok = true, value = true }
+			end,
+			getHints = function()
+				return { ok = true, value = "test hint" }
+			end,
+			getMetrics = function()
+				return { preferredInput = rig.inputFamily }
+			end,
+			cleanup = function()
+				rig.inputCleaned += 1
+				return { ok = true, value = true }
+			end,
+		},
+		connectWorldPointer = function(listener)
+			rig.worldPointerListener = listener
+			return RobloxAdapter.createConnection(function()
+				rig.disconnectCount += 1
+			end) :: RBXScriptConnection
+		end,
+		connectRenderStep = function(listener)
+			rig.renderListener = listener
+			return RobloxAdapter.createConnection(function()
+				rig.disconnectCount += 1
+			end) :: RBXScriptConnection
+		end,
+		now = function()
+			return rig.clock
+		end,
+		getPointerPosition = function()
+			return rig.pointer
+		end,
+		getViewportSize = function()
+			return rig.viewport
+		end,
+		raycastPlacement = function(position)
+			rig.raycastScreenPosition = position
+			return rig.raycastPosition
+		end,
+		pickTower = function(_position, _towers, _family)
+			return rig.pickedTowerId
+		end,
+		focusBase = function()
+			rig.focused += 1
+			return true
+		end,
+		restoreCamera = function()
+			rig.restored += 1
+		end,
+	}
+
+	local controllerResult = (newControllerForTests :: PlayableMatchController.TestConstructor)(logger, dependencies)
+	if not controllerResult.ok then
+		error("playable controller fixture failed", 0)
+	end
+	rig.controller = controllerResult.value
+	local service = controllerResult.value:getServiceDefinition()
+	service.initialize()
+	service.start()
+	rig.service = service
+	return rig
+end
+
+local function deliverInitial(rig: any, value: any)
+	local endpoint = PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT
+	local request = rig.fires[endpoint][1]
+	if request == nil then
+		error("initial playable Get missing", 0)
+	end
+	rig.responses[endpoint]:fire(successWire(request, value))
+end
+
+local function cleanupRig(rig: any)
+	if rig.controller:getState() ~= "Shutdown" then
+		rig.service.shutdown()
+	end
+end
+
+return TestHarness.suite("playable Match production client controller", {
+	TestHarness.case("registers listeners before one initial owner-private snapshot request", function(assertions)
+		local rig = makeRig()
+		assertions.equal(#rig.fires[PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT], 1)
+		assertions.equal(rig.controller:getMetrics().connectionCount, 11)
+		assertions.equal(#rig.renders, 1)
+		assertions.equal(rig.renders[1].state, "Loading")
+		assertions.equal(rig.renders[1].inputHint, "Connecting to the authoritative match.")
+		assertions.equal(#rig.worlds[1].towers, 0)
+		assertions.equal(#rig.worlds[1].enemies, 0)
+		deliverInitial(rig, snapshot(7))
+		local metrics = rig.controller:getMetrics()
+		assertions.equal(metrics.matchId, "match:playable-controller")
+		assertions.equal(metrics.revision, 7)
+		assertions.equal(metrics.acceptedSnapshotCount, 1)
+		assertions.equal(#rig.renders, 2)
+		assertions.equal(rig.renders[2].battleCash, 245)
+		assertions.equal(rig.renders[2].base.health, 27)
+		assertions.equal(rig.renders[2].wave.enemiesRemaining, 1)
+		assertions.equal(#rig.worlds[2].towers, 1)
+		assertions.equal(#rig.worlds[2].enemies, 1)
+		cleanupRig(rig)
+	end),
+
+	TestHarness.case("omits a zero Studio viewport so the view can use its safe fallback", function(assertions)
+		local rig = makeRig()
+		rig.viewport = Vector2.zero
+		deliverInitial(rig, snapshot(7))
+		assertions.isNil(rig.renders[#rig.renders].viewport)
+		assertions.equal(rig.controller:getMetrics().acceptedSnapshotCount, 1)
+		assertions.equal(rig.controller:getMetrics().renderCount, 2)
+		assertions.equal(rig.controller:getMetrics().rejectedInputCount, 0)
+		cleanupRig(rig)
+	end),
+
+	TestHarness.case("keeps an actionable Loading HUD through initial rejection and timeout", function(assertions)
+		local endpoint = PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT
+
+		local rejected = makeRig()
+		local rejectedRequest = rejected.fires[endpoint][1]
+		rejected.responses[endpoint]:fire(rejectedWire(rejectedRequest, "UNAVAILABLE"))
+		assertions.equal(rejected.controller:getMetrics().feedbackCode, "SERVER_UNAVAILABLE")
+		assertions.equal(rejected.renders[#rejected.renders].state, "Loading")
+		assertions.equal(rejected.renders[#rejected.renders].feedback.code, "SERVER_UNAVAILABLE")
+		assertions.equal(#rejected.fires[endpoint], 2)
+		cleanupRig(rejected)
+
+		local timedOut = makeRig()
+		local renderListener = timedOut.renderListener :: any
+		timedOut.clock += PlayableMatchController.REQUEST_TIMEOUT_SECONDS + 0.1
+		renderListener(0.1)
+		assertions.equal(timedOut.controller:getMetrics().feedbackCode, "SERVER_UNAVAILABLE")
+		assertions.equal(timedOut.renders[#timedOut.renders].state, "Loading")
+		assertions.equal(timedOut.renders[#timedOut.renders].feedback.code, "SERVER_UNAVAILABLE")
+		assertions.equal(#timedOut.fires[endpoint], 2)
+		cleanupRig(timedOut)
+	end),
+
+	TestHarness.case(
+		"retries a failed render from an exact duplicate without recounting or chaining recovery",
+		function(assertions)
+			local rig = makeRig()
+			local renderListener = rig.renderListener :: any
+			rig.renderFailuresRemaining = 1
+			local authoritative = snapshot(7)
+			deliverInitial(rig, authoritative)
+			assertions.equal(rig.controller:getMetrics().acceptedSnapshotCount, 1)
+			assertions.equal(rig.controller:getMetrics().renderCount, 1)
+
+			rig.clock += PlayableMatchController.RECOVERY_SILENCE_SECONDS + 0.1
+			renderListener(0.1)
+			local endpoint = PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT
+			assertions.equal(#rig.fires[endpoint], 2)
+			rig.events[PlayableMatchProtocol.ENDPOINTS.REPLICATION]:fire({ payload = {} })
+			local rejectedBeforeDuplicate = rig.controller:getMetrics().rejectedInputCount
+			rig.clock += PlayableMatchController.RECOVERY_SILENCE_SECONDS + 0.1
+			local recovered = snapshot(7)
+			recovered.serverTime = authoritative.serverTime + 10
+			rig.responses[endpoint]:fire(successWire(rig.fires[endpoint][2], recovered))
+
+			local metrics = rig.controller:getMetrics()
+			assertions.equal(metrics.acceptedSnapshotCount, 1)
+			assertions.equal(metrics.rejectedInputCount, rejectedBeforeDuplicate)
+			assertions.equal(metrics.renderCount, 2)
+			assertions.equal(metrics.recoveryRequestCount, 1)
+			assertions.equal(#rig.renders, 3)
+			assertions.equal(#rig.fires[endpoint], 2)
+			renderListener(0.1)
+			renderListener(0.1)
+			assertions.equal(#rig.fires[endpoint], 2)
+			cleanupRig(rig)
+		end
+	),
+
+	TestHarness.case(
+		"turns hotbar and pointer confirm into an exact placement intent then recovers",
+		function(assertions)
+			local rig = makeRig()
+			deliverInitial(rig, snapshot(7))
+			assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+				kind = "SelectHotbar",
+				source = "Desktop",
+				slot = 1,
+			}))
+			assertions.equal(rig.controller:getMetrics().selectedSlot, 1)
+			assertions.equal(rig.contexts[#rig.contexts], "Placement")
+			assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+				kind = "Rotate",
+				source = "Desktop",
+			}))
+			assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+				kind = "Confirm",
+				source = "Desktop",
+				screenPosition = Vector2.new(80, 90),
+			}))
+
+			local endpoint = PlayableMatchProtocol.ENDPOINTS.SUBMIT_PLACEMENT
+			assertions.equal(#rig.fires[endpoint], 1)
+			local request = rig.fires[endpoint][1]
+			assertions.equal(request.payload.matchId, "match:playable-controller")
+			assertions.equal(request.payload.towerId, "tower:dart-ant")
+			assertions.equal(request.payload.position, Vector3.new(8, 0, 9))
+			assertions.equal(request.payload.rotationDegrees, 15)
+			assertions.isNil(request.payload.damage)
+			rig.responses[endpoint]:fire(successWire(request, {
+				accepted = true,
+				reason = "Accepted",
+				matchId = "match:playable-controller",
+				revision = 8,
+				battleCash = 125,
+			}))
+			assertions.equal(rig.controller:getMetrics().feedbackCode, "REQUEST_ACCEPTED")
+			assertions.isNil(rig.controller:getMetrics().selectedSlot)
+			assertions.equal(#rig.fires[PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT], 2)
+			cleanupRig(rig)
+		end
+	),
+
+	TestHarness.case("centers keyboard placement when the pointer is outside the viewport", function(assertions)
+		local rig = makeRig()
+		deliverInitial(rig, snapshot(7))
+		rig.pointer = Vector2.new(-63, -21)
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "SelectHotbar",
+			source = "Desktop",
+			slot = 1,
+		}))
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "Confirm",
+			source = "Desktop",
+		}))
+		assertions.equal(rig.raycastScreenPosition, rig.viewport * 0.5)
+		assertions.equal(#rig.fires[PlayableMatchProtocol.ENDPOINTS.SUBMIT_PLACEMENT], 1)
+		cleanupRig(rig)
+	end),
+
+	TestHarness.case("stages touch placement locally until one explicit confirm", function(assertions)
+		local rig = makeRig()
+		deliverInitial(rig, snapshot(7))
+		rig.inputFamily = "Touch"
+		(rig.renderListener :: any)(0.1)
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "SelectHotbar",
+			source = "Touch",
+			slot = 1,
+		}))
+
+		local endpoint = PlayableMatchProtocol.ENDPOINTS.SUBMIT_PLACEMENT
+		local invokePointer = invokePointerForTests :: any
+		invokePointer(rig.controller, Vector2.new(80, 90), "Touch")
+		assertions.equal(#rig.fires[endpoint], 0)
+		assertions.isTrue(rig.controller:getMetrics().touchPlacementSelected)
+		assertions.equal(rig.controller:getMetrics().feedbackCode, "POSITION_SELECTED")
+		assertions.isTrue(rig.renders[#rig.renders].placement.positionSelected)
+
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "Rotate",
+			source = "Touch",
+		}))
+		assertions.equal(#rig.fires[endpoint], 0)
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "Confirm",
+			source = "Touch",
+		}))
+		assertions.equal(#rig.fires[endpoint], 1)
+		assertions.equal(rig.fires[endpoint][1].payload.position, rig.raycastPosition)
+		assertions.equal(rig.fires[endpoint][1].payload.rotationDegrees, 15)
+		assertions.isFalse((invokeActionForTests :: any)(rig.controller, {
+			kind = "Confirm",
+			source = "Touch",
+		}))
+		assertions.equal(#rig.fires[endpoint], 1)
+		cleanupRig(rig)
+	end),
+
+	TestHarness.case(
+		"selects a world tower and sends owner mutation with its observed tower revision",
+		function(assertions)
+			local rig = makeRig()
+			local invokePointer = invokePointerForTests :: any
+			deliverInitial(rig, snapshot(7))
+			invokePointer(rig.controller, Vector2.new(300, 200), "Touch")
+			assertions.equal(rig.controller:getMetrics().selectedTowerId, 1)
+			assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+				kind = "Cancel",
+				source = "Touch",
+			}))
+			assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+				kind = "CycleTower",
+				source = "Gamepad",
+				direction = 1,
+			}))
+			assertions.equal(rig.controller:getMetrics().selectedTowerId, 1)
+			assertions.equal(rig.contexts[#rig.contexts], "Tower")
+			assertions.equal(rig.renders[#rig.renders].selection.revision, 4)
+			assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+				kind = "Upgrade",
+				source = "Gamepad",
+			}))
+			local endpoint = PlayableMatchProtocol.ENDPOINTS.SUBMIT_UPGRADE
+			local request = rig.fires[endpoint][1]
+			assertions.equal(request.payload.runtimeTowerId, 1)
+			assertions.equal(request.payload.towerRevision, 4)
+			assertions.isNil(request.payload.damage)
+			cleanupRig(rig)
+		end
+	),
+
+	TestHarness.case(
+		"accepts full replication and presents compact attacks only for the current match",
+		function(assertions)
+			local rig = makeRig()
+			deliverInitial(rig, snapshot(7))
+			local nextSnapshot = snapshot(8)
+			nextSnapshot.battleCash = 300
+			rig.events[PlayableMatchProtocol.ENDPOINTS.REPLICATION]:fire({ payload = nextSnapshot })
+			assertions.equal(rig.controller:getMetrics().revision, 8)
+			assertions.equal(rig.renders[#rig.renders].battleCash, 300)
+
+			rig.events[PlayableMatchProtocol.ENDPOINTS.ATTACK_EVENT]:fire({
+				payload = {
+					matchId = "match:playable-controller",
+					sequence = 1,
+					runtimeTowerId = 1,
+					runtimeEnemyId = 3,
+					sourcePosition = Vector3.new(4, 1, 7),
+					targetPosition = Vector3.new(-8, 2, 3),
+					actualDamage = 12,
+					killed = false,
+					serverTime = 111,
+				},
+			})
+			assertions.equal(#rig.effects, 1)
+			assertions.equal(rig.effects[1].towerId, "tower-runtime:1")
+			assertions.equal(rig.effects[1].targetId, "enemy-runtime:3")
+			assertions.equal(rig.controller:getMetrics().attackEventCount, 1)
+			cleanupRig(rig)
+		end
+	),
+
+	TestHarness.case("retires tower selection before presenting authoritative Results", function(assertions)
+		local rig = makeRig()
+		deliverInitial(rig, snapshot(7))
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "CycleTower",
+			source = "Gamepad",
+			direction = 1,
+		}))
+		assertions.equal(rig.controller:getMetrics().selectedTowerId, 1)
+
+		local results = snapshot(8, "Results")
+		results.towers = snapshot(7).towers
+		rig.events[PlayableMatchProtocol.ENDPOINTS.REPLICATION]:fire({ payload = results })
+
+		assertions.equal(rig.controller:getMetrics().revision, 8)
+		assertions.isNil(rig.controller:getMetrics().selectedTowerId)
+		assertions.equal(rig.renders[#rig.renders].state, "Results")
+		assertions.equal(rig.renders[#rig.renders].result.kind, "Victory")
+		assertions.isNil(rig.renders[#rig.renders].selection)
+		cleanupRig(rig)
+	end),
+
+	TestHarness.case(
+		"replaces replay state cleanly for response-first and replication-first orderings",
+		function(assertions)
+			local replayEndpoint = PlayableMatchProtocol.ENDPOINTS.SUBMIT_REPLAY
+			local getEndpoint = PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT
+
+			local responseFirst = makeRig()
+			deliverInitial(responseFirst, snapshot(7, "Results"))
+			assertions.isTrue((invokeActionForTests :: any)(responseFirst.controller, {
+				kind = "Replay",
+				source = "Gamepad",
+			}))
+			local replayRequest = responseFirst.fires[replayEndpoint][1]
+			responseFirst.responses[replayEndpoint]:fire(successWire(replayRequest, {
+				accepted = true,
+				reason = "Accepted",
+				matchId = "match:playable-controller",
+				revision = 8,
+				battleCash = 245,
+			}))
+			assertions.isFalse(responseFirst.controller:getMetrics().actionPending)
+			assertions.equal(#responseFirst.fires[getEndpoint], 2)
+			local recoveryRequest = responseFirst.fires[getEndpoint][2]
+			responseFirst.responses[getEndpoint]:fire(successWire(recoveryRequest, replayReplacement()))
+			assertions.equal(responseFirst.controller:getMetrics().matchId, "match:playable-replacement")
+			assertions.equal(responseFirst.controller:getMetrics().matchGeneration, 1)
+			responseFirst.events[PlayableMatchProtocol.ENDPOINTS.REPLICATION]:fire({ payload = snapshot(9, "Results") })
+			assertions.equal(responseFirst.controller:getMetrics().matchId, "match:playable-replacement")
+			cleanupRig(responseFirst)
+
+			local replicationFirst = makeRig()
+			deliverInitial(replicationFirst, snapshot(7, "Results"))
+			assertions.isTrue((invokeActionForTests :: any)(replicationFirst.controller, {
+				kind = "Replay",
+				source = "Desktop",
+			}))
+			local lateRequest = replicationFirst.fires[replayEndpoint][1]
+			replicationFirst.events[PlayableMatchProtocol.ENDPOINTS.REPLICATION]:fire({ payload = replayReplacement() })
+			assertions.isFalse(replicationFirst.controller:getMetrics().actionPending)
+			assertions.equal(replicationFirst.controller:getMetrics().matchGeneration, 1)
+			replicationFirst.responses[replayEndpoint]:fire(successWire(lateRequest, {
+				accepted = true,
+				reason = "Accepted",
+				matchId = "match:playable-controller",
+				revision = 8,
+				battleCash = 245,
+			}))
+			assertions.equal(replicationFirst.controller:getMetrics().matchId, "match:playable-replacement")
+			assertions.isFalse(replicationFirst.controller:getMetrics().actionPending)
+			cleanupRig(replicationFirst)
+		end
+	),
+
+	TestHarness.case("times out a missing action receipt and recovers authoritative state", function(assertions)
+		local rig = makeRig()
+		local renderListener = rig.renderListener :: any
+		deliverInitial(rig, snapshot(7))
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "SelectHotbar",
+			source = "Desktop",
+			slot = 1,
+		}))
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "Confirm",
+			source = "Desktop",
+			screenPosition = Vector2.new(80, 90),
+		}))
+		rig.clock += PlayableMatchController.REQUEST_TIMEOUT_SECONDS + 0.1
+		renderListener(0.1)
+		local metrics = rig.controller:getMetrics()
+		assertions.isFalse(metrics.actionPending)
+		assertions.equal(metrics.feedbackCode, "SERVER_UNAVAILABLE")
+		assertions.equal(#rig.fires[PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT], 2)
+		cleanupRig(rig)
+	end),
+
+	TestHarness.case("periodically recovers silence and shuts down all owned client state", function(assertions)
+		local rig = makeRig()
+		local renderListener = rig.renderListener :: any
+		deliverInitial(rig, snapshot(7))
+		rig.clock += PlayableMatchController.RECOVERY_SILENCE_SECONDS + 0.1
+		renderListener(0.1)
+		assertions.equal(#rig.fires[PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT], 2)
+		assertions.equal(rig.controller:getMetrics().recoveryRequestCount, 1)
+		rig.service.shutdown()
+		assertions.equal(rig.controller:getState(), "Shutdown")
+		assertions.equal(rig.controller:getMetrics().connectionCount, 0)
+		assertions.equal(rig.viewCleaned, 1)
+		assertions.equal(rig.inputCleaned, 1)
+		assertions.equal(rig.restored, 1)
+		assertions.equal(rig.disconnectCount, 11)
+		assertions.isTrue(rig.service.shutdown == rig.service.shutdown)
+	end),
+})

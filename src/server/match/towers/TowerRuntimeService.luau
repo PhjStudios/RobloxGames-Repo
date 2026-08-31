@@ -2208,8 +2208,6 @@ local function initialize(data: ServiceData)
 		or not ConfigurationValidator.isValidatedConfiguration(configuration)
 		or not AssetSchema.isValidatedManifest(configuration.assets)
 		or not TowerSchema.isValidatedCatalog(configuration.towers)
-		or #configuration.assets.ordered ~= 0
-		or #configuration.towers.ordered ~= 0
 	then
 		data.state = "Failed"
 		data.ownershipState = "Faulted"

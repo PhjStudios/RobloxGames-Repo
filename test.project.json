@@ -45,6 +45,10 @@
           "$path": "src/client/match/placement"
         },
 
+        "ProductionClientPlayable": {
+          "$path": "src/client/match/playable"
+        },
+
         "ProductionClientBase": {
           "$path": "src/client/match/base"
         },
@@ -75,6 +79,10 @@
 
         "ProductionServerPlacement": {
           "$path": "src/server/match/placement"
+        },
+
+        "ProductionServerPlayable": {
+          "$path": "src/server/match/playable"
         },
 
         "ProductionServerBase": {

@@ -53,6 +53,10 @@
             "$path": "src/server/match/placement"
           },
 
+          "playable": {
+            "$path": "src/server/match/playable"
+          },
+
           "lifecycle": {
             "$path": "src/server/match/lifecycle"
           },
@@ -108,6 +112,10 @@
 
             "placement": {
               "$path": "src/client/match/placement"
+            },
+
+            "playable": {
+              "$path": "src/client/match/playable"
             },
 
             "waves": {

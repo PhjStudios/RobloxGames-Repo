@@ -236,17 +236,24 @@ return TestHarness.suite("server authoritative rate limiter", {
 
 	TestHarness.case("binds exact production request rates and no outbound policy", function(assertions)
 		assertions.isTrue(table.isfrozen(ProductionRateLimits))
-		assertions.equal(rawlen(ProductionRateLimits), 8)
+		assertions.equal(rawlen(ProductionRateLimits), 15)
 
 		local expected = {
 			GetBaseSnapshot = { capacity = 2, refillPerSecond = 0.25 },
 			GetEnemySnapshot = { capacity = 2, refillPerSecond = 0.25 },
 			GetMatchSnapshot = { capacity = 2, refillPerSecond = 1 },
+			GetPlayableMatchSnapshot = { capacity = 3, refillPerSecond = 1 },
 			GetTowerPlacementQuery = { capacity = 4, refillPerSecond = 1 },
 			GetWaveSnapshot = { capacity = 2, refillPerSecond = 0.25 },
+			SubmitPlayablePlacement = { capacity = 5, refillPerSecond = 1 },
+			SubmitPlayableReady = { capacity = 3, refillPerSecond = 0.5 },
+			SubmitPlayableReplay = { capacity = 2, refillPerSecond = 0.25 },
 			SubmitReady = { capacity = 2, refillPerSecond = 0.5 },
 			SubmitSkipVote = { capacity = 2, refillPerSecond = 0.5 },
 			SubmitTowerPlacement = { capacity = 3, refillPerSecond = 0.5 },
+			SubmitTowerSell = { capacity = 4, refillPerSecond = 0.75 },
+			SubmitTowerTargetMode = { capacity = 6, refillPerSecond = 1 },
+			SubmitTowerUpgrade = { capacity = 4, refillPerSecond = 0.75 },
 		}
 		for _, binding in ProductionRateLimits do
 			assertions.isTrue(table.isfrozen(binding))
@@ -260,6 +267,8 @@ return TestHarness.suite("server authoritative rate limiter", {
 			assertions.notEqual(binding.endpoint, "BaseReplication")
 			assertions.notEqual(binding.endpoint, "MatchSnapshot")
 			assertions.notEqual(binding.endpoint, "EnemyReplication")
+			assertions.notEqual(binding.endpoint, "CombatAttackEvent")
+			assertions.notEqual(binding.endpoint, "PlayableMatchReplication")
 			assertions.notEqual(binding.endpoint, "WaveReplication")
 			assertions.notEqual(binding.endpoint, "TowerPlacementRevision")
 		end
@@ -267,22 +276,34 @@ return TestHarness.suite("server authoritative rate limiter", {
 		local matchResult = ServerRateLimiter.createPolicySet(ProductionRemotes, "Match", ProductionRateLimits)
 		assertions.isTrue(matchResult.ok)
 		if matchResult.ok then
-			assertions.equal(matchResult.value:count(), 8)
-			assertions.equal(matchResult.value:activeCount(), 8)
-			assertions.equal(matchResult.value:listActive()[1].endpoint, "GetBaseSnapshot")
-			assertions.equal(matchResult.value:listActive()[2].endpoint, "GetEnemySnapshot")
-			assertions.equal(matchResult.value:listActive()[3].endpoint, "GetMatchSnapshot")
-			assertions.equal(matchResult.value:listActive()[4].endpoint, "GetTowerPlacementQuery")
-			assertions.equal(matchResult.value:listActive()[5].endpoint, "GetWaveSnapshot")
-			assertions.equal(matchResult.value:listActive()[6].endpoint, "SubmitReady")
-			assertions.equal(matchResult.value:listActive()[7].endpoint, "SubmitSkipVote")
-			assertions.equal(matchResult.value:listActive()[8].endpoint, "SubmitTowerPlacement")
+			local expectedActive = {
+				"GetBaseSnapshot",
+				"GetEnemySnapshot",
+				"GetMatchSnapshot",
+				"GetPlayableMatchSnapshot",
+				"GetTowerPlacementQuery",
+				"GetWaveSnapshot",
+				"SubmitPlayablePlacement",
+				"SubmitPlayableReady",
+				"SubmitPlayableReplay",
+				"SubmitReady",
+				"SubmitSkipVote",
+				"SubmitTowerPlacement",
+				"SubmitTowerSell",
+				"SubmitTowerTargetMode",
+				"SubmitTowerUpgrade",
+			}
+			assertions.equal(matchResult.value:count(), #expectedActive)
+			assertions.equal(matchResult.value:activeCount(), #expectedActive)
+			for index, endpoint in expectedActive do
+				assertions.equal(matchResult.value:listActive()[index].endpoint, endpoint)
+			end
 		end
 
 		local lobbyResult = ServerRateLimiter.createPolicySet(ProductionRemotes, "Lobby", ProductionRateLimits)
 		assertions.isTrue(lobbyResult.ok)
 		if lobbyResult.ok then
-			assertions.equal(lobbyResult.value:count(), 8)
+			assertions.equal(lobbyResult.value:count(), 15)
 			assertions.equal(lobbyResult.value:activeCount(), 0)
 		end
 	end),

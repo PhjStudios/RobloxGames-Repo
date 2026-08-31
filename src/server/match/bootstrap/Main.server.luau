@@ -1,23 +1,21 @@
 --!strict
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local EnemyProtocol = require(ReplicatedStorage.Shared.match.EnemyProtocol)
+local PlaceRoles = require(ReplicatedStorage.Shared.config.PlaceRoles)
 local BaseProtocol = require(ReplicatedStorage.Shared.match.BaseProtocol)
+local EnemyProtocol = require(ReplicatedStorage.Shared.match.EnemyProtocol)
 local MatchProtocol = require(ReplicatedStorage.Shared.match.MatchProtocol)
 local PlacementProtocol = require(ReplicatedStorage.Shared.match.PlacementProtocol)
+local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
 local WaveProtocol = require(ReplicatedStorage.Shared.match.WaveProtocol)
-local PlaceRoles = require(ReplicatedStorage.Shared.config.PlaceRoles)
 local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
+
 local ServerBootstrap = require(script.Parent.ServerBootstrap)
 local ServerRequestDispatcher = require(script.Parent.Parent.networking.ServerRequestDispatcher)
-local BaseRuntimeService = require(script.Parent.Parent.Parent.match.base.BaseRuntimeService)
-local EnemySimulationService = require(script.Parent.Parent.Parent.match.enemies.EnemySimulationService)
 local MatchLifecycleService = require(script.Parent.Parent.Parent.match.lifecycle.MatchLifecycleService)
-local TowerPlacementService = require(script.Parent.Parent.Parent.match.placement.TowerPlacementService)
-local WaveRuntimeService = require(script.Parent.Parent.Parent.match.waves.WaveRuntimeService)
-local TowerRuntimeService = require(script.Parent.Parent.Parent.match.towers.TowerRuntimeService)
+local PlayableMatchService = require(script.Parent.Parent.Parent.match.playable.PlayableMatchService)
 
 local function publicError(code: RequestProtocol.PublicErrorCode): RequestProtocol.PublicError
 	local result = RequestProtocol.createPublicError(code, nil)
@@ -35,16 +33,7 @@ local PUBLIC_ERRORS: { [string]: RequestProtocol.PublicError } = table.freeze({
 	INTERNAL_ERROR = publicError("INTERNAL_ERROR"),
 })
 
-local function rejectCode(code: unknown): ServerRequestDispatcher.HandlerOutcome
-	local errorValue = if type(code) == "string" then PUBLIC_ERRORS[code] else nil
-	return ServerRequestDispatcher.reject(errorValue or PUBLIC_ERRORS.INTERNAL_ERROR)
-end
-
-local function authorizeContext(context: ServerRequestDispatcher.ServerContext): boolean
-	return ServerRequestDispatcher.isContext(context)
-end
-
-local function authorizeLivePlacementContext(context: ServerRequestDispatcher.ServerContext): boolean
+local function authorizeLiveContext(context: ServerRequestDispatcher.ServerContext): boolean
 	if not ServerRequestDispatcher.isContext(context) then
 		return false
 	end
@@ -52,29 +41,14 @@ local function authorizeLivePlacementContext(context: ServerRequestDispatcher.Se
 	return player.Parent == Players and Players:GetPlayerByUserId(player.UserId) == player
 end
 
-local function rejectEnemySnapshot(code: unknown): ServerRequestDispatcher.HandlerOutcome
-	if code == "INVALID_RECIPIENT" then
-		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.NOT_AUTHORIZED)
-	elseif code == "INTERNAL_ERROR" or code == "INVALID_PROVIDER" then
-		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.INTERNAL_ERROR)
-	end
+local function unavailable(_context: ServerRequestDispatcher.ServerContext, _payload: unknown)
 	return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 end
 
-local function rejectBaseSnapshot(code: unknown): ServerRequestDispatcher.HandlerOutcome
-	if code == "INTERNAL_ERROR" then
-		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.INTERNAL_ERROR)
-	end
-	return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
-end
-
-local function rejectPlacementQuery(code: unknown): ServerRequestDispatcher.HandlerOutcome
-	if code == "NOT_ELIGIBLE" or code == "INVALID_ARGUMENT" then
-		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.NOT_AUTHORIZED)
-	elseif code == "INTERNAL_ERROR" then
-		return ServerRequestDispatcher.reject(PUBLIC_ERRORS.INTERNAL_ERROR)
-	end
-	return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+local function actionOutcome(receipt: PlayableMatchProtocol.ActionReceipt?): ServerRequestDispatcher.HandlerOutcome
+	return if receipt == nil
+		then ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+		else ServerRequestDispatcher.success(receipt)
 end
 
 ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
@@ -83,177 +57,173 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		error("[ATD_MATCH_BOOTSTRAP][code=NETWORK_REGISTRY_MISSING]", 0)
 	end
 
-	local sendSnapshot =
+	-- Bind every production outbound contract exactly once. The legacy senders
+	-- remain available to MatchLifecycle, while the playable outcome owns the
+	-- compact combat/world presentation stream.
+	local sendMatchSnapshot =
 		network:registerServerEvent(MatchProtocol.MATCH_SNAPSHOT_ENDPOINT, MatchProtocol.MatchSnapshotSchema)
-	local sendEnemyReplication =
-		network:registerServerEvent(EnemyProtocol.ENEMY_REPLICATION_ENDPOINT, EnemyProtocol.EnemyReplicationSchema)
-	local sendBaseReplication =
-		network:registerServerEvent(BaseProtocol.BASE_REPLICATION_ENDPOINT, BaseProtocol.BaseReplicationSchema)
-	local sendWaveReplication =
-		network:registerServerEvent(WaveProtocol.WAVE_REPLICATION_ENDPOINT, WaveProtocol.WaveSnapshotSchema)
-	local sendPlacementRevision =
-		network:registerServerEvent(PlacementProtocol.REVISION_ENDPOINT, PlacementProtocol.RevisionEventSchema)
-	local queryRevisionProvider: () -> unknown = function(): unknown
-		return nil
-	end
-	local sendLifecycleSnapshot = TowerPlacementService.createRevisionAwareSnapshotSender(
-		sendSnapshot,
-		sendPlacementRevision,
-		function(): unknown
-			return queryRevisionProvider()
-		end
+	network:registerServerEvent(BaseProtocol.BASE_REPLICATION_ENDPOINT, BaseProtocol.BaseReplicationSchema)
+	network:registerServerEvent(EnemyProtocol.ENEMY_REPLICATION_ENDPOINT, EnemyProtocol.EnemyReplicationSchema)
+	network:registerServerEvent(WaveProtocol.WAVE_REPLICATION_ENDPOINT, WaveProtocol.WaveSnapshotSchema)
+	network:registerServerEvent(PlacementProtocol.REVISION_ENDPOINT, PlacementProtocol.RevisionEventSchema)
+	local sendPlayableSnapshot =
+		network:registerServerEvent(PlayableMatchProtocol.ENDPOINTS.REPLICATION, PlayableMatchProtocol.SnapshotSchema)
+	local sendAttack = network:registerServerEvent(
+		PlayableMatchProtocol.ENDPOINTS.ATTACK_EVENT,
+		PlayableMatchProtocol.AttackEventSchema
 	)
-	local matchLifecycle = MatchLifecycleService.new(configuration.log, sendLifecycleSnapshot)
-	local baseRuntime =
-		BaseRuntimeService.new(matchLifecycle, configuration.coreConfiguration.difficulties, sendBaseReplication)
-	local enemySimulation = EnemySimulationService.new(
-		matchLifecycle,
-		baseRuntime,
-		configuration.coreConfiguration.enemies,
-		sendEnemyReplication
-	)
-	local waveRuntime = WaveRuntimeService.new(
-		matchLifecycle,
-		baseRuntime,
-		enemySimulation,
-		configuration.coreConfiguration,
-		nil,
-		sendWaveReplication
-	)
-	local towerRuntime = TowerRuntimeService.new(matchLifecycle, waveRuntime, configuration.coreConfiguration)
-	local towerPlacement = TowerPlacementService.new(matchLifecycle, towerRuntime, function(matchId, queryRevision)
-		local payload = table.freeze({ matchId = matchId, queryRevision = queryRevision })
-		local sent = true
-		for _, player in Players:GetPlayers() do
-			if not sendPlacementRevision(player, payload) then
-				sent = false
-			end
-		end
-		return sent
-	end)
-	queryRevisionProvider = function(): unknown
-		return towerPlacement:getMetrics().queryRevision
-	end
 
+	local matchLifecycle = MatchLifecycleService.new(configuration.log, sendMatchSnapshot)
+	local playable = PlayableMatchService.new(
+		configuration.log,
+		matchLifecycle,
+		configuration.coreConfiguration,
+		sendPlayableSnapshot,
+		sendAttack
+	)
+
+	-- Preserve the Phase 8 ready/snapshot compatibility boundary. Superseded
+	-- combat, wave, base, and placement requests fail closed without starting a
+	-- second authoritative simulation graph.
 	network:registerRequest(
 		MatchProtocol.GET_MATCH_SNAPSHOT_ENDPOINT,
 		MatchProtocol.GetMatchSnapshotPayloadSchema,
 		MatchProtocol.MatchSnapshotSchema,
-		authorizeContext,
+		authorizeLiveContext,
 		function(_context, _payload)
-			local snapshotResult = matchLifecycle:getSnapshot()
-			if snapshotResult.ok then
-				return ServerRequestDispatcher.success(snapshotResult.value)
-			end
-			return rejectCode(snapshotResult.error.code)
+			local result = matchLifecycle:getSnapshot()
+			return if result.ok
+				then ServerRequestDispatcher.success(result.value)
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 		end
 	)
 	network:registerRequest(
 		MatchProtocol.SUBMIT_READY_ENDPOINT,
 		MatchProtocol.SubmitReadyPayloadSchema,
 		MatchProtocol.MatchSnapshotSchema,
-		authorizeContext,
+		authorizeLiveContext,
 		function(context, payload)
-			local canonicalPayload = payload :: MatchProtocol.SubmitReadyPayload
-			local readyResult =
-				matchLifecycle:submitReady(context.player, canonicalPayload.matchId, canonicalPayload.observedRevision)
-			if readyResult.ok then
-				return ServerRequestDispatcher.success(readyResult.value)
-			end
-			return rejectCode(readyResult.error.code)
+			local intent = payload :: MatchProtocol.SubmitReadyPayload
+			local result = matchLifecycle:submitReady(context.player, intent.matchId, intent.observedRevision)
+			return if result.ok
+				then ServerRequestDispatcher.success(result.value)
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 		end
 	)
 	network:registerRequest(
 		BaseProtocol.GET_BASE_SNAPSHOT_ENDPOINT,
 		BaseProtocol.GetBaseSnapshotPayloadSchema,
 		BaseProtocol.BaseSnapshotSchema,
-		authorizeContext,
-		function(_context, _payload)
-			local snapshotResult = baseRuntime:getSnapshot()
-			if snapshotResult.ok then
-				return ServerRequestDispatcher.success(snapshotResult.value)
-			end
-			return rejectBaseSnapshot(snapshotResult.error.code)
-		end
+		authorizeLiveContext,
+		unavailable
 	)
 	network:registerRequest(
 		EnemyProtocol.GET_ENEMY_SNAPSHOT_ENDPOINT,
 		EnemyProtocol.GetEnemySnapshotPayloadSchema,
 		EnemyProtocol.EnemySnapshotReceiptSchema,
-		authorizeContext,
-		function(context, _payload)
-			local snapshotResult = enemySimulation:requestSnapshot(context.player)
-			if snapshotResult.ok then
-				return ServerRequestDispatcher.success(snapshotResult.value)
-			end
-			return rejectEnemySnapshot(snapshotResult.error.code)
-		end
+		authorizeLiveContext,
+		unavailable
 	)
 	network:registerRequest(
 		WaveProtocol.GET_WAVE_SNAPSHOT_ENDPOINT,
 		WaveProtocol.GetWaveSnapshotPayloadSchema,
 		WaveProtocol.WaveSnapshotSchema,
-		authorizeContext,
-		function(_context, _payload)
-			local snapshotResult = waveRuntime:getSnapshot()
-			if snapshotResult.ok then
-				return ServerRequestDispatcher.success(snapshotResult.value)
-			end
-			return rejectCode(snapshotResult.error.code)
-		end
+		authorizeLiveContext,
+		unavailable
 	)
 	network:registerRequest(
 		WaveProtocol.SUBMIT_SKIP_VOTE_ENDPOINT,
 		WaveProtocol.SubmitSkipVotePayloadSchema,
 		WaveProtocol.WaveSnapshotSchema,
-		authorizeContext,
-		function(context, payload)
-			local canonicalPayload = payload :: WaveProtocol.SubmitSkipVotePayload
-			local voteResult =
-				waveRuntime:submitSkipVote(context.player.UserId, canonicalPayload.matchId, canonicalPayload.waveNumber)
-			if voteResult.ok then
-				return ServerRequestDispatcher.success(voteResult.value)
-			end
-			return rejectCode(voteResult.error.code)
-		end
+		authorizeLiveContext,
+		unavailable
 	)
 	network:registerRequest(
 		PlacementProtocol.GET_QUERY_ENDPOINT,
 		PlacementProtocol.GetQueryPayloadSchema,
 		PlacementProtocol.QuerySnapshotSchema,
-		authorizeLivePlacementContext,
-		function(context, _payload)
-			if not authorizeLivePlacementContext(context) then
-				return ServerRequestDispatcher.reject(PUBLIC_ERRORS.NOT_AUTHORIZED)
-			end
-			local queryResult = towerPlacement:getQuery(context.player.UserId)
-			if queryResult.ok then
-				return ServerRequestDispatcher.success(queryResult.value)
-			end
-			return rejectPlacementQuery(queryResult.error.code)
-		end
+		authorizeLiveContext,
+		unavailable
 	)
 	network:registerRequest(
 		PlacementProtocol.SUBMIT_PLACEMENT_ENDPOINT,
 		PlacementProtocol.SubmitPlacementPayloadSchema,
 		PlacementProtocol.PlacementReceiptSchema,
-		authorizeLivePlacementContext,
-		function(context, payload)
-			if not authorizeLivePlacementContext(context) then
-				return ServerRequestDispatcher.reject(PUBLIC_ERRORS.NOT_AUTHORIZED)
-			end
-			local placementResult =
-				towerPlacement:submitPlacement(context.player.UserId, payload :: PlacementProtocol.PlacementIntent)
-			if placementResult.ok then
-				return ServerRequestDispatcher.success(placementResult.value)
-			end
-			return rejectPlacementQuery(placementResult.error.code)
+		authorizeLiveContext,
+		unavailable
+	)
+
+	network:registerRequest(
+		PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT,
+		PlayableMatchProtocol.GetSnapshotPayloadSchema,
+		PlayableMatchProtocol.SnapshotSchema,
+		authorizeLiveContext,
+		function(context, _payload)
+			local result = playable:getSnapshot(context.player)
+			return if result.ok
+				then ServerRequestDispatcher.success(result.value)
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 		end
 	)
+	network:registerRequest(
+		PlayableMatchProtocol.ENDPOINTS.SUBMIT_READY,
+		PlayableMatchProtocol.ReadyPayloadSchema,
+		PlayableMatchProtocol.ActionReceiptSchema,
+		authorizeLiveContext,
+		function(context, payload)
+			return actionOutcome(playable:submitReady(context.player, payload :: PlayableMatchProtocol.ReadyPayload))
+		end
+	)
+	network:registerRequest(
+		PlayableMatchProtocol.ENDPOINTS.SUBMIT_PLACEMENT,
+		PlayableMatchProtocol.PlacementPayloadSchema,
+		PlayableMatchProtocol.ActionReceiptSchema,
+		authorizeLiveContext,
+		function(context, payload)
+			return actionOutcome(
+				playable:submitPlacement(context.player, payload :: PlayableMatchProtocol.PlacementPayload)
+			)
+		end
+	)
+	network:registerRequest(
+		PlayableMatchProtocol.ENDPOINTS.SUBMIT_UPGRADE,
+		PlayableMatchProtocol.TowerPayloadSchema,
+		PlayableMatchProtocol.ActionReceiptSchema,
+		authorizeLiveContext,
+		function(context, payload)
+			return actionOutcome(playable:submitUpgrade(context.player, payload :: PlayableMatchProtocol.TowerPayload))
+		end
+	)
+	network:registerRequest(
+		PlayableMatchProtocol.ENDPOINTS.SUBMIT_SELL,
+		PlayableMatchProtocol.TowerPayloadSchema,
+		PlayableMatchProtocol.ActionReceiptSchema,
+		authorizeLiveContext,
+		function(context, payload)
+			return actionOutcome(playable:submitSell(context.player, payload :: PlayableMatchProtocol.TowerPayload))
+		end
+	)
+	network:registerRequest(
+		PlayableMatchProtocol.ENDPOINTS.SUBMIT_TARGET_MODE,
+		PlayableMatchProtocol.TargetModePayloadSchema,
+		PlayableMatchProtocol.ActionReceiptSchema,
+		authorizeLiveContext,
+		function(context, payload)
+			return actionOutcome(
+				playable:submitTargetMode(context.player, payload :: PlayableMatchProtocol.TargetModePayload)
+			)
+		end
+	)
+	network:registerRequest(
+		PlayableMatchProtocol.ENDPOINTS.SUBMIT_REPLAY,
+		PlayableMatchProtocol.ReplayPayloadSchema,
+		PlayableMatchProtocol.ActionReceiptSchema,
+		authorizeLiveContext,
+		function(context, payload)
+			return actionOutcome(playable:submitReplay(context.player, payload :: PlayableMatchProtocol.ReplayPayload))
+		end
+	)
+
 	configuration.lifecycleRunner:register(matchLifecycle:getServiceDefinition())
-	configuration.lifecycleRunner:register(baseRuntime:getServiceDefinition())
-	configuration.lifecycleRunner:register(enemySimulation:getServiceDefinition())
-	configuration.lifecycleRunner:register(waveRuntime:getServiceDefinition())
-	configuration.lifecycleRunner:register(towerRuntime:getServiceDefinition())
-	configuration.lifecycleRunner:register(towerPlacement:getServiceDefinition())
+	configuration.lifecycleRunner:register(playable:getServiceDefinition())
 end)

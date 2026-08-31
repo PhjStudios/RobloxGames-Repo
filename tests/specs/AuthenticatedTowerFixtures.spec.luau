@@ -441,10 +441,12 @@ return TestHarness.suite("authenticated Phase 12 tower fixtures", {
 		assertions.notEqual(raw.towers[1], fresh.towers[1])
 		assertions.isTrue(table.isfrozen(fixture.single.levels[1].attack))
 	end),
-	TestHarness.case("keeps production Asset and Tower sources frozen and empty", function(assertions)
+	TestHarness.case("keeps production Asset and Tower sources frozen and distinct from fixtures", function(assertions)
 		assertions.isTrue(table.isfrozen(ProductionAssets))
 		assertions.isTrue(table.isfrozen(ProductionTowers))
-		assertions.equal(#ProductionAssets, 0)
-		assertions.equal(#ProductionTowers, 0)
+		assertions.equal(#ProductionAssets, 16)
+		assertions.equal(#ProductionTowers, 3)
+		assertions.equal(ProductionTowers[1].id, "tower:dart-ant")
+		assertions.notEqual(ProductionTowers[1].id, Fixtures.SINGLE_TOWER_ID)
 	end),
 })

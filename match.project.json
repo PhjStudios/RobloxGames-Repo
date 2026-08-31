@@ -76,6 +76,11 @@
             "$ignoreUnknownInstances": true
           },
 
+          "playable": {
+            "$path": "src/server/match/playable",
+            "$ignoreUnknownInstances": true
+          },
+
           "lifecycle": {
             "$path": "src/server/match/lifecycle",
             "$ignoreUnknownInstances": true
@@ -155,6 +160,11 @@
 
             "placement": {
               "$path": "src/client/match/placement",
+              "$ignoreUnknownInstances": true
+            },
+
+            "playable": {
+              "$path": "src/client/match/playable",
               "$ignoreUnknownInstances": true
             },
 

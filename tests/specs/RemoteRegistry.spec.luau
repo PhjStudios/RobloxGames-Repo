@@ -64,7 +64,7 @@ end
 
 return TestHarness.suite("remote registry contract", {
 	TestHarness.case(
-		"exports fixed protocol constants and exactly thirteen Match production remotes",
+		"exports fixed protocol constants and the complete Match production remote boundary",
 		function(assertions)
 			assertions.equal(RemoteRegistry.ROOT_NAME, "ATDNetwork")
 			assertions.equal(RemoteRegistry.VERSION_NAME, "v1")
@@ -73,50 +73,77 @@ return TestHarness.suite("remote registry contract", {
 			assertions.isTrue(table.isfrozen(RemoteRegistry))
 
 			assertions.isTrue(RemoteRegistry.isRegistry(ProductionRemotes))
-			assertions.equal(ProductionRemotes:count(), 13)
+			assertions.equal(ProductionRemotes:count(), 22)
 			assertNames(assertions, ProductionRemotes:list(), {
 				"BaseReplication",
+				"CombatAttackEvent",
 				"EnemyReplication",
 				"GetBaseSnapshot",
 				"GetEnemySnapshot",
 				"GetMatchSnapshot",
+				"GetPlayableMatchSnapshot",
 				"GetTowerPlacementQuery",
 				"GetWaveSnapshot",
 				"MatchSnapshot",
+				"PlayableMatchReplication",
+				"SubmitPlayablePlacement",
+				"SubmitPlayableReady",
+				"SubmitPlayableReplay",
 				"SubmitReady",
 				"SubmitSkipVote",
 				"SubmitTowerPlacement",
+				"SubmitTowerSell",
+				"SubmitTowerTargetMode",
+				"SubmitTowerUpgrade",
 				"TowerPlacementRevision",
 				"WaveReplication",
 			})
 			assertNames(assertions, ProductionRemotes:listForRole("Development"), {
 				"BaseReplication",
+				"CombatAttackEvent",
 				"EnemyReplication",
 				"GetBaseSnapshot",
 				"GetEnemySnapshot",
 				"GetMatchSnapshot",
+				"GetPlayableMatchSnapshot",
 				"GetTowerPlacementQuery",
 				"GetWaveSnapshot",
 				"MatchSnapshot",
+				"PlayableMatchReplication",
+				"SubmitPlayablePlacement",
+				"SubmitPlayableReady",
+				"SubmitPlayableReplay",
 				"SubmitReady",
 				"SubmitSkipVote",
 				"SubmitTowerPlacement",
+				"SubmitTowerSell",
+				"SubmitTowerTargetMode",
+				"SubmitTowerUpgrade",
 				"TowerPlacementRevision",
 				"WaveReplication",
 			})
 			assertions.equal(rawlen(ProductionRemotes:listForRole("Lobby")), 0)
 			assertNames(assertions, ProductionRemotes:listForRole("Match"), {
 				"BaseReplication",
+				"CombatAttackEvent",
 				"EnemyReplication",
 				"GetBaseSnapshot",
 				"GetEnemySnapshot",
 				"GetMatchSnapshot",
+				"GetPlayableMatchSnapshot",
 				"GetTowerPlacementQuery",
 				"GetWaveSnapshot",
 				"MatchSnapshot",
+				"PlayableMatchReplication",
+				"SubmitPlayablePlacement",
+				"SubmitPlayableReady",
+				"SubmitPlayableReplay",
 				"SubmitReady",
 				"SubmitSkipVote",
 				"SubmitTowerPlacement",
+				"SubmitTowerSell",
+				"SubmitTowerTargetMode",
+				"SubmitTowerUpgrade",
 				"TowerPlacementRevision",
 				"WaveReplication",
 			})

@@ -24,6 +24,10 @@ local bindings: { ServerRateLimiter.PolicyBinding } = {
 		policy = requirePolicy(2, 1),
 	}),
 	table.freeze({
+		endpoint = "GetPlayableMatchSnapshot",
+		policy = requirePolicy(3, 1),
+	}),
+	table.freeze({
 		endpoint = "GetTowerPlacementQuery",
 		policy = requirePolicy(4, 1),
 	}),
@@ -34,6 +38,30 @@ local bindings: { ServerRateLimiter.PolicyBinding } = {
 	table.freeze({
 		endpoint = "SubmitReady",
 		policy = requirePolicy(2, 0.5),
+	}),
+	table.freeze({
+		endpoint = "SubmitPlayablePlacement",
+		policy = requirePolicy(5, 1),
+	}),
+	table.freeze({
+		endpoint = "SubmitPlayableReady",
+		policy = requirePolicy(3, 0.5),
+	}),
+	table.freeze({
+		endpoint = "SubmitPlayableReplay",
+		policy = requirePolicy(2, 0.25),
+	}),
+	table.freeze({
+		endpoint = "SubmitTowerSell",
+		policy = requirePolicy(4, 0.75),
+	}),
+	table.freeze({
+		endpoint = "SubmitTowerTargetMode",
+		policy = requirePolicy(6, 1),
+	}),
+	table.freeze({
+		endpoint = "SubmitTowerUpgrade",
+		policy = requirePolicy(4, 0.75),
 	}),
 	table.freeze({
 		endpoint = "SubmitSkipVote",
