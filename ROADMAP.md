@@ -1,12 +1,13 @@
 # Ant Tower Defense Roadmap
 
-This is the current delivery roadmap. Phases 00–13 are complete, and Phase 14
-gameplay work has not begun. The detailed historical packet plan remains useful
-for requirements and design context, but delivery now targets playable outcomes.
+This is the current delivery roadmap. Phases 00–13 and the Playable Local Match
+outcome are complete; the Persistent Lobby Loop has not begun. The detailed
+historical packet plan remains useful for requirements and design context, but
+delivery now targets playable outcomes.
 
 ## Delivery outcomes
 
-1. **Playable local match — Phases 14–18 plus minimum content from 29–31.**
+1. **Complete: Playable local match — Phases 14–18 plus minimum content from 29–31.**
    Complete authoritative combat, tower management, the match experience,
    victory/defeat/replay, and the vertical-slice gate. Pull forward only the
    minimum real map, tower, enemy, and wave content needed to make that local
