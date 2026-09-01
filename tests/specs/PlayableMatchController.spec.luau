@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DefaultSettings = require(ReplicatedStorage.Shared.config.DefaultSettings)
 local EnvironmentContext = require(ReplicatedStorage.Shared.logging.EnvironmentContext)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
+local MatchTravelProtocol = require(ReplicatedStorage.Shared.match.MatchTravelProtocol)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
 local ProductionRemotes = require(ReplicatedStorage.Shared.network.ProductionRemotes)
 
@@ -49,6 +50,8 @@ local function snapshot(revision: number, state: string?): any
 	local isReady = selectedState == "Ready"
 	return {
 		matchId = "match:playable-controller",
+		viewerRole = "Participant",
+		rewarding = false,
 		revision = revision,
 		loadoutRevision = 6,
 		state = selectedState,
@@ -122,6 +125,22 @@ local function snapshot(revision: number, state: string?): any
 	}
 end
 
+local function travelSnapshot(revision: number, role: string?): any
+	return {
+		version = 1,
+		matchId = "match:playable-controller",
+		revision = revision,
+		viewerRole = role or "Participant",
+		returnStatus = "Idle",
+		rematch = {
+			revision = revision,
+			state = "Pending",
+			deadline = 300,
+			votes = { { userId = 42, choice = "Pending" } },
+		},
+	}
+end
+
 local function successWire(request: any, payload: unknown): any
 	return { requestId = request.requestId, state = "Success", payload = payload }
 end
@@ -176,6 +195,7 @@ local function makeRig(): any
 		raycastScreenPosition = nil,
 		pickedTowerId = 1,
 		focused = 0,
+		spectatorFocuses = {},
 		restored = 0,
 		renderListener = nil,
 		worldPointerListener = nil,
@@ -184,6 +204,7 @@ local function makeRig(): any
 		renderFailuresRemaining = 0,
 		viewCleaned = 0,
 		inputCleaned = 0,
+		transactionSequence = 0,
 	}
 	local requestCounter = 0
 	local trackerResult = (newTrackerForTests :: ClientRequestTracker.TestConstructor)(
@@ -236,8 +257,12 @@ local function makeRig(): any
 		submitSell = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.SUBMIT_SELL),
 		submitTargetMode = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.SUBMIT_TARGET_MODE),
 		submitReplay = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.SUBMIT_REPLAY),
+		getTravelSnapshot = requestEndpoint(MatchTravelProtocol.ENDPOINTS.GET_SNAPSHOT),
+		requestReturn = requestEndpoint(MatchTravelProtocol.ENDPOINTS.REQUEST_RETURN),
+		voteRematch = requestEndpoint(MatchTravelProtocol.ENDPOINTS.VOTE_REMATCH),
 		replicationEvent = eventEndpoint(PlayableMatchProtocol.ENDPOINTS.REPLICATION),
 		attackEvent = eventEndpoint(PlayableMatchProtocol.ENDPOINTS.ATTACK_EVENT),
+		travelReplicationEvent = eventEndpoint(MatchTravelProtocol.ENDPOINTS.REPLICATION),
 		view = {
 			render = function(_self, value)
 				table.insert(rig.renders, value)
@@ -312,11 +337,19 @@ local function makeRig(): any
 			rig.focused += 1
 			return true
 		end,
+		focusSpectatorTarget = function(position)
+			table.insert(rig.spectatorFocuses, position)
+			return true
+		end,
 		restoreCamera = function()
 			rig.restored += 1
 		end,
 		applySettings = function(settings)
 			table.insert(rig.appliedSettings, settings)
+		end,
+		newTransactionId = function()
+			rig.transactionSequence += 1
+			return string.format("transaction:00000000-0000-4000-8000-%012d", rig.transactionSequence)
 		end,
 	}
 
@@ -341,6 +374,15 @@ local function deliverInitial(rig: any, value: any)
 	rig.responses[endpoint]:fire(successWire(request, value))
 end
 
+local function deliverTravel(rig: any, value: any)
+	local endpoint = MatchTravelProtocol.ENDPOINTS.GET_SNAPSHOT
+	local request = rig.fires[endpoint][1]
+	if request == nil then
+		error("initial Match travel Get missing", 0)
+	end
+	rig.responses[endpoint]:fire(successWire(request, value))
+end
+
 local function cleanupRig(rig: any)
 	if rig.controller:getState() ~= "Shutdown" then
 		rig.service.shutdown()
@@ -351,7 +393,7 @@ return TestHarness.suite("playable Match production client controller", {
 	TestHarness.case("registers listeners before one initial owner-private snapshot request", function(assertions)
 		local rig = makeRig()
 		assertions.equal(#rig.fires[PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT], 1)
-		assertions.equal(rig.controller:getMetrics().connectionCount, 11)
+		assertions.equal(rig.controller:getMetrics().connectionCount, 15)
 		assertions.equal(#rig.renders, 1)
 		assertions.equal(rig.renders[1].state, "Loading")
 		assertions.equal(rig.renders[1].inputHint, "Connecting to the authoritative match.")
@@ -662,6 +704,8 @@ return TestHarness.suite("playable Match production client controller", {
 		assertions.isNil(rig.controller:getMetrics().selectedTowerId)
 		assertions.equal(rig.renders[#rig.renders].state, "Results")
 		assertions.equal(rig.renders[#rig.renders].result.kind, "Victory")
+		assertions.equal(rig.renders[#rig.renders].result.rewardStatus, "Ineligible")
+		assertions.isTrue(rig.renders[#rig.renders].result.canReplay)
 		assertions.isNil(rig.renders[#rig.renders].selection)
 		cleanupRig(rig)
 	end),
@@ -719,6 +763,111 @@ return TestHarness.suite("playable Match production client controller", {
 		end
 	),
 
+	TestHarness.case(
+		"renders durable rewards and sends revision-bound return and rematch intents",
+		function(assertions)
+			local rig = makeRig()
+			local results = snapshot(7, "Results")
+			results.rewarding = true
+			results.reward = {
+				resultId = "result:controller-ticketed",
+				status = "Granted",
+				persistentGoldAwarded = 500,
+				firstClearBonus = 250,
+				battleCashEarned = 76,
+				battleCashSpent = 230,
+				reason = "Claimed",
+			}
+			deliverInitial(rig, results)
+			deliverTravel(rig, travelSnapshot(1))
+			local rendered = rig.renders[#rig.renders]
+			assertions.equal(rendered.result.rewardStatus, "Granted")
+			assertions.equal(rendered.result.persistentGoldAwarded, 500)
+			assertions.equal(rendered.result.firstClearBonus, 250)
+			assertions.equal(rendered.result.battleCashEarned, 76)
+			assertions.isFalse(rendered.result.canReplay)
+			assertions.isTrue(rendered.travel.canReturn)
+			assertions.isTrue(rendered.travel.canApprove)
+
+			assertions.isTrue((invokeActionForTests :: any)(rig.controller, { kind = "Return", source = "Touch" }))
+			local returnEndpoint = MatchTravelProtocol.ENDPOINTS.REQUEST_RETURN
+			local returnRequest = rig.fires[returnEndpoint][1]
+			assertions.equal(returnRequest.payload.matchId, results.matchId)
+			assertions.equal(returnRequest.payload.observedRevision, 1)
+			assertions.equal(returnRequest.payload.transactionId, "transaction:00000000-0000-4000-8000-000000000001")
+			assertions.isNil(returnRequest.payload.ticketId)
+			local returned = travelSnapshot(2)
+			returned.returnStatus = "Pending"
+			rig.responses[returnEndpoint]:fire(successWire(returnRequest, {
+				transactionId = returnRequest.payload.transactionId,
+				changed = true,
+				snapshot = returned,
+			}))
+			assertions.isFalse(rig.controller:getMetrics().travelMutationPending)
+
+			assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+				kind = "RematchApprove",
+				source = "Gamepad",
+			}))
+			local rematchRequest = rig.fires[MatchTravelProtocol.ENDPOINTS.VOTE_REMATCH][1]
+			assertions.isTrue(rematchRequest.payload.approve)
+			assertions.equal(rematchRequest.payload.observedRevision, 2)
+			assertions.equal(rematchRequest.payload.observedRematchRevision, 2)
+			assertions.isNil(rematchRequest.payload.roster)
+			cleanupRig(rig)
+		end
+	),
+
+	TestHarness.case("keeps spectators read-only while cycling bounded live camera targets", function(assertions)
+		local rig = makeRig()
+		local spectator = snapshot(7, "Results")
+		spectator.viewerRole = "Spectator"
+		spectator.rewarding = true
+		spectator.loadoutRevision = 0
+		spectator.battleCash = 0
+		table.clear(spectator.towerOptions)
+		spectator.towers = snapshot(7).towers
+		spectator.stats.damageDealt = 0
+		spectator.stats.battleCashEarned = 0
+		spectator.stats.battleCashSpent = 0
+		spectator.stats.placements = 0
+		spectator.stats.upgrades = 0
+		spectator.stats.sells = 0
+		spectator.reward = {
+			resultId = "result:controller-spectator",
+			status = "Pending",
+			persistentGoldAwarded = 0,
+			firstClearBonus = 0,
+			battleCashEarned = 0,
+			battleCashSpent = 0,
+			reason = "ClaimPending",
+		}
+		deliverInitial(rig, spectator)
+		deliverTravel(rig, travelSnapshot(1, "Spectator"))
+		assertions.equal(rig.renders[#rig.renders].viewerRole, "Spectator")
+		assertions.equal(rig.renders[#rig.renders].result.rewardStatus, "Pending")
+		assertions.isFalse(rig.renders[#rig.renders].travel.canApprove)
+		assertions.isFalse((invokeActionForTests :: any)(rig.controller, { kind = "Ready", source = "Desktop" }))
+		assertions.equal(#rig.fires[PlayableMatchProtocol.ENDPOINTS.SUBMIT_READY], 0)
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "SpectateNext",
+			source = "Gamepad",
+		}))
+		assertions.equal(#rig.spectatorFocuses, 1)
+		assertions.equal(rig.controller:getMetrics().spectatorTargetId, "tower:1")
+
+		local noTargets = table.clone(spectator)
+		noTargets.revision = 8
+		noTargets.towers = {}
+		rig.events[PlayableMatchProtocol.ENDPOINTS.REPLICATION]:fire({ payload = noTargets })
+		assertions.isNil(rig.controller:getMetrics().spectatorTargetId)
+		assertions.isFalse((invokeActionForTests :: any)(rig.controller, {
+			kind = "SpectateNext",
+			source = "Touch",
+		}))
+		cleanupRig(rig)
+	end),
+
 	TestHarness.case("times out a missing action receipt and recovers authoritative state", function(assertions)
 		local rig = makeRig()
 		local renderListener = rig.renderListener :: any
@@ -756,7 +905,7 @@ return TestHarness.suite("playable Match production client controller", {
 		assertions.equal(rig.viewCleaned, 1)
 		assertions.equal(rig.inputCleaned, 1)
 		assertions.equal(rig.restored, 1)
-		assertions.equal(rig.disconnectCount, 11)
+		assertions.equal(rig.disconnectCount, 15)
 		assertions.isTrue(rig.service.shutdown == rig.service.shutdown)
 	end),
 })

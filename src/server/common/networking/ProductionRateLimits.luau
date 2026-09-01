@@ -28,6 +28,10 @@ local bindings: { ServerRateLimiter.PolicyBinding } = {
 		policy = requirePolicy(3, 1),
 	}),
 	table.freeze({
+		endpoint = "GetMatchTravelSnapshot",
+		policy = requirePolicy(3, 1),
+	}),
+	table.freeze({
 		endpoint = "GetTowerPlacementQuery",
 		policy = requirePolicy(4, 1),
 	}),
@@ -76,6 +80,82 @@ local bindings: { ServerRateLimiter.PolicyBinding } = {
 		policy = requirePolicy(4, 1),
 	}),
 	table.freeze({
+		endpoint = "GetLobbyParty",
+		policy = requirePolicy(4, 1),
+	}),
+	table.freeze({
+		endpoint = "CreateLobbyParty",
+		policy = requirePolicy(2, 0.25),
+	}),
+	table.freeze({
+		endpoint = "InviteLobbyParty",
+		policy = requirePolicy(3, 0.25),
+	}),
+	table.freeze({
+		endpoint = "AcceptLobbyPartyInvite",
+		policy = requirePolicy(3, 0.5),
+	}),
+	table.freeze({
+		endpoint = "DeclineLobbyPartyInvite",
+		policy = requirePolicy(3, 0.5),
+	}),
+	table.freeze({
+		endpoint = "LeaveLobbyParty",
+		policy = requirePolicy(2, 0.25),
+	}),
+	table.freeze({
+		endpoint = "KickLobbyPartyMember",
+		policy = requirePolicy(3, 0.25),
+	}),
+	table.freeze({
+		endpoint = "TransferLobbyPartyLeadership",
+		policy = requirePolicy(2, 0.2),
+	}),
+	table.freeze({
+		endpoint = "SetLobbyPartyPrivacy",
+		policy = requirePolicy(3, 0.5),
+	}),
+	table.freeze({
+		endpoint = "DisbandLobbyParty",
+		policy = requirePolicy(2, 0.2),
+	}),
+	table.freeze({
+		endpoint = "PromptLobbyPartyInvite",
+		policy = requirePolicy(2, 0.1),
+	}),
+	table.freeze({
+		endpoint = "GetLobbyQueues",
+		policy = requirePolicy(4, 1),
+	}),
+	table.freeze({
+		endpoint = "JoinLobbyQueue",
+		policy = requirePolicy(3, 0.5),
+	}),
+	table.freeze({
+		endpoint = "LeaveLobbyQueue",
+		policy = requirePolicy(3, 0.5),
+	}),
+	table.freeze({
+		endpoint = "ConfigureLobbyQueue",
+		policy = requirePolicy(4, 0.75),
+	}),
+	table.freeze({
+		endpoint = "StartLobbyQueue",
+		policy = requirePolicy(2, 0.2),
+	}),
+	table.freeze({
+		endpoint = "GetLobbyActiveRoute",
+		policy = requirePolicy(3, 0.5),
+	}),
+	table.freeze({
+		endpoint = "ReconnectLobbyActiveMatch",
+		policy = requirePolicy(2, 0.2),
+	}),
+	table.freeze({
+		endpoint = "RequestReturnToLobby",
+		policy = requirePolicy(2, 0.2),
+	}),
+	table.freeze({
 		endpoint = "SubmitReady",
 		policy = requirePolicy(2, 0.5),
 	}),
@@ -90,6 +170,10 @@ local bindings: { ServerRateLimiter.PolicyBinding } = {
 	table.freeze({
 		endpoint = "SubmitPlayableReplay",
 		policy = requirePolicy(2, 0.25),
+	}),
+	table.freeze({
+		endpoint = "SubmitRematchVote",
+		policy = requirePolicy(3, 0.5),
 	}),
 	table.freeze({
 		endpoint = "SubmitTowerSell",

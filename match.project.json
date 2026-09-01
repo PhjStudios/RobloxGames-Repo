@@ -54,6 +54,11 @@
           "profile": {
             "$path": "src/server/common/profile",
             "$ignoreUnknownInstances": true
+          },
+
+          "travel": {
+            "$path": "src/server/common/travel",
+            "$ignoreUnknownInstances": true
           }
         },
 
@@ -98,6 +103,21 @@
 
           "ready": {
             "$path": "src/server/match/ready",
+            "$ignoreUnknownInstances": true
+          },
+
+          "admission": {
+            "$path": "src/server/match/admission",
+            "$ignoreUnknownInstances": true
+          },
+
+          "travel": {
+            "$path": "src/server/match/travel",
+            "$ignoreUnknownInstances": true
+          },
+
+          "rewards": {
+            "$path": "src/server/match/rewards",
             "$ignoreUnknownInstances": true
           },
 

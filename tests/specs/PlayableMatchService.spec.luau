@@ -7,6 +7,7 @@ local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local ConfigurationValidator = require(ReplicatedStorage.Shared.config.ConfigurationValidator)
 local EnvironmentContext = require(ReplicatedStorage.Shared.logging.EnvironmentContext)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
+local MatchLoadoutProtocol = require(ReplicatedStorage.Shared.match.MatchLoadoutProtocol)
 local Result = require(ReplicatedStorage.Shared.util.Result)
 
 local PlayableMatchService = require(script.Parent.Parent.ProductionServerPlayable.PlayableMatchService)
@@ -22,6 +23,30 @@ local CONFIGURATION = loaded.value
 local newForTests = PlayableMatchService.newForTests
 if newForTests == nil then
 	error("expected PlayableMatchService test constructor", 0)
+end
+
+local function frozenLoadout(userId: number, settingsOverride: any?): MatchLoadoutProtocol.Snapshot
+	local slots = {}
+	for index, definition in CONFIGURATION.towers.ordered do
+		if index > MatchLoadoutProtocol.MAX_SLOTS then
+			break
+		end
+		table.insert(slots, {
+			slot = index,
+			unitId = `unit:ticket-{userId}-{index}`,
+			towerId = definition.id,
+		})
+	end
+	local validated = MatchLoadoutProtocol.validate({
+		userId = userId,
+		revision = 7,
+		slots = slots,
+		settings = settingsOverride or CONFIGURATION.defaultSettings,
+	}, CONFIGURATION)
+	if not validated.ok then
+		error("expected valid frozen loadout", 0)
+	end
+	return validated.value
 end
 
 local function runtimeMap(): any
@@ -98,7 +123,7 @@ local function removeActive(active: { Player }, player: Player)
 	end
 end
 
-local function makeRig(extraContent: boolean?): any
+local function makeRig(extraContent: boolean?, rosterInputs: PlayableMatchService.RosterInputs?): any
 	local root = contentRoot()
 	if extraContent then
 		local catalog = root:FindFirstChild("ATDPlayableTemplates") :: Folder
@@ -203,7 +228,9 @@ local function makeRig(extraContent: boolean?): any
 		function()
 			return true
 		end,
-		environment
+		environment,
+		nil,
+		rosterInputs
 	)
 	return {
 		service = service,
@@ -221,6 +248,9 @@ local function makeRig(extraContent: boolean?): any
 		active = active,
 		first = first,
 		second = second,
+		bindPlayer = function(player: Player, userId: number)
+			ids[player] = userId
+		end,
 		publications = publications,
 		setClock = function(value: number)
 			clock = value
@@ -311,48 +341,98 @@ return TestHarness.suite("playable match service integration", {
 		cleanupRig(rig)
 	end),
 
-	TestHarness.case("replaces empty Playing and Results runtimes on the next active join", function(assertions)
-		local playing = makeRig()
-		startRig(playing)
-		ready(assertions, playing, playing.first)
-		local playingSnapshot = currentSnapshot(assertions, playing, playing.first)
-		local placed = playing.service:submitPlacement(playing.first, {
-			matchId = playingSnapshot.matchId,
-			loadoutRevision = playingSnapshot.loadoutRevision,
-			slot = 1,
-			towerId = "tower:dart-ant",
-			position = Vector3.new(0, 0, 8),
-			rotationDegrees = 0,
-		})
-		assertions.isTrue((placed :: any).accepted)
-		removeActive(playing.active, playing.first)
-		playing.fireRemoving(playing.first)
-		assertions.equal(playing.service:getMetrics().frozenLoadoutCount, 0)
-		assertions.equal((playing.service:getMetrics().runtime :: any).participantCount, 0)
-		assertions.equal((playing.service:getMetrics().runtime :: any).activeTowerCount, 0)
-		table.insert(playing.active, playing.second)
-		playing.fireAdded(playing.second)
-		local playingReplacement = currentSnapshot(assertions, playing, playing.second)
-		assertions.equal(playingReplacement.state, "Ready")
-		assertions.equal(playingReplacement.battleCash, 500)
-		assertions.equal(playing.service:getMetrics().generation, 2)
-		assertions.isTrue(playing.service:getMetrics().publishPending)
-		cleanupRig(playing)
+	TestHarness.case(
+		"retains a disconnected participant and makes late arrivals read-only spectators",
+		function(assertions)
+			local playing = makeRig()
+			startRig(playing)
+			ready(assertions, playing, playing.first)
+			local playingSnapshot = currentSnapshot(assertions, playing, playing.first)
+			local placed = playing.service:submitPlacement(playing.first, {
+				matchId = playingSnapshot.matchId,
+				loadoutRevision = playingSnapshot.loadoutRevision,
+				slot = 1,
+				towerId = "tower:dart-ant",
+				position = Vector3.new(0, 0, 8),
+				rotationDegrees = 0,
+			})
+			assertions.isTrue((placed :: any).accepted)
+			removeActive(playing.active, playing.first)
+			playing.fireRemoving(playing.first)
+			assertions.equal(playing.service:getMetrics().frozenLoadoutCount, 1)
+			assertions.equal((playing.service:getMetrics().runtime :: any).participantCount, 1)
+			assertions.equal((playing.service:getMetrics().runtime :: any).connectedParticipantCount, 0)
+			assertions.equal((playing.service:getMetrics().runtime :: any).activeTowerCount, 1)
+			table.insert(playing.active, playing.second)
+			playing.fireAdded(playing.second)
+			local spectator = currentSnapshot(assertions, playing, playing.second)
+			assertions.equal(spectator.viewerRole, "Spectator")
+			assertions.equal(spectator.state, "Playing")
+			assertions.equal(spectator.battleCash, 0)
+			assertions.equal(#spectator.towerOptions, 0)
+			assertions.equal(#spectator.towers, 1)
+			local spectatorPlacement = playing.service:submitPlacement(playing.second, {
+				matchId = spectator.matchId,
+				loadoutRevision = 1,
+				slot = 1,
+				towerId = "tower:dart-ant",
+				position = Vector3.new(4, 0, 8),
+				rotationDegrees = 0,
+			})
+			assertions.isNotNil(spectatorPlacement)
+			assertions.isFalse((spectatorPlacement :: any).accepted)
+			assertions.equal((spectatorPlacement :: any).reason, "NotParticipant")
+			assertions.equal(playing.service:getMetrics().generation, 1)
+			assertions.isTrue(playing.service:getMetrics().publishPending)
 
-		local results = makeRig()
-		startRig(results)
-		ready(assertions, results, results.first)
-		runToResults(assertions, results)
-		removeActive(results.active, results.first)
-		results.fireRemoving(results.first)
-		assertions.equal(results.service:getMetrics().frozenLoadoutCount, 0)
-		assertions.equal((results.service:getMetrics().runtime :: any).participantCount, 0)
-		table.insert(results.active, results.second)
-		results.fireAdded(results.second)
-		assertions.equal(currentSnapshot(assertions, results, results.second).state, "Ready")
-		assertions.equal(results.service:getMetrics().generation, 2)
-		cleanupRig(results)
-	end),
+			removeActive(playing.active, playing.second)
+			playing.fireRemoving(playing.second)
+			local replacementPlayer = fakePlayer("ServicePlayerOneReplacement")
+			playing.bindPlayer(replacementPlayer, 101)
+			table.insert(playing.active, replacementPlayer)
+			playing.fireAdded(replacementPlayer)
+			local rebound = currentSnapshot(assertions, playing, replacementPlayer)
+			assertions.equal(rebound.viewerRole, "Participant")
+			assertions.equal(rebound.matchId, playingSnapshot.matchId)
+			assertions.equal(rebound.battleCash, 380)
+			assertions.equal(rebound.stats.placements, 1)
+			assertions.equal(#rebound.towers, 1)
+			assertions.equal((playing.service:getMetrics().runtime :: any).participantCount, 1)
+			assertions.equal((playing.service:getMetrics().runtime :: any).connectedParticipantCount, 1)
+			removeActive(playing.active, replacementPlayer)
+			playing.fireRemoving(replacementPlayer)
+			replacementPlayer:Destroy()
+			cleanupRig(playing)
+
+			local results = makeRig()
+			startRig(results)
+			ready(assertions, results, results.first)
+			runToResults(assertions, results)
+			local directEvidence = results.service:getResultEvidence()
+			assertions.isTrue(directEvidence.ok)
+			assertions.isFalse((directEvidence :: any).value.rewardingMatch)
+			assertions.equal(#(directEvidence :: any).value.entries, 1)
+			removeActive(results.active, results.first)
+			results.fireRemoving(results.first)
+			assertions.equal(results.service:getMetrics().frozenLoadoutCount, 1)
+			assertions.equal((results.service:getMetrics().runtime :: any).participantCount, 1)
+			table.insert(results.active, results.second)
+			results.fireAdded(results.second)
+			local resultsSpectator = currentSnapshot(assertions, results, results.second)
+			assertions.equal(resultsSpectator.viewerRole, "Spectator")
+			assertions.equal(resultsSpectator.state, "Results")
+			assertions.equal(results.service:getMetrics().generation, 1)
+			removeActive(results.active, results.second)
+			results.fireRemoving(results.second)
+			table.insert(results.active, results.first)
+			results.fireAdded(results.first)
+			local resultsRebound = currentSnapshot(assertions, results, results.first)
+			assertions.equal(resultsRebound.viewerRole, "Participant")
+			assertions.equal(resultsRebound.state, "Results")
+			assertions.equal(results.service:getMetrics().generation, 1)
+			cleanupRig(results)
+		end
+	),
 
 	TestHarness.case("bounds frozen loadouts across rejected joins and player churn", function(assertions)
 		local rig = makeRig()
@@ -367,7 +447,60 @@ return TestHarness.suite("playable match service integration", {
 		rig.fireRemoving(rig.second)
 		removeActive(rig.active, rig.first)
 		rig.fireRemoving(rig.first)
-		assertions.equal(rig.service:getMetrics().frozenLoadoutCount, 0)
+		assertions.equal(rig.service:getMetrics().frozenLoadoutCount, 1)
 		cleanupRig(rig)
 	end),
+
+	TestHarness.case(
+		"injects an ordered frozen ticket roster before all expected identities arrive",
+		function(assertions)
+			local rig = makeRig(false, {
+				expectedUserIds = { 202, 101 },
+				frozenLoadouts = { frozenLoadout(202), frozenLoadout(101) },
+				rewarding = true,
+			})
+			startRig(rig)
+			local first = currentSnapshot(assertions, rig, rig.first)
+			assertions.equal(first.viewerRole, "Participant")
+			assertions.isTrue(first.rewarding)
+			assertions.equal(first.loadoutRevision, 7)
+			assertions.equal((rig.service:getMetrics().runtime :: any).participantCount, 2)
+			assertions.equal((rig.service:getMetrics().runtime :: any).connectedParticipantCount, 1)
+
+			-- The second expected identity reconnects to the preloaded participant
+			-- instead of appending or resolving a fresh profile loadout.
+			table.insert(rig.active, rig.second)
+			rig.fireAdded(rig.second)
+			local second = currentSnapshot(assertions, rig, rig.second)
+			assertions.equal(second.viewerRole, "Participant")
+			assertions.equal(second.loadoutRevision, 7)
+			assertions.equal((rig.service:getMetrics().runtime :: any).participantCount, 2)
+			assertions.equal((rig.service:getMetrics().runtime :: any).connectedParticipantCount, 2)
+			cleanupRig(rig)
+
+			local spectatorSettings = table.clone(CONFIGURATION.defaultSettings)
+			spectatorSettings.uiScale = 1.25
+			spectatorSettings.reducedMotionEnabled = true
+			local late = makeRig(false, {
+				expectedUserIds = { 101, 202 },
+				frozenLoadouts = { frozenLoadout(101), frozenLoadout(202, spectatorSettings) },
+				rewarding = true,
+			})
+			startRig(late)
+			ready(assertions, late, late.first)
+			table.insert(late.active, late.second)
+			late.fireAdded(late.second)
+			local lateSnapshot = currentSnapshot(assertions, late, late.second)
+			assertions.equal(lateSnapshot.viewerRole, "Spectator")
+			assertions.equal(lateSnapshot.state, "Playing")
+			assertions.equal(lateSnapshot.loadoutRevision, 0)
+			assertions.equal(lateSnapshot.settings.uiScale, 1.25)
+			assertions.isTrue(lateSnapshot.settings.reducedMotionEnabled)
+			assertions.equal(lateSnapshot.battleCash, 0)
+			assertions.equal(#lateSnapshot.towerOptions, 0)
+			assertions.equal((late.service:getMetrics().runtime :: any).participantCount, 2)
+			assertions.equal((late.service:getMetrics().runtime :: any).connectedParticipantCount, 1)
+			cleanupRig(late)
+		end
+	),
 })

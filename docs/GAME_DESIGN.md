@@ -70,11 +70,9 @@ players is too restrictive or harms map balance.
 
 ### GD-004 — Queue privacy
 
-**Decision:** Core queue modes are:
-
-- Solo.
-- Friends.
-- Public.
+**Decision:** Queue privacy is either `Public` or `PartyOnly`. Solo is a squad
+size, not a privacy mode. A `PartyOnly` solo queue remains private and does not
+reserve space for future party members.
 
 Public queues in the initial core release form from players in the same lobby
 server. Cross-server public matchmaking is deferred to Phase 43.
@@ -84,7 +82,8 @@ lobby-to-match implementation depend on global matchmaking infrastructure.
 
 ### GD-005 — Captain authority
 
-**Decision:** The first valid player entering a queue square becomes captain.
+**Decision:** The first valid enrollment becomes captain. An atomically enrolled
+party uses its current party leader as captain.
 Only the captain can select:
 
 - Map.
@@ -99,8 +98,10 @@ An empty queue resets completely.
 ### GD-006 — Party separation
 
 **Decision:** A social party exists independently from physical queue membership.
-A party is not automatically treated as a committed match squad until its
-members join or accept the queue flow according to the later Party/Queue design.
+The party leader may atomically enroll the complete present party, but invited,
+absent, and future members reserve no slots. A party enrollment is one unit: a
+membership change or intentional leave removes it rather than silently splitting
+the roster. Starting remains a manual captain action.
 
 **Reason:** Separating party and queue state prevents invitations, walking out of
 a queue, or partial teleports from producing ambiguous membership.
@@ -451,7 +452,7 @@ structured levels and high-frequency limits keep output usable.
 - Graybox and production match loops.
 - Profile persistence and migrations.
 - Settings, inventory, loadout, and earn-only gacha.
-- Same-server parties and Solo/Friends/Public queue squares.
+- Same-server parties and Public/PartyOnly queue squares for squads of one to four.
 - Reserved match servers and safe teleports.
 - Persistent match rewards.
 - One production map.

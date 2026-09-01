@@ -78,6 +78,24 @@ export type TransactionReceipt = {
 	result: ReceiptResult,
 }
 
+export type FirstClearRecord = {
+	mapId: Ids.MapId,
+	difficultyId: Ids.DifficultyId,
+	clearedAt: number,
+}
+
+export type ClaimedResultRecord = {
+	resultId: string,
+	persistentGoldAwarded: number,
+	firstClearBonus: number,
+	claimedAt: number,
+}
+
+export type PendingResultRecord = {
+	resultId: string,
+	createdAt: number,
+}
+
 export type Profile = {
 	schemaVersion: number,
 	revision: number,
@@ -90,6 +108,9 @@ export type Profile = {
 	stats: Statistics,
 	migration: MigrationMetadata,
 	receipts: { TransactionReceipt },
+	firstClears: { [string]: FirstClearRecord },
+	pendingResults: { PendingResultRecord },
+	claimedResults: { ClaimedResultRecord },
 }
 
 export type ErrorCode =
@@ -109,7 +130,7 @@ export type ProfileError = {
 	message: string,
 }
 
-local CURRENT_VERSION = 3
+local CURRENT_VERSION = 5
 local SETTINGS_VERSION = 2
 local STARTER_GOLD = 2_000
 local MAX_GOLD = 1_000_000_000_000
@@ -127,6 +148,10 @@ local MAX_RECEIPT_OUTCOMES = 10
 local MAX_RECEIPT_KIND_BYTES = 48
 local MAX_FINGERPRINT_BYTES = 160
 local MAX_RESULT_CODE_BYTES = 48
+local MAX_FIRST_CLEARS = 64
+local MAX_PENDING_RESULT_IDS = 16
+local MAX_CLAIMED_RESULT_IDS = 128
+local MAX_RESULT_ID_BYTES = 64
 
 local PROFILE_FIELDS = table.freeze({
 	schemaVersion = true,
@@ -140,6 +165,9 @@ local PROFILE_FIELDS = table.freeze({
 	stats = true,
 	migration = true,
 	receipts = true,
+	firstClears = true,
+	pendingResults = true,
+	claimedResults = true,
 })
 
 local UNIT_FIELDS = table.freeze({
@@ -212,6 +240,24 @@ local RECEIPT_RESULT_FIELDS = table.freeze({
 	pityCount = true,
 })
 
+local FIRST_CLEAR_FIELDS = table.freeze({
+	mapId = true,
+	difficultyId = true,
+	clearedAt = true,
+})
+
+local CLAIMED_RESULT_FIELDS = table.freeze({
+	resultId = true,
+	persistentGoldAwarded = true,
+	firstClearBonus = true,
+	claimedAt = true,
+})
+
+local PENDING_RESULT_FIELDS = table.freeze({
+	resultId = true,
+	createdAt = true,
+})
+
 local ProfileSchema = {
 	CURRENT_VERSION = CURRENT_VERSION,
 	SETTINGS_VERSION = SETTINGS_VERSION,
@@ -225,6 +271,10 @@ local ProfileSchema = {
 	MAX_TUTORIAL_STEP = MAX_TUTORIAL_STEP,
 	MAX_RECEIPTS = MAX_RECEIPTS,
 	MAX_RECEIPT_OUTCOMES = MAX_RECEIPT_OUTCOMES,
+	MAX_FIRST_CLEARS = MAX_FIRST_CLEARS,
+	MAX_PENDING_RESULT_IDS = MAX_PENDING_RESULT_IDS,
+	MAX_CLAIMED_RESULT_IDS = MAX_CLAIMED_RESULT_IDS,
+	MAX_RESULT_ID_BYTES = MAX_RESULT_ID_BYTES,
 }
 
 local function failure(code: ErrorCode, path: string, message: string): Result.Failure<ProfileError>
@@ -309,6 +359,18 @@ local function boundedToken(value: unknown, maximumBytes: number): string?
 		end
 	end
 	return value
+end
+
+local function resultId(value: unknown): string?
+	local token = boundedToken(value, MAX_RESULT_ID_BYTES)
+	if token == nil or string.match(token, "^result:[a-z0-9][a-z0-9_.%-]*$") == nil then
+		return nil
+	end
+	return token
+end
+
+local function firstClearKey(mapId: string, difficultyId: string): string
+	return `{mapId}|{difficultyId}`
 end
 
 local function denseArray(value: unknown, maximum: number, minimum: number): { unknown }?
@@ -702,6 +764,109 @@ function ProfileSchema.validate(value: unknown, towers: ConfigTypes.TowerCatalog
 		}
 	end
 
+	if not isPlainTable(record.firstClears) then
+		return failure("INVALID_FIELD", "profile.firstClears", "First clears must be a bounded dictionary")
+	end
+	local clearKeys: { string } = {}
+	for key in next, record.firstClears :: { [any]: unknown } do
+		if type(key) ~= "string" then
+			return failure("INVALID_FIELD", "profile.firstClears", "First-clear keys must be configured pair IDs")
+		end
+		table.insert(clearKeys, key)
+		if #clearKeys > MAX_FIRST_CLEARS then
+			return failure("CAPACITY_EXCEEDED", "profile.firstClears", "First-clear capacity is exceeded")
+		end
+	end
+	table.sort(clearKeys)
+	local firstClears: { [string]: FirstClearRecord } = {}
+	for _, key in clearKeys do
+		local clear = exactRecord(rawget(record.firstClears :: any, key), FIRST_CLEAR_FIELDS)
+		local mapId = if clear == nil then nil else Ids.validateMapId(clear.mapId)
+		local difficultyId = if clear == nil then nil else Ids.validateDifficultyId(clear.difficultyId)
+		local clearedAt = if clear == nil then nil else integerIn(clear.clearedAt, 0, Validation.MAX_SAFE_INTEGER)
+		if
+			clear == nil
+			or mapId == nil
+			or difficultyId == nil
+			or not mapId.ok
+			or not difficultyId.ok
+			or key ~= firstClearKey(mapId.value, difficultyId.value)
+			or clearedAt == nil
+		then
+			return failure("INVALID_REFERENCE", `profile.firstClears.{key}`, "First-clear pair is malformed")
+		end
+		firstClears[key] = {
+			mapId = mapId.value,
+			difficultyId = difficultyId.value,
+			clearedAt = clearedAt,
+		}
+	end
+
+	local rawPendingResults = denseArray(record.pendingResults, MAX_PENDING_RESULT_IDS, 0)
+	if rawPendingResults == nil then
+		return failure("INVALID_FIELD", "profile.pendingResults", "Pending result inbox is malformed")
+	end
+	local pendingResults: { PendingResultRecord } = table.create(#rawPendingResults)
+	local seenPendingResultIds: { [string]: boolean } = {}
+	local previousPendingCreatedAt = -1
+	for index, rawPendingResult in rawPendingResults do
+		local pending = exactRecord(rawPendingResult, PENDING_RESULT_FIELDS)
+		local validatedResultId = if pending == nil then nil else resultId(pending.resultId)
+		local createdAt = if pending == nil then nil else integerIn(pending.createdAt, 0, Validation.MAX_SAFE_INTEGER)
+		if
+			validatedResultId == nil
+			or seenPendingResultIds[validatedResultId]
+			or createdAt == nil
+			or createdAt < previousPendingCreatedAt
+		then
+			return failure(
+				"INVALID_FIELD",
+				`profile.pendingResults[{index}]`,
+				"Pending result reference is malformed, duplicated, or unordered"
+			)
+		end
+		seenPendingResultIds[validatedResultId] = true
+		previousPendingCreatedAt = createdAt
+		pendingResults[index] = { resultId = validatedResultId, createdAt = createdAt }
+	end
+
+	local rawClaimedResults = denseArray(record.claimedResults, MAX_CLAIMED_RESULT_IDS, 0)
+	if rawClaimedResults == nil then
+		return failure("INVALID_FIELD", "profile.claimedResults", "Claimed result history is malformed")
+	end
+	local claimedResults: { ClaimedResultRecord } = table.create(#rawClaimedResults)
+	local seenResultIds: { [string]: boolean } = {}
+	for index, rawClaimedResult in rawClaimedResults do
+		local claimed = exactRecord(rawClaimedResult, CLAIMED_RESULT_FIELDS)
+		local validatedResultId = if claimed == nil then nil else resultId(claimed.resultId)
+		local persistentGoldAwarded = if claimed == nil
+			then nil
+			else integerIn(claimed.persistentGoldAwarded, 0, MAX_GOLD)
+		local firstClearBonus = if claimed == nil then nil else integerIn(claimed.firstClearBonus, 0, MAX_GOLD)
+		local claimedAt = if claimed == nil then nil else integerIn(claimed.claimedAt, 0, Validation.MAX_SAFE_INTEGER)
+		if
+			validatedResultId == nil
+			or seenResultIds[validatedResultId]
+			or persistentGoldAwarded == nil
+			or firstClearBonus == nil
+			or firstClearBonus > persistentGoldAwarded
+			or claimedAt == nil
+		then
+			return failure(
+				"INVALID_FIELD",
+				`profile.claimedResults[{index}]`,
+				"Claimed result receipt is malformed or duplicated"
+			)
+		end
+		seenResultIds[validatedResultId] = true
+		claimedResults[index] = {
+			resultId = validatedResultId,
+			persistentGoldAwarded = persistentGoldAwarded,
+			firstClearBonus = firstClearBonus,
+			claimedAt = claimedAt,
+		}
+	end
+
 	local profile: Profile = {
 		schemaVersion = schemaVersion,
 		revision = revision,
@@ -714,6 +879,9 @@ function ProfileSchema.validate(value: unknown, towers: ConfigTypes.TowerCatalog
 		stats = stats,
 		migration = migration,
 		receipts = receipts,
+		firstClears = firstClears,
+		pendingResults = pendingResults,
+		claimedResults = claimedResults,
 	}
 	return Result.ok(freezeDeep(profile) :: Profile)
 end
@@ -774,6 +942,9 @@ function ProfileSchema.createStarter(
 			migrationCount = 0,
 		},
 		receipts = {},
+		firstClears = {},
+		pendingResults = {},
+		claimedResults = {},
 	}
 	return ProfileSchema.validate(rawProfile, towers)
 end

@@ -37,6 +37,10 @@
           "$path": "src/server/common/profile"
         },
 
+        "ProductionServerTravel": {
+          "$path": "src/server/common/travel"
+        },
+
         "ProductionServerLobbyInventory": {
           "$path": "src/server/lobby/inventory"
         },
@@ -47,6 +51,18 @@
 
         "ProductionServerLobbySettings": {
           "$path": "src/server/lobby/settings"
+        },
+
+        "ProductionServerLobbyParty": {
+          "$path": "src/server/lobby/party"
+        },
+
+        "ProductionServerLobbyQueue": {
+          "$path": "src/server/lobby/queue"
+        },
+
+        "ProductionServerLobbyTravel": {
+          "$path": "src/server/lobby/travel"
         },
 
         "ProductionClientNetworking": {
@@ -143,6 +159,18 @@
 
         "ProductionServerMatchReady": {
           "$path": "src/server/match/ready"
+        },
+
+        "ProductionServerMatchAdmission": {
+          "$path": "src/server/match/admission"
+        },
+
+        "ProductionServerMatchTravel": {
+          "$path": "src/server/match/travel"
+        },
+
+        "ProductionServerMatchRewards": {
+          "$path": "src/server/match/rewards"
         }
       },
 

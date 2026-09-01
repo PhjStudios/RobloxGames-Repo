@@ -20,6 +20,8 @@ end
 local function validSnapshot()
 	return {
 		matchId = "match:playable-protocol",
+		viewerRole = "Participant",
+		rewarding = false,
 		revision = 7,
 		loadoutRevision = 4,
 		state = "Playing",
@@ -146,7 +148,7 @@ return TestHarness.suite("playable match wire protocol", {
 		healthyResult.wavePhase = "Results"
 		assertions.isTrue(Protocol.validateSnapshot(healthyResult).ok)
 	end),
-	TestHarness.case("bounds arrays and accepts one through five ordered tower options", function(assertions)
+	TestHarness.case("bounds arrays and separates participant and spectator loadout fields", function(assertions)
 		local full = validSnapshot()
 		local towerTemplate = full.towers[1]
 		local enemyTemplate = full.enemies[1]
@@ -167,7 +169,21 @@ return TestHarness.suite("playable match wire protocol", {
 
 		local tooFew = validSnapshot()
 		table.clear(tooFew.towerOptions)
-		assertions.isFalse(Protocol.SnapshotSchema:validate(tooFew).ok)
+		assertions.isFalse(Protocol.validateSnapshot(tooFew).ok)
+		local spectator = validSnapshot()
+		spectator.viewerRole = "Spectator"
+		spectator.loadoutRevision = 0
+		spectator.battleCash = 0
+		table.clear(spectator.towerOptions)
+		spectator.stats.damageDealt = 0
+		spectator.stats.battleCashEarned = 0
+		spectator.stats.battleCashSpent = 0
+		spectator.stats.placements = 0
+		spectator.stats.upgrades = 0
+		spectator.stats.sells = 0
+		assertions.isTrue(Protocol.validateSnapshot(spectator).ok)
+		spectator.battleCash = 1
+		assertions.isFalse(Protocol.validateSnapshot(spectator).ok)
 		local one = validSnapshot()
 		while #one.towerOptions > 1 do
 			table.remove(one.towerOptions)
@@ -228,6 +244,49 @@ return TestHarness.suite("playable match wire protocol", {
 			battleCash = 125,
 		}).ok)
 	end),
+	TestHarness.case(
+		"bounds participant and spectator reward views to authoritative rewarding Results",
+		function(assertions)
+			local rewarded = validSnapshot()
+			rewarded.state = "Results"
+			rewarded.result = "Victory"
+			rewarded.wavePhase = "Results"
+			rewarded.rewarding = true
+			rewarded.reward = {
+				resultId = "result:playable-protocol",
+				status = "Granted",
+				persistentGoldAwarded = 500,
+				firstClearBonus = 250,
+				battleCashEarned = 76,
+				battleCashSpent = 230,
+				reason = "Granted",
+			}
+			assertions.isTrue(Protocol.validateSnapshot(rewarded).ok)
+			rewarded.viewerRole = "Spectator"
+			rewarded.loadoutRevision = 0
+			rewarded.battleCash = 0
+			table.clear(rewarded.towerOptions)
+			rewarded.stats.damageDealt = 0
+			rewarded.stats.battleCashEarned = 0
+			rewarded.stats.battleCashSpent = 0
+			rewarded.stats.placements = 0
+			rewarded.stats.upgrades = 0
+			rewarded.stats.sells = 0
+			assertions.isFalse(Protocol.validateSnapshot(rewarded).ok)
+			rewarded.reward.status = "Pending"
+			rewarded.reward.persistentGoldAwarded = 0
+			rewarded.reward.firstClearBonus = 0
+			rewarded.reward.battleCashEarned = 0
+			rewarded.reward.battleCashSpent = 0
+			assertions.isTrue(Protocol.validateSnapshot(rewarded).ok)
+			rewarded.reward.status = "Failed"
+			assertions.isTrue(Protocol.validateSnapshot(rewarded).ok)
+			rewarded.reward.status = "Ineligible"
+			assertions.isTrue(Protocol.validateSnapshot(rewarded).ok)
+			rewarded.reward.status = "Granted"
+			assertions.isFalse(Protocol.validateSnapshot(rewarded).ok)
+		end
+	),
 	TestHarness.case("validates compact server-authored attacks without hit inputs", function(assertions)
 		local event = {
 			matchId = "match:playable-protocol",

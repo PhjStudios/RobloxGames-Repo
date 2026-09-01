@@ -54,6 +54,16 @@
           "profile": {
             "$path": "src/server/common/profile",
             "$ignoreUnknownInstances": true
+          },
+
+          "rewards": {
+            "$path": "src/server/match/rewards",
+            "$ignoreUnknownInstances": true
+          },
+
+          "travel": {
+            "$path": "src/server/common/travel",
+            "$ignoreUnknownInstances": true
           }
         },
 
@@ -73,6 +83,21 @@
 
           "settings": {
             "$path": "src/server/lobby/settings",
+            "$ignoreUnknownInstances": true
+          },
+
+          "party": {
+            "$path": "src/server/lobby/party",
+            "$ignoreUnknownInstances": true
+          },
+
+          "queue": {
+            "$path": "src/server/lobby/queue",
+            "$ignoreUnknownInstances": true
+          },
+
+          "travel": {
+            "$path": "src/server/lobby/travel",
             "$ignoreUnknownInstances": true
           }
         }

@@ -236,7 +236,7 @@ return TestHarness.suite("server authoritative rate limiter", {
 
 	TestHarness.case("binds exact production request rates and no outbound policy", function(assertions)
 		assertions.isTrue(table.isfrozen(ProductionRateLimits))
-		assertions.equal(rawlen(ProductionRateLimits), 25)
+		assertions.equal(rawlen(ProductionRateLimits), 46)
 
 		local expected = {
 			EquipLobbyTower = { capacity = 4, refillPerSecond = 1 },
@@ -247,16 +247,19 @@ return TestHarness.suite("server authoritative rate limiter", {
 			GetLobbyInventory = { capacity = 4, refillPerSecond = 1 },
 			GetLobbyProfile = { capacity = 4, refillPerSecond = 2 },
 			GetMatchSnapshot = { capacity = 2, refillPerSecond = 1 },
+			GetMatchTravelSnapshot = { capacity = 3, refillPerSecond = 1 },
 			GetPlayableMatchSnapshot = { capacity = 3, refillPerSecond = 1 },
 			GetTowerPlacementQuery = { capacity = 4, refillPerSecond = 1 },
 			GetWaveSnapshot = { capacity = 2, refillPerSecond = 0.25 },
 			LockLobbyTower = { capacity = 4, refillPerSecond = 1 },
 			PullLobbyChest = { capacity = 2, refillPerSecond = 0.2 },
 			RetryLobbyProfile = { capacity = 1, refillPerSecond = 0.1 },
+			RequestReturnToLobby = { capacity = 2, refillPerSecond = 0.2 },
 			SubmitPlayablePlacement = { capacity = 5, refillPerSecond = 1 },
 			SubmitPlayableReady = { capacity = 3, refillPerSecond = 0.5 },
 			SubmitPlayableReplay = { capacity = 2, refillPerSecond = 0.25 },
 			SubmitReady = { capacity = 2, refillPerSecond = 0.5 },
+			SubmitRematchVote = { capacity = 3, refillPerSecond = 0.5 },
 			SubmitSkipVote = { capacity = 2, refillPerSecond = 0.5 },
 			SubmitTowerPlacement = { capacity = 3, refillPerSecond = 0.5 },
 			SubmitTowerSell = { capacity = 4, refillPerSecond = 0.75 },
@@ -264,6 +267,24 @@ return TestHarness.suite("server authoritative rate limiter", {
 			SubmitTowerUpgrade = { capacity = 4, refillPerSecond = 0.75 },
 			UnequipLobbyTower = { capacity = 4, refillPerSecond = 1 },
 			UpdateLobbySettings = { capacity = 4, refillPerSecond = 1 },
+			GetLobbyParty = { capacity = 4, refillPerSecond = 1 },
+			CreateLobbyParty = { capacity = 2, refillPerSecond = 0.25 },
+			InviteLobbyParty = { capacity = 3, refillPerSecond = 0.25 },
+			AcceptLobbyPartyInvite = { capacity = 3, refillPerSecond = 0.5 },
+			DeclineLobbyPartyInvite = { capacity = 3, refillPerSecond = 0.5 },
+			LeaveLobbyParty = { capacity = 2, refillPerSecond = 0.25 },
+			KickLobbyPartyMember = { capacity = 3, refillPerSecond = 0.25 },
+			TransferLobbyPartyLeadership = { capacity = 2, refillPerSecond = 0.2 },
+			SetLobbyPartyPrivacy = { capacity = 3, refillPerSecond = 0.5 },
+			DisbandLobbyParty = { capacity = 2, refillPerSecond = 0.2 },
+			PromptLobbyPartyInvite = { capacity = 2, refillPerSecond = 0.1 },
+			GetLobbyQueues = { capacity = 4, refillPerSecond = 1 },
+			JoinLobbyQueue = { capacity = 3, refillPerSecond = 0.5 },
+			LeaveLobbyQueue = { capacity = 3, refillPerSecond = 0.5 },
+			ConfigureLobbyQueue = { capacity = 4, refillPerSecond = 0.75 },
+			StartLobbyQueue = { capacity = 2, refillPerSecond = 0.2 },
+			GetLobbyActiveRoute = { capacity = 3, refillPerSecond = 0.5 },
+			ReconnectLobbyActiveMatch = { capacity = 2, refillPerSecond = 0.2 },
 		}
 		for _, binding in ProductionRateLimits do
 			assertions.isTrue(table.isfrozen(binding))
@@ -279,6 +300,7 @@ return TestHarness.suite("server authoritative rate limiter", {
 			assertions.notEqual(binding.endpoint, "EnemyReplication")
 			assertions.notEqual(binding.endpoint, "CombatAttackEvent")
 			assertions.notEqual(binding.endpoint, "PlayableMatchReplication")
+			assertions.notEqual(binding.endpoint, "MatchTravelReplication")
 			assertions.notEqual(binding.endpoint, "WaveReplication")
 			assertions.notEqual(binding.endpoint, "TowerPlacementRevision")
 			assertions.notEqual(binding.endpoint, "LobbyProfileReplication")
@@ -292,20 +314,23 @@ return TestHarness.suite("server authoritative rate limiter", {
 				"GetBaseSnapshot",
 				"GetEnemySnapshot",
 				"GetMatchSnapshot",
+				"GetMatchTravelSnapshot",
 				"GetPlayableMatchSnapshot",
 				"GetTowerPlacementQuery",
 				"GetWaveSnapshot",
+				"RequestReturnToLobby",
 				"SubmitPlayablePlacement",
 				"SubmitPlayableReady",
 				"SubmitPlayableReplay",
 				"SubmitReady",
+				"SubmitRematchVote",
 				"SubmitSkipVote",
 				"SubmitTowerPlacement",
 				"SubmitTowerSell",
 				"SubmitTowerTargetMode",
 				"SubmitTowerUpgrade",
 			}
-			assertions.equal(matchResult.value:count(), 25)
+			assertions.equal(matchResult.value:count(), 46)
 			assertions.equal(matchResult.value:activeCount(), #expectedActive)
 			for index, endpoint in expectedActive do
 				assertions.equal(matchResult.value:listActive()[index].endpoint, endpoint)
@@ -318,16 +343,35 @@ return TestHarness.suite("server authoritative rate limiter", {
 			local expectedActive = {
 				"EquipLobbyTower",
 				"FavoriteLobbyTower",
+				"AcceptLobbyPartyInvite",
+				"ConfigureLobbyQueue",
+				"CreateLobbyParty",
+				"DeclineLobbyPartyInvite",
+				"DisbandLobbyParty",
+				"GetLobbyActiveRoute",
 				"GetLobbyBanner",
 				"GetLobbyInventory",
+				"GetLobbyParty",
 				"GetLobbyProfile",
+				"GetLobbyQueues",
+				"InviteLobbyParty",
+				"JoinLobbyQueue",
+				"KickLobbyPartyMember",
+				"LeaveLobbyParty",
+				"LeaveLobbyQueue",
 				"LockLobbyTower",
+				"PromptLobbyPartyInvite",
 				"PullLobbyChest",
+				"ReconnectLobbyActiveMatch",
 				"RetryLobbyProfile",
+				"SetLobbyPartyPrivacy",
+				"StartLobbyQueue",
+				"TransferLobbyPartyLeadership",
 				"UnequipLobbyTower",
 				"UpdateLobbySettings",
 			}
-			assertions.equal(lobbyResult.value:count(), 25)
+			table.sort(expectedActive)
+			assertions.equal(lobbyResult.value:count(), 46)
 			assertions.equal(lobbyResult.value:activeCount(), #expectedActive)
 			for index, endpoint in expectedActive do
 				assertions.equal(lobbyResult.value:listActive()[index].endpoint, endpoint)

@@ -7,6 +7,7 @@ local ConfigurationValidator = require(ReplicatedStorage.Shared.config.Configura
 local MatchLoadoutProtocol = require(ReplicatedStorage.Shared.match.MatchLoadoutProtocol)
 local PlacementGeometry = require(ReplicatedStorage.Shared.match.PlacementGeometry)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
+local RewardProtocol = require(ReplicatedStorage.Shared.match.RewardProtocol)
 local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
 local Ids = require(ReplicatedStorage.Shared.util.Ids)
 local Result = require(ReplicatedStorage.Shared.util.Result)
@@ -42,9 +43,13 @@ export type RuntimeMap = {
 
 export type Dependencies = {
 	matchId: string,
+	mapId: string?,
+	difficultyId: string?,
 	configuration: ConfigTypes.CoreConfiguration,
 	runtimeMap: RuntimeMap,
 	participantLoadouts: { MatchLoadoutProtocol.Snapshot },
+	connectedParticipantUserIds: { number }?,
+	rewarding: boolean?,
 }
 
 export type ActionOutcome = {
@@ -70,8 +75,31 @@ export type Metrics = {
 	activeEnemyCount: number,
 	attackCount: number,
 	participantCount: number,
+	connectedParticipantCount: number,
 	readyCount: number,
+	rewarding: boolean,
 	cleaned: boolean,
+}
+
+export type ResultParticipantEvidence = {
+	userId: number,
+	authenticatedParticipant: boolean,
+	spectator: boolean,
+	submittedReady: boolean,
+	placements: number,
+	wavesCompleted: number,
+	connectedAtResults: boolean,
+	battleCashEarned: number,
+	battleCashSpent: number,
+}
+
+export type ResultEvidence = {
+	matchId: Ids.MatchId,
+	mapId: Ids.MapId,
+	difficultyId: Ids.DifficultyId,
+	outcome: "Victory" | "Defeat",
+	rewardingMatch: boolean,
+	entries: { ResultParticipantEvidence },
 }
 
 export type ErrorCode =
@@ -82,10 +110,11 @@ export type ErrorCode =
 	| "INVALID_PARTICIPANTS"
 	| "LEDGER_FAILED"
 	| "INVALID_TIME"
+	| "WRONG_STATE"
 	| "CLEANED"
 	| "INTERNAL_ERROR"
 
-export type ErrorOperation = "new" | "step" | "snapshot" | "cleanup"
+export type ErrorOperation = "new" | "step" | "snapshot" | "resultEvidence" | "cleanup"
 export type RuntimeError = { code: ErrorCode, operation: ErrorOperation }
 
 type NormalizedRegion = { cframe: CFrame, size: Vector3 }
@@ -128,6 +157,8 @@ type ParticipantStats = {
 	placements: number,
 	upgrades: number,
 	sells: number,
+	wavesParticipated: number,
+	lastCreditedWave: number,
 }
 
 type RuntimeData = {
@@ -144,9 +175,15 @@ type RuntimeData = {
 	revision: number,
 	participants: { number },
 	participantSet: { [number]: boolean },
+	connectedParticipantSet: { [number]: boolean },
+	everConnectedParticipantSet: { [number]: boolean },
 	loadoutsByUserId: { [number]: MatchLoadoutProtocol.Snapshot },
 	ready: { [number]: boolean },
 	participantStats: { [number]: ParticipantStats },
+	submittedReady: { [number]: boolean },
+	connectedAtResults: { [number]: boolean },
+	rewardViewsByUserId: { [number]: RewardProtocol.RewardView },
+	rewarding: boolean,
 	path: { PathPoint },
 	pathTotalDistance: number,
 	basePosition: Vector3,
@@ -307,8 +344,32 @@ local function normalizeParticipants(
 		loadoutsByUserId[snapshot.userId] = snapshot
 		table.insert(copy, snapshot.userId)
 	end
-	table.sort(copy)
 	return copy, loadoutsByUserId
+end
+
+local function normalizeConnectedParticipants(
+	value: unknown,
+	participants: { number },
+	participantSet: { [number]: boolean }
+): { [number]: boolean }?
+	if value == nil then
+		local allConnected: { [number]: boolean } = {}
+		for _, userId in participants do
+			allConnected[userId] = true
+		end
+		return allConnected
+	end
+	if type(value) ~= "table" or getmetatable(value :: any) ~= nil then
+		return nil
+	end
+	local connected: { [number]: boolean } = {}
+	for _, userId in value :: { unknown } do
+		if not validUserId(userId) or not participantSet[userId :: number] or connected[userId :: number] then
+			return nil
+		end
+		connected[userId :: number] = true
+	end
+	return connected
 end
 
 local function normalizeMap(
@@ -408,11 +469,15 @@ end
 local function activeReadyCount(data: RuntimeData): number
 	local count = 0
 	for _, userId in data.participants do
-		if data.ready[userId] then
+		if data.connectedParticipantSet[userId] and data.ready[userId] then
 			count += 1
 		end
 	end
 	return count
+end
+
+local function connectedParticipantCount(data: RuntimeData): number
+	return countDictionary(data.connectedParticipantSet)
 end
 
 local function startPlaying(data: RuntimeData, serverTime: number)
@@ -425,7 +490,8 @@ local function startPlaying(data: RuntimeData, serverTime: number)
 end
 
 local function allParticipantsReady(data: RuntimeData): boolean
-	return #data.participants > 0 and activeReadyCount(data) == #data.participants
+	local connectedCount = connectedParticipantCount(data)
+	return connectedCount > 0 and activeReadyCount(data) == connectedCount
 end
 
 local function footprints(data: RuntimeData): { Vector3 }
@@ -551,6 +617,9 @@ local function finishMatch(data: RuntimeData, result: "Victory" | "Defeat"): boo
 	table.clear(data.spawnQueue)
 	data.spawnCursor = 1
 	table.clear(data.enemies)
+	for _, userId in data.participants do
+		data.connectedAtResults[userId] = data.connectedParticipantSet[userId] == true
+	end
 	return advanceRevision(data)
 end
 
@@ -690,6 +759,16 @@ local function completeWaveIfResolved(data: RuntimeData, serverTime: number): bo
 		return false
 	end
 	data.wavesCompleted = data.waveNumber
+	for userId in data.connectedParticipantSet do
+		local stats = data.participantStats[userId]
+		if stats ~= nil and stats.lastCreditedWave ~= data.waveNumber then
+			-- A resolved wave can be revisited when a downstream stipend operation
+			-- retries. Record the last distinct wave separately so reconnecting for
+			-- wave three earns one wave, rather than inheriting the global ordinal.
+			stats.wavesParticipated += 1
+			stats.lastCreditedWave = data.waveNumber
+		end
+	end
 	local reward = if wave.rewardClass == "Final"
 		then data.economy.waveRewards.final
 		elseif wave.rewardClass == "Milestone" then data.economy.waveRewards.milestone
@@ -708,7 +787,21 @@ local function completeWaveIfResolved(data: RuntimeData, serverTime: number): bo
 end
 
 local function participantMatches(data: RuntimeData, userId: unknown): boolean
+	return validUserId(userId) and data.connectedParticipantSet[userId :: number] == true
+end
+
+local function lifetimeParticipantMatches(data: RuntimeData, userId: unknown): boolean
 	return validUserId(userId) and data.participantSet[userId :: number] == true
+end
+
+local function participantActionFailure(data: RuntimeData, userId: unknown): ActionOutcome?
+	if not lifetimeParticipantMatches(data, userId) then
+		return reject("NotParticipant")
+	end
+	if not participantMatches(data, userId) then
+		return reject("ParticipantDisconnected")
+	end
+	return nil
 end
 
 local function requestMatches(data: RuntimeData, matchId: unknown): boolean
@@ -774,11 +867,19 @@ function Methods.addParticipant(self: Runtime, loadoutValue: unknown): ActionOut
 		return reject("Unavailable")
 	end
 	data.participantSet[userId] = true
+	data.connectedParticipantSet[userId] = true
+	data.everConnectedParticipantSet[userId] = true
 	data.loadoutsByUserId[userId] = loadout
 	table.insert(data.participants, userId)
-	table.sort(data.participants)
 	if data.participantStats[userId] == nil then
-		data.participantStats[userId] = { damageDealt = 0, placements = 0, upgrades = 0, sells = 0 }
+		data.participantStats[userId] = {
+			damageDealt = 0,
+			placements = 0,
+			upgrades = 0,
+			sells = 0,
+			wavesParticipated = 0,
+			lastCreditedWave = 0,
+		}
 	end
 	advanceRevision(data)
 	finishMutation(data)
@@ -787,8 +888,12 @@ end
 
 function Methods.removeParticipant(self: Runtime, userIdValue: unknown, serverTimeValue: unknown): ActionOutcome
 	local data = requireData(self)
-	if not participantMatches(data, userIdValue) or not isFiniteNumber(serverTimeValue) or not beginMutation(data) then
-		return reject("NotParticipant")
+	local participantFailure = participantActionFailure(data, userIdValue)
+	if participantFailure ~= nil then
+		return participantFailure
+	end
+	if not isFiniteNumber(serverTimeValue) or not beginMutation(data) then
+		return reject("Busy")
 	end
 	local userId = userIdValue :: number
 	local deactivated = data.ledger:setParticipantActive(userId, false)
@@ -796,19 +901,8 @@ function Methods.removeParticipant(self: Runtime, userIdValue: unknown, serverTi
 		finishMutation(data)
 		return reject("Unavailable")
 	end
-	data.participantSet[userId] = nil
+	data.connectedParticipantSet[userId] = nil
 	data.ready[userId] = nil
-	for runtimeTowerId, tower in data.towers do
-		if tower.ownerUserId == userId then
-			data.towers[runtimeTowerId] = nil
-		end
-	end
-	for index, candidate in data.participants do
-		if candidate == userId then
-			table.remove(data.participants, index)
-			break
-		end
-	end
 	if data.state == "Ready" and allParticipantsReady(data) then
 		startPlaying(data, serverTimeValue :: number)
 	else
@@ -816,6 +910,47 @@ function Methods.removeParticipant(self: Runtime, userIdValue: unknown, serverTi
 	end
 	finishMutation(data)
 	return ACCEPTED
+end
+
+function Methods.reconnectParticipant(self: Runtime, userIdValue: unknown): ActionOutcome
+	local data = requireData(self)
+	if data.cleaned then
+		return reject("WrongState")
+	end
+	if not lifetimeParticipantMatches(data, userIdValue) then
+		return reject("NotParticipant")
+	end
+	local userId = userIdValue :: number
+	if data.connectedParticipantSet[userId] then
+		return reject("Busy")
+	end
+	if not data.everConnectedParticipantSet[userId] and data.state ~= "Ready" then
+		return reject("NotParticipant")
+	end
+	if not beginMutation(data) then
+		return reject("Busy")
+	end
+	local activated = data.ledger:setParticipantActive(userId, true)
+	if not activated.ok then
+		finishMutation(data)
+		return reject("Unavailable")
+	end
+	data.connectedParticipantSet[userId] = true
+	data.everConnectedParticipantSet[userId] = true
+	-- Ready is intentionally not replayed. The retained loadout, cash, stats, and
+	-- tower ownership remain bound to this stable UserId for the match lifetime.
+	data.ready[userId] = nil
+	advanceRevision(data)
+	finishMutation(data)
+	return ACCEPTED
+end
+
+function Methods.hasParticipant(self: Runtime, userIdValue: unknown): boolean
+	return lifetimeParticipantMatches(requireData(self), userIdValue)
+end
+
+function Methods.isParticipantConnected(self: Runtime, userIdValue: unknown): boolean
+	return participantMatches(requireData(self), userIdValue)
 end
 
 function Methods.submitReady(
@@ -831,8 +966,9 @@ function Methods.submitReady(
 	if data.state ~= "Ready" then
 		return reject("WrongState")
 	end
-	if not participantMatches(data, userIdValue) then
-		return reject("NotParticipant")
+	local participantFailure = participantActionFailure(data, userIdValue)
+	if participantFailure ~= nil then
+		return participantFailure
 	end
 	if not isFiniteNumber(serverTimeValue) or (serverTimeValue :: number) < 0 or not beginMutation(data) then
 		return reject("Busy")
@@ -843,6 +979,7 @@ function Methods.submitReady(
 		return ACCEPTED
 	end
 	data.ready[userId] = true
+	data.submittedReady[userId] = true
 	if allParticipantsReady(data) then
 		startPlaying(data, serverTimeValue :: number)
 	else
@@ -870,8 +1007,9 @@ function Methods.placeTower(
 	if data.state ~= "Playing" then
 		return reject("WrongState")
 	end
-	if not participantMatches(data, userIdValue) then
-		return reject("NotParticipant")
+	local participantFailure = participantActionFailure(data, userIdValue)
+	if participantFailure ~= nil then
+		return participantFailure
 	end
 	if IS_EXACT_TEST_MODULE and typeof(slotValue) == "Vector3" then
 		serverTimeValue = positionValue
@@ -987,8 +1125,9 @@ local function ownedTower(
 	userIdValue: unknown,
 	runtimeTowerIdValue: unknown
 ): (TowerRecord?, ActionOutcome?)
-	if not participantMatches(data, userIdValue) then
-		return nil, reject("NotParticipant")
+	local participantFailure = participantActionFailure(data, userIdValue)
+	if participantFailure ~= nil then
+		return nil, participantFailure
 	end
 	if type(runtimeTowerIdValue) ~= "number" or not Validation.isSafeInteger(runtimeTowerIdValue) then
 		return nil, reject("NotFound")
@@ -1246,22 +1385,12 @@ local function towerSnapshot(data: RuntimeData, tower: TowerRecord): PlayableMat
 	})
 end
 
-function Methods.getSnapshot(
-	self: Runtime,
-	userIdValue: unknown,
-	serverTimeValue: unknown
+local function buildSnapshot(
+	data: RuntimeData,
+	serverTime: number,
+	viewerRole: PlayableMatchProtocol.ViewerRole,
+	userId: number?
 ): Result.Result<PlayableMatchProtocol.Snapshot, RuntimeError>
-	local data = requireData(self)
-	if data.cleaned then
-		return errorResult("CLEANED", "snapshot")
-	end
-	if not participantMatches(data, userIdValue) or not isFiniteNumber(serverTimeValue) then
-		return errorResult("INVALID_PARTICIPANTS", "snapshot")
-	end
-	local cashResult = data.ledger:getSnapshot(userIdValue)
-	if not cashResult.ok then
-		return errorResult("LEDGER_FAILED", "snapshot")
-	end
 	local towerEntries: { PlayableMatchProtocol.TowerSnapshot } = {}
 	for _, runtimeTowerId in towerIds(data) do
 		table.insert(towerEntries, towerSnapshot(data, data.towers[runtimeTowerId]))
@@ -1283,56 +1412,92 @@ function Methods.getSnapshot(
 		)
 	end
 	local options: { PlayableMatchProtocol.TowerOption } = {}
-	local loadout = data.loadoutsByUserId[userIdValue :: number]
-	if loadout == nil then
-		return errorResult("INVALID_PARTICIPANTS", "snapshot")
-	end
-	for _, equipped in loadout.slots do
-		local definition = data.configuration.towers.byId[equipped.towerId]
-		if definition == nil then
-			return errorResult("INTERNAL_ERROR", "snapshot")
+	local loadoutRevision = 0
+	local battleCash = 0
+	local damageDealt = 0
+	local battleCashEarned = 0
+	local battleCashSpent = 0
+	local placements = 0
+	local upgrades = 0
+	local sells = 0
+	local settings = data.configuration.defaultSettings
+	local reward: RewardProtocol.RewardView? = nil
+	if viewerRole == "Participant" then
+		local participantUserId = userId :: number
+		local loadout = data.loadoutsByUserId[participantUserId]
+		local participantStats = data.participantStats[participantUserId]
+		if loadout == nil or participantStats == nil then
+			return errorResult("INVALID_PARTICIPANTS", "snapshot")
 		end
-		table.insert(
-			options,
-			table.freeze({
-				slot = equipped.slot,
-				unitId = equipped.unitId,
-				towerId = definition.id,
-				displayName = definition.displayName,
-				placementCost = definition.placementCost,
-				description = definition.description or definition.displayName,
-			})
-		)
+		local cashResult = data.ledger:getSnapshot(participantUserId)
+		if not cashResult.ok then
+			return errorResult("LEDGER_FAILED", "snapshot")
+		end
+		for _, equipped in loadout.slots do
+			local definition = data.configuration.towers.byId[equipped.towerId]
+			if definition == nil then
+				return errorResult("INTERNAL_ERROR", "snapshot")
+			end
+			table.insert(
+				options,
+				table.freeze({
+					slot = equipped.slot,
+					unitId = equipped.unitId,
+					towerId = definition.id,
+					displayName = definition.displayName,
+					placementCost = definition.placementCost,
+					description = definition.description or definition.displayName,
+				})
+			)
+		end
+		local cash = cashResult.value
+		loadoutRevision = loadout.revision
+		battleCash = cash.balance
+		damageDealt = participantStats.damageDealt
+		battleCashEarned = cash.damageIncomeBattleCash + cash.waveStipendBattleCash + cash.refundedBattleCash
+		battleCashSpent = cash.spentBattleCash
+		placements = participantStats.placements
+		upgrades = participantStats.upgrades
+		sells = participantStats.sells
+		settings = loadout.settings
+		if data.state == "Results" then
+			reward = data.rewardViewsByUserId[participantUserId]
+		end
+	elseif userId ~= nil then
+		local authenticatedLoadout = data.loadoutsByUserId[userId]
+		if authenticatedLoadout ~= nil then
+			settings = authenticatedLoadout.settings
+		end
+		if data.state == "Results" then
+			reward = data.rewardViewsByUserId[userId]
+		end
 	end
-	local cash = cashResult.value
-	local participantStats = data.participantStats[userIdValue :: number]
 	local stats: PlayableMatchProtocol.ResultStats = table.freeze({
 		durationSeconds = if data.startedServerTime == 0
 			then 0
-			else math.max(
-				0,
-				math.min(serverTimeValue :: number, data.lastSimulationServerTime) - data.startedServerTime
-			),
+			else math.max(0, math.min(serverTime, data.lastSimulationServerTime) - data.startedServerTime),
 		wavesCompleted = data.wavesCompleted,
-		damageDealt = participantStats.damageDealt,
-		battleCashEarned = cash.damageIncomeBattleCash + cash.waveStipendBattleCash + cash.refundedBattleCash,
-		battleCashSpent = cash.spentBattleCash,
-		placements = participantStats.placements,
-		upgrades = participantStats.upgrades,
-		sells = participantStats.sells,
+		damageDealt = damageDealt,
+		battleCashEarned = battleCashEarned,
+		battleCashSpent = battleCashSpent,
+		placements = placements,
+		upgrades = upgrades,
+		sells = sells,
 		baseHealthRemaining = data.baseHealth,
 	})
 	local snapshot: PlayableMatchProtocol.Snapshot = table.freeze({
 		matchId = data.matchId,
+		viewerRole = viewerRole,
+		rewarding = data.rewarding,
 		revision = data.revision,
-		loadoutRevision = loadout.revision,
+		loadoutRevision = loadoutRevision,
 		state = data.state,
 		result = data.result,
 		mapId = data.mapDefinition.id,
 		mapDisplayName = data.mapDefinition.displayName,
 		difficultyId = data.difficulty.id,
 		difficultyDisplayName = data.difficulty.displayName,
-		serverTime = serverTimeValue :: number,
+		serverTime = serverTime,
 		waveNumber = data.waveNumber,
 		totalWaves = #data.schedule.waves,
 		wavePhase = data.wavePhase,
@@ -1340,7 +1505,7 @@ function Methods.getSnapshot(
 		baseHealth = data.baseHealth,
 		maximumBaseHealth = data.difficulty.base.maxHealth,
 		enemiesAlive = #enemyEntries,
-		battleCash = cash.balance,
+		battleCash = battleCash,
 		participants = table.freeze({
 			readyCount = activeReadyCount(data),
 			participantCount = #data.participants,
@@ -1349,7 +1514,8 @@ function Methods.getSnapshot(
 		towers = table.freeze(towerEntries),
 		enemies = table.freeze(enemyEntries),
 		stats = stats,
-		settings = loadout.settings,
+		reward = reward,
+		settings = settings,
 	})
 	local validated = PlayableMatchProtocol.validateSnapshot(snapshot)
 	if not validated.ok then
@@ -1358,18 +1524,155 @@ function Methods.getSnapshot(
 	return Result.ok(validated.value)
 end
 
+function Methods.getSnapshot(
+	self: Runtime,
+	userIdValue: unknown,
+	serverTimeValue: unknown
+): Result.Result<PlayableMatchProtocol.Snapshot, RuntimeError>
+	local data = requireData(self)
+	if data.cleaned then
+		return errorResult("CLEANED", "snapshot")
+	end
+	if not participantMatches(data, userIdValue) or not isFiniteNumber(serverTimeValue) then
+		return errorResult("INVALID_PARTICIPANTS", "snapshot")
+	end
+	return buildSnapshot(data, serverTimeValue :: number, "Participant", userIdValue :: number)
+end
+
+function Methods.getSpectatorSnapshot(
+	self: Runtime,
+	serverTimeValue: unknown,
+	viewerUserIdValue: unknown?
+): Result.Result<PlayableMatchProtocol.Snapshot, RuntimeError>
+	local data = requireData(self)
+	if data.cleaned then
+		return errorResult("CLEANED", "snapshot")
+	end
+	if not isFiniteNumber(serverTimeValue) then
+		return errorResult("INVALID_TIME", "snapshot")
+	end
+	if viewerUserIdValue ~= nil and not validUserId(viewerUserIdValue) then
+		return errorResult("INVALID_PARTICIPANTS", "snapshot")
+	end
+	return buildSnapshot(data, serverTimeValue :: number, "Spectator", viewerUserIdValue :: number?)
+end
+
 function Methods.canReplay(self: Runtime, userIdValue: unknown, matchIdValue: unknown): ActionOutcome
 	local data = requireData(self)
 	if not requestMatches(data, matchIdValue) then
 		return reject("StaleMatch")
 	end
-	if not participantMatches(data, userIdValue) then
-		return reject("NotParticipant")
+	local participantFailure = participantActionFailure(data, userIdValue)
+	if participantFailure ~= nil then
+		return participantFailure
 	end
 	if data.state ~= "Results" then
 		return reject("WrongState")
 	end
 	return ACCEPTED
+end
+
+local function rewardViewsEqual(left: RewardProtocol.RewardView, right: RewardProtocol.RewardView): boolean
+	return left.resultId == right.resultId
+		and left.status == right.status
+		and left.persistentGoldAwarded == right.persistentGoldAwarded
+		and left.firstClearBonus == right.firstClearBonus
+		and left.battleCashEarned == right.battleCashEarned
+		and left.battleCashSpent == right.battleCashSpent
+		and left.reason == right.reason
+end
+
+function Methods.setRewardView(self: Runtime, userIdValue: unknown, rewardViewValue: unknown): ActionOutcome
+	local data = requireData(self)
+	if data.cleaned or data.state ~= "Results" or not data.rewarding then
+		return reject("WrongState")
+	end
+	if not lifetimeParticipantMatches(data, userIdValue) then
+		return reject("NotParticipant")
+	end
+	local validated = RewardProtocol.validateRewardView(rewardViewValue)
+	if not validated.ok then
+		return reject("Unavailable")
+	end
+	local userId = userIdValue :: number
+	local authenticatedParticipant = data.everConnectedParticipantSet[userId] == true
+	if
+		not authenticatedParticipant
+		and (
+			validated.value.status == "Granted"
+			or validated.value.persistentGoldAwarded ~= 0
+			or validated.value.firstClearBonus ~= 0
+			or validated.value.battleCashEarned ~= 0
+			or validated.value.battleCashSpent ~= 0
+		)
+	then
+		return reject("Unavailable")
+	end
+	local cashResult = data.ledger:getSnapshot(userId)
+	if not cashResult.ok then
+		return reject("Unavailable")
+	end
+	local cash = cashResult.value
+	local earned = cash.damageIncomeBattleCash + cash.waveStipendBattleCash + cash.refundedBattleCash
+	if validated.value.battleCashEarned ~= earned or validated.value.battleCashSpent ~= cash.spentBattleCash then
+		return reject("Unavailable")
+	end
+	local existing = data.rewardViewsByUserId[userId]
+	if existing ~= nil and existing.resultId ~= validated.value.resultId then
+		return reject("StaleMatch")
+	end
+	if existing ~= nil and rewardViewsEqual(existing, validated.value) then
+		return ACCEPTED
+	end
+	if not beginMutation(data) then
+		return reject("Busy")
+	end
+	data.rewardViewsByUserId[userId] = validated.value
+	advanceRevision(data)
+	finishMutation(data)
+	return ACCEPTED
+end
+
+function Methods.getResultEvidence(self: Runtime): Result.Result<ResultEvidence, RuntimeError>
+	local data = requireData(self)
+	if data.cleaned then
+		return errorResult("CLEANED", "resultEvidence")
+	end
+	if data.state ~= "Results" or (data.result ~= "Victory" and data.result ~= "Defeat") then
+		return errorResult("WRONG_STATE", "resultEvidence")
+	end
+	local entries: { ResultParticipantEvidence } = {}
+	for _, userId in data.participants do
+		local cashResult = data.ledger:getSnapshot(userId)
+		local stats = data.participantStats[userId]
+		if not cashResult.ok or stats == nil then
+			return errorResult("LEDGER_FAILED", "resultEvidence")
+		end
+		local cash = cashResult.value
+		local authenticatedParticipant = data.everConnectedParticipantSet[userId] == true
+		table.insert(
+			entries,
+			table.freeze({
+				userId = userId,
+				authenticatedParticipant = authenticatedParticipant,
+				spectator = not authenticatedParticipant,
+				submittedReady = data.submittedReady[userId] == true,
+				placements = stats.placements,
+				wavesCompleted = stats.wavesParticipated,
+				connectedAtResults = data.connectedAtResults[userId] == true,
+				battleCashEarned = cash.damageIncomeBattleCash + cash.waveStipendBattleCash + cash.refundedBattleCash,
+				battleCashSpent = cash.spentBattleCash,
+			})
+		)
+	end
+	return Result.ok(table.freeze({
+		matchId = data.matchId,
+		mapId = data.mapDefinition.id,
+		difficultyId = data.difficulty.id,
+		outcome = data.result :: "Victory" | "Defeat",
+		rewardingMatch = data.rewarding,
+		entries = table.freeze(entries),
+	}))
 end
 
 function Methods.getMetrics(self: Runtime): Metrics
@@ -1384,7 +1687,9 @@ function Methods.getMetrics(self: Runtime): Metrics
 		activeEnemyCount = countDictionary(data.enemies),
 		attackCount = data.attackSequence,
 		participantCount = #data.participants,
+		connectedParticipantCount = connectedParticipantCount(data),
 		readyCount = activeReadyCount(data),
+		rewarding = data.rewarding,
 		cleaned = data.cleaned,
 	})
 end
@@ -1406,8 +1711,13 @@ function Methods.cleanup(self: Runtime): Result.Result<boolean, RuntimeError>
 	table.clear(data.spawnQueue)
 	table.clear(data.ready)
 	table.clear(data.participantSet)
+	table.clear(data.connectedParticipantSet)
+	table.clear(data.everConnectedParticipantSet)
 	table.clear(data.participants)
 	table.clear(data.participantStats)
+	table.clear(data.submittedReady)
+	table.clear(data.connectedAtResults)
+	table.clear(data.rewardViewsByUserId)
 	table.clear(data.loadoutsByUserId)
 	data.cleaned = true
 	return Result.ok(true)
@@ -1418,6 +1728,12 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 		return errorResult("INVALID_DEPENDENCIES", "new")
 	end
 	local dependencies = dependenciesValue :: any
+	local rewarding = dependencies.rewarding
+	if rewarding == nil then
+		rewarding = false
+	elseif type(rewarding) ~= "boolean" then
+		return errorResult("INVALID_DEPENDENCIES", "new")
+	end
 	local matchIdResult = Ids.validateMatchId(dependencies.matchId)
 	if not matchIdResult.ok then
 		return errorResult("INVALID_DEPENDENCIES", "new")
@@ -1427,18 +1743,32 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 	end
 	local configuration = dependencies.configuration :: ConfigTypes.CoreConfiguration
 	if
-		#configuration.maps.ordered ~= 1
-		or #configuration.difficulties.ordered ~= 1
-		or #configuration.waves.ordered ~= 1
+		#configuration.maps.ordered < 1
+		or #configuration.difficulties.ordered < 1
 		or #configuration.towers.ordered < 1
 	then
 		return errorResult("CONTENT_NOT_FOUND", "new")
 	end
-	local mapDefinition = configuration.maps.ordered[1]
-	local difficulty = configuration.difficulties.ordered[1]
-	local schedule = configuration.waves.ordered[1]
+	local requestedMapId = dependencies.mapId or configuration.maps.ordered[1].id
+	local requestedDifficultyId = dependencies.difficultyId or configuration.difficulties.ordered[1].id
+	local mapIdResult = Ids.validateMapId(requestedMapId)
+	local difficultyIdResult = Ids.validateDifficultyId(requestedDifficultyId)
+	if not mapIdResult.ok or not difficultyIdResult.ok then
+		return errorResult("INVALID_DEPENDENCIES", "new")
+	end
+	local mapDefinition = configuration.maps.byId[mapIdResult.value]
+	local difficulty = configuration.difficulties.byId[difficultyIdResult.value]
+	local schedules = configuration.waves.byMapId[mapIdResult.value]
+	local schedule = if schedules == nil then nil else schedules[difficultyIdResult.value]
+	if mapDefinition == nil or difficulty == nil or schedule == nil then
+		return errorResult("CONTENT_NOT_FOUND", "new")
+	end
+	local supported = false
+	for _, supportedId in mapDefinition.supportedDifficultyIds do
+		supported = supported or supportedId == difficulty.id
+	end
 	local economy = configuration.economy.byDifficultyId[difficulty.id]
-	if difficulty.kind ~= "Finite" or schedule.kind ~= "AuthoredFinite" or economy == nil then
+	if not supported or difficulty.kind ~= "Finite" or schedule.kind ~= "AuthoredFinite" or economy == nil then
 		return errorResult("CONTENT_NOT_FOUND", "new")
 	end
 	local laneId = mapDefinition.lanes[1] and mapDefinition.lanes[1].id
@@ -1503,7 +1833,33 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 			return errorResult("LEDGER_FAILED", "new")
 		end
 		participantSet[userId] = true
-		participantStats[userId] = { damageDealt = 0, placements = 0, upgrades = 0, sells = 0 }
+		participantStats[userId] = {
+			damageDealt = 0,
+			placements = 0,
+			upgrades = 0,
+			sells = 0,
+			wavesParticipated = 0,
+			lastCreditedWave = 0,
+		}
+	end
+	local connectedParticipantSet =
+		normalizeConnectedParticipants(dependencies.connectedParticipantUserIds, participants, participantSet)
+	if connectedParticipantSet == nil then
+		ledgerResult.value:cleanup()
+		return errorResult("INVALID_PARTICIPANTS", "new")
+	end
+	for _, userId in participants do
+		if not connectedParticipantSet[userId] then
+			local deactivated = ledgerResult.value:setParticipantActive(userId, false)
+			if not deactivated.ok then
+				ledgerResult.value:cleanup()
+				return errorResult("LEDGER_FAILED", "new")
+			end
+		end
+	end
+	local everConnectedParticipantSet: { [number]: boolean } = {}
+	for userId in connectedParticipantSet do
+		everConnectedParticipantSet[userId] = true
 	end
 	local runtime = setmetatable({}, Methods) :: Runtime
 	table.freeze(runtime)
@@ -1521,9 +1877,15 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 		revision = 1,
 		participants = participants,
 		participantSet = participantSet,
+		connectedParticipantSet = connectedParticipantSet,
+		everConnectedParticipantSet = everConnectedParticipantSet,
 		loadoutsByUserId = loadoutsByUserId,
 		ready = {},
 		participantStats = participantStats,
+		submittedReady = {},
+		connectedAtResults = {},
+		rewardViewsByUserId = {},
+		rewarding = rewarding :: boolean,
 		path = path,
 		pathTotalDistance = totalDistance,
 		basePosition = basePosition,

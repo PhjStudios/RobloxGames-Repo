@@ -157,9 +157,52 @@ local function migrateTwoToThree(profile: { [any]: any }, originalVersion: numbe
 		createdAt = now,
 		lastMigratedAt = now,
 		migratedFromVersion = originalVersion,
-		migrationCount = ProfileSchema.CURRENT_VERSION - originalVersion,
+		migrationCount = 3 - originalVersion,
 	}
-	profile.schemaVersion = ProfileSchema.CURRENT_VERSION
+	profile.schemaVersion = 3
+	return true
+end
+
+local function migrateThreeToFour(profile: { [any]: any }, now: number): boolean
+	if profile.firstClears ~= nil or profile.claimedResults ~= nil then
+		return false
+	end
+	local migration = profile.migration
+	if
+		type(migration) ~= "table"
+		or getmetatable(migration) ~= nil
+		or type(migration.migrationCount) ~= "number"
+		or not Validation.isSafeInteger(migration.migrationCount)
+		or migration.migrationCount < 0
+	then
+		return false
+	end
+	profile.firstClears = {}
+	profile.claimedResults = {}
+	migration.lastMigratedAt = now
+	migration.migrationCount += 1
+	profile.schemaVersion = 4
+	return true
+end
+
+local function migrateFourToFive(profile: { [any]: any }, now: number): boolean
+	if profile.pendingResults ~= nil then
+		return false
+	end
+	local migration = profile.migration
+	if
+		type(migration) ~= "table"
+		or getmetatable(migration) ~= nil
+		or type(migration.migrationCount) ~= "number"
+		or not Validation.isSafeInteger(migration.migrationCount)
+		or migration.migrationCount < 0
+	then
+		return false
+	end
+	profile.pendingResults = {}
+	migration.lastMigratedAt = now
+	migration.migrationCount += 1
+	profile.schemaVersion = 5
 	return true
 end
 
@@ -229,6 +272,12 @@ function ProfileMigrations.migrate(
 		elseif version == 2 then
 			migrated = migrateTwoToThree(working, originalVersion, now)
 			version = 3
+		elseif version == 3 then
+			migrated = migrateThreeToFour(working, now)
+			version = 4
+		elseif version == 4 then
+			migrated = migrateFourToFive(working, now)
+			version = 5
 		end
 		if not migrated then
 			return failure("MIGRATION_FAILED", "profile", "Stored profile failed a deterministic migration step")

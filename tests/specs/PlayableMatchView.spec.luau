@@ -25,6 +25,7 @@ local function snapshot(): any
 	return {
 		matchId = "match:playable-view",
 		revision = 7,
+		viewerRole = "Participant",
 		state = "WaveActive",
 		inputFamily = "Desktop",
 		wave = { current = 2, total = 5, enemiesRemaining = 7, status = "Active" },
@@ -352,10 +353,20 @@ return TestHarness.suite("playable local Match presentation", {
 				kind = "Victory",
 				summary = "All 5 waves cleared • Base 42 HP • Cash 310",
 				canReplay = true,
+				rewardStatus = "Granted",
+				persistentGoldAwarded = 500,
+				firstClearBonus = 250,
+				battleCashEarned = 310,
+				battleCashSpent = 200,
+				rewardReason = "CLAIMED",
 			}
 			assertions.isTrue(view:render(victory).ok)
 			assertions.isTrue(view:getMetrics().resultsVisible)
 			assertions.equal(view:getMetrics().resultKind, "Victory")
+			assertions.contains(view:getMetrics().rewardText, "REWARD GRANTED")
+			assertions.contains(view:getMetrics().rewardText, "PERSISTENT GOLD +500")
+			assertions.contains(view:getMetrics().rewardText, "FIRST-CLEAR +250")
+			assertions.contains(view:getMetrics().rewardText, "MATCH-LOCAL BATTLE CASH")
 			assertions.contains(view:getMetrics().feedbackText, "defeat enemies")
 			local _, root = guiTree(fixture)
 			local results = child(root, "ResultsOverlay", "Frame") :: Frame
@@ -367,12 +378,28 @@ return TestHarness.suite("playable local Match presentation", {
 			local defeat = snapshot()
 			defeat.revision = 8
 			defeat.state = "Results"
-			defeat.result = { kind = "Defeat", summary = "The base was overrun.", canReplay = false }
+			defeat.result = {
+				kind = "Defeat",
+				summary = "The base was overrun.",
+				canReplay = false,
+				rewardStatus = "Pending",
+				persistentGoldAwarded = 0,
+				firstClearBonus = 0,
+				battleCashEarned = 125,
+				battleCashSpent = 100,
+				rewardReason = "PENDING",
+			}
 			assertions.isTrue(view:render(defeat).ok)
 			assertions.equal(view:getMetrics().resultKind, "Defeat")
 			assertions.contains((child(results, "ResultTitle", "TextLabel") :: TextLabel).Text, "✕")
+			assertions.contains(view:getMetrics().rewardText, "REWARD PENDING")
 			fixture.activations[12]()
 			assertions.equal(#fixture.actions, 1)
+			defeat.revision = 9
+			defeat.result.rewardStatus = "Failed"
+			defeat.result.rewardReason = "CLAIM FAILED"
+			assertions.isTrue(view:render(defeat).ok)
+			assertions.contains(view:getMetrics().rewardText, "REWARD FAILED")
 
 			local replayReady = snapshot()
 			replayReady.matchId = "match:playable-view-replay"
@@ -385,6 +412,57 @@ return TestHarness.suite("playable local Match presentation", {
 			assertions.equal((child(results, "ResultTitle", "TextLabel") :: TextLabel).Text, "")
 			assertions.equal((child(results, "Summary", "TextLabel") :: TextLabel).Text, "")
 			assertions.isFalse((child(results, "Replay", "TextButton") :: TextButton).Active)
+		end)
+	end),
+
+	TestHarness.case("presents spectator read-only camera and safe return controls", function(assertions)
+		withView(function(view, fixture)
+			local spectator = snapshot()
+			spectator.viewerRole = "Spectator"
+			spectator.battleCash = 0
+			spectator.hotbar = {}
+			spectator.travel = {
+				returnStatus = "Idle",
+				canReturn = true,
+				rematchState = "Pending",
+				rematchStatus = "Pending • 1 connected participant votes",
+				canApprove = false,
+				canDecline = false,
+			}
+			assertions.isTrue(view:render(spectator).ok)
+			local _, root = guiTree(fixture)
+			local spectatorPanel = child(root, "SpectatorTravelPanel", "Frame") :: Frame
+			assertions.isTrue(spectatorPanel.Visible)
+			assertions.contains(view:getMetrics().travelText, "CAMERA TARGETS")
+			assertions.equal(view:getMetrics().viewerRole, "Spectator")
+			assertions.isTrue(view:getMetrics().spectatorVisible)
+			assertions.contains((child(spectatorPanel, "Banner", "TextLabel") :: TextLabel).Text, "READ ONLY")
+			assertions.isFalse((child(root, "TowerHotbar", "Frame") :: Frame).Visible)
+			fixture.activations[19]()
+			fixture.activations[20]()
+			fixture.activations[16]()
+			assertions.equal(fixture.actions[1].kind, "SpectatePrevious")
+			assertions.equal(fixture.actions[2].kind, "SpectateNext")
+			assertions.equal(fixture.actions[3].kind, "Return")
+
+			local results = table.clone(spectator)
+			results.revision = 8
+			results.state = "Results"
+			results.result = {
+				kind = "Defeat",
+				summary = "Read-only result.",
+				canReplay = false,
+				rewardStatus = "Ineligible",
+				persistentGoldAwarded = 0,
+				firstClearBonus = 0,
+				battleCashEarned = 0,
+				battleCashSpent = 0,
+				rewardReason = "SPECTATOR",
+			}
+			assertions.isTrue(view:render(results).ok)
+			assertions.contains(view:getMetrics().rewardText, "REWARD INELIGIBLE")
+			local resultOverlay = child(root, "ResultsOverlay", "Frame") :: Frame
+			assertions.isFalse((child(resultOverlay, "Replay", "TextButton") :: TextButton).Active)
 		end)
 	end),
 

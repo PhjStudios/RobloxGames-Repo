@@ -38,7 +38,27 @@ local function versionTwo(assertions: Assertions, fixture: TowerFixtures.Authent
 	local profile = ProfileSchema.clone(current(assertions, fixture))
 	profile.schemaVersion = 2
 	profile.migration = nil
+	profile.firstClears = nil
+	profile.pendingResults = nil
+	profile.claimedResults = nil
 	legacySettings(profile)
+	return profile
+end
+
+local function versionThree(assertions: Assertions, fixture: TowerFixtures.AuthenticatedFixture): any
+	local profile = ProfileSchema.clone(current(assertions, fixture))
+	profile.schemaVersion = 3
+	profile.firstClears = nil
+	profile.pendingResults = nil
+	profile.claimedResults = nil
+	profile.migration.migrationCount = math.max(0, profile.migration.migrationCount - 1)
+	return profile
+end
+
+local function versionFour(assertions: Assertions, fixture: TowerFixtures.AuthenticatedFixture): any
+	local profile = ProfileSchema.clone(current(assertions, fixture))
+	profile.schemaVersion = 4
+	profile.pendingResults = nil
 	return profile
 end
 
@@ -71,7 +91,7 @@ return TestHarness.suite("ProfileMigrations", {
 		assertions.equal(migrated.profile.migration.createdAt, NOW - 100)
 	end),
 
-	TestHarness.case("runs v1 migrations sequentially through v2 and v3", function(assertions)
+	TestHarness.case("runs v1 migrations sequentially through v2 v3 v4 and v5", function(assertions)
 		local fixture = TowerFixtures.createAuthenticatedFixture()
 		local migrated = success(
 			assertions,
@@ -79,19 +99,21 @@ return TestHarness.suite("ProfileMigrations", {
 		)
 		assertions.equal(migrated.outcome, "Migrated")
 		assertions.equal(migrated.fromVersion, 1)
-		assertions.equal(#migrated.appliedVersions, 2)
+		assertions.equal(#migrated.appliedVersions, 4)
 		assertions.equal(migrated.appliedVersions[1], 2)
 		assertions.equal(migrated.appliedVersions[2], 3)
-		assertions.equal(migrated.profile.schemaVersion, 3)
+		assertions.equal(migrated.appliedVersions[3], 4)
+		assertions.equal(migrated.appliedVersions[4], 5)
+		assertions.equal(migrated.profile.schemaVersion, 5)
 		assertions.equal(migrated.profile.settings.version, 2)
 		assertions.isFalse(migrated.profile.settings.reducedMotionEnabled)
 		assertions.equal(migrated.profile.stats.towersAcquired, 1)
 		assertions.equal(migrated.profile.migration.migratedFromVersion, 1)
-		assertions.equal(migrated.profile.migration.migrationCount, 2)
+		assertions.equal(migrated.profile.migration.migrationCount, 4)
 		assertions.equal(migrated.profile.migration.lastMigratedAt, NOW)
 	end),
 
-	TestHarness.case("runs v2 to v3 without fabricating transaction history", function(assertions)
+	TestHarness.case("runs v2 through v5 without fabricating transaction or reward history", function(assertions)
 		local fixture = TowerFixtures.createAuthenticatedFixture()
 		local migrated = success(
 			assertions,
@@ -99,10 +121,41 @@ return TestHarness.suite("ProfileMigrations", {
 		)
 		assertions.equal(migrated.outcome, "Migrated")
 		assertions.equal(migrated.fromVersion, 2)
-		assertions.equal(#migrated.appliedVersions, 1)
+		assertions.equal(#migrated.appliedVersions, 3)
 		assertions.equal(migrated.appliedVersions[1], 3)
+		assertions.equal(migrated.appliedVersions[2], 4)
+		assertions.equal(migrated.appliedVersions[3], 5)
 		assertions.equal(#migrated.profile.receipts, 0)
-		assertions.equal(migrated.profile.migration.migrationCount, 1)
+		assertions.equal(#migrated.profile.pendingResults, 0)
+		assertions.equal(#migrated.profile.claimedResults, 0)
+		assertions.equal(migrated.profile.migration.migrationCount, 3)
+	end),
+
+	TestHarness.case("adds reward and pending-inbox state from v3 through v5", function(assertions)
+		local fixture = TowerFixtures.createAuthenticatedFixture()
+		local migrated = success(
+			assertions,
+			ProfileMigrations.migrate(versionThree(assertions, fixture), fixture.configuration.towers, NOW)
+		)
+		assertions.equal(migrated.fromVersion, 3)
+		assertions.equal(#migrated.appliedVersions, 2)
+		assertions.equal(migrated.appliedVersions[1], 4)
+		assertions.equal(migrated.appliedVersions[2], 5)
+		assertions.equal(next(migrated.profile.firstClears), nil)
+		assertions.equal(#migrated.profile.pendingResults, 0)
+		assertions.equal(#migrated.profile.claimedResults, 0)
+	end),
+
+	TestHarness.case("adds only an empty pending-result inbox in the v4 to v5 migration", function(assertions)
+		local fixture = TowerFixtures.createAuthenticatedFixture()
+		local migrated = success(
+			assertions,
+			ProfileMigrations.migrate(versionFour(assertions, fixture), fixture.configuration.towers, NOW)
+		)
+		assertions.equal(migrated.fromVersion, 4)
+		assertions.equal(#migrated.appliedVersions, 1)
+		assertions.equal(migrated.appliedVersions[1], 5)
+		assertions.equal(#migrated.profile.pendingResults, 0)
 	end),
 
 	TestHarness.case(

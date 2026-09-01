@@ -14,7 +14,9 @@ local ConfigurationValidator = require(ReplicatedStorage.Shared.config.Configura
 local InventoryProtocol = require(ReplicatedStorage.Shared.inventory.InventoryProtocol)
 local LobbyProtocol = require(ReplicatedStorage.Shared.lobby.LobbyProtocol)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
+local PartyProtocol = require(ReplicatedStorage.Shared.party.PartyProtocol)
 local ProfileProtocol = require(ReplicatedStorage.Shared.profile.ProfileProtocol)
+local QueueProtocol = require(ReplicatedStorage.Shared.queue.QueueProtocol)
 local RemoteRegistry = require(ReplicatedStorage.Shared.network.RemoteRegistry)
 local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
@@ -74,6 +76,7 @@ export type Dependencies = {
 	getViewport: () -> Vector2,
 	getAccessibility: () -> Accessibility,
 	getInputFamily: () -> LobbyView.InputFamily,
+	getLocalUserId: () -> number,
 	newTransactionId: () -> string,
 	applySettings: (ProfileProtocol.SettingsView) -> (),
 	leave: () -> (),
@@ -108,6 +111,7 @@ type Modal = {
 
 type Pending = { startedAt: number, mutation: boolean }
 type Factory = ((LobbyView.Action) -> ()) -> Dependencies
+type LobbyUiModelSquadState = "Loading" | "Ready" | "Failed"
 
 type ControllerData = {
 	logger: Log.Logger,
@@ -121,6 +125,14 @@ type ControllerData = {
 	profile: ProfileProtocol.Snapshot,
 	inventory: InventoryProtocol.Snapshot?,
 	banner: AcquisitionProtocol.BannerView?,
+	localUserId: number,
+	partyState: LobbyUiModelSquadState,
+	partySnapshot: PartyProtocol.ViewerSnapshot?,
+	queuesState: LobbyUiModelSquadState,
+	queueSnapshots: { QueueProtocol.Snapshot }?,
+	activeRouteState: LobbyUiModelSquadState,
+	activeRoute: LobbyProtocol.ActiveRouteView?,
+	selectedQueueId: string?,
 	revision: number,
 	inputFamily: LobbyView.InputFamily,
 	selectedUnitId: string?,
@@ -129,6 +141,7 @@ type ControllerData = {
 	pending: { [string]: Pending },
 	mutationPending: boolean,
 	navigation: NavigationStore.Store,
+	activeScreen: LobbyView.PrimaryScreen,
 	notifications: NotificationStore.Store,
 	lastProfilePoll: number,
 	lastToastTick: number,
@@ -199,7 +212,7 @@ end
 local function networkFailure(data: ControllerData, endpoint: string, code: string?)
 	local message = if code == "RATE_LIMITED"
 		then "That action is happening too quickly. Please wait a moment."
-		elseif code == "STALE_REQUEST" then "Your profile changed. Refreshing the authoritative state."
+		elseif code == "STALE_REQUEST" then "Your party, queue, or profile changed. Refreshing the authoritative state."
 		else "The Lobby server did not accept that request. Retrying safely."
 	notify(
 		data,
@@ -221,10 +234,7 @@ local function popModal(data: ControllerData, expectedId: string?): boolean
 end
 
 local function pushModal(data: ControllerData, modal: Modal): boolean
-	local pushed = data.navigation:pushModal(
-		modal.id,
-		`screen:{string.lower((data.navigation:getSnapshot() :: any).value.activeScreen)}`
-	)
+	local pushed = data.navigation:pushModal(modal.id, `screen:{string.lower(data.activeScreen)}`)
 	if not pushed.ok then
 		return false
 	end
@@ -414,7 +424,7 @@ local function render(data: ControllerData): boolean
 	end
 	local base = {
 		profileState = profileState,
-		screen = navigation.value.activeScreen,
+		screen = data.activeScreen,
 		statusText = statusText,
 		canRetry = data.profile.state == "Failed",
 		canLeave = true,
@@ -427,6 +437,15 @@ local function render(data: ControllerData): boolean
 			else false,
 		isFirstJoin = false,
 		didMigrate = false,
+		localUserId = data.localUserId,
+		partyState = data.partyState,
+		partySnapshot = data.partySnapshot,
+		queuesState = data.queuesState,
+		queueSnapshots = data.queueSnapshots,
+		selectedQueueId = data.selectedQueueId,
+		activeRouteState = data.activeRouteState,
+		activeRoute = data.activeRoute,
+		squadMutationPending = data.mutationPending,
 		modals = if effectiveReady then data.modals else {},
 		toasts = toasts,
 	}
@@ -464,6 +483,7 @@ local function updateProfileRevision(data: ControllerData, revision: number)
 			settings = profile.settings,
 			tutorial = profile.tutorial,
 			stats = profile.stats,
+			firstClears = profile.firstClears,
 			migrationOutcome = profile.migrationOutcome,
 		})
 	end
@@ -472,6 +492,9 @@ end
 local issueProfile: (ControllerData) -> boolean
 local issueInventory: (ControllerData) -> boolean
 local issueBanner: (ControllerData) -> boolean
+local issueParty: (ControllerData) -> boolean
+local issueQueues: (ControllerData) -> boolean
+local issueActiveRoute: (ControllerData) -> boolean
 
 local function issueRequest(
 	data: ControllerData,
@@ -511,6 +534,9 @@ local function issueRequest(
 				issueProfile(data)
 				issueInventory(data)
 				issueBanner(data)
+				issueParty(data)
+				issueQueues(data)
+				issueActiveRoute(data)
 			end
 		end
 		render(data)
@@ -602,6 +628,293 @@ issueBanner = function(data: ControllerData): boolean
 			if data.banner == nil or validated.value.profileRevision >= data.banner.profileRevision then
 				data.banner = validated.value
 				updateProfileRevision(data, validated.value.profileRevision)
+			end
+			return true
+		end
+	)
+end
+
+local function selectUsefulQueue(data: ControllerData, queues: { QueueProtocol.Snapshot })
+	if data.selectedQueueId ~= nil then
+		for _, queue in queues do
+			if queue.queueId == data.selectedQueueId then
+				return
+			end
+		end
+	end
+	for _, queue in queues do
+		for _, member in queue.members do
+			if member.userId == data.localUserId then
+				data.selectedQueueId = queue.queueId
+				return
+			end
+		end
+	end
+	data.selectedQueueId = if queues[1] == nil then nil else queues[1].queueId
+end
+
+local function applyQueueList(data: ControllerData, value: unknown): boolean
+	local validated = LobbyProtocol.validateQueueList(value)
+	if not validated.ok then
+		return false
+	end
+	data.queuesState = "Ready"
+	data.queueSnapshots = validated.value.queues
+	selectUsefulQueue(data, validated.value.queues)
+	return true
+end
+
+local function applyQueueSnapshot(data: ControllerData, value: unknown): boolean
+	local validated = QueueProtocol.validateSnapshot(value)
+	if not validated.ok then
+		return false
+	end
+	local queues = {} :: { QueueProtocol.Snapshot }
+	local replaced = false
+	for _, queue in data.queueSnapshots or {} do
+		if queue.queueId == validated.value.queueId then
+			table.insert(queues, validated.value)
+			replaced = true
+		else
+			table.insert(queues, queue)
+		end
+	end
+	if not replaced then
+		table.insert(queues, validated.value)
+	end
+	table.sort(queues, function(left, right)
+		return left.queueId < right.queueId
+	end)
+	return applyQueueList(data, { version = LobbyProtocol.VERSION, queues = queues })
+end
+
+issueParty = function(data: ControllerData): boolean
+	return issueRequest(data, LobbyProtocol.ENDPOINTS.GET_PARTY, {}, false, function(value)
+		local validated = PartyProtocol.validateViewerSnapshot(value)
+		if not validated.ok then
+			data.partyState = "Failed"
+			data.partySnapshot = nil
+			return false
+		end
+		data.partyState = "Ready"
+		data.partySnapshot = validated.value
+		return true
+	end)
+end
+
+issueQueues = function(data: ControllerData): boolean
+	return issueRequest(data, LobbyProtocol.ENDPOINTS.GET_QUEUES, {}, false, function(value)
+		if not applyQueueList(data, value) then
+			data.queuesState = "Failed"
+			data.queueSnapshots = nil
+			data.selectedQueueId = nil
+			return false
+		end
+		return true
+	end)
+end
+
+issueActiveRoute = function(data: ControllerData): boolean
+	return issueRequest(data, LobbyProtocol.ENDPOINTS.GET_ACTIVE_ROUTE, {}, false, function(value)
+		local validated = LobbyProtocol.validateActiveRoute(value)
+		if not validated.ok then
+			data.activeRouteState = "Failed"
+			data.activeRoute = nil
+			return false
+		end
+		data.activeRouteState = "Ready"
+		data.activeRoute = validated.value
+		return true
+	end)
+end
+
+local function currentParty(data: ControllerData): PartyProtocol.PartyView?
+	return if data.partySnapshot == nil then nil else data.partySnapshot.party
+end
+
+local function currentQueue(data: ControllerData): QueueProtocol.Snapshot?
+	if data.queueSnapshots == nil or data.selectedQueueId == nil then
+		return nil
+	end
+	for _, queue in data.queueSnapshots do
+		if queue.queueId == data.selectedQueueId then
+			return queue
+		end
+	end
+	return nil
+end
+
+local function applyPartyReceipt(
+	data: ControllerData,
+	value: unknown,
+	transactionId: string,
+	successMessage: string
+): boolean
+	local validated = PartyProtocol.validateMutationReceipt(value)
+	if not validated.ok or validated.value.transactionId ~= transactionId then
+		return false
+	end
+	data.partyState = "Ready"
+	data.partySnapshot = validated.value.snapshot
+	if validated.value.changed then
+		notify(data, "Success", "Party updated", successMessage, nil)
+	end
+	return true
+end
+
+local function issuePartyMutation(
+	data: ControllerData,
+	endpoint: string,
+	payload: { [string]: any },
+	successMessage: string
+): boolean
+	local transactionId = (data.dependencies :: Dependencies).newTransactionId()
+	payload.transactionId = transactionId
+	return issueRequest(data, endpoint, payload, true, function(value)
+		return applyPartyReceipt(data, value, transactionId, successMessage)
+	end)
+end
+
+local function applyQueueReceipt(
+	data: ControllerData,
+	value: unknown,
+	transactionId: string,
+	successMessage: string
+): boolean
+	local validated = QueueProtocol.validateMutationReceipt(value)
+	if not validated.ok or validated.value.transactionId ~= transactionId then
+		return false
+	end
+	local current = data.queueSnapshots or {}
+	local queues = table.create(math.max(#current, 1)) :: { QueueProtocol.Snapshot }
+	local replaced = false
+	for _, queue in current do
+		if queue.queueId == validated.value.snapshot.queueId then
+			table.insert(queues, validated.value.snapshot)
+			replaced = true
+		else
+			table.insert(queues, queue)
+		end
+	end
+	if not replaced then
+		table.insert(queues, validated.value.snapshot)
+	end
+	table.sort(queues, function(left, right)
+		return left.queueId < right.queueId
+	end)
+	local list = LobbyProtocol.validateQueueList({ version = LobbyProtocol.VERSION, queues = queues })
+	if not list.ok then
+		return false
+	end
+	data.queuesState = "Ready"
+	data.queueSnapshots = list.value.queues
+	data.selectedQueueId = validated.value.snapshot.queueId
+	if validated.value.changed then
+		notify(data, "Success", "Queue updated", successMessage, nil)
+	end
+	return true
+end
+
+local function issueQueueMutation(
+	data: ControllerData,
+	endpoint: string,
+	payload: { [string]: any },
+	successMessage: string
+): boolean
+	local transactionId = (data.dependencies :: Dependencies).newTransactionId()
+	payload.transactionId = transactionId
+	return issueRequest(data, endpoint, payload, true, function(value)
+		return applyQueueReceipt(data, value, transactionId, successMessage)
+	end)
+end
+
+local function issueInvitePrompt(data: ControllerData): boolean
+	local party = currentParty(data)
+	if party == nil then
+		return false
+	end
+	local transactionId = (data.dependencies :: Dependencies).newTransactionId()
+	return issueRequest(
+		data,
+		LobbyProtocol.ENDPOINTS.PROMPT_PARTY_INVITE,
+		{
+			transactionId = transactionId,
+			expectedRevision = party.revision,
+		},
+		true,
+		function(value)
+			local validated = LobbyProtocol.InvitePromptReceiptSchema:validate(value)
+			if not validated.ok or (validated.value :: any).transactionId ~= transactionId then
+				return false
+			end
+			local status = (validated.value :: any).status
+			if status == "Opened" then
+				notify(data, "Info", "Invite friends", "The Roblox invite prompt is open.", "party:prompt-open")
+			elseif status == "Denied" then
+				notify(
+					data,
+					"Warning",
+					"Invite unavailable",
+					"Invite permission was denied. You can still invite a present player by UserId.",
+					"party:prompt-denied"
+				)
+			else
+				notify(
+					data,
+					"Warning",
+					"Invite unavailable",
+					"The Roblox invite prompt is unavailable here. Use the same-server invite field instead.",
+					"party:prompt-unavailable"
+				)
+			end
+			return true
+		end
+	)
+end
+
+local function issueReconnect(data: ControllerData): boolean
+	if data.activeRoute == nil or data.activeRoute.status ~= "Available" then
+		return false
+	end
+	local transactionId = (data.dependencies :: Dependencies).newTransactionId()
+	return issueRequest(
+		data,
+		LobbyProtocol.ENDPOINTS.RECONNECT_ACTIVE_MATCH,
+		{
+			transactionId = transactionId,
+		},
+		true,
+		function(value)
+			local validated = LobbyProtocol.validateReconnectReceipt(value)
+			if not validated.ok or validated.value.transactionId ~= transactionId then
+				return false
+			end
+			data.activeRouteState = "Ready"
+			data.activeRoute = validated.value.route
+			if validated.value.status == "Initializing" then
+				notify(
+					data,
+					"Info",
+					"Reconnecting",
+					"The server is safely reconnecting you to the active Match.",
+					"route:initializing"
+				)
+			elseif validated.value.status == "Stale" then
+				notify(
+					data,
+					"Warning",
+					"Reconnect expired",
+					"That Match route is stale; you remain safely in the Lobby.",
+					"route:stale"
+				)
+			else
+				notify(
+					data,
+					"Error",
+					"Reconnect failed",
+					"The Match could not be reached. You remain safely in the Lobby.",
+					"route:failed"
+				)
 			end
 			return true
 		end
@@ -733,6 +1046,7 @@ local function issuePull(data: ControllerData, quantity: number): boolean
 				settings = profile.settings,
 				tutorial = profile.tutorial,
 				stats = profile.stats,
+				firstClears = profile.firstClears,
 				migrationOutcome = profile.migrationOutcome,
 			})
 		end
@@ -795,6 +1109,7 @@ local function issueSetting(data: ControllerData, action: LobbyView.Action): boo
 		settings = table.freeze(nextSettings),
 		tutorial = profile.tutorial,
 		stats = profile.stats,
+		firstClears = profile.firstClears,
 		migrationOutcome = profile.migrationOutcome,
 	})
 	pcall((data.dependencies :: Dependencies).applySettings, nextSettings)
@@ -820,6 +1135,7 @@ local function issueSetting(data: ControllerData, action: LobbyView.Action): boo
 				settings = accepted.settings,
 				tutorial = currentProfile.tutorial,
 				stats = currentProfile.stats,
+				firstClears = currentProfile.firstClears,
 				migrationOutcome = currentProfile.migrationOutcome,
 			})
 			pcall((data.dependencies :: Dependencies).applySettings, accepted.settings)
@@ -841,10 +1157,32 @@ local function onAction(data: ControllerData, action: LobbyView.Action)
 	if action.kind == "InputFamilyChanged" and action.inputFamily ~= nil then
 		data.inputFamily = action.inputFamily
 	elseif action.kind == "Navigate" and action.screen ~= nil then
-		data.navigation:setPrimary(action.screen)
+		if action.screen == "Party" or action.screen == "Queue" then
+			if #data.modals == 0 then
+				data.activeScreen = action.screen
+			end
+		else
+			local changed = data.navigation:setPrimary(action.screen)
+			if changed.ok then
+				data.activeScreen = action.screen
+			end
+		end
+		if action.screen == "Party" and data.partyState ~= "Ready" then
+			issueParty(data)
+		elseif action.screen == "Queue" and data.queuesState ~= "Ready" then
+			issueQueues(data)
+		end
 	elseif action.kind == "Back" then
-		local backed = data.navigation:back()
-		if backed.ok and backed.value.kind == "ModalClosed" then
+		local backed = if #data.modals == 0 and (data.activeScreen == "Party" or data.activeScreen == "Queue")
+			then nil
+			else data.navigation:back()
+		if backed == nil then
+			data.activeScreen = "Home"
+			data.navigation:setPrimary("Home")
+		elseif backed.ok and backed.value.kind == "ScreenChanged" then
+			data.activeScreen = (data.navigation:getSnapshot() :: any).value.activeScreen
+		end
+		if backed ~= nil and backed.ok and backed.value.kind == "ModalClosed" then
 			local top = data.modals[#data.modals]
 			if top ~= nil and top.id == backed.value.modalId and not top.busy then
 				table.remove(data.modals)
@@ -858,15 +1196,139 @@ local function onAction(data: ControllerData, action: LobbyView.Action)
 	elseif action.kind == "SafeLeave" then
 		pcall((data.dependencies :: Dependencies).leave)
 	elseif action.kind == "Play" and data.profile.state == "Ready" then
-		pushModal(data, {
-			id = "modal:play-ready",
-			title = "Loadout ready",
-			message = "Your saved loadout is ready for the local Match. Parties, queues, and travel are intentionally not enabled yet.",
-			confirmText = "OK",
-			cancelText = nil,
-			dismissable = true,
-			busy = false,
-		})
+		if #data.modals == 0 then
+			data.activeScreen = "Queue"
+		end
+	elseif action.kind == "SelectQueue" and action.queueId ~= nil and data.queueSnapshots ~= nil then
+		for _, queue in data.queueSnapshots do
+			if queue.queueId == action.queueId then
+				data.selectedQueueId = queue.queueId
+				break
+			end
+		end
+	elseif action.kind == "ReconnectActiveMatch" then
+		if data.profile.state == "Ready" and data.inventory ~= nil then
+			issueReconnect(data)
+		else
+			notify(
+				data,
+				"Warning",
+				"Profile not ready",
+				"Reconnect begins only after protected profile acquisition is ready.",
+				"route:profile-not-ready"
+			)
+		end
+	elseif
+		action.kind == "CreateParty"
+		or action.kind == "InvitePartyMember"
+		or action.kind == "AcceptPartyInvite"
+		or action.kind == "DeclinePartyInvite"
+		or action.kind == "LeaveParty"
+		or action.kind == "KickPartyMember"
+		or action.kind == "TransferPartyLeadership"
+		or action.kind == "TogglePartyPrivacy"
+		or action.kind == "DisbandParty"
+		or action.kind == "PromptPartyInvite"
+		or action.kind == "JoinQueue"
+		or action.kind == "LeaveQueue"
+		or action.kind == "ConfigureQueue"
+		or action.kind == "StartQueue"
+	then
+		if data.profile.state ~= "Ready" or data.inventory == nil then
+			notify(
+				data,
+				"Warning",
+				"Profile not ready",
+				"Party and queue changes unlock after your authoritative profile and loadout are ready.",
+				"squad:profile-not-ready"
+			)
+		elseif action.kind == "CreateParty" then
+			issuePartyMutation(data, LobbyProtocol.ENDPOINTS.CREATE_PARTY, {
+				expectedRevision = 0,
+				privacy = "InviteOnly",
+			}, "Your same-server party was created.")
+		elseif action.kind == "AcceptPartyInvite" or action.kind == "DeclinePartyInvite" then
+			local invitation: PartyProtocol.InvitationView? = nil
+			if data.partySnapshot ~= nil and action.invitationId ~= nil then
+				for _, candidate in data.partySnapshot.incomingInvitations do
+					if candidate.invitationId == action.invitationId then
+						invitation = candidate
+						break
+					end
+				end
+			end
+			if invitation ~= nil then
+				issuePartyMutation(
+					data,
+					if action.kind == "AcceptPartyInvite"
+						then LobbyProtocol.ENDPOINTS.ACCEPT_PARTY_INVITE
+						else LobbyProtocol.ENDPOINTS.DECLINE_PARTY_INVITE,
+					{
+						expectedRevision = invitation.partyRevision,
+						invitationId = invitation.invitationId,
+					},
+					if action.kind == "AcceptPartyInvite"
+						then "You joined the party."
+						else "The invitation was declined."
+				)
+			end
+		else
+			local party = currentParty(data)
+			local queue = currentQueue(data)
+			if action.kind == "InvitePartyMember" and party ~= nil and action.targetUserId ~= nil then
+				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.INVITE_PARTY, {
+					expectedRevision = party.revision,
+					targetUserId = action.targetUserId,
+				}, "The bounded invitation was sent.")
+			elseif action.kind == "LeaveParty" and party ~= nil then
+				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.LEAVE_PARTY, {
+					expectedRevision = party.revision,
+				}, "You left the party.")
+			elseif action.kind == "KickPartyMember" and party ~= nil and action.targetUserId ~= nil then
+				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.KICK_PARTY_MEMBER, {
+					expectedRevision = party.revision,
+					targetUserId = action.targetUserId,
+				}, "The member was removed.")
+			elseif action.kind == "TransferPartyLeadership" and party ~= nil and action.targetUserId ~= nil then
+				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.TRANSFER_PARTY_LEADERSHIP, {
+					expectedRevision = party.revision,
+					targetUserId = action.targetUserId,
+				}, "Party leadership was transferred.")
+			elseif action.kind == "TogglePartyPrivacy" and party ~= nil then
+				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.SET_PARTY_PRIVACY, {
+					expectedRevision = party.revision,
+					privacy = if party.privacy == "InviteOnly" then "FriendsOnly" else "InviteOnly",
+				}, "Party privacy was updated.")
+			elseif action.kind == "DisbandParty" and party ~= nil then
+				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.DISBAND_PARTY, {
+					expectedRevision = party.revision,
+				}, "The party was disbanded.")
+			elseif action.kind == "PromptPartyInvite" then
+				issueInvitePrompt(data)
+			elseif action.kind == "JoinQueue" and queue ~= nil then
+				issueQueueMutation(data, LobbyProtocol.ENDPOINTS.JOIN_QUEUE, {
+					expectedRevision = queue.revision,
+					queueId = queue.queueId,
+					source = "UI",
+				}, "You entered the queue through the accessible Lobby UI.")
+			elseif action.kind == "LeaveQueue" and queue ~= nil then
+				issueQueueMutation(data, LobbyProtocol.ENDPOINTS.LEAVE_QUEUE, {
+					expectedRevision = queue.revision,
+					queueId = queue.queueId,
+				}, "Your enrollment left the queue cleanly.")
+			elseif action.kind == "ConfigureQueue" and queue ~= nil and action.configuration ~= nil then
+				issueQueueMutation(data, LobbyProtocol.ENDPOINTS.CONFIGURE_QUEUE, {
+					expectedRevision = queue.revision,
+					queueId = queue.queueId,
+					configuration = action.configuration,
+				}, "The captain configuration was saved.")
+			elseif action.kind == "StartQueue" and queue ~= nil then
+				issueQueueMutation(data, LobbyProtocol.ENDPOINTS.START_QUEUE, {
+					expectedRevision = queue.revision,
+					queueId = queue.queueId,
+				}, "The squad is locked and travel initialization has started.")
+			end
+		end
 	elseif action.kind == "SelectTower" then
 		data.selectedUnitId = action.unitId
 	elseif action.kind == "CloseTowerDetails" then
@@ -929,6 +1391,7 @@ local function validateDependencies(value: unknown): boolean
 		and type(record.getViewport) == "function"
 		and type(record.getAccessibility) == "function"
 		and type(record.getInputFamily) == "function"
+		and type(record.getLocalUserId) == "function"
 		and type(record.newTransactionId) == "function"
 		and type(record.applySettings) == "function"
 		and type(record.leave) == "function"
@@ -956,6 +1419,12 @@ local function initialize(data: ControllerData)
 		error("[ATD_LOBBY_CONTROLLER][code=INITIALIZE_FAILED]", 0)
 	end
 	data.dependencies = dependencies :: Dependencies
+	local userOk, userId = pcall((dependencies :: Dependencies).getLocalUserId)
+	if not userOk or type(userId) ~= "number" or userId % 1 ~= 0 or userId < 1 or userId > 2 ^ 31 - 1 then
+		data.state = "Failed"
+		error("[ATD_LOBBY_CONTROLLER][code=LOCAL_USER_INVALID]", 0)
+	end
+	data.localUserId = userId
 	local familyOk, family = pcall((dependencies :: Dependencies).getInputFamily)
 	if familyOk and (family == "Desktop" or family == "Touch" or family == "Gamepad") then
 		data.inputFamily = family
@@ -983,6 +1452,9 @@ local function onStep(data: ControllerData)
 		issueProfile(data)
 		issueInventory(data)
 		issueBanner(data)
+		issueParty(data)
+		issueQueues(data)
+		issueActiveRoute(data)
 	end
 	local interval = if data.profile.state == "Ready" then READY_REFRESH_SECONDS else PROFILE_POLL_SECONDS
 	if data.pending[LobbyProtocol.ENDPOINTS.GET_PROFILE] == nil and now - data.lastProfilePoll >= interval then
@@ -1037,12 +1509,59 @@ local function start(data: ControllerData)
 			render(data)
 		end
 	)
+	local partyConnection = dependencies.connectEvent(LobbyProtocol.ENDPOINTS.PARTY_REPLICATION, function(value, ...)
+		if not data.active or data.generation ~= generation then
+			return
+		end
+		local parsed = RequestProtocol.parseEvent(value, ...)
+		local validated = if parsed.ok then PartyProtocol.validateViewerSnapshot(parsed.value.payload) else nil
+		if validated ~= nil and validated.ok then
+			data.partyState = "Ready"
+			data.partySnapshot = validated.value
+		else
+			data.rejectedResponseCount += 1
+			issueParty(data)
+		end
+		render(data)
+	end)
+	local queueConnection = dependencies.connectEvent(LobbyProtocol.ENDPOINTS.QUEUE_REPLICATION, function(value, ...)
+		if not data.active or data.generation ~= generation then
+			return
+		end
+		local parsed = RequestProtocol.parseEvent(value, ...)
+		if not parsed.ok or not applyQueueSnapshot(data, parsed.value.payload) then
+			data.rejectedResponseCount += 1
+			issueQueues(data)
+		end
+		render(data)
+	end)
+	local routeConnection = dependencies.connectEvent(
+		LobbyProtocol.ENDPOINTS.ACTIVE_ROUTE_REPLICATION,
+		function(value, ...)
+			if not data.active or data.generation ~= generation then
+				return
+			end
+			local parsed = RequestProtocol.parseEvent(value, ...)
+			local validated = if parsed.ok then LobbyProtocol.validateActiveRoute(parsed.value.payload) else nil
+			if validated ~= nil and validated.ok then
+				data.activeRouteState = "Ready"
+				data.activeRoute = validated.value
+			else
+				data.rejectedResponseCount += 1
+				issueActiveRoute(data)
+			end
+			render(data)
+		end
+	)
 	local stepConnection = dependencies.connectStep(function()
 		onStep(data)
 	end)
 	if
 		not addConnection(data, profileConnection)
 		or not addConnection(data, inventoryConnection)
+		or not addConnection(data, partyConnection)
+		or not addConnection(data, queueConnection)
+		or not addConnection(data, routeConnection)
 		or not addConnection(data, stepConnection)
 	then
 		error("[ATD_LOBBY_CONTROLLER][code=START_FAILED]", 0)
@@ -1051,6 +1570,9 @@ local function start(data: ControllerData)
 	data.lastProfilePoll = dependencies.now()
 	render(data)
 	issueProfile(data)
+	issueParty(data)
+	issueQueues(data)
+	issueActiveRoute(data)
 end
 
 local function cleanup(data: ControllerData): boolean
@@ -1089,6 +1611,10 @@ local function cleanup(data: ControllerData): boolean
 	table.clear(data.modals)
 	data.inventory = nil
 	data.banner = nil
+	data.partySnapshot = nil
+	data.queueSnapshots = nil
+	data.activeRoute = nil
+	data.selectedQueueId = nil
 	data.dependencies = nil
 	data.state = "Shutdown"
 	return not failed
@@ -1127,6 +1653,14 @@ local function construct(
 		profile = ProfileProtocol.status("Loading"),
 		inventory = nil,
 		banner = nil,
+		localUserId = 1,
+		partyState = "Loading",
+		partySnapshot = nil,
+		queuesState = "Loading",
+		queueSnapshots = nil,
+		activeRouteState = "Loading",
+		activeRoute = nil,
+		selectedQueueId = nil,
 		revision = 0,
 		inputFamily = "Desktop",
 		selectedUnitId = nil,
@@ -1135,6 +1669,7 @@ local function construct(
 		pending = {},
 		mutationPending = false,
 		navigation = navigationResult.value,
+		activeScreen = "Home",
 		notifications = notificationResult.value,
 		lastProfilePoll = 0,
 		lastToastTick = 0,
@@ -1225,6 +1760,56 @@ local REQUEST_SPECS = table.freeze({
 		SettingsProtocol.UpdateIntentSchema,
 		SettingsProtocol.UpdateReceiptSchema,
 	},
+	{ LobbyProtocol.ENDPOINTS.GET_PARTY, LobbyProtocol.EmptyPayloadSchema, PartyProtocol.ViewerSnapshotSchema },
+	{ LobbyProtocol.ENDPOINTS.CREATE_PARTY, PartyProtocol.CreateIntentSchema, PartyProtocol.MutationReceiptSchema },
+	{ LobbyProtocol.ENDPOINTS.INVITE_PARTY, PartyProtocol.InviteIntentSchema, PartyProtocol.MutationReceiptSchema },
+	{
+		LobbyProtocol.ENDPOINTS.ACCEPT_PARTY_INVITE,
+		PartyProtocol.InvitationIntentSchema,
+		PartyProtocol.MutationReceiptSchema,
+	},
+	{
+		LobbyProtocol.ENDPOINTS.DECLINE_PARTY_INVITE,
+		PartyProtocol.InvitationIntentSchema,
+		PartyProtocol.MutationReceiptSchema,
+	},
+	{ LobbyProtocol.ENDPOINTS.LEAVE_PARTY, PartyProtocol.RevisionIntentSchema, PartyProtocol.MutationReceiptSchema },
+	{
+		LobbyProtocol.ENDPOINTS.KICK_PARTY_MEMBER,
+		PartyProtocol.MemberIntentSchema,
+		PartyProtocol.MutationReceiptSchema,
+	},
+	{
+		LobbyProtocol.ENDPOINTS.TRANSFER_PARTY_LEADERSHIP,
+		PartyProtocol.MemberIntentSchema,
+		PartyProtocol.MutationReceiptSchema,
+	},
+	{
+		LobbyProtocol.ENDPOINTS.SET_PARTY_PRIVACY,
+		PartyProtocol.PrivacyIntentSchema,
+		PartyProtocol.MutationReceiptSchema,
+	},
+	{ LobbyProtocol.ENDPOINTS.DISBAND_PARTY, PartyProtocol.RevisionIntentSchema, PartyProtocol.MutationReceiptSchema },
+	{
+		LobbyProtocol.ENDPOINTS.PROMPT_PARTY_INVITE,
+		LobbyProtocol.InvitePromptIntentSchema,
+		LobbyProtocol.InvitePromptReceiptSchema,
+	},
+	{ LobbyProtocol.ENDPOINTS.GET_QUEUES, LobbyProtocol.EmptyPayloadSchema, LobbyProtocol.QueueListSchema },
+	{ LobbyProtocol.ENDPOINTS.JOIN_QUEUE, QueueProtocol.JoinIntentSchema, QueueProtocol.MutationReceiptSchema },
+	{ LobbyProtocol.ENDPOINTS.LEAVE_QUEUE, QueueProtocol.LeaveIntentSchema, QueueProtocol.MutationReceiptSchema },
+	{
+		LobbyProtocol.ENDPOINTS.CONFIGURE_QUEUE,
+		QueueProtocol.ConfigureIntentSchema,
+		QueueProtocol.MutationReceiptSchema,
+	},
+	{ LobbyProtocol.ENDPOINTS.START_QUEUE, QueueProtocol.StartIntentSchema, QueueProtocol.MutationReceiptSchema },
+	{ LobbyProtocol.ENDPOINTS.GET_ACTIVE_ROUTE, LobbyProtocol.EmptyPayloadSchema, LobbyProtocol.ActiveRouteViewSchema },
+	{
+		LobbyProtocol.ENDPOINTS.RECONNECT_ACTIVE_MATCH,
+		LobbyProtocol.ReconnectIntentSchema,
+		LobbyProtocol.ReconnectReceiptSchema,
+	},
 })
 
 local function inputFamily(): LobbyView.InputFamily
@@ -1298,7 +1883,15 @@ local function makeProductionFactory(): Factory
 			)
 		end
 		local eventEndpoints: { [string]: RemoteEvent } = {}
-		for _, name in { LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION, LobbyProtocol.ENDPOINTS.INVENTORY_REPLICATION } do
+		for _, name in
+			{
+				LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION,
+				LobbyProtocol.ENDPOINTS.INVENTORY_REPLICATION,
+				LobbyProtocol.ENDPOINTS.PARTY_REPLICATION,
+				LobbyProtocol.ENDPOINTS.QUEUE_REPLICATION,
+				LobbyProtocol.ENDPOINTS.ACTIVE_ROUTE_REPLICATION,
+			}
+		do
 			local lookup = ClientRemoteLookup.resolve(name, 5)
 			if not success(lookup) or lookup.value.event == nil or lookup.value.request ~= nil then
 				error("[ATD_LOBBY_CONTROLLER][code=EVENT_LOOKUP_FAILED]", 0)
@@ -1387,6 +1980,10 @@ local function makeProductionFactory(): Factory
 				return { textScale = textScale, transparency = transparency }
 			end,
 			getInputFamily = inputFamily,
+			getLocalUserId = function()
+				local player = Players.LocalPlayer
+				return if player == nil then 0 else player.UserId
+			end,
 			newTransactionId = function()
 				return `transaction:{string.lower(HttpService:GenerateGUID(false))}`
 			end,

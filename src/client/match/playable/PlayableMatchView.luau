@@ -10,6 +10,8 @@ local Workspace = game:GetService("Workspace")
 export type InputFamily = "Desktop" | "Touch" | "Gamepad"
 export type MatchState = "Loading" | "ReadyCheck" | "PreWave" | "WaveActive" | "Results" | "Closing"
 export type ResultKind = "Victory" | "Defeat"
+export type ViewerRole = "Participant" | "Spectator"
+export type RewardStatus = "Granted" | "Pending" | "Ineligible" | "Failed"
 export type TargetMode = "First" | "Last" | "Strongest" | "Weakest" | "Closest"
 export type UiActionKind =
 	"SelectHotbar"
@@ -22,6 +24,11 @@ export type UiActionKind =
 	| "Rotate"
 	| "Cancel"
 	| "Replay"
+	| "Return"
+	| "RematchApprove"
+	| "RematchDecline"
+	| "SpectatePrevious"
+	| "SpectateNext"
 
 export type UiAction = {
 	kind: UiActionKind,
@@ -96,11 +103,28 @@ export type ResultState = {
 	summary: string,
 	canReplay: boolean,
 	status: string?,
+	rewardStatus: RewardStatus,
+	persistentGoldAwarded: number,
+	firstClearBonus: number,
+	battleCashEarned: number,
+	battleCashSpent: number,
+	rewardReason: string?,
+}
+
+export type TravelState = {
+	returnStatus: "Idle" | "Pending" | "Teleporting" | "Failed",
+	failure: string?,
+	canReturn: boolean,
+	rematchState: "Pending" | "Approved" | "Declined" | "Failed"?,
+	rematchStatus: string?,
+	canApprove: boolean,
+	canDecline: boolean,
 }
 
 export type RenderSnapshot = {
 	matchId: string,
 	revision: number,
+	viewerRole: ViewerRole,
 	state: MatchState,
 	inputFamily: InputFamily,
 	wave: WaveState,
@@ -111,6 +135,7 @@ export type RenderSnapshot = {
 	selection: TowerSelection?,
 	feedback: FeedbackState?,
 	result: ResultState?,
+	travel: TravelState?,
 	placement: PlacementState?,
 	inputHint: string?,
 	viewport: Vector2?,
@@ -179,6 +204,10 @@ export type Metrics = {
 	inspectionOnly: boolean,
 	resultsVisible: boolean,
 	resultKind: ResultKind?,
+	viewerRole: ViewerRole?,
+	spectatorVisible: boolean,
+	rewardText: string,
+	travelText: string,
 	touchPlacementVisible: boolean,
 	touchPlacementText: string,
 	worldTowerCount: number,
@@ -251,8 +280,17 @@ type ViewInstances = {
 	resultsOverlay: Frame,
 	resultTitle: TextLabel,
 	resultSummary: TextLabel,
+	resultReward: TextLabel,
 	resultHint: TextLabel,
 	replayButton: TextButton,
+	rematchApproveButton: TextButton,
+	rematchDeclineButton: TextButton,
+	spectatorPanel: Frame,
+	spectatorBanner: TextLabel,
+	spectatorTarget: TextLabel,
+	spectatorPreviousButton: TextButton,
+	spectatorNextButton: TextButton,
+	returnButton: TextButton,
 	touchPlacementPanel: Frame,
 	touchPlacementStatus: TextLabel,
 	touchConfirmButton: TextButton,
@@ -329,7 +367,7 @@ local TEMPLATE_FOLDER_NAME = "ATDPlayableTemplates"
 local CONTENT_CONTRACT = "playable-local-match-v1"
 local CONTENT_VERSION = 1
 local HOTBAR_SLOTS = 5
-local BUTTON_CONNECTION_COUNT = 15
+local BUTTON_CONNECTION_COUNT = 20
 local MAX_TOWERS = 64
 local MAX_ENEMIES = 256
 local MAX_ATTACK_EFFECTS = 32
@@ -634,11 +672,23 @@ local function canonicalResult(value: unknown): CanonicalResult?
 	local summary = rawget(result, "summary")
 	local canReplay = rawget(result, "canReplay")
 	local status = rawget(result, "status")
+	local rewardStatus = rawget(result, "rewardStatus")
+	local persistentGoldAwarded = rawget(result, "persistentGoldAwarded")
+	local firstClearBonus = rawget(result, "firstClearBonus")
+	local battleCashEarned = rawget(result, "battleCashEarned")
+	local battleCashSpent = rawget(result, "battleCashSpent")
+	local rewardReason = rawget(result, "rewardReason")
 	if
 		(kind ~= "Victory" and kind ~= "Defeat")
 		or not safeText(summary, 180, true)
 		or type(canReplay) ~= "boolean"
 		or (status ~= nil and not safeText(status, 96, true))
+		or (rewardStatus ~= "Granted" and rewardStatus ~= "Pending" and rewardStatus ~= "Ineligible" and rewardStatus ~= "Failed")
+		or not safeInteger(persistentGoldAwarded, 0, 1_000_000)
+		or not safeInteger(firstClearBonus, 0, 1_000_000)
+		or not safeInteger(battleCashEarned, 0, 2 ^ 31 - 1)
+		or not safeInteger(battleCashSpent, 0, 2 ^ 31 - 1)
+		or (rewardReason ~= nil and not safeText(rewardReason, 160, true))
 	then
 		return nil
 	end
@@ -647,6 +697,54 @@ local function canonicalResult(value: unknown): CanonicalResult?
 		summary = summary :: string,
 		canReplay = canReplay :: boolean,
 		status = status :: string?,
+		rewardStatus = rewardStatus :: RewardStatus,
+		persistentGoldAwarded = persistentGoldAwarded :: number,
+		firstClearBonus = firstClearBonus :: number,
+		battleCashEarned = battleCashEarned :: number,
+		battleCashSpent = battleCashSpent :: number,
+		rewardReason = rewardReason :: string?,
+	})
+end
+
+local function canonicalTravel(value: unknown): TravelState?
+	if type(value) ~= "table" or getmetatable(value) ~= nil then
+		return nil
+	end
+	local travel = value :: { [any]: unknown }
+	local returnStatus = rawget(travel, "returnStatus")
+	local failureValue = rawget(travel, "failure")
+	local canReturn = rawget(travel, "canReturn")
+	local rematchState = rawget(travel, "rematchState")
+	local rematchStatus = rawget(travel, "rematchStatus")
+	local canApprove = rawget(travel, "canApprove")
+	local canDecline = rawget(travel, "canDecline")
+	if
+		(
+			returnStatus ~= "Idle"
+			and returnStatus ~= "Pending"
+			and returnStatus ~= "Teleporting"
+			and returnStatus ~= "Failed"
+		)
+		or (failureValue ~= nil and not safeText(failureValue, 64))
+		or type(canReturn) ~= "boolean"
+		or (rematchState ~= nil and rematchState ~= "Pending" and rematchState ~= "Approved" and rematchState ~= "Declined" and rematchState ~= "Failed")
+		or (rematchStatus ~= nil and not safeText(rematchStatus, 120, true))
+		or type(canApprove) ~= "boolean"
+		or type(canDecline) ~= "boolean"
+	then
+		return nil
+	end
+	if rematchState == nil and (canApprove or canDecline or rematchStatus ~= nil) then
+		return nil
+	end
+	return table.freeze({
+		returnStatus = returnStatus :: any,
+		failure = failureValue :: string?,
+		canReturn = canReturn :: boolean,
+		rematchState = rematchState :: any,
+		rematchStatus = rematchStatus :: string?,
+		canApprove = canApprove :: boolean,
+		canDecline = canDecline :: boolean,
 	})
 end
 
@@ -680,6 +778,7 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	local snapshot = value :: { [any]: unknown }
 	local matchId = rawget(snapshot, "matchId")
 	local revision = rawget(snapshot, "revision")
+	local viewerRole = rawget(snapshot, "viewerRole")
 	local state = rawget(snapshot, "state")
 	local inputFamily = rawget(snapshot, "inputFamily")
 	local waveValue = rawget(snapshot, "wave")
@@ -689,6 +788,7 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	if
 		not safeId(matchId)
 		or not safeInteger(revision, 0, 2 ^ 31 - 1)
+		or (viewerRole ~= "Participant" and viewerRole ~= "Spectator")
 		or type(state) ~= "string"
 		or rawget(MATCH_STATES, state) ~= true
 		or type(inputFamily) ~= "string"
@@ -725,7 +825,11 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	end
 
 	local hotbarCount = denseCount(hotbarValue :: { [any]: unknown }, HOTBAR_SLOTS)
-	if hotbarCount == nil or hotbarCount < 1 then
+	if
+		hotbarCount == nil
+		or (viewerRole == "Participant" and hotbarCount < 1)
+		or (viewerRole == "Spectator" and hotbarCount ~= 0)
+	then
 		return nil
 	end
 	local hotbar = table.create(hotbarCount) :: { HotbarSlot }
@@ -778,6 +882,9 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	elseif state ~= "ReadyCheck" and ready ~= nil then
 		return nil
 	end
+	if viewerRole == "Spectator" and ready ~= nil then
+		return nil
+	end
 
 	local selectionValue = rawget(snapshot, "selection")
 	local selection = if selectionValue == nil then nil else canonicalSelection(selectionValue)
@@ -785,6 +892,9 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 		return nil
 	end
 	if selection ~= nil and state ~= "PreWave" and state ~= "WaveActive" then
+		return nil
+	end
+	if viewerRole == "Spectator" and selection ~= nil then
 		return nil
 	end
 
@@ -809,6 +919,18 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	if (state == "Results") ~= (result ~= nil) then
 		return nil
 	end
+	if viewerRole == "Spectator" and result ~= nil and (result.canReplay or result.rewardStatus == "Granted") then
+		return nil
+	end
+
+	local travelValue = rawget(snapshot, "travel")
+	local travel = if travelValue == nil then nil else canonicalTravel(travelValue)
+	if travelValue ~= nil and travel == nil then
+		return nil
+	end
+	if viewerRole == "Spectator" and travel ~= nil and (travel.canApprove or travel.canDecline) then
+		return nil
+	end
 
 	local placementValue = rawget(snapshot, "placement")
 	local placement = if placementValue == nil then nil else canonicalPlacement(placementValue)
@@ -819,6 +941,9 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 		placement ~= nil
 		and (inputFamily ~= "Touch" or (state ~= "PreWave" and state ~= "WaveActive") or selectedCount ~= 1)
 	then
+		return nil
+	end
+	if viewerRole == "Spectator" and placement ~= nil then
 		return nil
 	end
 
@@ -857,6 +982,7 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	return table.freeze({
 		matchId = matchId :: string,
 		revision = revision :: number,
+		viewerRole = viewerRole :: ViewerRole,
 		state = state :: MatchState,
 		inputFamily = inputFamily :: InputFamily,
 		wave = table.freeze({
@@ -872,6 +998,7 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 		selection = selection,
 		feedback = feedback,
 		result = result,
+		travel = travel,
 		placement = placement,
 		inputHint = inputHint :: string?,
 		viewport = viewport :: Vector2?,
@@ -898,6 +1025,14 @@ local FEEDBACK_TEXT: { [string]: string } = table.freeze({
 	REQUEST_REJECTED = "! The server rejected that action — retry or choose another.",
 	SERVER_UNAVAILABLE = "! Server unavailable — wait a moment and retry.",
 	POSITION_SELECTED = "✓ Position selected — Confirm to spend Battle Cash and place the tower.",
+	SPECTATOR_READ_ONLY = "◉ Spectators are read-only and cannot affect gameplay or rewards.",
+	SPECTATOR_TARGET_UNAVAILABLE = "◉ No live spectator camera target is available.",
+	TRAVEL_UNAVAILABLE = "↩ Return or rematch is not available yet.",
+	RETURN_PENDING = "… Requesting a safe return to the Lobby.",
+	RETURN_CONFIRMED = "✓ Return request confirmed by the server.",
+	REMATCH_PENDING = "… Sending your rematch vote.",
+	REMATCH_CONFIRMED = "✓ Rematch vote confirmed by the server.",
+	REMATCH_UNAVAILABLE = "! Rematch voting is unavailable or already resolved.",
 })
 
 local function feedbackText(feedback: FeedbackState?): string
@@ -908,7 +1043,12 @@ local function feedbackText(feedback: FeedbackState?): string
 end
 
 local function defaultHint(snapshot: CanonicalSnapshot): string
-	if snapshot.placement ~= nil then
+	if snapshot.viewerRole == "Spectator" then
+		return if snapshot.inputFamily == "Gamepad"
+			then "LB/RB Camera Target • Return is always safe"
+			elseif snapshot.inputFamily == "Touch" then "Cycle camera targets or Return"
+			else "[ / ] Camera Target • Return"
+	elseif snapshot.placement ~= nil then
 		return "Tap the map to choose a position • Confirm • Rotate • Cancel"
 	elseif snapshot.state == "ReadyCheck" then
 		return if snapshot.inputFamily == "Gamepad"
@@ -1272,10 +1412,30 @@ local function createInstances(
 		local resultsOverlay = makeFrame("ResultsOverlay", root)
 		local resultTitle = makeLabel("ResultTitle", resultsOverlay, applyProductionStyle)
 		local resultSummary = makeLabel("Summary", resultsOverlay, applyProductionStyle)
+		local resultReward = makeLabel("Reward", resultsOverlay, applyProductionStyle)
 		local resultHint = makeLabel("InputHint", resultsOverlay, applyProductionStyle)
 		local replayButton = makeButton("Replay", resultsOverlay, applyProductionStyle)
 		replayButton.Text = "↻ PLAY AGAIN"
 		replayButton.SelectionOrder = 2
+		local rematchApproveButton = makeButton("ApproveRematch", resultsOverlay, applyProductionStyle)
+		rematchApproveButton.Text = "✓ REMATCH"
+		rematchApproveButton.SelectionOrder = 3
+		local rematchDeclineButton = makeButton("DeclineRematch", resultsOverlay, applyProductionStyle)
+		rematchDeclineButton.Text = "✕ DECLINE"
+		rematchDeclineButton.SelectionOrder = 4
+
+		local spectatorPanel = makeFrame("SpectatorTravelPanel", root)
+		local spectatorBanner = makeLabel("Banner", spectatorPanel, applyProductionStyle)
+		local spectatorTarget = makeLabel("Target", spectatorPanel, applyProductionStyle)
+		local spectatorPreviousButton = makeButton("PreviousTarget", spectatorPanel, applyProductionStyle)
+		spectatorPreviousButton.Text = "◀ TARGET"
+		spectatorPreviousButton.SelectionOrder = 60
+		local spectatorNextButton = makeButton("NextTarget", spectatorPanel, applyProductionStyle)
+		spectatorNextButton.Text = "TARGET ▶"
+		spectatorNextButton.SelectionOrder = 61
+		local returnButton = makeButton("ReturnToLobby", spectatorPanel, applyProductionStyle)
+		returnButton.Text = "↩ RETURN TO LOBBY"
+		returnButton.SelectionOrder = 62
 
 		local worldFolder = Instance.new("Folder")
 		worldFolder.Name = WORLD_FOLDER_NAME
@@ -1321,8 +1481,17 @@ local function createInstances(
 			resultsOverlay = resultsOverlay,
 			resultTitle = resultTitle,
 			resultSummary = resultSummary,
+			resultReward = resultReward,
 			resultHint = resultHint,
 			replayButton = replayButton,
+			rematchApproveButton = rematchApproveButton,
+			rematchDeclineButton = rematchDeclineButton,
+			spectatorPanel = spectatorPanel,
+			spectatorBanner = spectatorBanner,
+			spectatorTarget = spectatorTarget,
+			spectatorPreviousButton = spectatorPreviousButton,
+			spectatorNextButton = spectatorNextButton,
+			returnButton = returnButton,
 			touchPlacementPanel = touchPlacementPanel,
 			touchPlacementStatus = touchPlacementStatus,
 			touchConfirmButton = touchConfirmButton,
@@ -1455,20 +1624,43 @@ local function applyLayout(instances: ViewInstances, layout: ResponsiveLayout)
 
 	instances.resultsOverlay.AnchorPoint = Vector2.new(0.5, 0.5)
 	instances.resultsOverlay.Position = UDim2.fromScale(0.5, 0.5)
-	instances.resultsOverlay.Size = UDim2.fromOffset(math.min(500, layout.hudWidth), 310)
+	instances.resultsOverlay.Size = UDim2.fromOffset(math.min(540, layout.hudWidth), 430)
 	instances.resultsOverlay.BackgroundTransparency = 0.03
 	instances.resultTitle.Position = UDim2.fromOffset(18, 22)
 	instances.resultTitle.Size = UDim2.new(1, -36, 0, 58)
 	instances.resultTitle.TextSize = layout.textSize + 10
-	instances.resultSummary.Position = UDim2.fromOffset(18, 88)
-	instances.resultSummary.Size = UDim2.new(1, -36, 0, 92)
+	instances.resultSummary.Position = UDim2.fromOffset(18, 78)
+	instances.resultSummary.Size = UDim2.new(1, -36, 0, 64)
 	instances.resultSummary.TextSize = layout.textSize
-	instances.replayButton.Position = UDim2.new(0, 18, 1, -(layout.touchTarget + 50))
-	instances.replayButton.Size = UDim2.new(1, -36, 0, layout.touchTarget + 8)
+	instances.resultReward.Position = UDim2.fromOffset(18, 146)
+	instances.resultReward.Size = UDim2.new(1, -36, 0, 104)
+	instances.resultReward.TextSize = math.max(13, layout.textSize - 2)
+	instances.rematchApproveButton.Position = UDim2.fromOffset(18, 260)
+	instances.rematchApproveButton.Size = UDim2.new(0.5, -23, 0, layout.touchTarget)
+	instances.rematchDeclineButton.Position = UDim2.new(0.5, 5, 0, 260)
+	instances.rematchDeclineButton.Size = UDim2.new(0.5, -23, 0, layout.touchTarget)
+	instances.replayButton.Position = UDim2.fromOffset(18, 320)
+	instances.replayButton.Size = UDim2.new(1, -36, 0, layout.touchTarget)
 	instances.replayButton.TextSize = layout.textSize + 1
-	instances.resultHint.Position = UDim2.new(0, 18, 1, -32)
+	instances.resultHint.Position = UDim2.new(0, 18, 1, -42)
 	instances.resultHint.Size = UDim2.new(1, -36, 0, 22)
 	instances.resultHint.TextSize = math.max(13, layout.textSize - 4)
+
+	instances.spectatorPanel.AnchorPoint = Vector2.new(0.5, 0)
+	instances.spectatorPanel.Position = UDim2.new(0.5, 0, 0, 82)
+	instances.spectatorPanel.Size = UDim2.fromOffset(math.min(520, layout.hudWidth), 160)
+	instances.spectatorBanner.Position = UDim2.fromOffset(12, 8)
+	instances.spectatorBanner.Size = UDim2.new(1, -24, 0, 34)
+	instances.spectatorBanner.TextSize = layout.textSize
+	instances.spectatorTarget.Position = UDim2.fromOffset(12, 42)
+	instances.spectatorTarget.Size = UDim2.new(1, -24, 0, 24)
+	instances.spectatorTarget.TextSize = math.max(13, layout.textSize - 3)
+	instances.spectatorPreviousButton.Position = UDim2.fromOffset(12, 72)
+	instances.spectatorPreviousButton.Size = UDim2.new(0.25, -9, 0, layout.touchTarget)
+	instances.spectatorNextButton.Position = UDim2.new(0.25, 6, 0, 72)
+	instances.spectatorNextButton.Size = UDim2.new(0.25, -9, 0, layout.touchTarget)
+	instances.returnButton.Position = UDim2.new(0.5, 6, 0, 72)
+	instances.returnButton.Size = UDim2.new(0.5, -18, 0, layout.touchTarget)
 end
 
 local function setButtonEnabled(button: TextButton, enabled: boolean)
@@ -1499,8 +1691,14 @@ local function focusMode(snapshot: CanonicalSnapshot): string
 end
 
 local function bestFocus(instances: ViewInstances, snapshot: CanonicalSnapshot): GuiObject?
-	if snapshot.result ~= nil and snapshot.result.canReplay then
+	if snapshot.result ~= nil and snapshot.travel ~= nil and snapshot.travel.canApprove then
+		return instances.rematchApproveButton
+	elseif snapshot.result ~= nil and snapshot.result.canReplay then
 		return instances.replayButton
+	elseif snapshot.travel ~= nil and snapshot.travel.canReturn then
+		return instances.returnButton
+	elseif snapshot.viewerRole == "Spectator" then
+		return instances.spectatorNextButton
 	elseif snapshot.ready ~= nil and snapshot.ready.enabled then
 		return instances.readyButton
 	elseif snapshot.selection ~= nil then
@@ -1528,7 +1726,25 @@ local function actionFor(data: ViewData, kind: UiActionKind, slot: number?): UiA
 	end
 	local selection = snapshot.selection
 	local placement = snapshot.placement
-	if kind == "SelectHotbar" then
+	if kind == "Return" then
+		if snapshot.travel == nil or not snapshot.travel.canReturn then
+			return nil
+		end
+	elseif kind == "RematchApprove" then
+		if snapshot.travel == nil or not snapshot.travel.canApprove then
+			return nil
+		end
+	elseif kind == "RematchDecline" then
+		if snapshot.travel == nil or not snapshot.travel.canDecline then
+			return nil
+		end
+	elseif kind == "SpectatePrevious" or kind == "SpectateNext" then
+		if snapshot.viewerRole ~= "Spectator" then
+			return nil
+		end
+	elseif snapshot.viewerRole == "Spectator" and kind ~= "FocusBase" then
+		return nil
+	elseif kind == "SelectHotbar" then
 		if
 			(snapshot.state ~= "PreWave" and snapshot.state ~= "WaveActive")
 			or slot == nil
@@ -1644,6 +1860,11 @@ local function connectAll(data: ViewData): boolean
 			{ data.instances.touchConfirmButton, "Confirm" :: UiActionKind },
 			{ data.instances.touchRotateButton, "Rotate" :: UiActionKind },
 			{ data.instances.touchCancelButton, "Cancel" :: UiActionKind },
+			{ data.instances.returnButton, "Return" :: UiActionKind },
+			{ data.instances.rematchApproveButton, "RematchApprove" :: UiActionKind },
+			{ data.instances.rematchDeclineButton, "RematchDecline" :: UiActionKind },
+			{ data.instances.spectatorPreviousButton, "SpectatePrevious" :: UiActionKind },
+			{ data.instances.spectatorNextButton, "SpectateNext" :: UiActionKind },
 		}
 	do
 		if not connectButton(data, binding[1] :: TextButton, binding[2] :: UiActionKind, nil) then
@@ -1732,6 +1953,7 @@ local function construct(
 	instances.readyOverlay.Visible = false
 	instances.towerPanel.Visible = false
 	instances.resultsOverlay.Visible = false
+	instances.spectatorPanel.Visible = false
 	instances.touchPlacementPanel.Visible = false
 	instances.feedback.Visible = false
 	return ok(view)
@@ -1780,6 +2002,7 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 			setButtonEnabled(button, false)
 		end
 	end
+	instances.hotbar.Visible = snapshot.viewerRole == "Participant"
 	for slot, metadata in snapshot.hotbar do
 		local button = instances.hotbarButtons[slot]
 		local availabilityText = if metadata.available then "AVAILABLE" else (metadata.reason or "UNAVAILABLE")
@@ -1859,14 +2082,54 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 		instances.resultTitle.Text = if result.kind == "Victory" then "✓ VICTORY" else "✕ DEFEAT"
 		instances.resultTitle.TextColor3 = if result.kind == "Victory" then COLORS.Good else COLORS.Bad
 		instances.resultSummary.Text = result.summary
+		local rewardPrefix = if result.rewardStatus == "Granted"
+			then "✓ REWARD GRANTED"
+			elseif result.rewardStatus == "Pending" then "… REWARD PENDING"
+			elseif result.rewardStatus == "Failed" then "! REWARD FAILED"
+			else "○ REWARD INELIGIBLE"
+		instances.resultReward.Text =
+			`{rewardPrefix}\nPERSISTENT GOLD +{result.persistentGoldAwarded} • FIRST-CLEAR +{result.firstClearBonus}\nMATCH-LOCAL BATTLE CASH EARNED {result.battleCashEarned} • SPENT {result.battleCashSpent}{if result.rewardReason
+					== nil
+				then ""
+				else `\n{result.rewardReason}`}`
+		instances.resultReward.TextColor3 = if result.rewardStatus == "Granted"
+			then COLORS.Good
+			elseif result.rewardStatus == "Pending" then COLORS.Warning
+			elseif result.rewardStatus == "Failed" then COLORS.Bad
+			else COLORS.Muted
 		instances.resultHint.Text = result.status or hint
 		setButtonEnabled(instances.replayButton, result.canReplay)
 	else
 		instances.resultTitle.Text = ""
 		instances.resultSummary.Text = ""
+		instances.resultReward.Text = ""
 		instances.resultHint.Text = ""
 		setButtonEnabled(instances.replayButton, false)
 	end
+
+	local travel = snapshot.travel
+	instances.spectatorPanel.Visible = snapshot.viewerRole == "Spectator" or (result ~= nil and travel ~= nil)
+	instances.spectatorBanner.Text = if snapshot.viewerRole == "Spectator"
+		then "◉ SPECTATOR • READ ONLY • ZERO PARTICIPATION CREDIT"
+		else "↩ RETURN & REMATCH"
+	instances.spectatorBanner.TextColor3 = if snapshot.viewerRole == "Spectator" then COLORS.Warning else COLORS.Text
+	instances.spectatorTarget.Text = if travel == nil
+		then "Waiting for the server-owned travel state."
+		elseif travel.failure ~= nil then `TRAVEL FAILED • {travel.failure}`
+		elseif snapshot.viewerRole == "Spectator" then `CAMERA TARGETS • RETURN {string.upper(
+			travel.returnStatus
+		)}`
+		else `RETURN {string.upper(travel.returnStatus)} • {travel.rematchStatus or "REMATCH UNAVAILABLE"}`
+	instances.spectatorPreviousButton.Visible = snapshot.viewerRole == "Spectator"
+	instances.spectatorNextButton.Visible = snapshot.viewerRole == "Spectator"
+	instances.returnButton.Visible = travel ~= nil
+	setButtonEnabled(instances.spectatorPreviousButton, snapshot.viewerRole == "Spectator")
+	setButtonEnabled(instances.spectatorNextButton, snapshot.viewerRole == "Spectator")
+	setButtonEnabled(instances.returnButton, travel ~= nil and travel.canReturn)
+	instances.rematchApproveButton.Visible = result ~= nil and travel ~= nil and travel.rematchState ~= nil
+	instances.rematchDeclineButton.Visible = result ~= nil and travel ~= nil and travel.rematchState ~= nil
+	setButtonEnabled(instances.rematchApproveButton, travel ~= nil and travel.canApprove)
+	setButtonEnabled(instances.rematchDeclineButton, travel ~= nil and travel.canDecline)
 
 	local nextFocusMode = focusMode(snapshot)
 	if snapshot.inputFamily == "Gamepad" and (data.inputFamily ~= "Gamepad" or data.lastFocusMode ~= nextFocusMode) then
@@ -2322,6 +2585,10 @@ function ViewMethods.getMetrics(self: View): Metrics
 			inspectionOnly = false,
 			resultsVisible = false,
 			resultKind = nil,
+			viewerRole = nil,
+			spectatorVisible = false,
+			rewardText = "",
+			travelText = "",
 			worldTowerCount = 0,
 			worldEnemyCount = 0,
 			attackEffectCount = 0,
@@ -2346,6 +2613,10 @@ function ViewMethods.getMetrics(self: View): Metrics
 		inspectionOnly = snapshot ~= nil and snapshot.selection ~= nil and not snapshot.selection.isOwner,
 		resultsVisible = instances.resultsOverlay.Visible,
 		resultKind = if snapshot == nil or snapshot.result == nil then nil else snapshot.result.kind,
+		viewerRole = if snapshot == nil then nil else snapshot.viewerRole,
+		spectatorVisible = instances.spectatorPanel.Visible,
+		rewardText = instances.resultReward.Text,
+		travelText = instances.spectatorTarget.Text,
 		touchPlacementVisible = instances.touchPlacementPanel.Visible,
 		touchPlacementText = instances.touchPlacementStatus.Text,
 		worldTowerCount = countMap(data.towerRecords),

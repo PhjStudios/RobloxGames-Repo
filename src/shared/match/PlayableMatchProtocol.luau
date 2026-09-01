@@ -4,10 +4,12 @@ local PayloadValidation = require(script.Parent.Parent.network.PayloadValidation
 local SettingsProtocol = require(script.Parent.Parent.settings.SettingsProtocol)
 local Result = require(script.Parent.Parent.util.Result)
 local Validation = require(script.Parent.Parent.util.Validation)
+local RewardProtocol = require(script.Parent.RewardProtocol)
 
 export type MatchState = "Ready" | "Playing" | "Results"
 export type MatchResult = "None" | "Victory" | "Defeat"
 export type WavePhase = "Ready" | "Intermission" | "Spawning" | "Resolving" | "Results"
+export type ViewerRole = "Participant" | "Spectator"
 export type TargetMode = "First" | "Last" | "Strongest" | "Weakest" | "Closest"
 export type ActionReason =
 	"Accepted"
@@ -16,6 +18,7 @@ export type ActionReason =
 	| "StaleLoadout"
 	| "StaleTower"
 	| "NotParticipant"
+	| "ParticipantDisconnected"
 	| "UnequippedTower"
 	| "InvalidPlacement"
 	| "InsufficientCash"
@@ -84,6 +87,8 @@ export type ResultStats = {
 
 export type Snapshot = {
 	matchId: string,
+	viewerRole: ViewerRole,
+	rewarding: boolean,
 	revision: number,
 	loadoutRevision: number,
 	state: MatchState,
@@ -106,6 +111,7 @@ export type Snapshot = {
 	towers: { TowerSnapshot },
 	enemies: { EnemySnapshot },
 	stats: ResultStats,
+	reward: RewardProtocol.RewardView?,
 	settings: SettingsProtocol.Settings,
 }
 
@@ -151,7 +157,7 @@ local MAX_COORDINATE = 100_000
 -- Keep a worst-case snapshot within PayloadValidation's global 512-node budget.
 local MAX_ACTIVE_TOWERS = 12
 local MAX_ACTIVE_ENEMIES = 20
-local MIN_TOWER_OPTIONS = 1
+local MIN_TOWER_OPTIONS = 0
 local MAX_TOWER_OPTIONS = 5
 local MAX_LEVEL = 10
 local MAX_WAVES = 1_000
@@ -186,6 +192,7 @@ local ACTION_REASONS: { ActionReason } = table.freeze({
 	"StaleLoadout",
 	"StaleTower",
 	"NotParticipant",
+	"ParticipantDisconnected",
 	"UnequippedTower",
 	"InvalidPlacement",
 	"InsufficientCash",
@@ -258,10 +265,25 @@ local RESULT_STATS = PayloadValidation.record({
 	baseHealthRemaining = NONNEGATIVE_SAFE_INTEGER,
 })
 
+-- RewardProtocol exports a boundary Schema, while nested protocol fields need
+-- a Validator. Keep this wire shape identical and apply RewardProtocol's
+-- additional result/status invariants in validateSnapshot below.
+local REWARD_VIEW = PayloadValidation.record({
+	resultId = PayloadValidation.string(64, 8),
+	status = PayloadValidation.enum({ "Granted", "Pending", "Ineligible", "Failed" }),
+	persistentGoldAwarded = PayloadValidation.integer(0, 1_000_000_000_000),
+	firstClearBonus = PayloadValidation.integer(0, 1_000_000_000_000),
+	battleCashEarned = PayloadValidation.integer(0, 1_000_000_000_000),
+	battleCashSpent = PayloadValidation.integer(0, 1_000_000_000_000),
+	reason = PayloadValidation.string(48, 1),
+})
+
 local SNAPSHOT = PayloadValidation.record({
 	matchId = PayloadValidation.id("match"),
+	viewerRole = PayloadValidation.enum({ "Participant", "Spectator" }),
+	rewarding = PayloadValidation.boolean(),
 	revision = POSITIVE_SAFE_INTEGER,
-	loadoutRevision = POSITIVE_SAFE_INTEGER,
+	loadoutRevision = NONNEGATIVE_SAFE_INTEGER,
 	state = PayloadValidation.enum({ "Ready", "Playing", "Results" }),
 	result = PayloadValidation.enum({ "None", "Victory", "Defeat" }),
 	mapId = PayloadValidation.id("map"),
@@ -282,6 +304,7 @@ local SNAPSHOT = PayloadValidation.record({
 	towers = PayloadValidation.array(TOWER_SNAPSHOT, MAX_ACTIVE_TOWERS),
 	enemies = PayloadValidation.array(ENEMY_SNAPSHOT, MAX_ACTIVE_ENEMIES),
 	stats = RESULT_STATS,
+	reward = PayloadValidation.optional(REWARD_VIEW),
 	settings = SettingsProtocol.SettingsValidator,
 })
 
@@ -402,6 +425,65 @@ function PlayableMatchProtocol.validateSnapshot(value: unknown): Result.Result<S
 				"Ready count exceeds participant count"
 			)
 		)
+	end
+	if snapshot.viewerRole == "Participant" then
+		if snapshot.loadoutRevision < 1 or #snapshot.towerOptions < 1 then
+			return Result.err(
+				Validation.issue(
+					"INVALID_REFERENCE",
+					{ "payload", "viewerRole" },
+					"Participant snapshots require a frozen loadout"
+				)
+			)
+		end
+	elseif
+		snapshot.loadoutRevision ~= 0
+		or snapshot.battleCash ~= 0
+		or #snapshot.towerOptions ~= 0
+		or snapshot.stats.damageDealt ~= 0
+		or snapshot.stats.battleCashEarned ~= 0
+		or snapshot.stats.battleCashSpent ~= 0
+		or snapshot.stats.placements ~= 0
+		or snapshot.stats.upgrades ~= 0
+		or snapshot.stats.sells ~= 0
+	then
+		return Result.err(
+			Validation.issue(
+				"INVALID_REFERENCE",
+				{ "payload", "viewerRole" },
+				"Spectator snapshots cannot contain participant-private match state"
+			)
+		)
+	end
+	if snapshot.reward ~= nil then
+		local reward = RewardProtocol.validateRewardView(snapshot.reward)
+		if not reward.ok or snapshot.state ~= "Results" or not snapshot.rewarding then
+			return Result.err(
+				Validation.issue(
+					"INVALID_REFERENCE",
+					{ "payload", "reward" },
+					"Reward views require an authoritative rewarding result"
+				)
+			)
+		end
+		if
+			snapshot.viewerRole == "Spectator"
+			and (
+				reward.value.status == "Granted"
+				or reward.value.persistentGoldAwarded ~= 0
+				or reward.value.firstClearBonus ~= 0
+				or reward.value.battleCashEarned ~= 0
+				or reward.value.battleCashSpent ~= 0
+			)
+		then
+			return Result.err(
+				Validation.issue(
+					"INVALID_REFERENCE",
+					{ "payload", "reward" },
+					"Spectator reward status cannot grant Gold or expose participant Battle Cash"
+				)
+			)
+		end
 	end
 	if snapshot.waveNumber > snapshot.totalWaves then
 		return Result.err(

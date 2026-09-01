@@ -51,6 +51,22 @@ export type ActionKind =
 	| "InventoryQueryChanged"
 	| "InventorySortChanged"
 	| "InventoryFilterChanged"
+	| "CreateParty"
+	| "InvitePartyMember"
+	| "AcceptPartyInvite"
+	| "DeclinePartyInvite"
+	| "LeaveParty"
+	| "KickPartyMember"
+	| "TransferPartyLeadership"
+	| "TogglePartyPrivacy"
+	| "DisbandParty"
+	| "PromptPartyInvite"
+	| "SelectQueue"
+	| "JoinQueue"
+	| "LeaveQueue"
+	| "ConfigureQueue"
+	| "StartQueue"
+	| "ReconnectActiveMatch"
 
 export type Action = {
 	kind: ActionKind,
@@ -67,6 +83,15 @@ export type Action = {
 	toastId: string?,
 	inputFamily: InputFamily?,
 	textValue: string?,
+	targetUserId: number?,
+	invitationId: string?,
+	queueId: string?,
+	configuration: {
+		mapId: string,
+		difficultyId: string,
+		privacy: "Public" | "PartyOnly",
+		maxPlayers: number,
+	}?,
 }
 
 export type Callback = (Action) -> ()
@@ -125,6 +150,31 @@ type Instances = {
 	homeStatus: TextLabel,
 	homeProgression: TextLabel,
 	playButton: TextButton,
+	partyScroll: ScrollingFrame,
+	partyHeading: TextLabel,
+	partyStatus: TextLabel,
+	partyInviteInput: TextBox,
+	partyCreateButton: TextButton,
+	partyInviteButton: TextButton,
+	partyPlatformInviteButton: TextButton,
+	partyPrivacyButton: TextButton,
+	partyLeaveButton: TextButton,
+	partyDisbandButton: TextButton,
+	partyList: ScrollingFrame,
+	queueScroll: ScrollingFrame,
+	queueHeading: TextLabel,
+	queueStatus: TextLabel,
+	queueList: ScrollingFrame,
+	queueRoster: TextLabel,
+	queueConfiguration: TextLabel,
+	queueJoinButton: TextButton,
+	queueLeaveButton: TextButton,
+	queueMapButton: TextButton,
+	queueDifficultyButton: TextButton,
+	queuePrivacyButton: TextButton,
+	queueCapacityButton: TextButton,
+	queueStartButton: TextButton,
+	reconnectButton: TextButton,
 	inventorySearch: TextBox,
 	inventorySort: TextButton,
 	inventoryFilter: TextButton,
@@ -178,6 +228,7 @@ type ViewData = {
 	current: LobbyUiModel.RenderState?,
 	focusStack: { FocusEntry },
 	localSelectedUnitId: string?,
+	partyInviteText: string,
 	inventoryQuery: string,
 	inventorySort: "Name" | "Copies" | "Equipped",
 	inventoryFilter: "All" | "Equipped" | "Favorites" | "Locked",
@@ -200,7 +251,8 @@ export type TestConstructor = (Instance, Callback, Dependencies) -> ViewResult
 
 local GUI_NAME = "ATDLobbyGui"
 local MAX_QUERY_BYTES = 48
-local NAVIGATION_ORDER: { PrimaryScreen } = table.freeze({ "Home", "Inventory", "Chests", "Settings" })
+local NAVIGATION_ORDER: { PrimaryScreen } =
+	table.freeze({ "Home", "Party", "Queue", "Inventory", "Chests", "Settings" })
 local SETTING_ORDER: { string } = table.freeze({
 	"masterVolume",
 	"musicVolume",
@@ -396,6 +448,7 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 
 		local content = makeFrame("Content", root, Theme.ZIndex.Content)
 		content.BackgroundColor3 = Theme.Colors.Surface
+		content.ClipsDescendants = true
 		addCorner(content, Theme.Radii.Large)
 		addStroke(content, Theme.Colors.SurfaceMuted, Theme.Stroke.Normal)
 		local screens = {} :: { [PrimaryScreen]: Frame }
@@ -413,6 +466,104 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		local homeProgression = label("Progression", home, "", Theme.ZIndex.Content + 2)
 		local playButton = button("Play", home, "PLAY\nLocal Match", Theme.ZIndex.Content + 2)
 		playButton.SelectionOrder = 1
+
+		local partyScreen = screens.Party
+		local party = Instance.new("ScrollingFrame")
+		party.Name = "PartyContent"
+		party.BackgroundTransparency = 1
+		party.BorderSizePixel = 0
+		party.AutomaticCanvasSize = Enum.AutomaticSize.None
+		party.CanvasSize = UDim2.fromOffset(0, 0)
+		party.ScrollingDirection = Enum.ScrollingDirection.Y
+		party.ScrollBarThickness = 8
+		party.ZIndex = Theme.ZIndex.Content + 1
+		party.Parent = partyScreen
+		local partyHeading = label("Heading", party, "SAME-SERVER PARTY", Theme.ZIndex.Content + 2)
+		partyHeading.Font = Enum.Font.GothamBold
+		local partyStatus = label("Status", party, "LOADING AUTHORITATIVE PARTY…", Theme.ZIndex.Content + 2)
+		local partyInviteInput = Instance.new("TextBox")
+		partyInviteInput.Name = "InviteUserId"
+		partyInviteInput.BackgroundColor3 = Theme.Colors.SurfaceRaised
+		partyInviteInput.BorderSizePixel = 0
+		partyInviteInput.ClearTextOnFocus = false
+		partyInviteInput.PlaceholderText = "Present player UserId"
+		partyInviteInput.PlaceholderColor3 = Theme.Colors.TextMuted
+		partyInviteInput.Text = ""
+		partyInviteInput.TextColor3 = Theme.Colors.Text
+		partyInviteInput.Font = Enum.Font.Gotham
+		partyInviteInput.TextXAlignment = Enum.TextXAlignment.Left
+		partyInviteInput.ZIndex = Theme.ZIndex.Content + 2
+		partyInviteInput.SelectionOrder = 61
+		partyInviteInput.Parent = party
+		addCorner(partyInviteInput, Theme.Radii.Small)
+		addStroke(partyInviteInput, Theme.Colors.SurfaceMuted, Theme.Stroke.Normal)
+		local partyCreateButton = button("CreateParty", party, "CREATE PARTY", Theme.ZIndex.Content + 2)
+		local partyInviteButton = button("InviteMember", party, "INVITE USERID", Theme.ZIndex.Content + 2)
+		local partyPlatformInviteButton = button("InviteFriends", party, "INVITE FRIENDS", Theme.ZIndex.Content + 2)
+		local partyPrivacyButton = button("Privacy", party, "PRIVACY", Theme.ZIndex.Content + 2)
+		local partyLeaveButton = button("LeaveParty", party, "LEAVE", Theme.ZIndex.Content + 2)
+		local partyDisbandButton = button("DisbandParty", party, "DISBAND", Theme.ZIndex.Content + 2)
+		local partyList = Instance.new("ScrollingFrame")
+		partyList.Name = "PartyRosterAndInvites"
+		partyList.BackgroundColor3 = Theme.Colors.Backdrop
+		partyList.BackgroundTransparency = 0.3
+		partyList.BorderSizePixel = 0
+		partyList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		partyList.CanvasSize = UDim2.fromOffset(0, 0)
+		partyList.ScrollBarThickness = 8
+		partyList.ScrollingDirection = Enum.ScrollingDirection.Y
+		partyList.ZIndex = Theme.ZIndex.Content + 2
+		partyList.Parent = party
+		addCorner(partyList, Theme.Radii.Small)
+		local partyListLayout = Instance.new("UIListLayout")
+		partyListLayout.Name = "Layout"
+		partyListLayout.Padding = UDim.new(0, Theme.Spacing.Small)
+		partyListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		partyListLayout.Parent = partyList
+
+		local queueScreen = screens.Queue
+		local queue = Instance.new("ScrollingFrame")
+		queue.Name = "QueueContent"
+		queue.BackgroundTransparency = 1
+		queue.BorderSizePixel = 0
+		queue.AutomaticCanvasSize = Enum.AutomaticSize.None
+		queue.CanvasSize = UDim2.fromOffset(0, 0)
+		queue.ScrollingDirection = Enum.ScrollingDirection.Y
+		queue.ScrollBarThickness = 8
+		queue.ZIndex = Theme.ZIndex.Content + 1
+		queue.Parent = queueScreen
+		local queueHeading = label("Heading", queue, "SQUAD QUEUE", Theme.ZIndex.Content + 2)
+		queueHeading.Font = Enum.Font.GothamBold
+		local queueStatus = label("Status", queue, "LOADING AUTHORITATIVE QUEUES…", Theme.ZIndex.Content + 2)
+		local queueList = Instance.new("ScrollingFrame")
+		queueList.Name = "QueueSelector"
+		queueList.BackgroundColor3 = Theme.Colors.Backdrop
+		queueList.BackgroundTransparency = 0.3
+		queueList.BorderSizePixel = 0
+		queueList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		queueList.CanvasSize = UDim2.fromOffset(0, 0)
+		queueList.ScrollBarThickness = 8
+		queueList.ScrollingDirection = Enum.ScrollingDirection.Y
+		queueList.ZIndex = Theme.ZIndex.Content + 2
+		queueList.Parent = queue
+		addCorner(queueList, Theme.Radii.Small)
+		local queueListLayout = Instance.new("UIListLayout")
+		queueListLayout.Name = "Layout"
+		queueListLayout.Padding = UDim.new(0, Theme.Spacing.Small)
+		queueListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		queueListLayout.Parent = queueList
+		local queueRoster = label("Roster", queue, "ROSTER —", Theme.ZIndex.Content + 2)
+		queueRoster.TextYAlignment = Enum.TextYAlignment.Top
+		local queueConfiguration = label("Configuration", queue, "CONFIGURATION —", Theme.ZIndex.Content + 2)
+		queueConfiguration.TextYAlignment = Enum.TextYAlignment.Top
+		local queueJoinButton = button("JoinQueue", queue, "JOIN VIA UI", Theme.ZIndex.Content + 2)
+		local queueLeaveButton = button("LeaveQueue", queue, "LEAVE QUEUE", Theme.ZIndex.Content + 2)
+		local queueMapButton = button("Map", queue, "MAP", Theme.ZIndex.Content + 2)
+		local queueDifficultyButton = button("Difficulty", queue, "DIFFICULTY", Theme.ZIndex.Content + 2)
+		local queuePrivacyButton = button("QueuePrivacy", queue, "PRIVACY", Theme.ZIndex.Content + 2)
+		local queueCapacityButton = button("Capacity", queue, "CAPACITY", Theme.ZIndex.Content + 2)
+		local queueStartButton = button("StartQueue", queue, "LOCK & START", Theme.ZIndex.Content + 2)
+		local reconnectButton = button("ReconnectMatch", queue, "RECONNECT TO ACTIVE MATCH", Theme.ZIndex.Content + 2)
 
 		local inventory = screens.Inventory
 		local inventoryTitle = label("Heading", inventory, "INVENTORY & LOADOUT", Theme.ZIndex.Content + 2)
@@ -576,6 +727,31 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 			homeStatus = homeStatus,
 			homeProgression = homeProgression,
 			playButton = playButton,
+			partyScroll = party,
+			partyHeading = partyHeading,
+			partyStatus = partyStatus,
+			partyInviteInput = partyInviteInput,
+			partyCreateButton = partyCreateButton,
+			partyInviteButton = partyInviteButton,
+			partyPlatformInviteButton = partyPlatformInviteButton,
+			partyPrivacyButton = partyPrivacyButton,
+			partyLeaveButton = partyLeaveButton,
+			partyDisbandButton = partyDisbandButton,
+			partyList = partyList,
+			queueScroll = queue,
+			queueHeading = queueHeading,
+			queueStatus = queueStatus,
+			queueList = queueList,
+			queueRoster = queueRoster,
+			queueConfiguration = queueConfiguration,
+			queueJoinButton = queueJoinButton,
+			queueLeaveButton = queueLeaveButton,
+			queueMapButton = queueMapButton,
+			queueDifficultyButton = queueDifficultyButton,
+			queuePrivacyButton = queuePrivacyButton,
+			queueCapacityButton = queueCapacityButton,
+			queueStartButton = queueStartButton,
+			reconnectButton = reconnectButton,
 			inventorySearch = inventorySearch,
 			inventorySort = inventorySort,
 			inventoryFilter = inventoryFilter,
@@ -631,6 +807,7 @@ end
 
 local function applyLayout(instances: Instances, layout: ResponsiveLayout.Layout)
 	local margin = layout.safeMargin
+	local wideCompact = layout.mode == "Compact" and layout.logicalWidth >= 600
 	instances.header.Position = UDim2.fromOffset(margin, margin)
 	instances.header.Size = UDim2.new(1, -margin * 2, 0, layout.headerHeight)
 	instances.title.Position = UDim2.fromOffset(18, 0)
@@ -643,17 +820,26 @@ local function applyLayout(instances: Instances, layout: ResponsiveLayout.Layout
 	instances.backButton.Size = UDim2.fromOffset(math.max(96, layout.touchTarget * 2), layout.touchTarget)
 
 	local contentTop = margin + layout.headerHeight + layout.panelPadding
+	local contentFrameHeight: number
 	if layout.mode == "Compact" then
-		instances.navigation.Position = UDim2.new(0, margin, 1, -(margin + layout.bottomNavigationHeight))
-		instances.navigation.Size = UDim2.new(1, -margin * 2, 0, layout.bottomNavigationHeight)
+		local navigationColumns = if wideCompact then #NAVIGATION_ORDER else 3
+		local navigationRows = math.ceil(#NAVIGATION_ORDER / navigationColumns)
+		local compactNavigationHeight =
+			math.max(layout.bottomNavigationHeight, navigationRows * layout.touchTarget + (navigationRows + 1) * 8)
+		instances.navigation.Position = UDim2.new(0, margin, 1, -(margin + compactNavigationHeight))
+		instances.navigation.Size = UDim2.new(1, -margin * 2, 0, compactNavigationHeight)
 		for index, screen in NAVIGATION_ORDER do
 			local button = instances.navigationButtons[screen]
-			button.Position = UDim2.new((index - 1) * 0.25, 4, 0, 8)
-			button.Size = UDim2.new(0.25, -8, 1, -16)
+			local column = (index - 1) % navigationColumns
+			local row = math.floor((index - 1) / navigationColumns)
+			button.Position = UDim2.new(column / navigationColumns, 4, 0, 8 + row * (layout.touchTarget + 8))
+			button.Size = UDim2.new(1 / navigationColumns, -8, 0, layout.touchTarget)
 		end
 		instances.content.Position = UDim2.fromOffset(margin, contentTop)
 		instances.content.Size =
-			UDim2.new(1, -margin * 2, 1, -(contentTop + margin + layout.bottomNavigationHeight + layout.panelPadding))
+			UDim2.new(1, -margin * 2, 1, -(contentTop + margin + compactNavigationHeight + layout.panelPadding))
+		contentFrameHeight = layout.logicalHeight
+			- (contentTop + margin + compactNavigationHeight + layout.panelPadding)
 	else
 		instances.navigation.Position = UDim2.fromOffset(margin, contentTop)
 		instances.navigation.Size = UDim2.new(0, layout.navigationWidth, 1, -(contentTop + margin))
@@ -665,6 +851,7 @@ local function applyLayout(instances: Instances, layout: ResponsiveLayout.Layout
 		instances.content.Position = UDim2.fromOffset(margin + layout.navigationWidth + layout.panelPadding, contentTop)
 		instances.content.Size =
 			UDim2.new(1, -(margin * 2 + layout.navigationWidth + layout.panelPadding), 1, -(contentTop + margin))
+		contentFrameHeight = layout.logicalHeight - (contentTop + margin)
 	end
 
 	for _, screen in NAVIGATION_ORDER do
@@ -686,6 +873,109 @@ local function applyLayout(instances: Instances, layout: ResponsiveLayout.Layout
 	instances.playButton.AnchorPoint = Vector2.new(0.5, 1)
 	instances.playButton.Position = UDim2.new(0.5, 0, 1, -12)
 	instances.playButton.Size = UDim2.fromOffset(math.min(420, layout.contentWidth - 40), layout.touchTarget + 18)
+
+	local squadViewportHeight = math.max(1, contentFrameHeight - layout.panelPadding * 2)
+	instances.partyScroll.Position = UDim2.fromScale(0, 0)
+	instances.partyScroll.Size = UDim2.fromScale(1, 1)
+	instances.partyHeading.Position = UDim2.fromOffset(0, 0)
+	instances.partyHeading.Size = UDim2.new(1, -10, 0, 26)
+	instances.partyStatus.Position = UDim2.fromOffset(0, 28)
+	instances.partyStatus.Size = UDim2.new(1, -10, 0, 26)
+	instances.partyInviteInput.TextSize = layout.baseTextSize
+	local partyListTop: number
+	if layout.mode == "Compact" then
+		instances.partyInviteInput.Position = UDim2.fromOffset(0, 58)
+		instances.partyInviteInput.Size = UDim2.new(0.55, -5, 0, layout.touchTarget)
+		instances.partyInviteButton.Position = UDim2.new(0.55, 5, 0, 58)
+		instances.partyInviteButton.Size = UDim2.new(0.45, -5, 0, layout.touchTarget)
+		instances.partyCreateButton.Position = UDim2.fromOffset(0, 58)
+		instances.partyCreateButton.Size = UDim2.new(1, -10, 0, layout.touchTarget)
+		local actionColumns = if wideCompact then 4 else 2
+		for index, button in
+			{
+				instances.partyPlatformInviteButton,
+				instances.partyPrivacyButton,
+				instances.partyLeaveButton,
+				instances.partyDisbandButton,
+			}
+		do
+			local column = (index - 1) % actionColumns
+			local row = math.floor((index - 1) / actionColumns)
+			button.Position =
+				UDim2.new(column / actionColumns, if column == 0 then 0 else 5, 0, 110 + row * (layout.touchTarget + 6))
+			button.Size = UDim2.new(1 / actionColumns, -5, 0, layout.touchTarget)
+		end
+		local actionRows = math.ceil(4 / actionColumns)
+		partyListTop = 110 + actionRows * (layout.touchTarget + 6)
+	else
+		instances.partyInviteInput.Position = UDim2.fromOffset(0, 58)
+		instances.partyInviteInput.Size = UDim2.new(0.35, -5, 0, layout.touchTarget)
+		instances.partyInviteButton.Position = UDim2.new(0.35, 5, 0, 58)
+		instances.partyInviteButton.Size = UDim2.new(0.2, -5, 0, layout.touchTarget)
+		local partyButtons = {
+			instances.partyCreateButton,
+			instances.partyPlatformInviteButton,
+			instances.partyPrivacyButton,
+			instances.partyLeaveButton,
+			instances.partyDisbandButton,
+		}
+		for index, button in partyButtons do
+			button.Position = UDim2.new(0.55 + (index - 1) * 0.09, 5, 0, 58)
+			button.Size = UDim2.new(0.09, -5, 0, layout.touchTarget)
+		end
+		partyListTop = 58 + layout.touchTarget + 10
+	end
+	local partyListHeight = math.max(160, squadViewportHeight - partyListTop)
+	instances.partyList.Position = UDim2.fromOffset(0, partyListTop)
+	instances.partyList.Size = UDim2.new(1, -10, 0, partyListHeight)
+	instances.partyScroll.CanvasSize = UDim2.fromOffset(0, partyListTop + partyListHeight)
+
+	instances.queueScroll.Position = UDim2.fromScale(0, 0)
+	instances.queueScroll.Size = UDim2.fromScale(1, 1)
+	instances.queueHeading.Position = UDim2.fromOffset(0, 0)
+	instances.queueHeading.Size = UDim2.new(1, -10, 0, 26)
+	instances.queueStatus.Position = UDim2.fromOffset(0, 28)
+	instances.queueStatus.Size = UDim2.new(1, -10, 0, 26)
+	local queueListWidth = if layout.mode == "Compact" then 0.34 else 0.26
+	instances.queueList.Position = UDim2.fromOffset(0, 58)
+	instances.queueRoster.Position = UDim2.new(queueListWidth, 6, 0, 58)
+	local queueControlTop = 232
+	if layout.mode == "Compact" then
+		instances.queueRoster.Size = UDim2.new(1 - queueListWidth, -6, 0, 64)
+		instances.queueConfiguration.Position = UDim2.new(queueListWidth, 6, 0, 126)
+		instances.queueConfiguration.Size = UDim2.new(1 - queueListWidth, -6, 0, 64)
+		queueControlTop = 196
+	else
+		instances.queueRoster.Size = UDim2.new(1 - queueListWidth, -6, 0, 92)
+		instances.queueConfiguration.Position = UDim2.new(queueListWidth, 6, 0, 154)
+		instances.queueConfiguration.Size = UDim2.new(1 - queueListWidth, -6, 0, 72)
+	end
+	local queueControls = {
+		instances.queueJoinButton,
+		instances.queueLeaveButton,
+		instances.queueMapButton,
+		instances.queueDifficultyButton,
+		instances.queuePrivacyButton,
+		instances.queueCapacityButton,
+		instances.queueStartButton,
+		instances.reconnectButton,
+	}
+	local queueColumns = if layout.mode == "Compact" and not wideCompact then 2 else 4
+	for index, button in queueControls do
+		local column = (index - 1) % queueColumns
+		local row = math.floor((index - 1) / queueColumns)
+		button.Position = UDim2.new(
+			queueListWidth + column * ((1 - queueListWidth) / queueColumns),
+			6,
+			0,
+			queueControlTop + row * (layout.touchTarget + 8)
+		)
+		button.Size = UDim2.new((1 - queueListWidth) / queueColumns, -8, 0, layout.touchTarget)
+	end
+	local queueRows = math.ceil(#queueControls / queueColumns)
+	local queueCanvasHeight = math.max(squadViewportHeight, queueControlTop + queueRows * (layout.touchTarget + 8))
+	instances.queueList.Size = UDim2.new(queueListWidth, -6, 0, queueCanvasHeight - 58)
+	instances.queueScroll.CanvasSize = UDim2.fromOffset(0, queueCanvasHeight)
 
 	instances.inventorySearch.TextSize = layout.baseTextSize
 	local inventoryTop: number
@@ -862,6 +1152,10 @@ local function emit(data: ViewData, fields: { [string]: any })
 		toastId = fields.toastId,
 		inputFamily = fields.inputFamily,
 		textValue = fields.textValue,
+		targetUserId = fields.targetUserId,
+		invitationId = fields.invitationId,
+		queueId = fields.queueId,
+		configuration = fields.configuration,
 	}) :: Action
 	if pcall(data.callback, action) then
 		data.actionCount += 1
@@ -941,6 +1235,65 @@ local function cycleFilter(
 	return "All"
 end
 
+local function selectedQueue(snapshot: LobbyUiModel.RenderState?): any
+	if snapshot == nil or snapshot.queueSnapshots == nil or snapshot.selectedQueueId == nil then
+		return nil
+	end
+	for _, queue in snapshot.queueSnapshots do
+		if queue.queueId == snapshot.selectedQueueId then
+			return queue
+		end
+	end
+	return nil
+end
+
+local function nextConfiguredId(
+	snapshot: LobbyUiModel.RenderState,
+	current: string,
+	field: "mapId" | "difficultyId"
+): string
+	local values = {} :: { string }
+	local seen: { [string]: boolean } = {}
+	for _, queue in snapshot.queueSnapshots or {} do
+		local value = queue.configuration[field]
+		if not seen[value] then
+			seen[value] = true
+			table.insert(values, value)
+		end
+	end
+	table.sort(values)
+	for index, value in values do
+		if value == current then
+			return values[index % #values + 1]
+		end
+	end
+	return values[1] or current
+end
+
+local function emitQueueConfiguration(data: ViewData, field: string)
+	local snapshot = data.current
+	local queue = selectedQueue(snapshot)
+	if snapshot == nil or queue == nil then
+		return
+	end
+	local configuration = {
+		mapId = queue.configuration.mapId,
+		difficultyId = queue.configuration.difficultyId,
+		privacy = queue.configuration.privacy,
+		maxPlayers = queue.configuration.maxPlayers,
+	}
+	if field == "mapId" then
+		configuration.mapId = nextConfiguredId(snapshot, configuration.mapId, "mapId")
+	elseif field == "difficultyId" then
+		configuration.difficultyId = nextConfiguredId(snapshot, configuration.difficultyId, "difficultyId")
+	elseif field == "privacy" then
+		configuration.privacy = if configuration.privacy == "Public" then "PartyOnly" else "Public"
+	else
+		configuration.maxPlayers = math.max(#queue.members, configuration.maxPlayers % 4 + 1)
+	end
+	emit(data, { kind = "ConfigureQueue", queueId = queue.queueId, configuration = configuration })
+end
+
 local function connectStatic(data: ViewData): boolean
 	for _, screen in NAVIGATION_ORDER do
 		local selectedScreen = screen
@@ -964,6 +1317,60 @@ local function connectStatic(data: ViewData): boolean
 		end)
 		or not connectButton(data, data.instances.playButton, function()
 			emit(data, { kind = "Play" })
+		end)
+		or not connectButton(data, data.instances.partyCreateButton, function()
+			emit(data, { kind = "CreateParty" })
+		end)
+		or not connectButton(data, data.instances.partyInviteButton, function()
+			local targetUserId = tonumber(data.partyInviteText)
+			if targetUserId ~= nil and targetUserId % 1 == 0 and targetUserId > 0 then
+				emit(data, { kind = "InvitePartyMember", targetUserId = targetUserId })
+			end
+		end)
+		or not connectButton(data, data.instances.partyPlatformInviteButton, function()
+			emit(data, { kind = "PromptPartyInvite" })
+		end)
+		or not connectButton(data, data.instances.partyPrivacyButton, function()
+			emit(data, { kind = "TogglePartyPrivacy" })
+		end)
+		or not connectButton(data, data.instances.partyLeaveButton, function()
+			emit(data, { kind = "LeaveParty" })
+		end)
+		or not connectButton(data, data.instances.partyDisbandButton, function()
+			emit(data, { kind = "DisbandParty" })
+		end)
+		or not connectButton(data, data.instances.queueJoinButton, function()
+			local queue = selectedQueue(data.current)
+			if queue ~= nil then
+				emit(data, { kind = "JoinQueue", queueId = queue.queueId })
+			end
+		end)
+		or not connectButton(data, data.instances.queueLeaveButton, function()
+			local queue = selectedQueue(data.current)
+			if queue ~= nil then
+				emit(data, { kind = "LeaveQueue", queueId = queue.queueId })
+			end
+		end)
+		or not connectButton(data, data.instances.queueMapButton, function()
+			emitQueueConfiguration(data, "mapId")
+		end)
+		or not connectButton(data, data.instances.queueDifficultyButton, function()
+			emitQueueConfiguration(data, "difficultyId")
+		end)
+		or not connectButton(data, data.instances.queuePrivacyButton, function()
+			emitQueueConfiguration(data, "privacy")
+		end)
+		or not connectButton(data, data.instances.queueCapacityButton, function()
+			emitQueueConfiguration(data, "maxPlayers")
+		end)
+		or not connectButton(data, data.instances.queueStartButton, function()
+			local queue = selectedQueue(data.current)
+			if queue ~= nil then
+				emit(data, { kind = "StartQueue", queueId = queue.queueId })
+			end
+		end)
+		or not connectButton(data, data.instances.reconnectButton, function()
+			emit(data, { kind = "ReconnectActiveMatch" })
 		end)
 		or not connectButton(data, data.instances.retryButton, function()
 			emit(data, { kind = "RetryProfile" })
@@ -1120,14 +1527,37 @@ local function connectStatic(data: ViewData): boolean
 		return false
 	end
 	table.insert(data.connections, searchConnection :: RBXScriptConnection)
+	local inviteConnected, inviteConnection = pcall(
+		data.dependencies.connectSearchCommitted,
+		data.instances.partyInviteInput,
+		function(text)
+			if data.cleaned or type(text) ~= "string" then
+				return
+			end
+			local bounded = string.sub(text, 1, 20)
+			data.partyInviteText = bounded
+			data.instances.partyInviteInput.Text = bounded
+		end
+	)
+	if not inviteConnected or typeof(inviteConnection) ~= "RBXScriptConnection" then
+		return false
+	end
+	table.insert(data.connections, inviteConnection :: RBXScriptConnection)
 	return true
 end
 
 local function clearDynamic(data: ViewData): boolean
 	local succeeded = disconnectAll(data.dynamicConnections)
-	for _, container in { data.instances.inventoryGrid, data.instances.toastContainer } do
+	for _, container in
+		{
+			data.instances.inventoryGrid,
+			data.instances.partyList,
+			data.instances.queueList,
+			data.instances.toastContainer,
+		}
+	do
 		for _, child in container:GetChildren() do
-			if child.Name ~= "GridLayout" then
+			if child.Name ~= "GridLayout" and child.Name ~= "Layout" then
 				local destroyed = pcall(function()
 					child:Destroy()
 				end)
@@ -1262,6 +1692,241 @@ local function renderInventory(data: ViewData, snapshot: LobbyUiModel.RenderStat
 	end
 end
 
+local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, layout: ResponsiveLayout.Layout)
+	local instances = data.instances
+	local interactive = snapshot.profileState == "Ready" and #snapshot.modals == 0 and not snapshot.squadMutationPending
+	instances.partyInviteInput.Text = data.partyInviteText
+	if snapshot.partyState ~= "Ready" or snapshot.partySnapshot == nil then
+		instances.partyStatus.Text = if snapshot.partyState == "Failed"
+			then "PARTY UNAVAILABLE • Refreshing server-owned state."
+			else "LOADING AUTHORITATIVE PARTY…"
+		instances.partyInviteInput.Visible = false
+		instances.partyInviteInput.PlaceholderText = "Waiting for party snapshot"
+		instances.partyInviteInput.Active = false
+		instances.partyInviteInput.Selectable = false
+		for _, button in
+			{
+				instances.partyCreateButton,
+				instances.partyInviteButton,
+				instances.partyPlatformInviteButton,
+				instances.partyPrivacyButton,
+				instances.partyLeaveButton,
+				instances.partyDisbandButton,
+			}
+		do
+			button.Visible = false
+			setButtonEnabled(button, false)
+		end
+		return
+	end
+
+	local party = snapshot.partySnapshot.party
+	local isLeader = party ~= nil and party.leaderUserId == snapshot.localUserId
+	local partyHasRoom = party ~= nil and #party.members < 4
+	instances.partyCreateButton.Visible = party == nil
+	setButtonEnabled(instances.partyCreateButton, party == nil and interactive)
+	instances.partyInviteInput.Visible = party ~= nil
+	instances.partyInviteInput.PlaceholderText = "Present player UserId"
+	instances.partyInviteInput.Active = isLeader and interactive and partyHasRoom
+	instances.partyInviteInput.Selectable = instances.partyInviteInput.Active
+	instances.partyInviteButton.Visible = party ~= nil
+	instances.partyPlatformInviteButton.Visible = party ~= nil
+	instances.partyPrivacyButton.Visible = party ~= nil
+	instances.partyLeaveButton.Visible = party ~= nil
+	instances.partyDisbandButton.Visible = party ~= nil
+	setButtonEnabled(instances.partyInviteButton, isLeader and interactive and partyHasRoom)
+	setButtonEnabled(instances.partyPlatformInviteButton, isLeader and interactive and partyHasRoom)
+	setButtonEnabled(instances.partyPrivacyButton, isLeader and interactive)
+	setButtonEnabled(instances.partyLeaveButton, party ~= nil and interactive)
+	setButtonEnabled(instances.partyDisbandButton, isLeader and interactive)
+	if party == nil then
+		instances.partyStatus.Text = `NO PARTY • {#snapshot.partySnapshot.incomingInvitations} bounded invitation(s)`
+	else
+		instances.partyStatus.Text =
+			`PARTY {#party.members}/4 • {party.privacy} • {party.queueState} • REV {party.revision}`
+		instances.partyPrivacyButton.Text = `PRIVACY\n{string.upper(party.privacy)}`
+		for index, member in party.members do
+			local memberLabel = makeButton(
+				`PartyMember{index}`,
+				instances.partyList,
+				`{if member.isLeader then "CAPTAIN • " else ""}USER {member.userId}\n{if member.profileReady
+					then "PROFILE READY"
+					else "PROFILE LOADING"}`,
+				Theme.ZIndex.Content + 3
+			)
+			memberLabel.LayoutOrder = index * 3
+			memberLabel.Size = UDim2.new(1, -10, 0, layout.touchTarget + 12)
+			memberLabel.TextXAlignment = Enum.TextXAlignment.Left
+			setButtonEnabled(memberLabel, false)
+			if isLeader and member.userId ~= snapshot.localUserId then
+				local kick = makeButton(
+					`KickMember{index}`,
+					instances.partyList,
+					`REMOVE USER {member.userId}`,
+					Theme.ZIndex.Content + 3
+				)
+				kick.LayoutOrder = index * 3 + 1
+				kick.Size = UDim2.new(1, -10, 0, layout.touchTarget)
+				setButtonEnabled(kick, interactive)
+				if
+					not connectDynamic(data, kick, function()
+						emit(data, { kind = "KickPartyMember", targetUserId = member.userId })
+					end)
+				then
+					error("dynamic party kick connection failed", 0)
+				end
+				local transfer = makeButton(
+					`TransferMember{index}`,
+					instances.partyList,
+					`TRANSFER LEADERSHIP TO {member.userId}`,
+					Theme.ZIndex.Content + 3
+				)
+				transfer.LayoutOrder = index * 3 + 2
+				transfer.Size = UDim2.new(1, -10, 0, layout.touchTarget)
+				setButtonEnabled(transfer, interactive)
+				if
+					not connectDynamic(data, transfer, function()
+						emit(data, { kind = "TransferPartyLeadership", targetUserId = member.userId })
+					end)
+				then
+					error("dynamic party transfer connection failed", 0)
+				end
+			end
+		end
+	end
+	for index, invitation in snapshot.partySnapshot.incomingInvitations do
+		local accept = makeButton(
+			`AcceptInvitation{index}`,
+			instances.partyList,
+			`ACCEPT INVITE FROM USER {invitation.inviterUserId}`,
+			Theme.ZIndex.Content + 3
+		)
+		accept.LayoutOrder = 100 + index * 2
+		accept.Size = UDim2.new(1, -10, 0, layout.touchTarget)
+		setButtonEnabled(accept, party == nil and interactive)
+		if
+			not connectDynamic(data, accept, function()
+				emit(data, { kind = "AcceptPartyInvite", invitationId = invitation.invitationId })
+			end)
+		then
+			error("dynamic party accept connection failed", 0)
+		end
+		local decline = makeButton(
+			`DeclineInvitation{index}`,
+			instances.partyList,
+			`DECLINE INVITE FROM USER {invitation.inviterUserId}`,
+			Theme.ZIndex.Content + 3
+		)
+		decline.LayoutOrder = 101 + index * 2
+		decline.Size = UDim2.new(1, -10, 0, layout.touchTarget)
+		setButtonEnabled(decline, interactive)
+		if
+			not connectDynamic(data, decline, function()
+				emit(data, { kind = "DeclinePartyInvite", invitationId = invitation.invitationId })
+			end)
+		then
+			error("dynamic party decline connection failed", 0)
+		end
+	end
+end
+
+local function renderQueue(data: ViewData, snapshot: LobbyUiModel.RenderState, layout: ResponsiveLayout.Layout)
+	local instances = data.instances
+	local interactive = snapshot.profileState == "Ready" and #snapshot.modals == 0 and not snapshot.squadMutationPending
+	local routeAvailable = snapshot.activeRouteState == "Ready"
+		and snapshot.activeRoute ~= nil
+		and snapshot.activeRoute.status == "Available"
+	setButtonEnabled(instances.reconnectButton, routeAvailable and interactive)
+	instances.reconnectButton.Text = if snapshot.activeRouteState == "Loading"
+		then "CHECKING ACTIVE MATCH…"
+		elseif routeAvailable then "RECONNECT TO ACTIVE MATCH"
+		elseif
+			snapshot.activeRoute ~= nil and snapshot.activeRoute.status == "Stale"
+		then "RECONNECT EXPIRED • SAFE IN LOBBY"
+		elseif snapshot.activeRouteState == "Failed" then "RECONNECT STATUS UNAVAILABLE"
+		else "NO ACTIVE MATCH"
+	if snapshot.queuesState ~= "Ready" or snapshot.queueSnapshots == nil then
+		instances.queueStatus.Text = if snapshot.queuesState == "Failed"
+			then "QUEUES UNAVAILABLE • Refreshing server-owned state."
+			else "LOADING AUTHORITATIVE QUEUES…"
+		instances.queueRoster.Text = "ROSTER —"
+		instances.queueConfiguration.Text = "CONFIGURATION —"
+		for _, button in
+			{
+				instances.queueJoinButton,
+				instances.queueLeaveButton,
+				instances.queueMapButton,
+				instances.queueDifficultyButton,
+				instances.queuePrivacyButton,
+				instances.queueCapacityButton,
+				instances.queueStartButton,
+			}
+		do
+			setButtonEnabled(button, false)
+		end
+		return
+	end
+	for index, queue in snapshot.queueSnapshots do
+		local selector = makeButton(
+			`Queue{index}`,
+			instances.queueList,
+			`{queue.queueId}\n{#queue.members}/{queue.configuration.maxPlayers} • {queue.state}`,
+			Theme.ZIndex.Content + 3
+		)
+		selector.LayoutOrder = index
+		selector.Size = UDim2.new(1, -10, 0, layout.touchTarget + 14)
+		selector.TextXAlignment = Enum.TextXAlignment.Left
+		selector.BackgroundColor3 = if queue.queueId == snapshot.selectedQueueId
+			then Theme.Colors.AccentStrong
+			else Theme.Colors.SurfaceRaised
+		setButtonEnabled(selector, interactive)
+		if
+			not connectDynamic(data, selector, function()
+				emit(data, { kind = "SelectQueue", queueId = queue.queueId })
+			end)
+		then
+			error("dynamic queue selection connection failed", 0)
+		end
+	end
+	local queue = selectedQueue(snapshot)
+	if queue == nil then
+		instances.queueStatus.Text = "NO CONFIGURED QUEUE"
+		instances.queueRoster.Text = "ROSTER —"
+		instances.queueConfiguration.Text = "CONFIGURATION —"
+		return
+	end
+	local isMember = false
+	local isCaptain = queue.captainUserId == snapshot.localUserId
+	local roster = table.create(#queue.members)
+	for index, member in queue.members do
+		isMember = isMember or member.userId == snapshot.localUserId
+		roster[index] = `{if member.isCaptain then "CAPTAIN " else ""}USER {member.userId} • {member.readiness}`
+	end
+	local status = queue.publicStatus or queue.state
+	instances.queueStatus.Text = `{queue.queueId} • {string.upper(status)} • REV {queue.revision}`
+	instances.queueRoster.Text = if #roster == 0 then "ROSTER • EMPTY" else `ROSTER\n{table.concat(roster, "\n")}`
+	instances.queueConfiguration.Text =
+		`MAP {queue.configuration.mapId} • DIFFICULTY {queue.configuration.difficultyId}\n{queue.configuration.privacy} • CAPACITY {queue.configuration.maxPlayers}`
+	instances.queueMapButton.Text = `MAP\n{queue.configuration.mapId}`
+	instances.queueDifficultyButton.Text = `DIFFICULTY\n{queue.configuration.difficultyId}`
+	instances.queuePrivacyButton.Text = `PRIVACY\n{queue.configuration.privacy}`
+	instances.queueCapacityButton.Text = `CAPACITY\n{queue.configuration.maxPlayers}`
+	local open = queue.state == "Open"
+	setButtonEnabled(instances.queueJoinButton, interactive and open and not isMember)
+	setButtonEnabled(instances.queueLeaveButton, interactive and open and isMember)
+	for _, button in
+		{
+			instances.queueMapButton,
+			instances.queueDifficultyButton,
+			instances.queuePrivacyButton,
+			instances.queueCapacityButton,
+		}
+	do
+		setButtonEnabled(button, interactive and open and isCaptain)
+	end
+	setButtonEnabled(instances.queueStartButton, interactive and open and isCaptain and queue.canStart)
+end
+
 local function renderToasts(data: ViewData, snapshot: LobbyUiModel.RenderState, layout: ResponsiveLayout.Layout)
 	for index, toast in snapshot.toasts do
 		local toastButton = makeButton(
@@ -1333,6 +1998,13 @@ local function bestFocus(instances: Instances, snapshot: LobbyUiModel.RenderStat
 	end
 	if snapshot.screen == "Home" then
 		return instances.playButton
+	elseif snapshot.screen == "Party" then
+		if snapshot.partyState ~= "Ready" or snapshot.partySnapshot == nil then
+			return instances.backButton
+		end
+		return if snapshot.partySnapshot.party == nil then instances.partyCreateButton else instances.partyInviteInput
+	elseif snapshot.screen == "Queue" then
+		return instances.queueJoinButton
 	elseif snapshot.screen == "Inventory" then
 		return instances.inventorySearch
 	elseif snapshot.screen == "Chests" then
@@ -1468,6 +2140,8 @@ renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 		instances.inventorySearch.Active = #snapshot.modals == 0
 		instances.inventorySearch.Selectable = #snapshot.modals == 0
 		renderInventory(data, snapshot)
+		renderParty(data, snapshot, layout)
+		renderQueue(data, snapshot, layout)
 
 		local banner = snapshot.banner
 		if banner == nil then
@@ -1566,6 +2240,7 @@ local function construct(
 		current = nil,
 		focusStack = {},
 		localSelectedUnitId = nil,
+		partyInviteText = "",
 		inventoryQuery = "",
 		inventorySort = "Name",
 		inventoryFilter = "All",

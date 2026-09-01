@@ -400,6 +400,57 @@ return TestHarness.suite("ProfileService", {
 		assertions.equal(profile.receipts[#profile.receipts].transactionId, "transaction:bounded-65")
 	end),
 
+	TestHarness.case("closes and can safely cancel the synchronous travel mutation gate", function(assertions)
+		local store = IsolatedProfileStore.new()
+		local profileService = service(assertions, store, "session-transfer-gate", function()
+			return 8_500
+		end)
+		local initial = success(assertions, profileService:load(USER_ID))
+		local frozen = success(assertions, profileService:beginTransfer(USER_ID))
+		assertions.equal(frozen.revision, initial.revision)
+		assertions.equal(profileService:getState(USER_ID), "Releasing")
+		expectError(assertions, profileService:read(USER_ID), "NOT_READY")
+		expectError(
+			assertions,
+			profileService:transact(
+				USER_ID,
+				"transaction:blocked-during-transfer",
+				initial.revision,
+				"InventoryLock",
+				"transfer-gate",
+				function(draft)
+					draft.units[draft.equippedUnitIds[1]].locked = true
+					return Result.ok(emptyResult(draft, "LOCK_OK"))
+				end
+			),
+			"NOT_READY"
+		)
+		assertions.isTrue(success(assertions, profileService:cancelTransfer(USER_ID)))
+		assertions.equal(profileService:getState(USER_ID), "Ready")
+
+		local committed = success(
+			assertions,
+			profileService:transact(
+				USER_ID,
+				"transaction:after-cancel",
+				initial.revision,
+				"InventoryLock",
+				"transfer-cancelled",
+				function(draft)
+					draft.units[draft.equippedUnitIds[1]].locked = true
+					return Result.ok(emptyResult(draft, "LOCK_OK"))
+				end
+			)
+		)
+		assertions.isTrue(committed.applied)
+		assertions.equal(committed.profileRevision, initial.revision + 1)
+
+		local secondFrozen = success(assertions, profileService:beginTransfer(USER_ID))
+		assertions.equal(secondFrozen.revision, initial.revision + 1)
+		assertions.isTrue(success(assertions, profileService:release(USER_ID)))
+		assertions.isNil(profileService:getState(USER_ID))
+	end),
+
 	TestHarness.case(
 		"keeps Releasing explicit and allows bounded release retry after store faults",
 		function(assertions)

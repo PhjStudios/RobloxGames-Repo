@@ -1,9 +1,13 @@
 # Ant Tower Defense Roadmap
 
 This is the current delivery roadmap. Phases 00–23, the Playable Local Match,
-and the Persistent Lobby Loop outcomes are complete; the Squad Travel Loop has
-not begun. The detailed historical packet plan remains useful for requirements
-and design context, but delivery now targets playable outcomes.
+and the Persistent Lobby Loop outcomes are complete. Squad Travel Loop
+implementation, deterministic headless verification, and isolated,
+non-publishing Studio simulation are complete; the outcome remains open pending
+the private published-client reserved-server teleport test, which requires
+separate explicit approval. No publish occurred, and the Content and Onboarding
+outcome has not begun. The detailed historical packet plan remains useful for
+requirements and design context, but delivery now targets playable outcomes.
 
 ## Delivery outcomes
 
@@ -15,11 +19,18 @@ and design context, but delivery now targets playable outcomes.
 2. **Complete: Persistent lobby loop — Phases 19–23.** Safe profiles, shared UI
    and settings, persistent inventory/loadouts, earn-only acquisition, and a
    coherent lobby now form one player loop.
-3. **Squad travel loop — Phases 24–28.** Add parties, physical queues, safe match
-   tickets and travel, persistent rewards/return, reconnect, and spectating.
-4. **Content and onboarding — remaining Phases 29–33.** Finish the production
-   map, tower and enemy rosters, authored waves, Endless mode, and onboarding
-   work not already pulled into the playable local match.
+3. **Implementation and simulated verification complete; published travel
+   validation pending: Squad travel loop — Phases 24–28.** Server-owned parties,
+   physical and accessible queues, bounded match tickets, isolated travel,
+   authenticated admission, exactly-once persistent rewards, safe return,
+   reconnect, and read-only spectating form one coherent loop. Deterministic
+   headless adapters and non-publishing Studio simulation cover the ordinary
+   development boundary. The outcome is not fully complete until a private
+   published-client real reserved-server teleport test is approved separately
+   and passes.
+4. **Not begun: Content and onboarding — remaining Phases 29–33.** Finish the
+   production map, tower and enemy rosters, authored waves, Endless mode, and
+   onboarding work not already pulled into the playable local match.
 5. **Platform, presentation, performance, and analytics — Phases 34–37.** Finish
    cross-platform/accessibility work, game feel, optimization, observability,
    and safe development tooling.

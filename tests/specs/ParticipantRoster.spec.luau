@@ -184,38 +184,76 @@ return TestHarness.suite("match participant roster", {
 		assertions.isFalse(resolved.ready)
 	end),
 
-	TestHarness.case("turns only a retained disconnected participant into a post-check Spectator", function(assertions)
-		local roster = newRoster(assertions)
-		local first = connection("first")
-		local spectator = connection("spectator")
-		add(assertions, roster, first, 55)
-		expectSuccess(assertions, roster:disconnect(first))
+	TestHarness.case(
+		"reactivates a retained participant after ReadyCheck without changing identity",
+		function(assertions)
+			local roster = newRoster(assertions)
+			local first = connection("first")
+			local spectator = connection("spectator")
+			add(assertions, roster, first, 55)
+			expectSuccess(assertions, roster:disconnect(first))
 
-		local outcome = add(assertions, roster, spectator, 55, "PreWave")
-		assertions.equal(outcome.kind, "Spectator")
-		assertions.isTrue(outcome.changed)
-		assertions.equal(outcome.participant.state, "Spectator")
-		assertions.isFalse(outcome.participant.ready)
-		expectError(
-			assertions,
-			roster:setReadyForConnection(spectator),
-			"INACTIVE_PARTICIPANT",
-			"setReadyForConnection"
-		)
-		expectError(assertions, roster:disconnect(spectator), "INACTIVE_PARTICIPANT", "disconnect")
-		expectError(
-			assertions,
-			roster:connect(connection("spectator-again"), 55, "Results"),
-			"DUPLICATE_CONNECTION",
-			"connect"
-		)
+			local outcome = add(assertions, roster, spectator, 55, "PreWave")
+			assertions.equal(outcome.kind, "Reactivated")
+			assertions.isTrue(outcome.changed)
+			assertions.equal(outcome.participant.state, "Active")
+			assertions.isFalse(outcome.participant.ready)
+			expectSuccess(assertions, roster:disconnect(spectator))
+			local resultsConnection = connection("results-rejoin")
+			local resultsOutcome = add(assertions, roster, resultsConnection, 55, "Results")
+			assertions.equal(resultsOutcome.kind, "Reactivated")
+			assertions.equal(resultsOutcome.participant.state, "Active")
+			expectError(
+				assertions,
+				roster:connect(connection("spectator-again"), 55, "Results"),
+				"DUPLICATE_CONNECTION",
+				"connect"
+			)
 
-		local newIdentity = connection("new-identity")
-		local untracked = add(assertions, roster, newIdentity, 56, "PreWave")
-		assertions.equal(untracked.kind, "UntrackedSpectator")
-		assertions.equal(#snapshot(assertions, roster), 1)
-		assertions.equal(readiness(assertions, roster).activeCount, 0)
-	end),
+			local newIdentity = connection("new-identity")
+			local untracked = add(assertions, roster, newIdentity, 56, "PreWave")
+			assertions.equal(untracked.kind, "UntrackedSpectator")
+			assertions.equal(#snapshot(assertions, roster), 1)
+			assertions.equal(readiness(assertions, roster).activeCount, 1)
+		end
+	),
+
+	TestHarness.case(
+		"preloads an ordered expected roster and makes unexpected arrivals spectators",
+		function(assertions)
+			local roster = expectSuccess(assertions, ParticipantRoster.new({ 40, -7, 10 }))
+			local initial = snapshot(assertions, roster)
+			assertions.equal(#initial, 3)
+			assertions.equal(initial[1].userId, 40)
+			assertions.equal(initial[2].userId, -7)
+			assertions.equal(initial[3].userId, 10)
+			for _, participant in initial do
+				assertions.equal(participant.state, "Disconnected")
+			end
+
+			local expectedConnection = connection("expected")
+			local expected = add(assertions, roster, expectedConnection, -7, "Loading")
+			assertions.equal(expected.kind, "Admitted")
+			assertions.equal(expected.participant.state, "Active")
+			expectSuccess(assertions, roster:disconnect(expectedConnection))
+			local rebound = add(assertions, roster, connection("expected-rejoin"), -7, "Results")
+			assertions.equal(rebound.kind, "Reactivated")
+			assertions.equal(rebound.participant.state, "Active")
+			local lateExpected = add(assertions, roster, connection("late-expected"), 40, "WaveActive")
+			assertions.equal(lateExpected.kind, "Spectator")
+			assertions.equal(lateExpected.participant.state, "Spectator")
+			local unexpectedConnection = connection("unexpected")
+			local unexpected = add(assertions, roster, unexpectedConnection, 99, "Loading")
+			assertions.equal(unexpected.kind, "UntrackedSpectator")
+			expectError(
+				assertions,
+				roster:setReadyForConnection(unexpectedConnection),
+				"UNTRACKED_SPECTATOR",
+				"setReadyForConnection"
+			)
+			expectError(assertions, ParticipantRoster.new({ 1, 1 }), "INVALID_EXPECTED_ROSTER", "new")
+		end
+	),
 
 	TestHarness.case("keeps Returned placeholders retained and ineligible across reconnect", function(assertions)
 		local roster = newRoster(assertions)

@@ -43,6 +43,18 @@
 
           "settings": {
             "$path": "src/server/lobby/settings"
+          },
+
+          "party": {
+            "$path": "src/server/lobby/party"
+          },
+
+          "queue": {
+            "$path": "src/server/lobby/queue"
+          },
+
+          "travel": {
+            "$path": "src/server/lobby/travel"
           }
         },
 
@@ -79,6 +91,18 @@
 
           "ready": {
             "$path": "src/server/match/ready"
+          },
+
+          "admission": {
+            "$path": "src/server/match/admission"
+          },
+
+          "travel": {
+            "$path": "src/server/match/travel"
+          },
+
+          "rewards": {
+            "$path": "src/server/match/rewards"
           },
 
           "towers": {

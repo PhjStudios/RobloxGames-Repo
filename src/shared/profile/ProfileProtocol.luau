@@ -37,6 +37,12 @@ export type StatisticsView = {
 	chestsOpened: number,
 }
 
+export type FirstClearView = {
+	mapId: string,
+	difficultyId: string,
+	clearedAt: number,
+}
+
 export type Snapshot = {
 	state: ProfileState,
 	retryable: boolean,
@@ -45,6 +51,7 @@ export type Snapshot = {
 	settings: SettingsView?,
 	tutorial: TutorialView?,
 	stats: StatisticsView?,
+	firstClears: { FirstClearView }?,
 	migrationOutcome: MigrationOutcome?,
 }
 
@@ -79,6 +86,12 @@ local STATISTICS = PayloadValidation.record({
 	chestsOpened = PayloadValidation.integer(0, 1_000_000_000_000),
 })
 
+local FIRST_CLEAR = PayloadValidation.record({
+	mapId = PayloadValidation.id("map"),
+	difficultyId = PayloadValidation.id("difficulty"),
+	clearedAt = PayloadValidation.integer(0, MAX_SAFE_INTEGER),
+})
+
 local SnapshotSchema = PayloadValidation.schema(PayloadValidation.record({
 	state = PayloadValidation.enum({ "Loading", "Ready", "Failed", "Releasing" }),
 	retryable = PayloadValidation.boolean(),
@@ -87,6 +100,7 @@ local SnapshotSchema = PayloadValidation.schema(PayloadValidation.record({
 	settings = PayloadValidation.optional(SETTINGS),
 	tutorial = PayloadValidation.optional(TUTORIAL),
 	stats = PayloadValidation.optional(STATISTICS),
+	firstClears = PayloadValidation.optional(PayloadValidation.array(FIRST_CLEAR, 64, 0)),
 	migrationOutcome = PayloadValidation.optional(PayloadValidation.enum({ "Created", "Migrated", "Current" })),
 }))
 
@@ -109,6 +123,7 @@ function ProfileProtocol.validateSnapshot(value: unknown): Result.Result<Snapsho
 		and snapshot.settings ~= nil
 		and snapshot.tutorial ~= nil
 		and snapshot.stats ~= nil
+		and snapshot.firstClears ~= nil
 		and snapshot.migrationOutcome ~= nil
 	if snapshot.state == "Ready" then
 		if not hasReadyFields or snapshot.retryable then
@@ -121,6 +136,7 @@ function ProfileProtocol.validateSnapshot(value: unknown): Result.Result<Snapsho
 		or snapshot.settings ~= nil
 		or snapshot.tutorial ~= nil
 		or snapshot.stats ~= nil
+		or snapshot.firstClears ~= nil
 		or snapshot.migrationOutcome ~= nil
 	then
 		return issue({ "payload" }, "Non-ready profile snapshot contains private ready-state fields")
@@ -138,6 +154,20 @@ function ProfileProtocol.status(state: ProfileState): Snapshot
 end
 
 function ProfileProtocol.ready(profile: any, migrationOutcome: MigrationOutcome): Snapshot
+	local clearKeys: { string } = {}
+	for key in profile.firstClears do
+		table.insert(clearKeys, key)
+	end
+	table.sort(clearKeys)
+	local firstClears: { FirstClearView } = table.create(#clearKeys)
+	for index, key in clearKeys do
+		local clear = profile.firstClears[key]
+		firstClears[index] = {
+			mapId = clear.mapId,
+			difficultyId = clear.difficultyId,
+			clearedAt = clear.clearedAt,
+		}
+	end
 	local snapshot = {
 		state = "Ready",
 		retryable = false,
@@ -170,6 +200,7 @@ function ProfileProtocol.ready(profile: any, migrationOutcome: MigrationOutcome)
 			towersAcquired = profile.stats.towersAcquired,
 			chestsOpened = profile.stats.chestsOpened,
 		},
+		firstClears = firstClears,
 		migrationOutcome = migrationOutcome,
 	}
 	local result = ProfileProtocol.validateSnapshot(snapshot)

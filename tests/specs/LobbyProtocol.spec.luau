@@ -37,6 +37,8 @@ return TestHarness.suite("Lobby network protocol", {
 		assertions.isTrue(table.isfrozen(LobbyProtocol.ENDPOINTS))
 		assertions.isTrue(PayloadValidation.isSchema(LobbyProtocol.EmptyPayloadSchema))
 		assertions.isTrue(PayloadValidation.isSchema(LobbyProtocol.BannerRequestSchema))
+		assertions.isTrue(PayloadValidation.isSchema(LobbyProtocol.QueueListSchema))
+		assertions.isTrue(PayloadValidation.isSchema(LobbyProtocol.ActiveRouteViewSchema))
 
 		local expected = {
 			GET_PROFILE = "GetLobbyProfile",
@@ -49,8 +51,29 @@ return TestHarness.suite("Lobby network protocol", {
 			GET_BANNER = "GetLobbyBanner",
 			PULL_CHEST = "PullLobbyChest",
 			UPDATE_SETTINGS = "UpdateLobbySettings",
+			GET_PARTY = "GetLobbyParty",
+			CREATE_PARTY = "CreateLobbyParty",
+			INVITE_PARTY = "InviteLobbyParty",
+			ACCEPT_PARTY_INVITE = "AcceptLobbyPartyInvite",
+			DECLINE_PARTY_INVITE = "DeclineLobbyPartyInvite",
+			LEAVE_PARTY = "LeaveLobbyParty",
+			KICK_PARTY_MEMBER = "KickLobbyPartyMember",
+			TRANSFER_PARTY_LEADERSHIP = "TransferLobbyPartyLeadership",
+			SET_PARTY_PRIVACY = "SetLobbyPartyPrivacy",
+			DISBAND_PARTY = "DisbandLobbyParty",
+			PROMPT_PARTY_INVITE = "PromptLobbyPartyInvite",
+			GET_QUEUES = "GetLobbyQueues",
+			JOIN_QUEUE = "JoinLobbyQueue",
+			LEAVE_QUEUE = "LeaveLobbyQueue",
+			CONFIGURE_QUEUE = "ConfigureLobbyQueue",
+			START_QUEUE = "StartLobbyQueue",
+			GET_ACTIVE_ROUTE = "GetLobbyActiveRoute",
+			RECONNECT_ACTIVE_MATCH = "ReconnectLobbyActiveMatch",
 			PROFILE_REPLICATION = "LobbyProfileReplication",
 			INVENTORY_REPLICATION = "LobbyInventoryReplication",
+			PARTY_REPLICATION = "LobbyPartyReplication",
+			QUEUE_REPLICATION = "LobbyQueueReplication",
+			ACTIVE_ROUTE_REPLICATION = "LobbyActiveRouteReplication",
 		}
 		local count = 0
 		local seenValues: { [string]: boolean } = {}
@@ -60,14 +83,9 @@ return TestHarness.suite("Lobby network protocol", {
 			assertions.isFalse(seenValues[value] == true)
 			seenValues[value] = true
 		end
-		assertions.equal(count, 12)
+		assertions.equal(count, 33)
 
-		local protocolFieldCount = 0
-		for key in LobbyProtocol do
-			protocolFieldCount += 1
-			assertions.isTrue(key == "ENDPOINTS" or key == "EmptyPayloadSchema" or key == "BannerRequestSchema")
-		end
-		assertions.equal(protocolFieldCount, 3)
+		assertions.equal(LobbyProtocol.VERSION, 1)
 	end),
 
 	TestHarness.case("accepts only detached empty payloads for snapshot and retry requests", function(assertions)
@@ -142,5 +160,51 @@ return TestHarness.suite("Lobby network protocol", {
 			"UNKNOWN_FIELD",
 			"payload"
 		)
+	end),
+
+	TestHarness.case("bounds ordered queue discovery and rejects client-visible travel secrets", function(assertions)
+		local queue = {
+			version = 1,
+			queueId = "queue:alpha",
+			revision = 1,
+			state = "Open",
+			configuration = {
+				mapId = "map:meadow",
+				difficultyId = "difficulty:normal",
+				privacy = "Public",
+				maxPlayers = 4,
+			},
+			members = {},
+			enrollments = {},
+			canStart = false,
+		}
+		local list = LobbyProtocol.validateQueueList({ version = 1, queues = { queue } })
+		assertions.isTrue(list.ok)
+		assertions.equal((list :: any).value.queues[1].queueId, "queue:alpha")
+		assertions.isFalse(LobbyProtocol.validateQueueList({ version = 1, queues = { queue, queue } }).ok)
+
+		local route = LobbyProtocol.validateActiveRoute({
+			version = 1,
+			status = "Available",
+			matchId = "match:active",
+			expiresAt = 100,
+		})
+		assertions.isTrue(route.ok)
+		assertions.isFalse(LobbyProtocol.ActiveRouteViewSchema:validate({
+			version = 1,
+			status = "Available",
+			matchId = "match:active",
+			expiresAt = 100,
+			reservedAccessCode = "PRIVATE",
+		}).ok)
+		assertions.isFalse(LobbyProtocol.ActiveRouteViewSchema:validate({
+			version = 1,
+			status = "Available",
+			matchId = "match:active",
+			expiresAt = 100,
+			ticketId = "ticket:private",
+		}).ok)
+		assertions.isFalse(LobbyProtocol.validateActiveRoute({ version = 1, status = "Available" }).ok)
+		assertions.isTrue(LobbyProtocol.validateActiveRoute({ version = 1, status = "None" }).ok)
 	end),
 })

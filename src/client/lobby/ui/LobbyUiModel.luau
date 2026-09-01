@@ -1,7 +1,14 @@
 --!strict
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LobbyProtocol = require(ReplicatedStorage.Shared.lobby.LobbyProtocol)
+local PartyProtocol = require(ReplicatedStorage.Shared.party.PartyProtocol)
+local QueueProtocol = require(ReplicatedStorage.Shared.queue.QueueProtocol)
+
 export type ProfileState = "Loading" | "Ready" | "Failed" | "Releasing"
-export type PrimaryScreen = "Home" | "Inventory" | "Chests" | "Settings"
+export type SquadState = "Loading" | "Ready" | "Failed"
+export type PrimaryScreen = "Home" | "Party" | "Queue" | "Inventory" | "Chests" | "Settings"
 export type InputFamily = "Desktop" | "Touch" | "Gamepad"
 export type ToastKind = "Info" | "Success" | "Warning" | "Error"
 
@@ -97,6 +104,15 @@ export type RenderState = {
 	selectedUnitId: string?,
 	settings: Settings?,
 	banner: Banner?,
+	localUserId: number,
+	partyState: SquadState,
+	partySnapshot: PartyProtocol.ViewerSnapshot?,
+	queuesState: SquadState,
+	queueSnapshots: { QueueProtocol.Snapshot }?,
+	selectedQueueId: string?,
+	activeRouteState: SquadState,
+	activeRoute: LobbyProtocol.ActiveRouteView?,
+	squadMutationPending: boolean,
 	modals: { Modal },
 	toasts: { Toast },
 }
@@ -122,6 +138,8 @@ local SCREENS: { [string]: boolean } = table.freeze({
 	Inventory = true,
 	Chests = true,
 	Settings = true,
+	Party = true,
+	Queue = true,
 })
 local INPUT_FAMILIES: { [string]: boolean } = table.freeze({
 	Desktop = true,
@@ -155,6 +173,15 @@ local ROOT_FIELDS: { [string]: boolean } = table.freeze({
 	selectedUnitId = true,
 	settings = true,
 	banner = true,
+	localUserId = true,
+	partyState = true,
+	partySnapshot = true,
+	queuesState = true,
+	queueSnapshots = true,
+	selectedQueueId = true,
+	activeRouteState = true,
+	activeRoute = true,
+	squadMutationPending = true,
 	modals = true,
 	toasts = true,
 })
@@ -616,6 +643,69 @@ function LobbyUiModel.canonicalize(value: unknown): RenderState?
 	local selectedUnitId = rawget(record, "selectedUnitId")
 	local settingsValue = rawget(record, "settings")
 	local bannerValue = rawget(record, "banner")
+	local localUserId = rawget(record, "localUserId")
+	local partyState = rawget(record, "partyState")
+	local partySnapshotValue = rawget(record, "partySnapshot")
+	local queuesState = rawget(record, "queuesState")
+	local queueSnapshotsValue = rawget(record, "queueSnapshots")
+	local selectedQueueId = rawget(record, "selectedQueueId")
+	local activeRouteState = rawget(record, "activeRouteState")
+	local activeRouteValue = rawget(record, "activeRoute")
+	local squadMutationPending = rawget(record, "squadMutationPending")
+	if
+		not integer(localUserId, 1, MAX_GOLD)
+		or (partyState ~= "Loading" and partyState ~= "Ready" and partyState ~= "Failed")
+		or (queuesState ~= "Loading" and queuesState ~= "Ready" and queuesState ~= "Failed")
+		or (activeRouteState ~= "Loading" and activeRouteState ~= "Ready" and activeRouteState ~= "Failed")
+		or type(squadMutationPending) ~= "boolean"
+	then
+		return nil
+	end
+	local partySnapshot: PartyProtocol.ViewerSnapshot? = nil
+	if partyState == "Ready" then
+		local validated = PartyProtocol.validateViewerSnapshot(partySnapshotValue)
+		if not validated.ok then
+			return nil
+		end
+		partySnapshot = validated.value
+	elseif partySnapshotValue ~= nil then
+		return nil
+	end
+	local queueSnapshots: { QueueProtocol.Snapshot }? = nil
+	if queuesState == "Ready" then
+		local validated =
+			LobbyProtocol.validateQueueList({ version = LobbyProtocol.VERSION, queues = queueSnapshotsValue })
+		if not validated.ok then
+			return nil
+		end
+		queueSnapshots = validated.value.queues
+		if selectedQueueId ~= nil then
+			if not safeId(selectedQueueId) then
+				return nil
+			end
+			local found = false
+			for _, queue in queueSnapshots do
+				found = found or queue.queueId == selectedQueueId
+			end
+			if not found then
+				return nil
+			end
+		end
+	elseif queueSnapshotsValue ~= nil then
+		return nil
+	elseif selectedQueueId ~= nil then
+		return nil
+	end
+	local activeRoute: LobbyProtocol.ActiveRouteView? = nil
+	if activeRouteState == "Ready" then
+		local validated = LobbyProtocol.validateActiveRoute(activeRouteValue)
+		if not validated.ok then
+			return nil
+		end
+		activeRoute = validated.value
+	elseif activeRouteValue ~= nil then
+		return nil
+	end
 	local inventoryValue = rawget(record, "inventory")
 	local inventory = {} :: { TowerCard }
 	local settings: Settings? = nil
@@ -709,6 +799,15 @@ function LobbyUiModel.canonicalize(value: unknown): RenderState?
 		selectedUnitId = selectedUnitId :: string?,
 		settings = settings,
 		banner = banner,
+		localUserId = localUserId :: number,
+		partyState = partyState :: SquadState,
+		partySnapshot = partySnapshot,
+		queuesState = queuesState :: SquadState,
+		queueSnapshots = queueSnapshots,
+		selectedQueueId = selectedQueueId :: string?,
+		activeRouteState = activeRouteState :: SquadState,
+		activeRoute = activeRoute,
+		squadMutationPending = squadMutationPending :: boolean,
 		modals = modals,
 		toasts = toasts,
 	})

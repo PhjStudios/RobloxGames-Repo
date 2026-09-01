@@ -948,11 +948,11 @@ return TestHarness.suite("match lifecycle service", {
 			source.existing = { first, second, reconnected }
 			local added = source.addedListener :: MatchLifecycleService.PlayerListener
 			added(reconnected)
-			local spectator = successSnapshot(assertions, service)
-			assertions.equal(spectator.revision, 10)
-			assertions.equal(spectator.participants[3].state, "Spectator")
+			local rejoined = successSnapshot(assertions, service)
+			assertions.equal(rejoined.revision, 10)
+			assertions.equal(rejoined.participants[3].state, "Active")
 			removing(departing)
-			assertions.equal(successSnapshot(assertions, service).revision, spectator.revision)
+			assertions.equal(successSnapshot(assertions, service).revision, rejoined.revision)
 			invoke(definition.shutdown)
 		end
 	),

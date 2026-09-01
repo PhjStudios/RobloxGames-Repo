@@ -34,6 +34,17 @@ export type AttackSender = (recipient: unknown, event: PlayableMatchProtocol.Att
 export type LoadoutProvider = (userId: number) -> MatchLoadoutProtocol.Snapshot?
 export type LifecycleState = "Constructed" | "Initialized" | "Started" | "Shutdown" | "Failed"
 
+export type RosterInputs = {
+	expectedUserIds: { number },
+	frozenLoadouts: { MatchLoadoutProtocol.Snapshot },
+	rewarding: boolean?,
+	matchId: string?,
+	mapId: string?,
+	difficultyId: string?,
+	managedAdmissions: boolean?,
+	connectedParticipantUserIds: { number }?,
+}
+
 export type Environment = {
 	now: () -> number,
 	generateMatchId: () -> Ids.MatchId?,
@@ -54,6 +65,7 @@ export type Metrics = {
 	publishCount: number,
 	attackPublishCount: number,
 	frozenLoadoutCount: number,
+	spectatorCount: number,
 	runtime: PlayableMatchRuntime.Metrics?,
 }
 
@@ -79,6 +91,15 @@ type ServiceData = {
 	loadoutProvider: LoadoutProvider,
 	frozenLoadouts: { [number]: MatchLoadoutProtocol.Snapshot },
 	admittedUserIds: { [number]: boolean },
+	expectedUserIds: { [number]: boolean }?,
+	expectedUserIdOrder: { number }?,
+	spectatorUserIds: { [number]: boolean },
+	rewarding: boolean,
+	fixedMatchId: Ids.MatchId?,
+	fixedMapId: Ids.MapId?,
+	fixedDifficultyId: Ids.DifficultyId?,
+	managedAdmissions: boolean,
+	initialConnectedParticipantUserIds: { number },
 }
 
 local SERVICE_NAME = "PlayableMatch"
@@ -98,7 +119,8 @@ export type TestConstructor = (
 	SnapshotSender,
 	AttackSender,
 	Environment,
-	LoadoutProvider?
+	LoadoutProvider?,
+	RosterInputs?
 ) -> Service
 
 local DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ServiceData }
@@ -161,6 +183,49 @@ local PRODUCTION_ENVIRONMENT: Environment = table.freeze({
 	contentRoot = ReplicatedStorage,
 })
 
+local function normalizeRosterInputs(
+	value: RosterInputs?,
+	configuration: ConfigTypes.CoreConfiguration
+): (
+	{ number }?,
+	{ [number]: boolean }?,
+	{ [number]: MatchLoadoutProtocol.Snapshot }?
+)
+	if value == nil then
+		return nil, nil, {}
+	end
+	if
+		type(value) ~= "table"
+		or getmetatable(value :: any) ~= nil
+		or type(value.expectedUserIds) ~= "table"
+		or type(value.frozenLoadouts) ~= "table"
+		or #value.expectedUserIds < 1
+		or #value.expectedUserIds > 4
+		or #value.expectedUserIds ~= #value.frozenLoadouts
+		or (value.rewarding ~= nil and type(value.rewarding) ~= "boolean")
+		or (value.matchId ~= nil and type(value.matchId) ~= "string")
+		or (value.mapId ~= nil and type(value.mapId) ~= "string")
+		or (value.difficultyId ~= nil and type(value.difficultyId) ~= "string")
+		or (value.managedAdmissions ~= nil and type(value.managedAdmissions) ~= "boolean")
+		or (value.connectedParticipantUserIds ~= nil and type(value.connectedParticipantUserIds) ~= "table")
+	then
+		return nil, nil, nil
+	end
+	local order: { number } = {}
+	local expected: { [number]: boolean } = {}
+	local frozen: { [number]: MatchLoadoutProtocol.Snapshot } = {}
+	for index, userId in value.expectedUserIds do
+		local validated = MatchLoadoutProtocol.validate(value.frozenLoadouts[index], configuration)
+		if not validated.ok or validated.value.userId ~= userId or userId == 0 or expected[userId] == true then
+			return nil, nil, nil
+		end
+		expected[userId] = true
+		frozen[userId] = validated.value
+		table.insert(order, userId)
+	end
+	return table.freeze(order), expected, frozen
+end
+
 local function resolveLoadout(data: ServiceData, userId: number): MatchLoadoutProtocol.Snapshot?
 	local retained = data.frozenLoadouts[userId]
 	if retained ~= nil then
@@ -178,14 +243,28 @@ local function resolveLoadout(data: ServiceData, userId: number): MatchLoadoutPr
 	return validated.value
 end
 
-local function participantLoadouts(data: ServiceData): { MatchLoadoutProtocol.Snapshot }
+local function participantLoadouts(data: ServiceData, retainedOnly: boolean): { MatchLoadoutProtocol.Snapshot }
 	local output: { MatchLoadoutProtocol.Snapshot } = {}
+	if data.expectedUserIdOrder ~= nil then
+		for _, userId in data.expectedUserIdOrder do
+			local loadout = data.frozenLoadouts[userId]
+			if loadout ~= nil then
+				table.insert(output, loadout)
+				data.admittedUserIds[userId] = true
+			end
+		end
+		return output
+	end
 	for _, player in data.environment.getActivePlayers() do
 		if #output >= 4 then
 			break
 		end
 		local userId = data.environment.getUserId(player)
-		local loadout = if userId == 0 then nil else resolveLoadout(data, userId)
+		local retainedParticipant = data.admittedUserIds[userId] == true
+			and (data.runtime == nil or data.runtime:isParticipantConnected(userId))
+		local loadout = if userId == 0 or (retainedOnly and not retainedParticipant)
+			then nil
+			else resolveLoadout(data, userId)
 		if loadout ~= nil then
 			table.insert(output, loadout)
 			data.admittedUserIds[userId] = true
@@ -301,27 +380,52 @@ local function hasAuthenticatedContent(configuration: ConfigTypes.CoreConfigurat
 	return true
 end
 
-local function constructRuntime(data: ServiceData): PlayableMatchRuntime.Runtime?
-	local matchId = data.environment.generateMatchId()
+local function constructRuntime(data: ServiceData, retainedOnly: boolean?): PlayableMatchRuntime.Runtime?
+	local matchId = data.fixedMatchId or data.environment.generateMatchId()
 	local runtimeMap = data.runtimeMap
 	if matchId == nil or runtimeMap == nil then
 		return nil
 	end
+	local loadouts = participantLoadouts(data, retainedOnly == true)
+	local connectedParticipantUserIds: { number }? = nil
+	if data.managedAdmissions then
+		connectedParticipantUserIds = table.clone(data.initialConnectedParticipantUserIds)
+	elseif data.expectedUserIds ~= nil then
+		connectedParticipantUserIds = {}
+		for _, player in data.environment.getActivePlayers() do
+			local userId = data.environment.getUserId(player)
+			if data.expectedUserIds[userId] then
+				table.insert(connectedParticipantUserIds, userId)
+			end
+		end
+	end
 	local result = PlayableMatchRuntime.new({
 		matchId = matchId,
+		mapId = data.fixedMapId,
+		difficultyId = data.fixedDifficultyId,
 		configuration = data.configuration,
 		runtimeMap = runtimeMap,
-		participantLoadouts = participantLoadouts(data),
+		participantLoadouts = loadouts,
+		connectedParticipantUserIds = connectedParticipantUserIds,
+		rewarding = data.rewarding,
 	})
 	return if result.ok then result.value else nil
 end
 
-local function runtimeSnapshot(data: ServiceData, player: Player): PlayableMatchProtocol.Snapshot?
+local function runtimeSnapshot(
+	data: ServiceData,
+	player: Player,
+	serverTimeValue: number?
+): PlayableMatchProtocol.Snapshot?
 	local runtime = data.runtime
 	if runtime == nil or not data.environment.isActivePlayer(player) then
 		return nil
 	end
-	local result = runtime:getSnapshot(data.environment.getUserId(player), data.environment.now())
+	local userId = data.environment.getUserId(player)
+	local serverTime = serverTimeValue or data.environment.now()
+	local result = if runtime:isParticipantConnected(userId)
+		then runtime:getSnapshot(userId, serverTime)
+		else runtime:getSpectatorSnapshot(serverTime, userId)
 	return if result.ok then result.value else nil
 end
 
@@ -331,8 +435,8 @@ local function publishAll(data: ServiceData, serverTime: number)
 		return
 	end
 	for _, player in data.environment.getActivePlayers() do
-		local snapshotResult = runtime:getSnapshot(data.environment.getUserId(player), serverTime)
-		if snapshotResult.ok and data.snapshotSender(player, snapshotResult.value) then
+		local snapshot = runtimeSnapshot(data, player, serverTime)
+		if snapshot ~= nil and data.snapshotSender(player, snapshot) then
 			data.publishCount += 1
 		end
 	end
@@ -354,43 +458,64 @@ local function installReplacement(
 end
 
 local function handlePlayerAdded(data: ServiceData, player: Player)
+	if data.managedAdmissions then
+		return
+	end
 	local runtime = data.runtime
 	if data.state ~= "Started" or runtime == nil or not data.environment.isActivePlayer(player) then
 		return
 	end
-	local metrics = runtime:getMetrics()
-	if metrics.participantCount == 0 and (metrics.state == "Playing" or metrics.state == "Results") then
-		local replacement = constructRuntime(data)
-		if replacement ~= nil then
-			installReplacement(data, runtime, replacement)
+	local userId = data.environment.getUserId(player)
+	if runtime:hasParticipant(userId) then
+		if not runtime:isParticipantConnected(userId) then
+			local outcome = runtime:reconnectParticipant(userId)
+			if outcome.accepted then
+				data.spectatorUserIds[userId] = nil
+				data.publishPending = true
+			else
+				data.spectatorUserIds[userId] = true
+				data.publishPending = true
+			end
 		end
 		return
 	end
-	local userId = data.environment.getUserId(player)
+	local metrics = runtime:getMetrics()
+	if data.expectedUserIds ~= nil or metrics.state ~= "Ready" then
+		data.spectatorUserIds[userId] = true
+		data.publishPending = true
+		return
+	end
 	local loadout = resolveLoadout(data, userId)
 	if loadout == nil then
+		data.spectatorUserIds[userId] = true
 		return
 	end
 	local outcome = runtime:addParticipant(loadout)
 	if outcome.accepted then
 		data.admittedUserIds[userId] = true
+		data.spectatorUserIds[userId] = nil
 		data.publishPending = true
 	else
 		data.frozenLoadouts[userId] = nil
+		data.spectatorUserIds[userId] = true
 	end
 end
 
 local function handlePlayerRemoving(data: ServiceData, player: Player)
+	if data.managedAdmissions then
+		return
+	end
 	local userId = data.environment.getUserId(player)
-	data.admittedUserIds[userId] = nil
-	data.frozenLoadouts[userId] = nil
+	data.spectatorUserIds[userId] = nil
 	local runtime = data.runtime
 	if data.state ~= "Started" or runtime == nil then
 		return
 	end
-	local outcome = runtime:removeParticipant(userId, data.environment.now())
-	if outcome.accepted then
-		data.publishPending = true
+	if runtime:isParticipantConnected(userId) then
+		local outcome = runtime:removeParticipant(userId, data.environment.now())
+		if outcome.accepted then
+			data.publishPending = true
+		end
 	end
 end
 
@@ -399,7 +524,7 @@ local function receipt(
 	player: Player,
 	outcome: PlayableMatchRuntime.ActionOutcome
 ): PlayableMatchProtocol.ActionReceipt?
-	local snapshot = runtimeSnapshot(data, player)
+	local snapshot = runtimeSnapshot(data, player, nil)
 	if snapshot == nil then
 		return nil
 	end
@@ -467,10 +592,16 @@ local function heartbeat(data: ServiceData)
 		data.state = "Failed"
 		return
 	end
-	if runtime:getMetrics().state == "Ready" then
+	if not data.managedAdmissions and runtime:getMetrics().state == "Ready" then
 		for _, player in data.environment.getActivePlayers() do
 			local userId = data.environment.getUserId(player)
-			if userId ~= 0 and data.admittedUserIds[userId] ~= true then
+			if
+				userId ~= 0
+				and (
+					data.admittedUserIds[userId] ~= true
+					or (runtime:hasParticipant(userId) and not runtime:isParticipantConnected(userId))
+				)
+			then
 				handlePlayerAdded(data, player)
 			end
 		end
@@ -516,7 +647,7 @@ local function initialize(data: ServiceData)
 		error("[ATD_PLAYABLE_MATCH_SERVICE][code=MAP_UNAVAILABLE]", 0)
 	end
 	data.runtimeMap = mapResult.value :: PlayableMatchRuntime.RuntimeMap
-	data.runtime = constructRuntime(data)
+	data.runtime = constructRuntime(data, false)
 	if data.runtime == nil then
 		data.state = "Failed"
 		error("[ATD_PLAYABLE_MATCH_SERVICE][code=RUNTIME_CREATION_FAILED]", 0)
@@ -529,18 +660,20 @@ local function start(data: ServiceData)
 		error("[ATD_PLAYABLE_MATCH_SERVICE][code=INVALID_START_STATE]", 0)
 	end
 	data.state = "Started"
-	table.insert(
-		data.connections,
-		data.environment.connectPlayerAdded(function(player)
-			handlePlayerAdded(data, player)
-		end)
-	)
-	table.insert(
-		data.connections,
-		data.environment.connectPlayerRemoving(function(player)
-			handlePlayerRemoving(data, player)
-		end)
-	)
+	if not data.managedAdmissions then
+		table.insert(
+			data.connections,
+			data.environment.connectPlayerAdded(function(player)
+				handlePlayerAdded(data, player)
+			end)
+		)
+		table.insert(
+			data.connections,
+			data.environment.connectPlayerRemoving(function(player)
+				handlePlayerRemoving(data, player)
+			end)
+		)
+	end
 	table.insert(
 		data.connections,
 		data.environment.connectHeartbeat(function()
@@ -567,6 +700,7 @@ local function shutdown(data: ServiceData)
 	data.runtimeMap = nil
 	table.clear(data.frozenLoadouts)
 	table.clear(data.admittedUserIds)
+	table.clear(data.spectatorUserIds)
 	data.publishPending = false
 	data.replayBusy = false
 end
@@ -575,9 +709,90 @@ function Methods.getServiceDefinition(self: Service): ServiceLifecycle.ServiceDe
 	return requireData(self).serviceDefinition :: ServiceLifecycle.ServiceDefinition
 end
 
+function Methods.admitAuthorized(
+	self: Service,
+	player: Player,
+	participant: boolean
+): PlayableMatchRuntime.ActionOutcome
+	local data = requireData(self)
+	local runtime = data.runtime
+	if
+		not data.managedAdmissions
+		or data.state ~= "Started"
+		or runtime == nil
+		or not data.environment.isActivePlayer(player)
+		or type(participant) ~= "boolean"
+	then
+		return table.freeze({ accepted = false, reason = "Unavailable" })
+	end
+	local userId = data.environment.getUserId(player)
+	if data.expectedUserIds == nil or data.expectedUserIds[userId] ~= true or not runtime:hasParticipant(userId) then
+		return table.freeze({ accepted = false, reason = "NotParticipant" })
+	end
+	if not participant then
+		if runtime:isParticipantConnected(userId) then
+			local removed = runtime:removeParticipant(userId, data.environment.now())
+			if not removed.accepted then
+				return removed
+			end
+		end
+		data.spectatorUserIds[userId] = true
+		data.publishPending = true
+		return table.freeze({ accepted = true, reason = "Accepted" })
+	end
+	if runtime:isParticipantConnected(userId) then
+		data.spectatorUserIds[userId] = nil
+		return table.freeze({ accepted = true, reason = "Accepted" })
+	end
+	local outcome = runtime:reconnectParticipant(userId)
+	if outcome.accepted then
+		data.admittedUserIds[userId] = true
+		data.spectatorUserIds[userId] = nil
+		data.publishPending = true
+	end
+	return outcome
+end
+
+function Methods.disconnectAuthorized(self: Service, player: Player): PlayableMatchRuntime.ActionOutcome
+	local data = requireData(self)
+	local runtime = data.runtime
+	if not data.managedAdmissions or data.state ~= "Started" or runtime == nil then
+		return table.freeze({ accepted = false, reason = "Unavailable" })
+	end
+	local userId = data.environment.getUserId(player)
+	data.spectatorUserIds[userId] = nil
+	if not runtime:isParticipantConnected(userId) then
+		return table.freeze({ accepted = true, reason = "Accepted" })
+	end
+	local outcome = runtime:removeParticipant(userId, data.environment.now())
+	data.publishPending = data.publishPending or outcome.accepted
+	return outcome
+end
+
 function Methods.getSnapshot(self: Service, player: Player): Result.Result<PlayableMatchProtocol.Snapshot, string>
-	local snapshot = runtimeSnapshot(requireData(self), player)
+	local snapshot = runtimeSnapshot(requireData(self), player, nil)
 	return if snapshot == nil then Result.err("UNAVAILABLE") else Result.ok(snapshot)
+end
+
+function Methods.getResultEvidence(self: Service): Result.Result<PlayableMatchRuntime.ResultEvidence, string>
+	local data = requireData(self)
+	local runtime = data.runtime
+	if data.state ~= "Started" or runtime == nil then
+		return Result.err("UNAVAILABLE")
+	end
+	local evidence = runtime:getResultEvidence()
+	return if evidence.ok then Result.ok(evidence.value) else Result.err(evidence.error.code)
+end
+
+function Methods.setRewardView(self: Service, userId: number, rewardView: unknown): PlayableMatchRuntime.ActionOutcome
+	local data = requireData(self)
+	local runtime = data.runtime
+	if data.state ~= "Started" or runtime == nil then
+		return table.freeze({ accepted = false, reason = "Unavailable" })
+	end
+	local outcome = runtime:setRewardView(userId, rewardView)
+	data.publishPending = data.publishPending or outcome.accepted
+	return outcome
 end
 
 function Methods.submitReady(
@@ -696,6 +911,9 @@ function Methods.submitReplay(
 	if data.replayBusy then
 		return receipt(data, player, table.freeze({ accepted = false, reason = "Busy" }))
 	end
+	if data.rewarding then
+		return receipt(data, player, table.freeze({ accepted = false, reason = "WrongState" }))
+	end
 	local eligibility = runtime:canReplay(data.environment.getUserId(player), payload.matchId)
 	if not eligibility.accepted then
 		return receipt(data, player, eligibility)
@@ -705,7 +923,7 @@ function Methods.submitReplay(
 		return nil
 	end
 	data.replayBusy = true
-	local replacement = constructRuntime(data)
+	local replacement = constructRuntime(data, true)
 	if replacement == nil then
 		data.replayBusy = false
 		return receipt(data, player, table.freeze({ accepted = false, reason = "Unavailable" }))
@@ -723,6 +941,14 @@ function Methods.getMetrics(self: Service): Metrics
 	for _ in data.frozenLoadouts do
 		frozenLoadoutCount += 1
 	end
+	local spectatorCount = 0
+	if runtime ~= nil then
+		for _, player in data.environment.getActivePlayers() do
+			if not runtime:isParticipantConnected(data.environment.getUserId(player)) then
+				spectatorCount += 1
+			end
+		end
+	end
 	return table.freeze({
 		state = data.state,
 		generation = data.generation,
@@ -731,6 +957,7 @@ function Methods.getMetrics(self: Service): Metrics
 		publishCount = data.publishCount,
 		attackPublishCount = data.attackPublishCount,
 		frozenLoadoutCount = frozenLoadoutCount,
+		spectatorCount = spectatorCount,
 		runtime = if runtime == nil then nil else runtime:getMetrics(),
 	})
 end
@@ -742,8 +969,70 @@ local function construct(
 	snapshotSender: SnapshotSender,
 	attackSender: AttackSender,
 	environment: Environment,
-	loadoutProvider: LoadoutProvider
+	loadoutProvider: LoadoutProvider,
+	rosterInputs: RosterInputs?
 ): Service
+	local expectedUserIdOrder, expectedUserIds, frozenLoadouts = normalizeRosterInputs(rosterInputs, configuration)
+	if rosterInputs ~= nil and frozenLoadouts == nil then
+		error("[ATD_PLAYABLE_MATCH_SERVICE][code=INVALID_ROSTER_INPUTS]", 0)
+	end
+	local rewarding = rosterInputs ~= nil and rosterInputs.rewarding == true
+	local managedAdmissions = rosterInputs ~= nil and rosterInputs.managedAdmissions == true
+	local initialConnectedParticipantUserIds: { number } = {}
+	if rosterInputs ~= nil and rosterInputs.connectedParticipantUserIds ~= nil then
+		local connectedSeen: { [number]: boolean } = {}
+		for _, userId in rosterInputs.connectedParticipantUserIds do
+			if
+				type(userId) ~= "number"
+				or userId % 1 ~= 0
+				or userId <= 0
+				or expectedUserIds == nil
+				or expectedUserIds[userId] ~= true
+				or connectedSeen[userId]
+			then
+				error("[ATD_PLAYABLE_MATCH_SERVICE][code=INVALID_CONNECTED_PARTICIPANTS]", 0)
+			end
+			connectedSeen[userId] = true
+			table.insert(initialConnectedParticipantUserIds, userId)
+		end
+	end
+	local fixedMatchId: Ids.MatchId? = nil
+	local fixedMapId: Ids.MapId? = nil
+	local fixedDifficultyId: Ids.DifficultyId? = nil
+	if
+		rosterInputs ~= nil
+		and (rosterInputs.matchId ~= nil or rosterInputs.mapId ~= nil or rosterInputs.difficultyId ~= nil)
+	then
+		local matchId = Ids.validateMatchId(rosterInputs.matchId)
+		local mapId = Ids.validateMapId(rosterInputs.mapId)
+		local difficultyId = Ids.validateDifficultyId(rosterInputs.difficultyId)
+		local schedules = if mapId.ok then configuration.waves.byMapId[mapId.value] else nil
+		if
+			not matchId.ok
+			or not mapId.ok
+			or not difficultyId.ok
+			or configuration.maps.byId[mapId.value] == nil
+			or configuration.difficulties.byId[difficultyId.value] == nil
+			or schedules == nil
+			or schedules[difficultyId.value] == nil
+		then
+			error("[ATD_PLAYABLE_MATCH_SERVICE][code=INVALID_MATCH_CONTEXT]", 0)
+		end
+		fixedMatchId = matchId.value
+		fixedMapId = mapId.value
+		fixedDifficultyId = difficultyId.value
+	end
+	if
+		managedAdmissions
+		and (
+			not rewarding
+			or fixedMatchId == nil
+			or rosterInputs == nil
+			or rosterInputs.connectedParticipantUserIds == nil
+		)
+	then
+		error("[ATD_PLAYABLE_MATCH_SERVICE][code=INVALID_MANAGED_ADMISSIONS]", 0)
+	end
 	local data: ServiceData = {
 		logger = logger,
 		lifecycle = lifecycle,
@@ -764,8 +1053,17 @@ local function construct(
 		attackPublishCount = 0,
 		legacyDefeatAttempted = false,
 		loadoutProvider = loadoutProvider,
-		frozenLoadouts = {},
+		frozenLoadouts = frozenLoadouts :: { [number]: MatchLoadoutProtocol.Snapshot },
 		admittedUserIds = {},
+		expectedUserIds = expectedUserIds,
+		expectedUserIdOrder = expectedUserIdOrder,
+		spectatorUserIds = {},
+		rewarding = rewarding,
+		fixedMatchId = fixedMatchId,
+		fixedMapId = fixedMapId,
+		fixedDifficultyId = fixedDifficultyId,
+		managedAdmissions = managedAdmissions,
+		initialConnectedParticipantUserIds = table.freeze(initialConnectedParticipantUserIds),
 	}
 	local service = setmetatable({}, Methods) :: Service
 	table.freeze(service)
@@ -792,7 +1090,8 @@ function PlayableMatchService.new(
 	configuration: ConfigTypes.CoreConfiguration,
 	snapshotSender: SnapshotSender,
 	attackSender: AttackSender,
-	loadoutProvider: LoadoutProvider
+	loadoutProvider: LoadoutProvider,
+	rosterInputs: RosterInputs?
 ): Service
 	if type(loadoutProvider) ~= "function" then
 		error("[ATD_PLAYABLE_MATCH_SERVICE][code=LOADOUT_PROVIDER_MISSING]", 0)
@@ -804,7 +1103,8 @@ function PlayableMatchService.new(
 		snapshotSender,
 		attackSender,
 		PRODUCTION_ENVIRONMENT,
-		loadoutProvider
+		loadoutProvider,
+		rosterInputs
 	)
 end
 
@@ -831,7 +1131,8 @@ if isExactTestModule() then
 		snapshotSender: SnapshotSender,
 		attackSender: AttackSender,
 		environment: Environment,
-		loadoutProvider: LoadoutProvider?
+		loadoutProvider: LoadoutProvider?,
+		rosterInputs: RosterInputs?
 	): Service
 		local provider = loadoutProvider
 			or function(userId: number): MatchLoadoutProtocol.Snapshot?
@@ -854,7 +1155,16 @@ if isExactTestModule() then
 				}, configuration)
 				return if result.ok then result.value else nil
 			end
-		return construct(logger, lifecycle, configuration, snapshotSender, attackSender, environment, provider)
+		return construct(
+			logger,
+			lifecycle,
+			configuration,
+			snapshotSender,
+			attackSender,
+			environment,
+			provider,
+			rosterInputs
+		)
 	end
 end
 

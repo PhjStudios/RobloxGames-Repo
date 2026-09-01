@@ -77,6 +77,11 @@ local function loadingState(): any
 		reducedMotion = false,
 		isFirstJoin = false,
 		didMigrate = false,
+		localUserId = 101,
+		partyState = "Loading",
+		queuesState = "Loading",
+		activeRouteState = "Loading",
+		squadMutationPending = false,
 		modals = {},
 		toasts = {},
 	}
@@ -123,9 +128,78 @@ local function readyState(screen: string?, inputFamily: string?): any
 			canPullTen = true,
 			transactionPending = false,
 		},
+		localUserId = 101,
+		partyState = "Ready",
+		partySnapshot = { version = 1, incomingInvitations = {} },
+		queuesState = "Ready",
+		queueSnapshots = {},
+		activeRouteState = "Ready",
+		activeRoute = { version = 1, status = "None" },
+		squadMutationPending = false,
 		modals = {},
 		toasts = {},
 	}
+end
+
+local function squadState(screen: "Party" | "Queue", queued: boolean?): any
+	local state = readyState(screen)
+	state.partySnapshot = {
+		version = 1,
+		party = {
+			version = 1,
+			partyId = "party:alpha",
+			revision = 3,
+			leaderUserId = 101,
+			privacy = "InviteOnly",
+			queueState = if queued then "Queued" else "Idle",
+			members = {
+				{ userId = 101, order = 1, isLeader = true, profileReady = true },
+				{ userId = 202, order = 2, isLeader = false, profileReady = true },
+			},
+			pendingInvitationCount = 0,
+		},
+		incomingInvitations = {},
+	}
+	local members = if queued
+		then {
+			{ userId = 101, order = 1, isCaptain = true, readiness = "Ready" },
+			{ userId = 202, order = 2, isCaptain = false, readiness = "Ready" },
+		}
+		else {}
+	local enrollments = if queued
+		then {
+			{
+				sequence = 1,
+				kind = "Party",
+				leaderUserId = 101,
+				partyId = "party:alpha",
+				partyRevision = 3,
+				userIds = { 101, 202 },
+				source = "UI",
+			},
+		}
+		else {}
+	state.queueSnapshots = {
+		{
+			version = 1,
+			queueId = "queue:alpha",
+			revision = if queued then 2 else 1,
+			state = "Open",
+			captainUserId = if queued then 101 else nil,
+			configuration = {
+				mapId = "map:meadow",
+				difficultyId = "difficulty:normal",
+				privacy = "Public",
+				maxPlayers = 4,
+			},
+			members = members,
+			enrollments = enrollments,
+			canStart = queued == true,
+		},
+	}
+	state.selectedQueueId = "queue:alpha"
+	state.activeRoute = { version = 1, status = "Available", matchId = "match:active", expiresAt = 500 }
+	return state
 end
 
 local function makeFixture(): any
@@ -205,6 +279,8 @@ local function contentScreens(root: Frame): (Frame, { Frame })
 	return content,
 		{
 			child(content, "HomeScreen", "Frame") :: Frame,
+			child(content, "PartyScreen", "Frame") :: Frame,
+			child(content, "QueueScreen", "Frame") :: Frame,
 			child(content, "InventoryScreen", "Frame") :: Frame,
 			child(content, "ChestsScreen", "Frame") :: Frame,
 			child(content, "SettingsScreen", "Frame") :: Frame,
@@ -556,6 +632,80 @@ return TestHarness.suite("persistent Lobby presentation", {
 		end)
 	end),
 
+	TestHarness.case(
+		"keeps compact landscape party and queue actions reachable above bottom navigation",
+		function(assertions)
+			withView(function(view, fixture)
+				local partyState = readyState("Party", "Touch")
+				partyState.viewport = Vector2.new(749, 361)
+				assertions.isTrue(view:render(partyState).ok)
+
+				local _, root = guiTree(fixture)
+				local navigation = child(root, "Navigation", "Frame") :: Frame
+				local content = child(root, "Content", "Frame") :: Frame
+				local partyScreen = child(content, "PartyScreen", "Frame") :: Frame
+				local party = child(partyScreen, "PartyContent", "ScrollingFrame") :: ScrollingFrame
+				local create = child(party, "CreateParty", "TextButton") :: TextButton
+				local inviteInput = child(party, "InviteUserId", "TextBox") :: TextBox
+				local logicalHeight = partyState.viewport.Y / partyState.settings.uiScale
+				local contentBottom = content.Position.Y.Offset + logicalHeight + content.Size.Y.Offset
+				local navigationTop = logicalHeight + navigation.Position.Y.Offset
+
+				assertions.equal(navigation.Size.Y.Offset, 68)
+				assertions.equal((child(navigation, "Home", "TextButton") :: TextButton).Position.Y.Offset, 8)
+				assertions.equal((child(navigation, "Settings", "TextButton") :: TextButton).Position.Y.Offset, 8)
+				assertions.isTrue(content.ClipsDescendants)
+				assertions.isTrue(contentBottom <= navigationTop)
+				assertions.isTrue(create.Visible)
+				assertions.isFalse(inviteInput.Visible)
+				assertions.isTrue(create.Position.Y.Offset + create.Size.Y.Offset <= party.CanvasSize.Y.Offset)
+				assertions.isTrue(create.Position.Y.Offset + create.Size.Y.Offset <= 110)
+
+				local loadingParty = readyState("Party", "Gamepad")
+				loadingParty.viewport = Vector2.new(749, 361)
+				loadingParty.partyState = "Loading"
+				loadingParty.partySnapshot = nil
+				assertions.isTrue(view:render(loadingParty).ok)
+				assertions.equal(fixture.selected, child(child(root, "Header", "Frame"), "Back", "TextButton"))
+				assertions.isFalse(inviteInput.Visible)
+
+				local formedParty = squadState("Party")
+				formedParty.inputFamily = "Touch"
+				formedParty.viewport = Vector2.new(749, 361)
+				assertions.isTrue(view:render(formedParty).ok)
+				assertions.isFalse(create.Visible)
+				assertions.isTrue(inviteInput.Visible)
+				for _, name in { "InviteFriends", "Privacy", "LeaveParty", "DisbandParty" } do
+					local action = child(party, name, "TextButton") :: TextButton
+					assertions.isTrue(action.Position.Y.Offset + action.Size.Y.Offset <= party.CanvasSize.Y.Offset)
+				end
+
+				local queueState = squadState("Queue", true)
+				queueState.inputFamily = "Touch"
+				queueState.viewport = Vector2.new(749, 361)
+				assertions.isTrue(view:render(queueState).ok)
+				local queueScreen = child(content, "QueueScreen", "Frame") :: Frame
+				local queue = child(queueScreen, "QueueContent", "ScrollingFrame") :: ScrollingFrame
+				assertions.isTrue(queue.CanvasSize.Y.Offset > 0)
+				for _, name in
+					{
+						"JoinQueue",
+						"LeaveQueue",
+						"Map",
+						"Difficulty",
+						"QueuePrivacy",
+						"Capacity",
+						"StartQueue",
+						"ReconnectMatch",
+					}
+				do
+					local action = child(queue, name, "TextButton") :: TextButton
+					assertions.isTrue(action.Position.Y.Offset + action.Size.Y.Offset <= queue.CanvasSize.Y.Offset)
+				end
+			end)
+		end
+	),
+
 	TestHarness.case("closes compact details before Back and restores valid gamepad focus", function(assertions)
 		withView(function(view, fixture)
 			local compact = readyState("Inventory", "Gamepad")
@@ -599,6 +749,50 @@ return TestHarness.suite("persistent Lobby presentation", {
 			assertions.equal(fixture.actions[#fixture.actions].kind, "Back")
 		end)
 	end),
+
+	TestHarness.case(
+		"keeps party queue captain and reconnect controls in the permanent accessible shell",
+		function(assertions)
+			withView(function(view, fixture)
+				local _, root = guiTree(fixture)
+				local content = child(root, "Content", "Frame") :: Frame
+				local partyScreen = child(content, "PartyScreen", "Frame") :: Frame
+				local party = child(partyScreen, "PartyContent", "ScrollingFrame") :: ScrollingFrame
+				assertions.isTrue(view:render(squadState("Party")).ok)
+				assertOneActiveScreen(assertions, root, "Party")
+				local inviteInput = child(party, "InviteUserId", "TextBox") :: TextBox
+				(fixture.searchListeners[inviteInput] :: (string) -> ())("202")
+				activate(fixture, child(party, "InviteMember", "TextButton") :: TextButton)
+				local inviteAction = fixture.actions[#fixture.actions]
+				assertions.equal(inviteAction.kind, "InvitePartyMember")
+				assertions.equal(inviteAction.targetUserId, 202)
+				local partyList = child(party, "PartyRosterAndInvites", "ScrollingFrame") :: ScrollingFrame
+				activate(fixture, child(partyList, "KickMember2", "TextButton") :: TextButton)
+				assertions.equal(fixture.actions[#fixture.actions].kind, "KickPartyMember")
+				activate(fixture, child(partyList, "TransferMember2", "TextButton") :: TextButton)
+				assertions.equal(fixture.actions[#fixture.actions].kind, "TransferPartyLeadership")
+
+				assertions.isTrue(view:render(squadState("Queue")).ok)
+				assertOneActiveScreen(assertions, root, "Queue")
+				local queueScreen = child(content, "QueueScreen", "Frame") :: Frame
+				local queue = child(queueScreen, "QueueContent", "ScrollingFrame") :: ScrollingFrame
+				activate(fixture, child(queue, "JoinQueue", "TextButton") :: TextButton)
+				assertions.equal(fixture.actions[#fixture.actions].kind, "JoinQueue")
+				assertions.equal(fixture.actions[#fixture.actions].queueId, "queue:alpha")
+
+				assertions.isTrue(view:render(squadState("Queue", true)).ok)
+				activate(fixture, child(queue, "QueuePrivacy", "TextButton") :: TextButton)
+				local configurationAction = fixture.actions[#fixture.actions]
+				assertions.equal(configurationAction.kind, "ConfigureQueue")
+				assertions.equal(configurationAction.configuration.privacy, "PartyOnly")
+				activate(fixture, child(queue, "StartQueue", "TextButton") :: TextButton)
+				assertions.equal(fixture.actions[#fixture.actions].kind, "StartQueue")
+				activate(fixture, child(queue, "ReconnectMatch", "TextButton") :: TextButton)
+				assertions.equal(fixture.actions[#fixture.actions].kind, "ReconnectActiveMatch")
+				assertions.equal(#fixture.guiParent:GetChildren(), 1)
+			end)
+		end
+	),
 
 	TestHarness.case("cleans GUI focus and every stale callback across respawn style recreation", function(assertions)
 		local fixture = makeFixture()

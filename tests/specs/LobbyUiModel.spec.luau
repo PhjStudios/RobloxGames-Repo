@@ -77,6 +77,14 @@ local function readyState()
 			canPullTen = true,
 			transactionPending = false,
 		},
+		localUserId = 101,
+		partyState = "Ready",
+		partySnapshot = { version = 1, incomingInvitations = {} },
+		queuesState = "Ready",
+		queueSnapshots = {},
+		activeRouteState = "Ready",
+		activeRoute = { version = 1, status = "None" },
+		squadMutationPending = false,
 		modals = {
 			{
 				id = "confirm:pull",
@@ -114,6 +122,11 @@ local function loadingState()
 		reducedMotion = false,
 		isFirstJoin = false,
 		didMigrate = false,
+		localUserId = 101,
+		partyState = "Loading",
+		queuesState = "Loading",
+		activeRouteState = "Loading",
+		squadMutationPending = false,
 		modals = {},
 		toasts = {},
 	}
@@ -235,4 +248,50 @@ return TestHarness.suite("Lobby UI canonical render model", {
 		invalidRetry.canRetry = true
 		assertions.isNil(LobbyUiModel.canonicalize(invalidRetry))
 	end),
+
+	TestHarness.case(
+		"requires authoritative squad loading discriminants and strips no routing secrets",
+		function(assertions)
+			local loading = loadingState()
+			assertions.isNotNil(LobbyUiModel.canonicalize(loading))
+			loading.partySnapshot = { version = 1, incomingInvitations = {} }
+			assertions.isNil(LobbyUiModel.canonicalize(loading))
+
+			local ready = readyState()
+			ready.screen = "Queue"
+			ready.partySnapshot = { version = 1, incomingInvitations = {} }
+			ready.queueSnapshots = {
+				{
+					version = 1,
+					queueId = "queue:alpha",
+					revision = 1,
+					state = "Open",
+					configuration = {
+						mapId = "map:meadow",
+						difficultyId = "difficulty:normal",
+						privacy = "Public",
+						maxPlayers = 4,
+					},
+					members = {},
+					enrollments = {},
+					canStart = false,
+				},
+			}
+			ready.selectedQueueId = "queue:alpha"
+			ready.activeRoute = { version = 1, status = "Available", matchId = "match:active", expiresAt = 100 }
+			local canonical = LobbyUiModel.canonicalize(ready)
+			assertions.isNotNil(canonical)
+			assertions.equal((canonical :: LobbyUiModel.RenderState).screen, "Queue")
+
+			local secret = readyState()
+			secret.activeRoute = {
+				version = 1,
+				status = "Available",
+				matchId = "match:active",
+				expiresAt = 100,
+				reservedAccessCode = "PRIVATE",
+			}
+			assertions.isNil(LobbyUiModel.canonicalize(secret))
+		end
+	),
 })

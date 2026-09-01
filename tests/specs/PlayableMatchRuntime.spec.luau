@@ -119,7 +119,8 @@ local function newRuntime(
 	assertions: Assertions,
 	participants: { number }?,
 	matchId: string?,
-	shortPath: boolean?
+	shortPath: boolean?,
+	rewarding: boolean?
 ): Runtime
 	return success(
 		assertions,
@@ -128,6 +129,7 @@ local function newRuntime(
 			configuration = CONFIGURATION,
 			runtimeMap = makeRuntimeMap(shortPath),
 			participantUserIds = participants or { USER_ONE },
+			rewarding = rewarding,
 		})
 	)
 end
@@ -188,6 +190,24 @@ local function runUntilResults(
 		currentServerTime = outcome.serverTime
 	end
 	error("runtime did not reach Results within the bounded scenario", 0)
+end
+
+local function runUntilCompletedWaves(
+	assertions: Assertions,
+	runtime: Runtime,
+	startingServerTime: number,
+	targetWaves: number
+): number
+	local currentServerTime = startingServerTime
+	for _ = 1, 5_000 do
+		if runtime:getMetrics().wavesCompleted >= targetWaves then
+			return currentServerTime
+		end
+		local outcome = success(assertions, runtime:step(currentServerTime + PlayableMatchRuntime.MAX_STEP_SECONDS))
+		assertions.isTrue(outcome.serverTime > currentServerTime)
+		currentServerTime = outcome.serverTime
+	end
+	error("runtime did not complete the requested waves within the bounded scenario", 0)
 end
 
 local function towerPositions(): { Vector3 }
@@ -596,6 +616,9 @@ return TestHarness.suite("authoritative playable match runtime", {
 			local defeated = snapshot(assertions, runtime, USER_ONE, finishedServerTime)
 			assertions.equal(defeated.state, "Results")
 			assertions.equal(defeated.result, "Defeat")
+			assertions.isFalse(defeated.rewarding)
+			assertions.isFalse(runtime:getMetrics().rewarding)
+			assertions.isFalse(success(assertions, runtime:getResultEvidence()).rewardingMatch)
 			assertions.equal(defeated.baseHealth, 0)
 			assertions.isTrue(defeated.stats.wavesCompleted < defeated.totalWaves)
 			local duration = defeated.stats.durationSeconds
@@ -610,13 +633,152 @@ return TestHarness.suite("authoritative playable match runtime", {
 		end
 	),
 
+	TestHarness.case("produces bounded server-only result evidence and role-safe reward views", function(assertions)
+		local runtime = success(
+			assertions,
+			PlayableMatchRuntime.new({
+				matchId = MATCH_ID,
+				configuration = CONFIGURATION,
+				runtimeMap = makeRuntimeMap(true),
+				participantUserIds = { USER_ONE, USER_TWO },
+				connectedParticipantUserIds = { USER_ONE },
+				rewarding = true,
+			})
+		)
+		assertions.isTrue(runtime:getMetrics().rewarding)
+		expectError(assertions, runtime:getResultEvidence(), "WRONG_STATE", "resultEvidence")
+		expectAccepted(assertions, runtime:submitReady(USER_ONE, MATCH_ID, 100))
+		expectAccepted(
+			assertions,
+			runtime:placeTower(USER_ONE, MATCH_ID, "tower:dart-ant", Vector3.new(0, 0, 0), 0, 100)
+		)
+		local finishedServerTime = runUntilResults(assertions, runtime, 100)
+		local evidence = success(assertions, runtime:getResultEvidence())
+		assertions.equal(evidence.matchId, MATCH_ID)
+		assertions.equal(evidence.outcome, "Defeat")
+		assertions.isTrue(evidence.rewardingMatch)
+		assertions.equal(#evidence.entries, 2)
+		local participant = evidence.entries[1]
+		assertions.equal(participant.userId, USER_ONE)
+		assertions.isTrue(participant.authenticatedParticipant)
+		assertions.isFalse(participant.spectator)
+		assertions.isTrue(participant.submittedReady)
+		assertions.equal(participant.placements, 1)
+		assertions.isTrue(participant.connectedAtResults)
+		assertions.equal(participant.battleCashSpent, 120)
+		local noShow = evidence.entries[2]
+		assertions.equal(noShow.userId, USER_TWO)
+		assertions.isFalse(noShow.authenticatedParticipant)
+		assertions.isTrue(noShow.spectator)
+		assertions.isFalse(noShow.submittedReady)
+		assertions.equal(noShow.placements, 0)
+		assertions.isFalse(noShow.connectedAtResults)
+
+		local pendingReward = {
+			resultId = "result:runtime-evidence",
+			status = "Pending",
+			persistentGoldAwarded = 0,
+			firstClearBonus = 0,
+			battleCashEarned = participant.battleCashEarned,
+			battleCashSpent = participant.battleCashSpent,
+			reason = "ClaimPending",
+		}
+		local revisionBeforeReward = runtime:getMetrics().revision
+		expectAccepted(assertions, runtime:setRewardView(USER_ONE, pendingReward))
+		local revisionAfterReward = runtime:getMetrics().revision
+		assertions.equal(revisionAfterReward, revisionBeforeReward + 1)
+		expectAccepted(assertions, runtime:setRewardView(USER_ONE, pendingReward))
+		assertions.equal(runtime:getMetrics().revision, revisionAfterReward)
+		expectRejected(assertions, runtime:setRewardView(USER_TWO, pendingReward), "Unavailable")
+		local spectatorReward = {
+			resultId = "result:runtime-evidence",
+			status = "Pending",
+			persistentGoldAwarded = 0,
+			firstClearBonus = 0,
+			battleCashEarned = 0,
+			battleCashSpent = 0,
+			reason = "ClaimPending",
+		}
+		expectAccepted(assertions, runtime:setRewardView(USER_TWO, spectatorReward))
+		local participantSnapshot = snapshot(assertions, runtime, USER_ONE, finishedServerTime)
+		assertions.isTrue(participantSnapshot.rewarding)
+		assertions.isNotNil(participantSnapshot.reward)
+		assertions.equal((participantSnapshot.reward :: any).status, "Pending")
+		local spectatorSnapshot = success(assertions, runtime:getSpectatorSnapshot(finishedServerTime, USER_TWO))
+		assertions.isTrue(spectatorSnapshot.rewarding)
+		assertions.equal((spectatorSnapshot.reward :: any).status, "Pending")
+		assertions.equal((spectatorSnapshot.reward :: any).persistentGoldAwarded, 0)
+		assertions.equal((spectatorSnapshot.reward :: any).battleCashEarned, 0)
+		assertions.isTrue(success(assertions, runtime:cleanup()))
+	end),
+
 	TestHarness.case(
-		"preserves ready reconnect cash removes disconnected ownership and cleans all match state",
+		"counts completed-wave reward evidence per connected participant without replay on rejoin",
+		function(assertions)
+			local participants = { USER_ONE, USER_TWO, USER_THREE, USER_FOUR }
+			local runtime = newRuntime(assertions, participants, nil, nil, true)
+			readyAll(assertions, runtime, participants, 100)
+			local positions = towerPositions()
+			for index = 1, PlayableMatchRuntime.MAX_TOWERS do
+				local owner = participants[((index - 1) % #participants) + 1]
+				expectAccepted(
+					assertions,
+					runtime:placeTower(owner, MATCH_ID, "tower:dart-ant", positions[index], 0, 100)
+				)
+			end
+
+			-- The departed participant keeps towers and placement evidence, but does
+			-- not inherit waves completed by the rest of the squad.
+			expectAccepted(assertions, runtime:removeParticipant(USER_ONE, 100.1))
+			local finishedServerTime = runUntilResults(assertions, runtime, 100.1)
+			assertions.isTrue(runtime:getMetrics().wavesCompleted >= 2)
+			local evidence = success(assertions, runtime:getResultEvidence())
+			assertions.equal(evidence.entries[1].userId, USER_ONE)
+			assertions.equal(evidence.entries[1].wavesCompleted, 0)
+			assertions.isFalse(evidence.entries[1].connectedAtResults)
+			for index = 2, #evidence.entries do
+				assertions.equal(evidence.entries[index].wavesCompleted, runtime:getMetrics().wavesCompleted)
+			end
+
+			-- A rebind after Results cannot replay or increase retained progress.
+			expectAccepted(assertions, runtime:reconnectParticipant(USER_ONE))
+			local afterRejoin = success(assertions, runtime:getResultEvidence())
+			assertions.equal(afterRejoin.entries[1].wavesCompleted, 0)
+			assertions.equal(snapshot(assertions, runtime, USER_ONE, finishedServerTime).viewerRole, "Participant")
+			assertions.isTrue(success(assertions, runtime:cleanup()))
+		end
+	),
+
+	TestHarness.case("counts a late rejoin wave as one rather than its global ordinal", function(assertions)
+		local participants = { USER_ONE, USER_TWO, USER_THREE, USER_FOUR }
+		local runtime = newRuntime(assertions, participants, nil, nil, true)
+		readyAll(assertions, runtime, participants, 100)
+		local positions = towerPositions()
+		for index = 1, PlayableMatchRuntime.MAX_TOWERS do
+			local owner = participants[((index - 1) % #participants) + 1]
+			expectAccepted(assertions, runtime:placeTower(owner, MATCH_ID, "tower:dart-ant", positions[index], 0, 100))
+		end
+		expectAccepted(assertions, runtime:removeParticipant(USER_ONE, 100.1))
+		local afterTwo = runUntilCompletedWaves(assertions, runtime, 100.1, 2)
+		expectAccepted(assertions, runtime:reconnectParticipant(USER_ONE))
+		local afterThree = runUntilCompletedWaves(assertions, runtime, afterTwo, 3)
+		expectAccepted(assertions, runtime:removeParticipant(USER_ONE, afterThree))
+		runUntilResults(assertions, runtime, afterThree)
+		local evidence = success(assertions, runtime:getResultEvidence())
+		assertions.equal(evidence.entries[1].wavesCompleted, 1)
+		assertions.isFalse(evidence.entries[1].connectedAtResults)
+		assertions.isTrue(success(assertions, runtime:cleanup()))
+	end),
+
+	TestHarness.case(
+		"retains stable UserId state across disconnect and exposes bounded spectator snapshots",
 		function(assertions)
 			local runtime = newRuntime(assertions, { USER_ONE, USER_TWO })
 			expectAccepted(assertions, runtime:removeParticipant(USER_ONE, 50))
-			assertions.equal(runtime:getMetrics().participantCount, 1)
-			expectAccepted(assertions, runtime:addParticipant(USER_ONE))
+			assertions.equal(runtime:getMetrics().participantCount, 2)
+			assertions.equal(runtime:getMetrics().connectedParticipantCount, 1)
+			expectRejected(assertions, runtime:submitReady(USER_ONE, MATCH_ID, 50), "ParticipantDisconnected")
+			expectAccepted(assertions, runtime:reconnectParticipant(USER_ONE))
 			assertions.equal(snapshot(assertions, runtime, USER_ONE, 50).battleCash, 500)
 			readyAll(assertions, runtime, { USER_ONE, USER_TWO }, 100)
 			expectAccepted(
@@ -625,14 +787,36 @@ return TestHarness.suite("authoritative playable match runtime", {
 			)
 			assertions.equal(runtime:getMetrics().activeTowerCount, 1)
 			expectAccepted(assertions, runtime:removeParticipant(USER_ONE, 100.1))
-			assertions.equal(runtime:getMetrics().participantCount, 1)
-			assertions.equal(runtime:getMetrics().activeTowerCount, 0)
+			assertions.equal(runtime:getMetrics().participantCount, 2)
+			assertions.equal(runtime:getMetrics().connectedParticipantCount, 1)
+			assertions.equal(runtime:getMetrics().activeTowerCount, 1)
 			expectRejected(
 				assertions,
 				runtime:placeTower(USER_ONE, MATCH_ID, "tower:dart-ant", Vector3.new(0, 0, 0), 0, 100.1),
-				"NotParticipant"
+				"ParticipantDisconnected"
 			)
-			expectRejected(assertions, runtime:addParticipant(USER_ONE), "WrongState")
+			local spectatorResult = runtime:getSpectatorSnapshot(100.1)
+			assertions.isTrue(spectatorResult.ok)
+			local spectator = success(assertions, spectatorResult)
+			assertions.equal(spectator.viewerRole, "Spectator")
+			assertions.equal(spectator.loadoutRevision, 0)
+			assertions.equal(spectator.battleCash, 0)
+			assertions.equal(#spectator.towerOptions, 0)
+			assertions.equal(#spectator.towers, 1)
+
+			local disconnectedAttacks =
+				advanceFrom(assertions, runtime, 100.1, 106.5, PlayableMatchRuntime.MAX_STEP_SECONDS)
+			assertions.isTrue(#disconnectedAttacks > 0)
+			expectAccepted(assertions, runtime:reconnectParticipant(USER_ONE))
+			local rebound = snapshot(assertions, runtime, USER_ONE, 106.5)
+			assertions.equal(rebound.viewerRole, "Participant")
+			assertions.equal(rebound.battleCash, 383)
+			assertions.equal(rebound.stats.placements, 1)
+			assertions.equal(rebound.stats.damageDealt, 12)
+			assertions.equal(#rebound.towers, 1)
+			assertions.equal(rebound.towers[1].ownerUserId, USER_ONE)
+			assertions.equal(runtime:getMetrics().participantCount, 2)
+			assertions.equal(runtime:getMetrics().connectedParticipantCount, 2)
 
 			assertions.isTrue(success(assertions, runtime:cleanup()))
 			assertions.isFalse(success(assertions, runtime:cleanup()))

@@ -50,6 +50,9 @@ return TestHarness.suite("ProfileSchema", {
 			assertions.equal(profile.stats.towersAcquired, 1)
 			assertions.isTrue(profile.tutorial.firstJoin)
 			assertions.isFalse(profile.settings.reducedMotionEnabled)
+			assertions.equal(next(profile.firstClears), nil)
+			assertions.equal(#profile.pendingResults, 0)
+			assertions.equal(#profile.claimedResults, 0)
 			assertions.isTrue(
 				success(assertions, ProfileSchema.validate(profile, fixture.configuration.towers)) ~= profile
 			)
@@ -134,6 +137,70 @@ return TestHarness.suite("ProfileSchema", {
 			ProfileSchema.validate(malformed, fixture.configuration.towers),
 			"INVALID_PROFILE"
 		)
+	end),
+
+	TestHarness.case("validates bounded first clears and durable claimed-result receipts", function(assertions)
+		local profile, fixture = starter(assertions)
+		local claimed = ProfileSchema.clone(profile)
+		claimed.firstClears["map:phase07-graybox|difficulty:local"] = {
+			mapId = "map:phase07-graybox",
+			difficultyId = "difficulty:local",
+			clearedAt = NOW,
+		}
+		table.insert(claimed.claimedResults, {
+			resultId = "result:11111111-1111-1111-1111-111111111111",
+			persistentGoldAwarded = 500,
+			firstClearBonus = 250,
+			claimedAt = NOW,
+		})
+		local validated = success(assertions, ProfileSchema.validate(claimed, fixture.configuration.towers))
+		assertions.equal(validated.claimedResults[1].persistentGoldAwarded, 500)
+		assertions.equal(#ProfileProtocol.ready(validated, "Current").firstClears, 1)
+
+		local malformed = ProfileSchema.clone(claimed)
+		malformed.claimedResults[1].firstClearBonus = 501
+		expectProfileError(assertions, ProfileSchema.validate(malformed, fixture.configuration.towers), "INVALID_FIELD")
+		malformed = ProfileSchema.clone(claimed)
+		malformed.firstClears["map:wrong|difficulty:local"] =
+			malformed.firstClears["map:phase07-graybox|difficulty:local"]
+		malformed.firstClears["map:phase07-graybox|difficulty:local"] = nil
+		expectProfileError(
+			assertions,
+			ProfileSchema.validate(malformed, fixture.configuration.towers),
+			"INVALID_REFERENCE"
+		)
+	end),
+
+	TestHarness.case("keeps a bounded server-only pending and claim-finalization inbox", function(assertions)
+		local profile, fixture = starter(assertions)
+		local pending = ProfileSchema.clone(profile)
+		table.insert(pending.pendingResults, {
+			resultId = "result:11111111-1111-1111-1111-111111111111",
+			createdAt = NOW,
+		})
+		local validated = success(assertions, ProfileSchema.validate(pending, fixture.configuration.towers))
+		assertions.equal(validated.pendingResults[1].createdAt, NOW)
+		local client = ProfileProtocol.ready(validated, "Current") :: any
+		assertions.isNil(client.pendingResults)
+		assertions.isNil(client.claimedResults)
+
+		local finalizing = ProfileSchema.clone(pending)
+		table.insert(finalizing.claimedResults, {
+			resultId = pending.pendingResults[1].resultId,
+			persistentGoldAwarded = 50,
+			firstClearBonus = 0,
+			claimedAt = NOW,
+		})
+		assertions.isTrue(ProfileSchema.validate(finalizing, fixture.configuration.towers).ok)
+
+		local oversized = ProfileSchema.clone(profile)
+		for index = 1, ProfileSchema.MAX_PENDING_RESULT_IDS + 1 do
+			table.insert(oversized.pendingResults, {
+				resultId = `result:pending-{index}`,
+				createdAt = NOW + index,
+			})
+		end
+		expectProfileError(assertions, ProfileSchema.validate(oversized, fixture.configuration.towers), "INVALID_FIELD")
 	end),
 
 	TestHarness.case("bounds exact idempotency receipt results", function(assertions)

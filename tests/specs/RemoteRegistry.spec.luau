@@ -74,109 +74,26 @@ return TestHarness.suite("remote registry contract", {
 			assertions.isTrue(table.isfrozen(RemoteRegistry))
 
 			assertions.isTrue(RemoteRegistry.isRegistry(ProductionRemotes))
-			assertions.equal(ProductionRemotes:count(), 34)
-			assertNames(assertions, ProductionRemotes:list(), {
-				"BaseReplication",
-				"CombatAttackEvent",
-				"EnemyReplication",
-				LobbyProtocol.ENDPOINTS.EQUIP_TOWER,
-				LobbyProtocol.ENDPOINTS.FAVORITE_TOWER,
-				"GetBaseSnapshot",
-				"GetEnemySnapshot",
-				LobbyProtocol.ENDPOINTS.GET_BANNER,
-				LobbyProtocol.ENDPOINTS.GET_INVENTORY,
-				LobbyProtocol.ENDPOINTS.GET_PROFILE,
-				"GetMatchSnapshot",
-				"GetPlayableMatchSnapshot",
-				"GetTowerPlacementQuery",
-				"GetWaveSnapshot",
-				LobbyProtocol.ENDPOINTS.INVENTORY_REPLICATION,
-				LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION,
-				LobbyProtocol.ENDPOINTS.LOCK_TOWER,
-				"MatchSnapshot",
-				"PlayableMatchReplication",
-				LobbyProtocol.ENDPOINTS.PULL_CHEST,
-				LobbyProtocol.ENDPOINTS.RETRY_PROFILE,
-				"SubmitPlayablePlacement",
-				"SubmitPlayableReady",
-				"SubmitPlayableReplay",
-				"SubmitReady",
-				"SubmitSkipVote",
-				"SubmitTowerPlacement",
-				"SubmitTowerSell",
-				"SubmitTowerTargetMode",
-				"SubmitTowerUpgrade",
-				"TowerPlacementRevision",
-				LobbyProtocol.ENDPOINTS.UNEQUIP_TOWER,
-				LobbyProtocol.ENDPOINTS.UPDATE_SETTINGS,
-				"WaveReplication",
-			})
-			assertNames(assertions, ProductionRemotes:listForRole("Development"), {
-				"BaseReplication",
-				"CombatAttackEvent",
-				"EnemyReplication",
-				LobbyProtocol.ENDPOINTS.EQUIP_TOWER,
-				LobbyProtocol.ENDPOINTS.FAVORITE_TOWER,
-				"GetBaseSnapshot",
-				"GetEnemySnapshot",
-				LobbyProtocol.ENDPOINTS.GET_BANNER,
-				LobbyProtocol.ENDPOINTS.GET_INVENTORY,
-				LobbyProtocol.ENDPOINTS.GET_PROFILE,
-				"GetMatchSnapshot",
-				"GetPlayableMatchSnapshot",
-				"GetTowerPlacementQuery",
-				"GetWaveSnapshot",
-				LobbyProtocol.ENDPOINTS.INVENTORY_REPLICATION,
-				LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION,
-				LobbyProtocol.ENDPOINTS.LOCK_TOWER,
-				"MatchSnapshot",
-				"PlayableMatchReplication",
-				LobbyProtocol.ENDPOINTS.PULL_CHEST,
-				LobbyProtocol.ENDPOINTS.RETRY_PROFILE,
-				"SubmitPlayablePlacement",
-				"SubmitPlayableReady",
-				"SubmitPlayableReplay",
-				"SubmitReady",
-				"SubmitSkipVote",
-				"SubmitTowerPlacement",
-				"SubmitTowerSell",
-				"SubmitTowerTargetMode",
-				"SubmitTowerUpgrade",
-				"TowerPlacementRevision",
-				LobbyProtocol.ENDPOINTS.UNEQUIP_TOWER,
-				LobbyProtocol.ENDPOINTS.UPDATE_SETTINGS,
-				"WaveReplication",
-			})
-			assertNames(assertions, ProductionRemotes:listForRole("Lobby"), {
-				LobbyProtocol.ENDPOINTS.EQUIP_TOWER,
-				LobbyProtocol.ENDPOINTS.FAVORITE_TOWER,
-				LobbyProtocol.ENDPOINTS.GET_BANNER,
-				LobbyProtocol.ENDPOINTS.GET_INVENTORY,
-				LobbyProtocol.ENDPOINTS.GET_PROFILE,
-				LobbyProtocol.ENDPOINTS.INVENTORY_REPLICATION,
-				LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION,
-				LobbyProtocol.ENDPOINTS.LOCK_TOWER,
-				LobbyProtocol.ENDPOINTS.PULL_CHEST,
-				LobbyProtocol.ENDPOINTS.RETRY_PROFILE,
-				LobbyProtocol.ENDPOINTS.UNEQUIP_TOWER,
-				LobbyProtocol.ENDPOINTS.UPDATE_SETTINGS,
-			})
-			assertNames(assertions, ProductionRemotes:listForRole("Match"), {
+			local matchNames = {
 				"BaseReplication",
 				"CombatAttackEvent",
 				"EnemyReplication",
 				"GetBaseSnapshot",
 				"GetEnemySnapshot",
 				"GetMatchSnapshot",
+				"GetMatchTravelSnapshot",
 				"GetPlayableMatchSnapshot",
 				"GetTowerPlacementQuery",
 				"GetWaveSnapshot",
 				"MatchSnapshot",
+				"MatchTravelReplication",
 				"PlayableMatchReplication",
+				"RequestReturnToLobby",
 				"SubmitPlayablePlacement",
 				"SubmitPlayableReady",
 				"SubmitPlayableReplay",
 				"SubmitReady",
+				"SubmitRematchVote",
 				"SubmitSkipVote",
 				"SubmitTowerPlacement",
 				"SubmitTowerSell",
@@ -184,7 +101,22 @@ return TestHarness.suite("remote registry contract", {
 				"SubmitTowerUpgrade",
 				"TowerPlacementRevision",
 				"WaveReplication",
-			})
+			}
+			local lobbyNames = {} :: { string }
+			for _, endpoint in LobbyProtocol.ENDPOINTS do
+				table.insert(lobbyNames, endpoint)
+			end
+			table.sort(lobbyNames)
+			local allNames = table.clone(matchNames)
+			for _, endpoint in lobbyNames do
+				table.insert(allNames, endpoint)
+			end
+			table.sort(allNames)
+			assertions.equal(ProductionRemotes:count(), #allNames)
+			assertNames(assertions, ProductionRemotes:list(), allNames)
+			assertNames(assertions, ProductionRemotes:listForRole("Development"), allNames)
+			assertNames(assertions, ProductionRemotes:listForRole("Lobby"), lobbyNames)
+			assertNames(assertions, ProductionRemotes:listForRole("Match"), matchNames)
 
 			local getSnapshot = ProductionRemotes:get("GetMatchSnapshot") :: RemoteRegistry.Definition
 			assertions.equal(getSnapshot.transport, "ReliableRemoteEvent")
@@ -300,6 +232,24 @@ return TestHarness.suite("remote registry contract", {
 					LobbyProtocol.ENDPOINTS.GET_BANNER,
 					LobbyProtocol.ENDPOINTS.PULL_CHEST,
 					LobbyProtocol.ENDPOINTS.UPDATE_SETTINGS,
+					LobbyProtocol.ENDPOINTS.GET_PARTY,
+					LobbyProtocol.ENDPOINTS.CREATE_PARTY,
+					LobbyProtocol.ENDPOINTS.INVITE_PARTY,
+					LobbyProtocol.ENDPOINTS.ACCEPT_PARTY_INVITE,
+					LobbyProtocol.ENDPOINTS.DECLINE_PARTY_INVITE,
+					LobbyProtocol.ENDPOINTS.LEAVE_PARTY,
+					LobbyProtocol.ENDPOINTS.KICK_PARTY_MEMBER,
+					LobbyProtocol.ENDPOINTS.TRANSFER_PARTY_LEADERSHIP,
+					LobbyProtocol.ENDPOINTS.SET_PARTY_PRIVACY,
+					LobbyProtocol.ENDPOINTS.DISBAND_PARTY,
+					LobbyProtocol.ENDPOINTS.PROMPT_PARTY_INVITE,
+					LobbyProtocol.ENDPOINTS.GET_QUEUES,
+					LobbyProtocol.ENDPOINTS.JOIN_QUEUE,
+					LobbyProtocol.ENDPOINTS.LEAVE_QUEUE,
+					LobbyProtocol.ENDPOINTS.CONFIGURE_QUEUE,
+					LobbyProtocol.ENDPOINTS.START_QUEUE,
+					LobbyProtocol.ENDPOINTS.GET_ACTIVE_ROUTE,
+					LobbyProtocol.ENDPOINTS.RECONNECT_ACTIVE_MATCH,
 				}
 			do
 				local definition = ProductionRemotes:get(endpoint) :: RemoteRegistry.Definition
@@ -316,6 +266,9 @@ return TestHarness.suite("remote registry contract", {
 				{
 					LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION,
 					LobbyProtocol.ENDPOINTS.INVENTORY_REPLICATION,
+					LobbyProtocol.ENDPOINTS.PARTY_REPLICATION,
+					LobbyProtocol.ENDPOINTS.QUEUE_REPLICATION,
+					LobbyProtocol.ENDPOINTS.ACTIVE_ROUTE_REPLICATION,
 				}
 			do
 				local definition = ProductionRemotes:get(endpoint) :: RemoteRegistry.Definition

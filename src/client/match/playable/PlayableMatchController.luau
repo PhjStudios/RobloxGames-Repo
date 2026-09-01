@@ -7,8 +7,10 @@ local ServerStorage = game:GetService("ServerStorage")
 local SoundService = game:GetService("SoundService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+local HttpService = game:GetService("HttpService")
 
 local Log = require(ReplicatedStorage.Shared.logging.Log)
+local MatchTravelProtocol = require(ReplicatedStorage.Shared.match.MatchTravelProtocol)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
 local RemoteRegistry = require(ReplicatedStorage.Shared.network.RemoteRegistry)
 local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
@@ -87,8 +89,12 @@ export type Dependencies = {
 	submitSell: RequestEndpoint,
 	submitTargetMode: RequestEndpoint,
 	submitReplay: RequestEndpoint,
+	getTravelSnapshot: RequestEndpoint,
+	requestReturn: RequestEndpoint,
+	voteRematch: RequestEndpoint,
 	replicationEvent: EventEndpoint,
 	attackEvent: EventEndpoint,
+	travelReplicationEvent: EventEndpoint,
 	view: ViewAdapter,
 	input: InputAdapter,
 	connectWorldPointer: (WorldPointerListener) -> RBXScriptConnection,
@@ -99,8 +105,10 @@ export type Dependencies = {
 	raycastPlacement: (Vector2) -> Vector3?,
 	pickTower: (Vector2, { PlayableMatchProtocol.TowerSnapshot }, PlayableInputMap.InputFamily) -> number?,
 	focusBase: () -> boolean,
+	focusSpectatorTarget: (Vector3) -> boolean,
 	restoreCamera: () -> (),
 	applySettings: (SettingsProtocol.Settings) -> (),
+	newTransactionId: () -> string,
 }
 
 export type Metrics = {
@@ -123,6 +131,11 @@ export type Metrics = {
 	rotationDegrees: number,
 	getPending: boolean,
 	actionPending: boolean,
+	travelGetPending: boolean,
+	travelMutationPending: boolean,
+	viewerRole: PlayableMatchProtocol.ViewerRole?,
+	travelRevision: number?,
+	spectatorTargetId: string?,
 	feedbackCode: string?,
 	viewMetrics: unknown,
 	inputMetrics: unknown,
@@ -144,6 +157,22 @@ type PendingAction = {
 	issuedAt: number,
 }
 
+type PendingTravelGet = {
+	pending: RequestProtocol.Pending,
+	issuedAt: number,
+}
+
+type TravelMutationKind = "Return" | "Rematch"
+
+type PendingTravelMutation = {
+	pending: RequestProtocol.Pending,
+	definition: RemoteRegistry.Definition,
+	kind: TravelMutationKind,
+	matchId: string,
+	transactionId: string,
+	issuedAt: number,
+}
+
 type DependencyFactory = (PlayableMatchView.UiActionCallback, PlayableInputMap.ActionCallback) -> Dependencies
 
 type ControllerData = {
@@ -156,6 +185,7 @@ type ControllerData = {
 	callbackGeneration: number,
 	cleanupFailed: boolean,
 	snapshot: PlayableMatchProtocol.Snapshot?,
+	travelSnapshot: MatchTravelProtocol.Snapshot?,
 	retiredMatchIds: { [string]: boolean },
 	retiredMatchRing: { string },
 	matchGeneration: number,
@@ -165,6 +195,9 @@ type ControllerData = {
 	rotationDegrees: number,
 	getPending: PendingGet?,
 	actionPending: PendingAction?,
+	travelGetPending: PendingTravelGet?,
+	travelMutationPending: PendingTravelMutation?,
+	spectatorTargetId: string?,
 	recoveryQueued: boolean,
 	lastSnapshotAt: number,
 	renderPending: boolean,
@@ -261,6 +294,24 @@ local REQUEST_SPECS = table.freeze({
 		endpoint = PlayableMatchProtocol.ENDPOINTS.SUBMIT_REPLAY,
 		requestSchema = PlayableMatchProtocol.ReplayPayloadSchema,
 		responseSchema = PlayableMatchProtocol.ActionReceiptSchema,
+	},
+	{
+		field = "getTravelSnapshot",
+		endpoint = MatchTravelProtocol.ENDPOINTS.GET_SNAPSHOT,
+		requestSchema = MatchTravelProtocol.EmptyPayloadSchema,
+		responseSchema = MatchTravelProtocol.SnapshotSchema,
+	},
+	{
+		field = "requestReturn",
+		endpoint = MatchTravelProtocol.ENDPOINTS.REQUEST_RETURN,
+		requestSchema = MatchTravelProtocol.ReturnIntentSchema,
+		responseSchema = MatchTravelProtocol.MutationReceiptSchema,
+	},
+	{
+		field = "voteRematch",
+		endpoint = MatchTravelProtocol.ENDPOINTS.VOTE_REMATCH,
+		requestSchema = MatchTravelProtocol.RematchVoteIntentSchema,
+		responseSchema = MatchTravelProtocol.MutationReceiptSchema,
 	},
 })
 
@@ -391,8 +442,10 @@ local function validateDependencies(value: unknown): boolean
 		or type(dependencies.raycastPlacement) ~= "function"
 		or type(dependencies.pickTower) ~= "function"
 		or type(dependencies.focusBase) ~= "function"
+		or type(dependencies.focusSpectatorTarget) ~= "function"
 		or type(dependencies.restoreCamera) ~= "function"
 		or type(dependencies.applySettings) ~= "function"
+		or type(dependencies.newTransactionId) ~= "function"
 	then
 		return false
 	end
@@ -403,6 +456,7 @@ local function validateDependencies(value: unknown): boolean
 	end
 	return validateEventEndpoint(dependencies.replicationEvent, PlayableMatchProtocol.ENDPOINTS.REPLICATION)
 		and validateEventEndpoint(dependencies.attackEvent, PlayableMatchProtocol.ENDPOINTS.ATTACK_EVENT)
+		and validateEventEndpoint(dependencies.travelReplicationEvent, MatchTravelProtocol.ENDPOINTS.REPLICATION)
 end
 
 local function addConnection(data: ControllerData, value: unknown): boolean
@@ -439,6 +493,26 @@ end
 local function cancelAction(data: ControllerData)
 	local pending = data.actionPending
 	data.actionPending = nil
+	if pending ~= nil and data.dependencies ~= nil then
+		pcall(function()
+			(data.dependencies :: Dependencies).tracker:cancel(pending.pending)
+		end)
+	end
+end
+
+local function cancelTravelGet(data: ControllerData)
+	local pending = data.travelGetPending
+	data.travelGetPending = nil
+	if pending ~= nil and data.dependencies ~= nil then
+		pcall(function()
+			(data.dependencies :: Dependencies).tracker:cancel(pending.pending)
+		end)
+	end
+end
+
+local function cancelTravelMutation(data: ControllerData)
+	local pending = data.travelMutationPending
+	data.travelMutationPending = nil
 	if pending ~= nil and data.dependencies ~= nil then
 		pcall(function()
 			(data.dependencies :: Dependencies).tracker:cancel(pending.pending)
@@ -547,6 +621,96 @@ local function resultSummary(snapshot: PlayableMatchProtocol.Snapshot): string
 	return `Base overrun after {stats.wavesCompleted}/{snapshot.totalWaves} waves • Damage {stats.damageDealt}`
 end
 
+local function compatibleTravelSnapshot(
+	playable: PlayableMatchProtocol.Snapshot,
+	travel: MatchTravelProtocol.Snapshot?
+): MatchTravelProtocol.Snapshot?
+	if travel == nil or travel.matchId ~= playable.matchId or travel.viewerRole ~= playable.viewerRole then
+		return nil
+	end
+	return travel
+end
+
+local function resultRewardView(snapshot: PlayableMatchProtocol.Snapshot): any
+	local reward = snapshot.reward
+	if reward ~= nil then
+		return {
+			status = reward.status,
+			persistentGoldAwarded = reward.persistentGoldAwarded,
+			firstClearBonus = reward.firstClearBonus,
+			battleCashEarned = reward.battleCashEarned,
+			battleCashSpent = reward.battleCashSpent,
+			reason = reward.reason,
+		}
+	end
+	if snapshot.viewerRole == "Spectator" then
+		return {
+			status = "Ineligible",
+			persistentGoldAwarded = 0,
+			firstClearBonus = 0,
+			battleCashEarned = 0,
+			battleCashSpent = 0,
+			reason = "Spectators do not earn participation rewards.",
+		}
+	end
+	if not snapshot.rewarding then
+		return {
+			status = "Ineligible",
+			persistentGoldAwarded = 0,
+			firstClearBonus = 0,
+			battleCashEarned = snapshot.stats.battleCashEarned,
+			battleCashSpent = snapshot.stats.battleCashSpent,
+			reason = "Direct local matches are non-rewarding.",
+		}
+	end
+	return {
+		status = "Pending",
+		persistentGoldAwarded = 0,
+		firstClearBonus = 0,
+		battleCashEarned = snapshot.stats.battleCashEarned,
+		battleCashSpent = snapshot.stats.battleCashSpent,
+		reason = "Waiting for the durable profile claim.",
+	}
+end
+
+local function travelView(data: ControllerData, snapshot: PlayableMatchProtocol.Snapshot): any
+	local travel = compatibleTravelSnapshot(snapshot, data.travelSnapshot)
+	if travel == nil then
+		return nil
+	end
+	local rematch = travel.rematch
+	local localChoice: MatchTravelProtocol.VoteChoice? = nil
+	if rematch ~= nil then
+		for _, vote in rematch.votes do
+			if vote.userId == (data.dependencies :: Dependencies).localUserId then
+				localChoice = vote.choice
+				break
+			end
+		end
+	end
+	return {
+		returnStatus = travel.returnStatus,
+		failure = travel.publicFailure,
+		canReturn = travel.returnStatus ~= "Pending"
+			and travel.returnStatus ~= "Teleporting"
+			and data.travelMutationPending == nil,
+		rematchState = if rematch == nil then nil else rematch.state,
+		rematchStatus = if rematch == nil
+			then nil
+			else `{rematch.state} • {#rematch.votes} connected participant votes`,
+		canApprove = snapshot.viewerRole == "Participant"
+			and rematch ~= nil
+			and rematch.state == "Pending"
+			and localChoice == "Pending"
+			and data.travelMutationPending == nil,
+		canDecline = snapshot.viewerRole == "Participant"
+			and rematch ~= nil
+			and rematch.state == "Pending"
+			and localChoice == "Pending"
+			and data.travelMutationPending == nil,
+	}
+end
+
 local function renderSnapshot(data: ControllerData): boolean
 	if data.state ~= "Started" or not data.callbacksEnabled then
 		return false
@@ -579,6 +743,7 @@ local function renderSnapshot(data: ControllerData): boolean
 		local rendered = dependencies.view:render({
 			matchId = "match:loading-local",
 			revision = 0,
+			viewerRole = "Participant",
 			state = "Loading",
 			inputFamily = family,
 			wave = { current = 0, total = 1, enemiesRemaining = 0, status = "Connecting" },
@@ -635,7 +800,7 @@ local function renderSnapshot(data: ControllerData): boolean
 
 	local hotbar = table.create(#snapshot.towerOptions)
 	for slot, option in snapshot.towerOptions do
-		local available = snapshot.state == "Playing"
+		local available = snapshot.state == "Playing" and snapshot.viewerRole == "Participant"
 		local reason: string? = nil
 		if not available then
 			reason = "WAITING"
@@ -657,7 +822,10 @@ local function renderSnapshot(data: ControllerData): boolean
 	local selection: any = nil
 	if selectedTower ~= nil then
 		local owner = selectedTower.ownerUserId == dependencies.localUserId
-		local actionsAvailable = snapshot.state == "Playing" and data.actionPending == nil and owner
+		local actionsAvailable = snapshot.state == "Playing"
+			and snapshot.viewerRole == "Participant"
+			and data.actionPending == nil
+			and owner
 		selection = {
 			towerId = `tower-runtime:{selectedTower.runtimeTowerId}`,
 			revision = selectedTower.revision,
@@ -683,7 +851,7 @@ local function renderSnapshot(data: ControllerData): boolean
 		elseif snapshot.wavePhase == "Intermission" then "PreWave"
 		else "WaveActive"
 	local ready: any = nil
-	if snapshot.state == "Ready" then
+	if snapshot.state == "Ready" and snapshot.viewerRole == "Participant" then
 		ready = {
 			enabled = data.actionPending == nil,
 			countdownSeconds = nil,
@@ -692,16 +860,24 @@ local function renderSnapshot(data: ControllerData): boolean
 	end
 	local resultState: any = nil
 	if snapshot.state == "Results" then
+		local rewardView = resultRewardView(snapshot)
 		resultState = {
 			kind = snapshot.result,
 			summary = resultSummary(snapshot),
-			canReplay = data.actionPending == nil,
+			canReplay = snapshot.viewerRole == "Participant" and not snapshot.rewarding and data.actionPending == nil,
 			status = if data.actionPending ~= nil then "Waiting for server confirmation." else nil,
+			rewardStatus = rewardView.status,
+			persistentGoldAwarded = rewardView.persistentGoldAwarded,
+			firstClearBonus = rewardView.firstClearBonus,
+			battleCashEarned = rewardView.battleCashEarned,
+			battleCashSpent = rewardView.battleCashSpent,
+			rewardReason = rewardView.reason,
 		}
 	end
 	local renderResult = dependencies.view:render({
 		matchId = snapshot.matchId,
 		revision = snapshot.revision,
+		viewerRole = snapshot.viewerRole,
 		state = state,
 		inputFamily = family,
 		wave = {
@@ -717,6 +893,7 @@ local function renderSnapshot(data: ControllerData): boolean
 		selection = selection,
 		feedback = if data.feedbackCode == nil then nil else { code = data.feedbackCode },
 		result = resultState,
+		travel = travelView(data, snapshot),
 		placement = if family == "Touch"
 				and snapshot.state == "Playing"
 				and data.selectedSlot ~= nil
@@ -775,6 +952,10 @@ local function resetForReplacement(data: ControllerData, previousMatchId: string
 	data.selectedTowerId = nil
 	data.touchPlacementPosition = nil
 	data.rotationDegrees = 0
+	data.travelSnapshot = nil
+	cancelTravelGet(data)
+	cancelTravelMutation(data)
+	data.spectatorTargetId = nil
 	data.feedbackCode = nil
 	data.feedbackExpiresAt = 0
 	data.recoveryQueued = false
@@ -808,6 +989,20 @@ local function applySnapshot(
 		end
 	end
 	data.snapshot = snapshot
+	if snapshot.viewerRole ~= "Spectator" then
+		data.spectatorTargetId = nil
+	elseif data.spectatorTargetId ~= nil then
+		local found = false
+		for _, tower in snapshot.towers do
+			found = found or data.spectatorTargetId == `tower:{tower.runtimeTowerId}`
+		end
+		for _, enemy in snapshot.enemies do
+			found = found or data.spectatorTargetId == `enemy:{enemy.runtimeEnemyId}`
+		end
+		if not found then
+			data.spectatorTargetId = nil
+		end
+	end
 	pcall((data.dependencies :: Dependencies).applySettings, snapshot.settings)
 	data.lastSnapshotAt = (data.dependencies :: Dependencies).now()
 	data.acceptedSnapshotCount += 1
@@ -858,6 +1053,108 @@ local function requestRecovery(data: ControllerData)
 	end
 	data.recoveryQueued = false
 	issueGet(data, true)
+end
+
+local function applyTravelSnapshot(data: ControllerData, snapshot: MatchTravelProtocol.Snapshot): boolean
+	local playable = data.snapshot
+	if playable ~= nil and (snapshot.matchId ~= playable.matchId or snapshot.viewerRole ~= playable.viewerRole) then
+		return false
+	end
+	local current = data.travelSnapshot
+	if current ~= nil then
+		if snapshot.matchId ~= current.matchId or snapshot.revision < current.revision then
+			return false
+		elseif snapshot.revision == current.revision then
+			return true
+		end
+	end
+	data.travelSnapshot = snapshot
+	renderSnapshot(data)
+	return true
+end
+
+local function issueTravelGet(data: ControllerData): boolean
+	if data.state ~= "Started" or not data.callbacksEnabled or data.travelGetPending ~= nil then
+		return false
+	end
+	local dependencies = data.dependencies :: Dependencies
+	local built = dependencies.tracker:buildRequest(MatchTravelProtocol.ENDPOINTS.GET_SNAPSHOT, {})
+	if not isSuccess(built) then
+		return false
+	end
+	local request = (built :: any).value
+	if not RequestProtocol.isPending(request.pending) then
+		return false
+	end
+	data.travelGetPending = { pending = request.pending, issuedAt = dependencies.now() }
+	data.requestCount += 1
+	if not pcall(dependencies.getTravelSnapshot.fire, request.envelope) then
+		cancelTravelGet(data)
+		return false
+	end
+	return true
+end
+
+local function issueTravelMutation(data: ControllerData, kind: TravelMutationKind, approve: boolean?): boolean
+	local snapshot = data.snapshot
+	local travel = if snapshot == nil then nil else compatibleTravelSnapshot(snapshot, data.travelSnapshot)
+	if snapshot == nil or travel == nil or data.travelMutationPending ~= nil then
+		setFeedback(data, "TRAVEL_UNAVAILABLE")
+		renderSnapshot(data)
+		return false
+	end
+	local endpointName = if kind == "Return"
+		then MatchTravelProtocol.ENDPOINTS.REQUEST_RETURN
+		else MatchTravelProtocol.ENDPOINTS.VOTE_REMATCH
+	local endpoint = endpointFor(data, endpointName)
+	if endpoint == nil then
+		return false
+	end
+	local dependencies = data.dependencies :: Dependencies
+	local transactionId = dependencies.newTransactionId()
+	local payload: any = {
+		transactionId = transactionId,
+		matchId = snapshot.matchId,
+		observedRevision = travel.revision,
+	}
+	if kind == "Rematch" then
+		local rematch = travel.rematch
+		if snapshot.viewerRole ~= "Participant" or rematch == nil or rematch.state ~= "Pending" then
+			setFeedback(data, "REMATCH_UNAVAILABLE")
+			renderSnapshot(data)
+			return false
+		end
+		payload.approve = approve == true
+		payload.observedRematchRevision = rematch.revision
+	end
+	local built = dependencies.tracker:buildRequest(endpointName, payload)
+	if not isSuccess(built) then
+		setFeedback(data, "REQUEST_REJECTED")
+		renderSnapshot(data)
+		return false
+	end
+	local request = (built :: any).value
+	if not RequestProtocol.isPending(request.pending) then
+		return false
+	end
+	data.travelMutationPending = {
+		pending = request.pending,
+		definition = endpoint.definition,
+		kind = kind,
+		matchId = snapshot.matchId,
+		transactionId = transactionId,
+		issuedAt = dependencies.now(),
+	}
+	data.requestCount += 1
+	setFeedback(data, if kind == "Return" then "RETURN_PENDING" else "REMATCH_PENDING")
+	renderSnapshot(data)
+	if not pcall(endpoint.fire, request.envelope) then
+		cancelTravelMutation(data)
+		setFeedback(data, "SERVER_UNAVAILABLE")
+		renderSnapshot(data)
+		return false
+	end
+	return true
 end
 
 local function issueAction(
@@ -1093,12 +1390,72 @@ local function submitTowerAction(data: ControllerData, kind: "Upgrade" | "Sell" 
 	return issueAction(data, kind, payload, nil)
 end
 
+local function cycleSpectatorTarget(data: ControllerData, direction: number): boolean
+	local snapshot = data.snapshot
+	if snapshot == nil or snapshot.viewerRole ~= "Spectator" or (direction ~= -1 and direction ~= 1) then
+		return false
+	end
+	local targets = {}
+	for _, tower in snapshot.towers do
+		table.insert(targets, { id = `tower:{tower.runtimeTowerId}`, position = tower.position })
+	end
+	for _, enemy in snapshot.enemies do
+		table.insert(targets, { id = `enemy:{enemy.runtimeEnemyId}`, position = enemy.position })
+	end
+	table.sort(targets, function(left, right)
+		return left.id < right.id
+	end)
+	if #targets == 0 then
+		data.spectatorTargetId = nil
+		setFeedback(data, "SPECTATOR_TARGET_UNAVAILABLE")
+		renderSnapshot(data)
+		return false
+	end
+	local currentIndex: number? = nil
+	for index, target in targets do
+		if target.id == data.spectatorTargetId then
+			currentIndex = index
+			break
+		end
+	end
+	local nextIndex = if currentIndex == nil
+		then (if direction == 1 then 1 else #targets)
+		else (((currentIndex :: number) - 1 + direction) % #targets) + 1
+	local target = targets[nextIndex]
+	local focused, resultValue = pcall((data.dependencies :: Dependencies).focusSpectatorTarget, target.position)
+	if not focused or resultValue ~= true then
+		setFeedback(data, "SPECTATOR_TARGET_UNAVAILABLE")
+		renderSnapshot(data)
+		return false
+	end
+	data.spectatorTargetId = target.id
+	setFeedback(data, nil)
+	renderSnapshot(data)
+	return true
+end
+
 local function onSemanticAction(data: ControllerData, value: unknown): boolean
 	if data.state ~= "Started" or not data.callbacksEnabled or type(value) ~= "table" then
 		return false
 	end
 	local action = value :: any
 	local kind = action.kind
+	local snapshot = data.snapshot
+	if kind == "Return" then
+		return issueTravelMutation(data, "Return", nil)
+	elseif kind == "RematchApprove" then
+		return issueTravelMutation(data, "Rematch", true)
+	elseif kind == "RematchDecline" then
+		return issueTravelMutation(data, "Rematch", false)
+	elseif kind == "SpectatePrevious" then
+		return cycleSpectatorTarget(data, -1)
+	elseif kind == "SpectateNext" then
+		return cycleSpectatorTarget(data, 1)
+	elseif snapshot ~= nil and snapshot.viewerRole == "Spectator" and kind ~= "FocusBase" then
+		setFeedback(data, "SPECTATOR_READ_ONLY")
+		renderSnapshot(data)
+		return false
+	end
 	if kind == "SelectHotbar" then
 		return selectHotbar(data, action.slot)
 	elseif kind == "CycleHotbar" then
@@ -1125,14 +1482,14 @@ local function onSemanticAction(data: ControllerData, value: unknown): boolean
 	elseif kind == "Upgrade" or kind == "Sell" or kind == "Retarget" then
 		return submitTowerAction(data, kind)
 	elseif kind == "Ready" then
-		local snapshot = data.snapshot
 		return snapshot ~= nil
 			and snapshot.state == "Ready"
 			and issueAction(data, "Ready", { matchId = snapshot.matchId }, nil)
 	elseif kind == "Replay" then
-		local snapshot = data.snapshot
 		return snapshot ~= nil
 			and snapshot.state == "Results"
+			and snapshot.viewerRole == "Participant"
+			and not snapshot.rewarding
 			and issueAction(data, "Replay", { matchId = snapshot.matchId }, nil)
 	elseif kind == "FocusBase" then
 		local focused, resultValue = pcall((data.dependencies :: Dependencies).focusBase)
@@ -1182,7 +1539,7 @@ local function onWorldPointer(data: ControllerData, positionValue: unknown, sour
 		return
 	end
 	local snapshot = data.snapshot
-	if snapshot == nil or snapshot.state ~= "Playing" then
+	if snapshot == nil or snapshot.state ~= "Playing" or snapshot.viewerRole ~= "Participant" then
 		return
 	end
 	local picked, runtimeTowerId =
@@ -1220,6 +1577,21 @@ local function onReplication(data: ControllerData, generation: number, value: un
 			data.rejectedInputCount += 1
 			requestRecovery(data)
 		end
+	end
+end
+
+local function onTravelReplication(data: ControllerData, generation: number, value: unknown, ...: unknown)
+	if not data.callbacksEnabled or data.state ~= "Started" or generation ~= data.callbackGeneration then
+		return
+	end
+	local parsed = RequestProtocol.parseEvent(value, ...)
+	if not parsed.ok then
+		data.rejectedInputCount += 1
+		return
+	end
+	local validated = MatchTravelProtocol.validateSnapshot(parsed.value.payload)
+	if not validated.ok or not applyTravelSnapshot(data, validated.value) then
+		data.rejectedInputCount += 1
 	end
 end
 
@@ -1298,6 +1670,84 @@ local function onGetResponse(data: ControllerData, generation: number, value: un
 	if data.recoveryQueued then
 		requestRecovery(data)
 	end
+end
+
+local function onTravelGetResponse(data: ControllerData, generation: number, value: unknown, ...: unknown)
+	if not data.callbacksEnabled or data.state ~= "Started" or generation ~= data.callbackGeneration then
+		return
+	end
+	local dependencies = data.dependencies :: Dependencies
+	local handled = dependencies.tracker:handleResponse(dependencies.getTravelSnapshot.definition, value, ...)
+	if not isSuccess(handled) then
+		if
+			type(handled) == "table"
+			and type((handled :: any).error) == "table"
+			and (handled :: any).error.code == "MALFORMED_RESPONSE"
+		then
+			cancelTravelGet(data)
+			data.rejectedInputCount += 1
+		end
+		return
+	end
+	data.travelGetPending = nil
+	local response = (handled :: any).value
+	if RequestProtocol.isSuccess(response) then
+		local validated = MatchTravelProtocol.validateSnapshot((response :: RequestProtocol.Success).payload)
+		if not validated.ok or not applyTravelSnapshot(data, validated.value) then
+			data.rejectedInputCount += 1
+		end
+	end
+end
+
+local function onTravelMutationResponse(
+	data: ControllerData,
+	generation: number,
+	definition: RemoteRegistry.Definition,
+	value: unknown,
+	...: unknown
+)
+	if not data.callbacksEnabled or data.state ~= "Started" or generation ~= data.callbackGeneration then
+		return
+	end
+	local pending = data.travelMutationPending
+	local handled = (data.dependencies :: Dependencies).tracker:handleResponse(definition, value, ...)
+	if not isSuccess(handled) then
+		if
+			type(handled) == "table"
+			and type((handled :: any).error) == "table"
+			and (handled :: any).error.code == "MALFORMED_RESPONSE"
+		then
+			cancelTravelMutation(data)
+			setFeedback(data, "SERVER_UNAVAILABLE")
+			data.rejectedInputCount += 1
+			renderSnapshot(data)
+		end
+		return
+	end
+	if pending == nil or pending.definition ~= definition then
+		data.rejectedInputCount += 1
+		return
+	end
+	data.travelMutationPending = nil
+	local response = (handled :: any).value
+	if RequestProtocol.isSuccess(response) then
+		local validated = MatchTravelProtocol.validateMutationReceipt((response :: RequestProtocol.Success).payload)
+		if
+			not validated.ok
+			or validated.value.transactionId ~= pending.transactionId
+			or validated.value.snapshot.matchId ~= pending.matchId
+			or not applyTravelSnapshot(data, validated.value.snapshot)
+		then
+			setFeedback(data, "STALE_MATCH")
+			data.rejectedInputCount += 1
+		else
+			setFeedback(data, if pending.kind == "Return" then "RETURN_CONFIRMED" else "REMATCH_CONFIRMED")
+		end
+	else
+		local code = (response :: RequestProtocol.Rejected).error.code
+		setFeedback(data, PUBLIC_FEEDBACK[code] or "SERVER_UNAVAILABLE")
+	end
+	renderSnapshot(data)
 end
 
 local function finishAcceptedAction(data: ControllerData, kind: ActionRequestKind)
@@ -1382,6 +1832,8 @@ local function cleanup(data: ControllerData): boolean
 	table.clear(data.connections)
 	cancelAction(data)
 	cancelGet(data)
+	cancelTravelGet(data)
+	cancelTravelMutation(data)
 	local dependencies = data.dependencies
 	if dependencies ~= nil then
 		if not pcall(function()
@@ -1406,6 +1858,8 @@ local function cleanup(data: ControllerData): boolean
 		end
 	end
 	data.snapshot = nil
+	data.travelSnapshot = nil
+	data.spectatorTargetId = nil
 	data.selectedSlot = nil
 	data.selectedTowerId = nil
 	data.touchPlacementPosition = nil
@@ -1461,12 +1915,22 @@ local function onRenderStep(data: ControllerData, generation: number)
 		and now - (data.getPending :: PendingGet).issuedAt >= REQUEST_TIMEOUT_SECONDS
 	local actionTimedOut = data.actionPending ~= nil
 		and now - (data.actionPending :: PendingAction).issuedAt >= REQUEST_TIMEOUT_SECONDS
-	if getTimedOut or actionTimedOut then
+	local travelGetTimedOut = data.travelGetPending ~= nil
+		and now - (data.travelGetPending :: PendingTravelGet).issuedAt >= REQUEST_TIMEOUT_SECONDS
+	local travelMutationTimedOut = data.travelMutationPending ~= nil
+		and now - (data.travelMutationPending :: PendingTravelMutation).issuedAt >= REQUEST_TIMEOUT_SECONDS
+	if getTimedOut or actionTimedOut or travelGetTimedOut or travelMutationTimedOut then
 		if getTimedOut then
 			cancelGet(data)
 		end
 		if actionTimedOut then
 			cancelAction(data)
+		end
+		if travelGetTimedOut then
+			cancelTravelGet(data)
+		end
+		if travelMutationTimedOut then
+			cancelTravelMutation(data)
 		end
 		setFeedback(data, "SERVER_UNAVAILABLE")
 		renderSnapshot(data)
@@ -1510,12 +1974,24 @@ local function start(data: ControllerData)
 			onAttack(data, generation, value, ...)
 		end)
 	end)
+	connectOrFail(data, function()
+		return dependencies.travelReplicationEvent.connectEvent(function(value, ...)
+			onTravelReplication(data, generation, value, ...)
+		end)
+	end)
 	for _, spec in REQUEST_SPECS do
 		local endpoint = (dependencies :: any)[spec.field] :: RequestEndpoint
 		connectOrFail(data, function()
 			return endpoint.connectResponse(function(value, ...)
 				if spec.endpoint == PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT then
 					onGetResponse(data, generation, value, ...)
+				elseif spec.endpoint == MatchTravelProtocol.ENDPOINTS.GET_SNAPSHOT then
+					onTravelGetResponse(data, generation, value, ...)
+				elseif
+					spec.endpoint == MatchTravelProtocol.ENDPOINTS.REQUEST_RETURN
+					or spec.endpoint == MatchTravelProtocol.ENDPOINTS.VOTE_REMATCH
+				then
+					onTravelMutationResponse(data, generation, endpoint.definition, value, ...)
 				else
 					onActionResponse(data, generation, endpoint.definition, value, ...)
 				end
@@ -1541,6 +2017,9 @@ local function start(data: ControllerData)
 		cleanup(data)
 		staticError("START_FAILED")
 	end
+	-- Direct local matches remain playable when no ticketed travel host is
+	-- present; the travel request is therefore an optional parallel boundary.
+	issueTravelGet(data)
 end
 
 local function construct(logger: Log.Logger, dependencyFactory: DependencyFactory): ControllerResult
@@ -1562,6 +2041,7 @@ local function construct(logger: Log.Logger, dependencyFactory: DependencyFactor
 		callbackGeneration = 0,
 		cleanupFailed = false,
 		snapshot = nil,
+		travelSnapshot = nil,
 		retiredMatchIds = {},
 		retiredMatchRing = {},
 		matchGeneration = 0,
@@ -1571,6 +2051,9 @@ local function construct(logger: Log.Logger, dependencyFactory: DependencyFactor
 		rotationDegrees = 0,
 		getPending = nil,
 		actionPending = nil,
+		travelGetPending = nil,
+		travelMutationPending = nil,
+		spectatorTargetId = nil,
 		recoveryQueued = false,
 		lastSnapshotAt = 0,
 		renderPending = false,
@@ -1622,6 +2105,11 @@ function ControllerMethods.getMetrics(self: Controller): Metrics
 		rotationDegrees = data.rotationDegrees,
 		getPending = data.getPending ~= nil,
 		actionPending = data.actionPending ~= nil,
+		travelGetPending = data.travelGetPending ~= nil,
+		travelMutationPending = data.travelMutationPending ~= nil,
+		viewerRole = if data.snapshot == nil then nil else data.snapshot.viewerRole,
+		travelRevision = if data.travelSnapshot == nil then nil else data.travelSnapshot.revision,
+		spectatorTargetId = data.spectatorTargetId,
 		feedbackCode = data.feedbackCode,
 		viewMetrics = viewMetrics,
 		inputMetrics = inputMetrics,
@@ -1721,8 +2209,12 @@ local function makeProductionDependencies(
 	local submitSellEndpoint = resolveRequest(PlayableMatchProtocol.ENDPOINTS.SUBMIT_SELL)
 	local submitTargetModeEndpoint = resolveRequest(PlayableMatchProtocol.ENDPOINTS.SUBMIT_TARGET_MODE)
 	local submitReplayEndpoint = resolveRequest(PlayableMatchProtocol.ENDPOINTS.SUBMIT_REPLAY)
+	local getTravelSnapshotEndpoint = resolveRequest(MatchTravelProtocol.ENDPOINTS.GET_SNAPSHOT)
+	local requestReturnEndpoint = resolveRequest(MatchTravelProtocol.ENDPOINTS.REQUEST_RETURN)
+	local voteRematchEndpoint = resolveRequest(MatchTravelProtocol.ENDPOINTS.VOTE_REMATCH)
 	local replicationEndpoint = resolveEvent(PlayableMatchProtocol.ENDPOINTS.REPLICATION)
 	local attackEndpoint = resolveEvent(PlayableMatchProtocol.ENDPOINTS.ATTACK_EVENT)
+	local travelReplicationEndpoint = resolveEvent(MatchTravelProtocol.ENDPOINTS.REPLICATION)
 	local inputResult = PlayableInputMap.new(inputCallback)
 	if not isSuccess(inputResult) then
 		staticError("INPUT_CREATION_FAILED")
@@ -1778,8 +2270,12 @@ local function makeProductionDependencies(
 		submitSell = submitSellEndpoint,
 		submitTargetMode = submitTargetModeEndpoint,
 		submitReplay = submitReplayEndpoint,
+		getTravelSnapshot = getTravelSnapshotEndpoint,
+		requestReturn = requestReturnEndpoint,
+		voteRematch = voteRematchEndpoint,
 		replicationEvent = replicationEndpoint,
 		attackEvent = attackEndpoint,
+		travelReplicationEvent = travelReplicationEndpoint,
 		view = viewResult.value,
 		input = inputResult.value,
 		connectWorldPointer = function(listener)
@@ -1863,10 +2359,23 @@ local function makeProductionDependencies(
 			baseFocused = true
 			return true
 		end,
+		focusSpectatorTarget = function(position)
+			local camera = Workspace.CurrentCamera
+			if camera == nil then
+				return false
+			end
+			camera.CameraType = Enum.CameraType.Scriptable
+			camera.CFrame = CFrame.lookAt(position + Vector3.new(0, 22, 28), position)
+			baseFocused = false
+			return true
+		end,
 		restoreCamera = function()
 			restoreInitialCamera()
 		end,
 		applySettings = applySettings,
+		newTransactionId = function()
+			return `transaction:{string.lower(HttpService:GenerateGUID(false))}`
+		end,
 	}
 end
 

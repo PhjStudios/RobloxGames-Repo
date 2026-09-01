@@ -143,6 +143,9 @@ local function makeRig(assertions: Assertions): Rig
 		getInputFamily = function()
 			return "Desktop"
 		end,
+		getLocalUserId = function()
+			return 101
+		end,
 		newTransactionId = function()
 			rig.transactionSequence += 1
 			return string.format("transaction:00000000-0000-4000-8000-%012d", rig.transactionSequence)
@@ -236,6 +239,7 @@ local function profile(revision: number, gold: number?): any
 		settings = settings(),
 		tutorial = { firstJoin = false, tutorialCompleted = false, tutorialStep = 1 },
 		stats = { matchesPlayed = 2, victories = 1, defeats = 1, towersAcquired = 2, chestsOpened = 1 },
+		firstClears = {},
 		migrationOutcome = "Current",
 	}
 end
@@ -298,6 +302,49 @@ local function readyRig(assertions: Assertions): Rig
 	respond(rig, LobbyProtocol.ENDPOINTS.GET_INVENTORY, true, inventory(rig, 7))
 	respond(rig, LobbyProtocol.ENDPOINTS.GET_BANNER, true, banner(rig, 7))
 	assertions.equal(latest(rig).profileState, "Ready")
+	return rig
+end
+
+local function emptyPartySnapshot(): any
+	return { version = 1, incomingInvitations = {} }
+end
+
+local function queueSnapshot(withMember: boolean?): any
+	local members = if withMember then { { userId = 101, order = 1, isCaptain = true, readiness = "Ready" } } else {}
+	local enrollments = if withMember
+		then {
+			{
+				sequence = 1,
+				kind = "Solo",
+				leaderUserId = 101,
+				userIds = { 101 },
+				source = "UI",
+			},
+		}
+		else {}
+	return {
+		version = 1,
+		queueId = "queue:alpha",
+		revision = if withMember then 2 else 1,
+		state = "Open",
+		captainUserId = if withMember then 101 else nil,
+		configuration = {
+			mapId = "map:meadow",
+			difficultyId = "difficulty:normal",
+			privacy = "Public",
+			maxPlayers = 4,
+		},
+		members = members,
+		enrollments = enrollments,
+		canStart = withMember == true,
+	}
+end
+
+local function readySquadRig(assertions: Assertions): Rig
+	local rig = readyRig(assertions)
+	respond(rig, LobbyProtocol.ENDPOINTS.GET_PARTY, true, emptyPartySnapshot())
+	respond(rig, LobbyProtocol.ENDPOINTS.GET_QUEUES, true, { version = 1, queues = { queueSnapshot() } })
+	respond(rig, LobbyProtocol.ENDPOINTS.GET_ACTIVE_ROUTE, true, { version = 1, status = "None" })
 	return rig
 end
 
@@ -550,6 +597,86 @@ return TestHarness.suite("LobbyController", {
 	end),
 
 	TestHarness.case(
+		"loads squad authority without defaults and sends revision-bound party queue and reconnect intents",
+		function(assertions)
+			local rig = readySquadRig(assertions)
+			assertions.equal(latest(rig).partyState, "Ready")
+			assertions.equal(latest(rig).queuesState, "Ready")
+			assertions.equal(latest(rig).activeRouteState, "Ready")
+			assertions.isNil((latest(rig).partySnapshot :: any).party)
+			assertions.equal((latest(rig).queueSnapshots :: any)[1].queueId, "queue:alpha")
+
+			dispatch(rig, { kind = "Navigate", screen = "Party" })
+			dispatch(rig, { kind = "CreateParty" })
+			local createRequest = findRequest(rig, LobbyProtocol.ENDPOINTS.CREATE_PARTY) :: RequestRecord
+			assertions.isNotNil(createRequest)
+			assertions.equal(createRequest.payload.expectedRevision, 0)
+			assertions.equal(createRequest.payload.privacy, "InviteOnly")
+			respond(rig, LobbyProtocol.ENDPOINTS.CREATE_PARTY, true, {
+				transactionId = createRequest.payload.transactionId,
+				kind = "Create",
+				reason = "PartyCreated",
+				changed = true,
+				partyRevision = 1,
+				snapshot = {
+					version = 1,
+					party = {
+						version = 1,
+						partyId = "party:alpha",
+						revision = 1,
+						leaderUserId = 101,
+						privacy = "InviteOnly",
+						queueState = "Idle",
+						members = { { userId = 101, order = 1, isLeader = true, profileReady = true } },
+						pendingInvitationCount = 0,
+					},
+					incomingInvitations = {},
+				},
+			})
+			assertions.equal(((latest(rig).partySnapshot :: any).party :: any).leaderUserId, 101)
+
+			dispatch(rig, { kind = "Navigate", screen = "Queue" })
+			dispatch(rig, { kind = "JoinQueue" })
+			local joinRequest = findRequest(rig, LobbyProtocol.ENDPOINTS.JOIN_QUEUE) :: RequestRecord
+			assertions.isNotNil(joinRequest)
+			assertions.equal(joinRequest.payload.queueId, "queue:alpha")
+			assertions.equal(joinRequest.payload.expectedRevision, 1)
+			assertions.equal(joinRequest.payload.source, "UI")
+			respond(rig, LobbyProtocol.ENDPOINTS.JOIN_QUEUE, true, {
+				transactionId = joinRequest.payload.transactionId,
+				kind = "Join",
+				changed = true,
+				revision = 2,
+				snapshot = queueSnapshot(true),
+			})
+			dispatch(rig, {
+				kind = "ConfigureQueue",
+				configuration = {
+					mapId = "map:meadow",
+					difficultyId = "difficulty:normal",
+					privacy = "PartyOnly",
+					maxPlayers = 3,
+				},
+			})
+			local configureRequest = findRequest(rig, LobbyProtocol.ENDPOINTS.CONFIGURE_QUEUE) :: RequestRecord
+			assertions.isNotNil(configureRequest)
+			assertions.equal(configureRequest.payload.expectedRevision, 2)
+			assertions.equal(configureRequest.payload.configuration.privacy, "PartyOnly")
+
+			respond(rig, LobbyProtocol.ENDPOINTS.CONFIGURE_QUEUE, false, nil, "STALE_REQUEST")
+			local routeEvent = rig.events[LobbyProtocol.ENDPOINTS.ACTIVE_ROUTE_REPLICATION] :: (unknown) -> ()
+			routeEvent({ payload = { version = 1, status = "Available", matchId = "match:active", expiresAt = 500 } })
+			dispatch(rig, { kind = "ReconnectActiveMatch" })
+			local reconnectRequest = findRequest(rig, LobbyProtocol.ENDPOINTS.RECONNECT_ACTIVE_MATCH) :: RequestRecord
+			assertions.isNotNil(reconnectRequest)
+			assertions.isNil(reconnectRequest.payload.matchId)
+			assertions.isNil(reconnectRequest.payload.routeId)
+			assertions.isNil(reconnectRequest.payload.ticketId)
+			shutdown(rig)
+		end
+	),
+
+	TestHarness.case(
 		"preserves input navigation and disconnects cancels and ignores stale callbacks",
 		function(assertions)
 			local rig = readyRig(assertions)
@@ -558,9 +685,9 @@ return TestHarness.suite("LobbyController", {
 			assertions.equal(latest(rig).screen, "Inventory")
 			assertions.equal(latest(rig).inputFamily, "Gamepad")
 			dispatch(rig, { kind = "Play" })
-			assertions.equal(#latest(rig).modals, 1)
+			assertions.equal(latest(rig).screen, "Queue")
 			dispatch(rig, { kind = "Back" })
-			assertions.equal(#latest(rig).modals, 0)
+			assertions.equal(latest(rig).screen, "Home")
 
 			rig.now = 11
 			(rig.step :: () -> ())()
@@ -570,7 +697,7 @@ return TestHarness.suite("LobbyController", {
 			local event = rig.events[LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION] :: (unknown) -> ()
 			rig.definition.shutdown()
 			assertions.equal(rig.controller:getMetrics().lifecycleState, "Shutdown")
-			assertions.equal(rig.disconnectCount, 3)
+			assertions.equal(rig.disconnectCount, 6)
 			assertions.equal(rig.viewCleanupCount, 1)
 			assertions.equal(rig.networkCleanupCount, 1)
 			assertions.contains(table.concat(rig.cancelled, ","), LobbyProtocol.ENDPOINTS.GET_PROFILE)

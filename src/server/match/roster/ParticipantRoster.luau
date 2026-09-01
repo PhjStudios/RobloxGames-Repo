@@ -33,7 +33,8 @@ export type ReturnBatchOutcome = {
 }
 
 export type Operation =
-	"connect"
+	"new"
+	| "connect"
 	| "disconnect"
 	| "resolveConnection"
 	| "setReadyForConnection"
@@ -43,7 +44,8 @@ export type Operation =
 	| "cleanup"
 
 export type ErrorCode =
-	"INVALID_CONNECTION"
+	"INVALID_EXPECTED_ROSTER"
+	| "INVALID_CONNECTION"
 	| "INVALID_USER_ID"
 	| "INVALID_MATCH_STATE"
 	| "EPOCH_EXHAUSTED"
@@ -64,6 +66,7 @@ export type RosterError = {
 type ParticipantRecord = {
 	state: ParticipantState,
 	ready: boolean,
+	connectedOnce: boolean,
 }
 
 type ConnectionBinding = {
@@ -80,6 +83,7 @@ type RosterData = {
 	connections: ConnectionTable,
 	admittedCount: number,
 	orderedUserIds: { number }?,
+	fixedOrder: boolean,
 	cleaned: boolean,
 }
 
@@ -172,7 +176,9 @@ local function connectOutcome(kind: ConnectKind, changed: boolean, participant: 
 end
 
 local function invalidateOrdering(data: RosterData)
-	data.orderedUserIds = nil
+	if not data.fixedOrder then
+		data.orderedUserIds = nil
+	end
 end
 
 local function orderedUserIds(data: RosterData): { number }
@@ -269,10 +275,12 @@ function RosterMethods.connect(
 			return Result.ok(connectOutcome("Returned", false, participantSnapshot(userId, record)))
 		end
 
-		if ADMISSION_STATES[matchState] == true then
+		if matchState ~= "Closing" and (record.connectedOnce or ADMISSION_STATES[matchState] == true) then
 			record.state = "Active"
 			record.ready = false
-			return Result.ok(connectOutcome("Reactivated", true, participantSnapshot(userId, record)))
+			local kind: ConnectKind = if record.connectedOnce then "Reactivated" else "Admitted"
+			record.connectedOnce = true
+			return Result.ok(connectOutcome(kind, true, participantSnapshot(userId, record)))
 		end
 
 		record.state = "Spectator"
@@ -280,7 +288,7 @@ function RosterMethods.connect(
 		return Result.ok(connectOutcome("Spectator", true, participantSnapshot(userId, record)))
 	end
 
-	if ADMISSION_STATES[matchState] ~= true or data.admittedCount >= MAX_PARTICIPANTS then
+	if data.fixedOrder or ADMISSION_STATES[matchState] ~= true or data.admittedCount >= MAX_PARTICIPANTS then
 		data.connections[connectionValue :: any] = {
 			userId = userId,
 			epoch = 0,
@@ -292,6 +300,7 @@ function RosterMethods.connect(
 	data.records[userId] = {
 		state = "Active",
 		ready = false,
+		connectedOnce = true,
 	}
 	data.epochs[userId] = 1
 	data.connections[connectionValue :: any] = {
@@ -433,18 +442,49 @@ function RosterMethods.cleanup(self: Roster): Result.Result<boolean, RosterError
 	data.connections = weakConnectionTable()
 	data.admittedCount = 0
 	data.orderedUserIds = nil
+	data.fixedOrder = false
 	return Result.ok(true)
 end
 
-function ParticipantRoster.new(): Result.Result<Roster, RosterError>
+function ParticipantRoster.new(expectedUserIdsValue: unknown?): Result.Result<Roster, RosterError>
+	local records: { [number]: ParticipantRecord } = {}
+	local epochs: { [number]: number } = {}
+	local admittedCount = 0
+	local ordered: { number }? = nil
+	local fixedOrder = false
+	if expectedUserIdsValue ~= nil then
+		if type(expectedUserIdsValue) ~= "table" or getmetatable(expectedUserIdsValue :: any) ~= nil then
+			return failure("INVALID_EXPECTED_ROSTER", "new")
+		end
+		local expected = expectedUserIdsValue :: { unknown }
+		if #expected < 1 or #expected > MAX_PARTICIPANTS then
+			return failure("INVALID_EXPECTED_ROSTER", "new")
+		end
+		local seen: { [number]: boolean } = {}
+		local expectedOrder: { number } = {}
+		for _, userIdValue in expected do
+			if not isUserId(userIdValue) or seen[userIdValue :: number] then
+				return failure("INVALID_EXPECTED_ROSTER", "new")
+			end
+			local userId = userIdValue :: number
+			seen[userId] = true
+			records[userId] = { state = "Disconnected", ready = false, connectedOnce = false }
+			epochs[userId] = 0
+			table.insert(expectedOrder, userId)
+		end
+		admittedCount = #expectedOrder
+		ordered = table.freeze(expectedOrder)
+		fixedOrder = true
+	end
 	local roster = setmetatable({}, RosterMethods) :: Roster
 	table.freeze(roster)
 	ROSTER_DATA[roster] = {
-		records = {},
-		epochs = {},
+		records = records,
+		epochs = epochs,
 		connections = weakConnectionTable(),
-		admittedCount = 0,
-		orderedUserIds = nil,
+		admittedCount = admittedCount,
+		orderedUserIds = ordered,
+		fixedOrder = fixedOrder,
 		cleaned = false,
 	}
 	return Result.ok(roster)

@@ -406,6 +406,63 @@ function Methods.read(self: Service, userIdValue: unknown): Result.Result<Profil
 	return Result.ok(session.profile)
 end
 
+-- Synchronously closes the profile mutation gate and returns the exact profile
+-- revision that a travel ticket may snapshot. No persistence call is made here;
+-- the subsequent release owns the save. Because every mutation requires Ready,
+-- no coroutine can change the profile after this method returns successfully.
+function Methods.beginTransfer(self: Service, userIdValue: unknown): Result.Result<ProfileSchema.Profile, ServiceError>
+	local data = requireData(self)
+	if not validUserId(userIdValue) then
+		return errorResult("INVALID_USER_ID", "beginTransfer", nil)
+	end
+	if data.closing or data.lifecycleState == "ShuttingDown" or data.lifecycleState == "Shutdown" then
+		return errorResult("NOT_READY", "beginTransfer", nil)
+	end
+	local userId = userIdValue :: number
+	local session = data.sessions[userId]
+	if session ~= nil and session.state == "Ready" and not leaseIsCurrent(data, session) then
+		if session.saving then
+			return errorResult("BUSY", "beginTransfer", nil)
+		end
+		failExpiredLease(session)
+		return errorResult("SESSION_LOST", "beginTransfer", nil)
+	end
+	if
+		session == nil
+		or session.state ~= "Ready"
+		or session.profile == nil
+		or not session.hasLock
+		or session.saving
+	then
+		return errorResult("NOT_READY", "beginTransfer", nil)
+	end
+	session.state = "Releasing"
+	session.releaseRequested = true
+	return Result.ok(session.profile)
+end
+
+-- Reopens only a transfer gate that has not begun persistence. This is used
+-- when another squad member cannot be frozen, before any ownership is released.
+function Methods.cancelTransfer(self: Service, userIdValue: unknown): Result.Result<boolean, ServiceError>
+	local data = requireData(self)
+	if not validUserId(userIdValue) then
+		return errorResult("INVALID_USER_ID", "cancelTransfer", nil)
+	end
+	local session = data.sessions[userIdValue :: number]
+	if
+		session == nil
+		or session.state ~= "Releasing"
+		or session.profile == nil
+		or not session.hasLock
+		or session.saving
+	then
+		return errorResult("INVALID_STATE", "cancelTransfer", nil)
+	end
+	session.releaseRequested = false
+	session.state = "Ready"
+	return Result.ok(true)
+end
+
 function Methods.load(self: Service, userIdValue: unknown): Result.Result<ProfileSchema.Profile, ServiceError>
 	local data = requireData(self)
 	if not validUserId(userIdValue) then
