@@ -27,6 +27,10 @@ export type TutorialView = {
 	firstJoin: boolean,
 	tutorialCompleted: boolean,
 	tutorialStep: number,
+	version: number?,
+	attempt: number?,
+	skipped: boolean?,
+	trackedMatchId: string?,
 }
 
 export type StatisticsView = {
@@ -76,6 +80,10 @@ local TUTORIAL = PayloadValidation.record({
 	firstJoin = PayloadValidation.boolean(),
 	tutorialCompleted = PayloadValidation.boolean(),
 	tutorialStep = PayloadValidation.integer(0, 20),
+	version = PayloadValidation.optional(PayloadValidation.integer(1, 1)),
+	attempt = PayloadValidation.optional(PayloadValidation.integer(1, 1_000_000)),
+	skipped = PayloadValidation.optional(PayloadValidation.boolean()),
+	trackedMatchId = PayloadValidation.optional(PayloadValidation.id("match")),
 })
 
 local STATISTICS = PayloadValidation.record({
@@ -112,6 +120,29 @@ local function issue(path: { Validation.PathSegment }, message: string)
 	return Result.err(Validation.issue("INVALID_REFERENCE", path, message))
 end
 
+local function validTutorialView(tutorial: TutorialView): boolean
+	local hasVersionedFields = tutorial.version ~= nil or tutorial.attempt ~= nil or tutorial.skipped ~= nil
+	if not hasVersionedFields then
+		-- Version-1 profile snapshots can remain in flight during a rolling server
+		-- handoff. Their legacy three-field tutorial projection stays readable.
+		return tutorial.trackedMatchId == nil
+	end
+	if tutorial.version ~= 1 or tutorial.attempt == nil or tutorial.skipped == nil or tutorial.tutorialStep > 9 then
+		return false
+	end
+	if tutorial.firstJoin ~= (tutorial.tutorialStep == 0) then
+		return false
+	end
+	if tutorial.tutorialCompleted ~= (tutorial.tutorialStep == 9) then
+		return false
+	end
+	if tutorial.skipped and tutorial.tutorialStep ~= 9 then
+		return false
+	end
+	local requiresMatch = tutorial.tutorialStep >= 5 and tutorial.tutorialStep <= 8
+	return requiresMatch == (tutorial.trackedMatchId ~= nil)
+end
+
 function ProfileProtocol.validateSnapshot(value: unknown): Result.Result<Snapshot, Validation.Issue>
 	local result = SnapshotSchema:validate(value)
 	if not result.ok then
@@ -128,6 +159,9 @@ function ProfileProtocol.validateSnapshot(value: unknown): Result.Result<Snapsho
 	if snapshot.state == "Ready" then
 		if not hasReadyFields or snapshot.retryable then
 			return issue({ "payload" }, "Ready profile snapshot is incomplete or retryable")
+		end
+		if not validTutorialView(snapshot.tutorial :: TutorialView) then
+			return issue({ "payload", "tutorial" }, "Tutorial projection is internally inconsistent")
 		end
 	elseif
 		hasReadyFields
@@ -189,9 +223,13 @@ function ProfileProtocol.ready(profile: any, migrationOutcome: MigrationOutcome)
 			reducedMotionEnabled = profile.settings.reducedMotionEnabled,
 		},
 		tutorial = {
+			version = profile.tutorial.version,
 			firstJoin = profile.tutorial.firstJoin,
 			tutorialCompleted = profile.tutorial.tutorialCompleted,
 			tutorialStep = profile.tutorial.tutorialStep,
+			attempt = profile.tutorial.attempt,
+			skipped = profile.tutorial.skipped,
+			trackedMatchId = if profile.tutorial.trackedMatchId == "" then nil else profile.tutorial.trackedMatchId,
 		},
 		stats = {
 			matchesPlayed = profile.stats.matchesPlayed,

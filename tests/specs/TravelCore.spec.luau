@@ -215,7 +215,12 @@ return TestHarness.suite("bounded server-only travel records", {
 		local unavailable = service:resolve(101, "route:travel-core", NOW)
 		assertions.isTrue(unavailable.ok)
 		assertions.isNil(unavailable.value)
+		adapter:failNext(1)
+		local unconfirmed = service:findConfirmed(101, NOW)
+		assertions.isFalse(unconfirmed.ok)
+		assertions.equal(unconfirmed.error.code, "STORE_UNAVAILABLE")
 		assertions.isNil(service:resolve(101, "route:travel-core", NOW + 2_700).value)
+		assertions.isNil(service:findConfirmed(101, NOW + 2_700).value)
 	end),
 	TestHarness.case("uses only the final create retry outcome across a cleared-route race", function(assertions)
 		local state: any = route()

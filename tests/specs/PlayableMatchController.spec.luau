@@ -61,7 +61,7 @@ local function snapshot(revision: number, state: string?): any
 		difficultyId = "difficulty:local",
 		difficultyDisplayName = "Local",
 		serverTime = 110,
-		waveNumber = if isReady then 0 else 2,
+		waveNumber = if isReady then 0 elseif isResults then 5 else 2,
 		totalWaves = 5,
 		wavePhase = if isResults then "Results" elseif isReady then "Ready" else "Resolving",
 		nextWaveServerTime = 0,
@@ -112,7 +112,7 @@ local function snapshot(revision: number, state: string?): any
 			},
 		stats = {
 			durationSeconds = 10,
-			wavesCompleted = if isResults then 5 else 1,
+			wavesCompleted = if isResults then 5 elseif isReady then 0 else 1,
 			damageDealt = 24,
 			battleCashEarned = 76,
 			battleCashSpent = 230,
@@ -177,7 +177,7 @@ local function makeSignal(rig: any): Signal
 	return signal
 end
 
-local function makeRig(): any
+local function makeRig(localUserId: number?): any
 	local rig: any = {
 		fires = {},
 		responses = {},
@@ -194,6 +194,7 @@ local function makeRig(): any
 		raycastPosition = Vector3.new(8, 0, 9),
 		raycastScreenPosition = nil,
 		pickedTowerId = 1,
+		overviewFocused = 0,
 		focused = 0,
 		spectatorFocuses = {},
 		restored = 0,
@@ -248,7 +249,7 @@ local function makeRig(): any
 	end
 
 	local dependencies: any = {
-		localUserId = 42,
+		localUserId = localUserId or 42,
 		tracker = trackerResult.value,
 		getSnapshot = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT),
 		submitReady = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.SUBMIT_READY),
@@ -333,6 +334,10 @@ local function makeRig(): any
 		pickTower = function(_position, _towers, _family)
 			return rig.pickedTowerId
 		end,
+		focusOverview = function()
+			rig.overviewFocused += 1
+			return true
+		end,
 		focusBase = function()
 			rig.focused += 1
 			return true
@@ -410,12 +415,14 @@ return TestHarness.suite("playable Match production client controller", {
 		assertions.equal(metrics.matchId, "match:playable-controller")
 		assertions.equal(metrics.revision, 7)
 		assertions.equal(metrics.acceptedSnapshotCount, 1)
+		assertions.equal(rig.overviewFocused, 1)
 		assertions.equal(#rig.renders, 2)
 		assertions.equal(rig.renders[2].battleCash, 245)
 		assertions.equal(rig.renders[2].base.health, 27)
 		assertions.equal(rig.renders[2].wave.enemiesRemaining, 1)
 		assertions.equal(#rig.worlds[2].towers, 1)
 		assertions.equal(#rig.worlds[2].enemies, 1)
+		assertions.equal(rig.worlds[2].towers[1].level, 2)
 		assertions.equal(rig.worlds[2].towers[1].range, 27)
 		assertions.equal(rig.renders[2].uiScale, 1.25)
 		assertions.isTrue(rig.renders[2].reducedMotion)
@@ -426,6 +433,25 @@ return TestHarness.suite("playable Match production client controller", {
 		assertions.equal(rig.appliedSettings[1].uiScale, 1.25)
 		cleanupRig(rig)
 	end),
+
+	TestHarness.case(
+		"reflows the current snapshot exactly once after the device viewport settles",
+		function(assertions)
+			local rig = makeRig()
+			local renderListener = rig.renderListener :: any
+			deliverInitial(rig, snapshot(7))
+			assertions.equal(#rig.renders, 2)
+			assertions.equal(rig.renders[2].viewport, Vector2.new(1280, 720))
+
+			rig.viewport = Vector2.new(750, 361)
+			renderListener(0.1)
+			assertions.equal(#rig.renders, 3)
+			assertions.equal(rig.renders[3].viewport, Vector2.new(750, 361))
+			renderListener(0.1)
+			assertions.equal(#rig.renders, 3)
+			cleanupRig(rig)
+		end
+	),
 
 	TestHarness.case("omits a zero Studio viewport so the view can use its safe fallback", function(assertions)
 		local rig = makeRig()
@@ -509,6 +535,7 @@ return TestHarness.suite("playable Match production client controller", {
 			}))
 			assertions.equal(rig.controller:getMetrics().selectedSlot, 1)
 			assertions.equal(rig.contexts[#rig.contexts], "Placement")
+			assertions.equal(rig.renders[#rig.renders].hotbar[1].description, "Place Dart Ant.")
 			assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
 				kind = "Rotate",
 				source = "Desktop",
@@ -638,6 +665,7 @@ return TestHarness.suite("playable Match production client controller", {
 			assertions.equal(rig.controller:getMetrics().selectedTowerId, 1)
 			assertions.equal(rig.contexts[#rig.contexts], "Tower")
 			assertions.equal(rig.renders[#rig.renders].selection.revision, 4)
+			assertions.equal(rig.renders[#rig.renders].selection.description, "Place Dart Ant.")
 			assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
 				kind = "Upgrade",
 				source = "Gamepad",
@@ -650,6 +678,30 @@ return TestHarness.suite("playable Match production client controller", {
 			cleanupRig(rig)
 		end
 	),
+
+	TestHarness.case("keeps a negative Studio UserId aligned with authoritative tower ownership", function(assertions)
+		local rig = makeRig(-3)
+		local direct = snapshot(7)
+		direct.towers[1].ownerUserId = -3
+		deliverInitial(rig, direct)
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "CycleTower",
+			source = "Gamepad",
+			direction = 1,
+		}))
+		assertions.equal(rig.controller:getMetrics().selectedTowerId, 1)
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "Upgrade",
+			source = "Gamepad",
+		}))
+		local requests = rig.fires[PlayableMatchProtocol.ENDPOINTS.SUBMIT_UPGRADE]
+		assertions.equal(#requests, 1)
+		assertions.equal(requests[1].payload.runtimeTowerId, 1)
+		assertions.equal(requests[1].payload.towerRevision, 4)
+		cleanupRig(rig)
+		assertions.equal(rig.viewCleaned, 1)
+		assertions.equal(rig.inputCleaned, 1)
+	end),
 
 	TestHarness.case(
 		"accepts full replication and presents compact attacks only for the current match",
@@ -728,6 +780,55 @@ return TestHarness.suite("playable Match production client controller", {
 		cleanupRig(rig)
 	end),
 
+	TestHarness.case("projects authoritative Endless and boss state without a fake wave total", function(assertions)
+		local rig = makeRig()
+		local active = snapshot(7)
+		active.modeKind = "Endless"
+		active.totalWaves = nil
+		active.contentVersion = 1
+		active.seed = 4_242
+		active.waveNumber = 317
+		active.bossKind = "Boss"
+		active.tutorialStep = 5
+		active.enemies[1].enemyId = "enemy:queen-ant"
+		active.enemies[1].displayName = "Queen Ant"
+		active.enemies[1].currentHealth = 2_500
+		active.enemies[1].maximumHealth = 10_000
+		active.enemies[1].threatClass = "Boss"
+		active.boss = {
+			runtimeEnemyId = 3,
+			displayName = "Queen Ant",
+			currentHealth = 2_500,
+			maximumHealth = 10_000,
+			threatClass = "Boss",
+		}
+		deliverInitial(rig, active)
+		local rendered = rig.renders[#rig.renders]
+		assertions.equal(rendered.wave.modeKind, "Endless")
+		assertions.isNil(rendered.wave.total)
+		assertions.equal(rendered.wave.bossKind, "Boss")
+		assertions.equal(rendered.wave.boss.displayName, "Queen Ant")
+		assertions.equal(rendered.tutorialStep, 5)
+
+		local results = snapshot(8, "Results")
+		results.modeKind = "Endless"
+		results.totalWaves = nil
+		results.contentVersion = 1
+		results.seed = 4_242
+		results.bossKind = "None"
+		results.tutorialStep = 8
+		results.result = "Defeat"
+		results.waveNumber = 317
+		results.stats.wavesCompleted = 317
+		rig.events[PlayableMatchProtocol.ENDPOINTS.REPLICATION]:fire({ payload = results })
+		rendered = rig.renders[#rig.renders]
+		assertions.isNil(rendered.wave.total)
+		assertions.contains(rendered.result.summary, "Endless")
+		assertions.contains(rendered.result.summary, "317 waves cleared")
+		assertions.equal(rendered.tutorialStep, 8)
+		cleanupRig(rig)
+	end),
+
 	TestHarness.case(
 		"replaces replay state cleanly for response-first and replication-first orderings",
 		function(assertions)
@@ -754,8 +855,10 @@ return TestHarness.suite("playable Match production client controller", {
 			responseFirst.responses[getEndpoint]:fire(successWire(recoveryRequest, replayReplacement()))
 			assertions.equal(responseFirst.controller:getMetrics().matchId, "match:playable-replacement")
 			assertions.equal(responseFirst.controller:getMetrics().matchGeneration, 1)
+			assertions.equal(responseFirst.overviewFocused, 2)
 			responseFirst.events[PlayableMatchProtocol.ENDPOINTS.REPLICATION]:fire({ payload = snapshot(9, "Results") })
 			assertions.equal(responseFirst.controller:getMetrics().matchId, "match:playable-replacement")
+			assertions.equal(responseFirst.overviewFocused, 2)
 			cleanupRig(responseFirst)
 
 			local replicationFirst = makeRig()
@@ -768,6 +871,7 @@ return TestHarness.suite("playable Match production client controller", {
 			replicationFirst.events[PlayableMatchProtocol.ENDPOINTS.REPLICATION]:fire({ payload = replayReplacement() })
 			assertions.isFalse(replicationFirst.controller:getMetrics().actionPending)
 			assertions.equal(replicationFirst.controller:getMetrics().matchGeneration, 1)
+			assertions.equal(replicationFirst.overviewFocused, 2)
 			replicationFirst.responses[replayEndpoint]:fire(successWire(lateRequest, {
 				accepted = true,
 				reason = "Accepted",

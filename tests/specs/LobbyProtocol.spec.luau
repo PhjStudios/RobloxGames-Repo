@@ -39,6 +39,8 @@ return TestHarness.suite("Lobby network protocol", {
 		assertions.isTrue(PayloadValidation.isSchema(LobbyProtocol.BannerRequestSchema))
 		assertions.isTrue(PayloadValidation.isSchema(LobbyProtocol.QueueListSchema))
 		assertions.isTrue(PayloadValidation.isSchema(LobbyProtocol.ActiveRouteViewSchema))
+		assertions.isTrue(PayloadValidation.isSchema(LobbyProtocol.TutorialActionIntentSchema))
+		assertions.isTrue(PayloadValidation.isSchema(LobbyProtocol.TutorialMutationReceiptSchema))
 
 		local expected = {
 			GET_PROFILE = "GetLobbyProfile",
@@ -51,6 +53,9 @@ return TestHarness.suite("Lobby network protocol", {
 			GET_BANNER = "GetLobbyBanner",
 			PULL_CHEST = "PullLobbyChest",
 			UPDATE_SETTINGS = "UpdateLobbySettings",
+			ADVANCE_TUTORIAL = "AdvanceLobbyTutorial",
+			SKIP_TUTORIAL = "SkipLobbyTutorial",
+			REPLAY_TUTORIAL = "ReplayLobbyTutorial",
 			GET_PARTY = "GetLobbyParty",
 			CREATE_PARTY = "CreateLobbyParty",
 			INVITE_PARTY = "InviteLobbyParty",
@@ -83,7 +88,7 @@ return TestHarness.suite("Lobby network protocol", {
 			assertions.isFalse(seenValues[value] == true)
 			seenValues[value] = true
 		end
-		assertions.equal(count, 33)
+		assertions.equal(count, 36)
 
 		assertions.equal(LobbyProtocol.VERSION, 1)
 	end),

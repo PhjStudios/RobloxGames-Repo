@@ -11,6 +11,12 @@ export type Anchor = {
 	adornee: BasePart | Attachment,
 }
 
+export type Dependencies = {
+	mapDisplayName: (string) -> string?,
+	difficultyDisplayName: (string) -> string?,
+	playerDisplayName: (number) -> string?,
+}
+
 export type ErrorCode =
 	"INVALID_ANCHORS"
 	| "DISPLAY_CONFLICT"
@@ -37,6 +43,7 @@ type ServiceData = {
 	displays: { [string]: Display },
 	state: LifecycleState,
 	updateCount: number,
+	dependencies: Dependencies?,
 }
 
 local Methods = {}
@@ -159,16 +166,41 @@ local function clearPortraits(display: Display)
 	table.clear(display.portraitImages)
 end
 
-local function render(display: Display, snapshot: QueueProtocol.Snapshot)
+local function resolvedName(callback: ((any) -> string?)?, value: any, fallback: string): string
+	if callback == nil then
+		return fallback
+	end
+	local called, result = pcall(callback, value)
+	return if called and type(result) == "string" and #result >= 1 and #result <= 64 then result else fallback
+end
+
+local function render(data: ServiceData, display: Display, snapshot: QueueProtocol.Snapshot)
 	display.state.Text = `STATE: {string.upper(snapshot.state)}{if snapshot.publicStatus == nil
 		then ""
 		else ` · {snapshot.publicStatus}`}`
-	display.configuration.Text =
-		`{snapshot.configuration.mapId}\n{snapshot.configuration.difficultyId} · {snapshot.configuration.privacy}`
+	local dependencies = data.dependencies
+	local mapName = resolvedName(
+		if dependencies == nil then nil else dependencies.mapDisplayName,
+		snapshot.configuration.mapId,
+		"Unavailable map"
+	)
+	local difficultyName = resolvedName(
+		if dependencies == nil then nil else dependencies.difficultyDisplayName,
+		snapshot.configuration.difficultyId,
+		"Unavailable difficulty"
+	)
+	display.configuration.Text = `{mapName}\n{difficultyName} · {snapshot.configuration.privacy}`
+	local captainName = if snapshot.captainUserId == nil
+		then nil
+		else resolvedName(
+			if dependencies == nil then nil else dependencies.playerDisplayName,
+			snapshot.captainUserId,
+			"Player"
+		)
 	display.roster.Text = `PLAYERS {#snapshot.members}/{snapshot.configuration.maxPlayers}{if snapshot.captainUserId
 			== nil
 		then ""
-		else ` · CAPTAIN {snapshot.captainUserId}`}`
+		else ` · CAPTAIN {captainName}`}`
 	local blockerCount = 0
 	for _, member in snapshot.members do
 		if member.readiness ~= "Ready" then
@@ -218,7 +250,7 @@ function Methods.update(
 	if not snapshot.ok or snapshot.value.queueId ~= queueIdValue then
 		return failure("INVALID_SNAPSHOT", "update")
 	end
-	render(display, snapshot.value)
+	render(data, display, snapshot.value)
 	data.updateCount += 1
 	return Result.ok(true)
 end
@@ -279,12 +311,26 @@ function Methods.getServiceDefinition(self: Service): ServiceLifecycle.ServiceDe
 	})
 end
 
-function QueueWorldDisplayService.new(anchorsValue: unknown): Result.Result<Service, DisplayError>
+function QueueWorldDisplayService.new(
+	anchorsValue: unknown,
+	dependenciesValue: Dependencies?
+): Result.Result<Service, DisplayError>
 	if
 		type(anchorsValue) ~= "table"
 		or getmetatable(anchorsValue :: any) ~= nil
 		or #anchorsValue < 1
 		or #anchorsValue > 16
+	then
+		return failure("INVALID_ANCHORS", "new")
+	end
+	if
+		dependenciesValue ~= nil
+		and (
+			type(dependenciesValue) ~= "table"
+			or type(dependenciesValue.mapDisplayName) ~= "function"
+			or type(dependenciesValue.difficultyDisplayName) ~= "function"
+			or type(dependenciesValue.playerDisplayName) ~= "function"
+		)
 	then
 		return failure("INVALID_ANCHORS", "new")
 	end
@@ -316,7 +362,12 @@ function QueueWorldDisplayService.new(anchorsValue: unknown): Result.Result<Serv
 	end
 	local service = setmetatable({}, Methods) :: Service
 	table.freeze(service)
-	DATA[service] = { displays = displays, state = "Constructed", updateCount = 0 }
+	DATA[service] = {
+		displays = displays,
+		state = "Constructed",
+		updateCount = 0,
+		dependencies = dependenciesValue,
+	}
 	return Result.ok(service)
 end
 

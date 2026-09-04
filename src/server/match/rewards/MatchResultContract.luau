@@ -7,6 +7,14 @@ local Result = require(ReplicatedStorage.Shared.util.Result)
 local Validation = require(ReplicatedStorage.Shared.util.Validation)
 
 export type Outcome = "Victory" | "Defeat"
+export type ModeKind = "Finite" | "Endless"
+export type TerminationReason =
+	"Victory"
+	| "BaseDefeated"
+	| "PlayerEnded"
+	| "AllParticipantsGone"
+	| "Shutdown"
+	| "TechnicalTermination"
 
 export type Entry = {
 	userId: number,
@@ -20,6 +28,9 @@ export type Entry = {
 	battleCashSpent: number,
 }
 
+-- Current-only fields are optional in the shared type so historical version-1
+-- records and current records can use one durable ledger API. Validation still
+-- requires the exact field set for the declared version.
 export type MatchResult = {
 	version: number,
 	resultId: string,
@@ -31,6 +42,12 @@ export type MatchResult = {
 	createdAt: number,
 	rewardingMatch: boolean,
 	entries: { Entry },
+	modeKind: ModeKind?,
+	highestCompletedWave: number?,
+	elapsedSeconds: number?,
+	seed: number?,
+	contentVersion: number?,
+	terminationReason: TerminationReason?,
 }
 
 export type ContractError = {
@@ -38,11 +55,13 @@ export type ContractError = {
 	path: string,
 }
 
-local VERSION = 1
+local LEGACY_VERSION = 1
+local CURRENT_VERSION = 2
 local MAX_ENTRIES = 4
 local MAX_COUNTER = 1_000_000_000_000
+local MAX_SEED = 2_147_483_647
 
-local ROOT_FIELDS = table.freeze({
+local COMMON_ROOT_FIELDS = {
 	version = true,
 	resultId = true,
 	matchId = true,
@@ -53,7 +72,17 @@ local ROOT_FIELDS = table.freeze({
 	createdAt = true,
 	rewardingMatch = true,
 	entries = true,
-})
+}
+
+local LEGACY_ROOT_FIELDS = table.freeze(table.clone(COMMON_ROOT_FIELDS))
+local currentFields = table.clone(COMMON_ROOT_FIELDS)
+currentFields.modeKind = true
+currentFields.highestCompletedWave = true
+currentFields.elapsedSeconds = true
+currentFields.seed = true
+currentFields.contentVersion = true
+currentFields.terminationReason = true
+local CURRENT_ROOT_FIELDS = table.freeze(currentFields)
 
 local ENTRY_FIELDS = table.freeze({
 	userId = true,
@@ -68,8 +97,11 @@ local ENTRY_FIELDS = table.freeze({
 })
 
 local MatchResultContract = {
-	VERSION = VERSION,
+	VERSION = CURRENT_VERSION,
+	LEGACY_VERSION = LEGACY_VERSION,
+	CURRENT_VERSION = CURRENT_VERSION,
 	MAX_ENTRIES = MAX_ENTRIES,
+	MAX_COUNTER = MAX_COUNTER,
 }
 
 local function failure(code: string, path: string): Result.Failure<ContractError>
@@ -115,43 +147,20 @@ local function opaque(value: unknown, prefix: string): string?
 	return value :: string
 end
 
-function MatchResultContract.validate(value: unknown): Result.Result<MatchResult, ContractError>
-	local record = exact(value, ROOT_FIELDS)
-	if record == nil then
-		return failure("INVALID_RESULT", "result")
+local function validateEntries(value: unknown): { Entry }?
+	if type(value) ~= "table" or getmetatable(value :: any) ~= nil then
+		return nil
 	end
-	local matchId = Ids.validateMatchId(record.matchId)
-	local mapId = Ids.validateMapId(record.mapId)
-	local difficultyId = Ids.validateDifficultyId(record.difficultyId)
-	local resultId = opaque(record.resultId, "result")
-	local ticketId = opaque(record.ticketId, "ticket")
-	local createdAt = integer(record.createdAt, 0, Validation.MAX_SAFE_INTEGER)
-	if
-		record.version ~= VERSION
-		or resultId == nil
-		or #resultId > 43
-		or ticketId == nil
-		or not matchId.ok
-		or not mapId.ok
-		or not difficultyId.ok
-		or (record.outcome ~= "Victory" and record.outcome ~= "Defeat")
-		or createdAt == nil
-		or type(record.rewardingMatch) ~= "boolean"
-		or type(record.entries) ~= "table"
-		or getmetatable(record.entries :: any) ~= nil
-	then
-		return failure("INVALID_FIELD", "result")
-	end
-	local rawEntries = record.entries :: { [any]: unknown }
+	local rawEntries = value :: { [any]: unknown }
 	local count = 0
 	for key in next, rawEntries do
 		if type(key) ~= "number" or not Validation.isSafeInteger(key) or key < 1 or key > MAX_ENTRIES then
-			return failure("INVALID_ENTRIES", "result.entries")
+			return nil
 		end
 		count += 1
 	end
 	if count < 1 or count ~= #rawEntries then
-		return failure("INVALID_ENTRIES", "result.entries")
+		return nil
 	end
 	local entries: { Entry } = table.create(count)
 	local seen: { [number]: boolean } = {}
@@ -172,7 +181,7 @@ function MatchResultContract.validate(value: unknown): Result.Result<MatchResult
 			or integer(entry.battleCashSpent, 0, MAX_COUNTER) == nil
 			or (entry.spectator == true and entry.authenticatedParticipant == true)
 		then
-			return failure("INVALID_ENTRY", `result.entries[{index}]`)
+			return nil
 		end
 		seen[userId] = true
 		entries[index] = table.freeze({
@@ -187,8 +196,43 @@ function MatchResultContract.validate(value: unknown): Result.Result<MatchResult
 			battleCashSpent = entry.battleCashSpent :: number,
 		})
 	end
-	return Result.ok(table.freeze({
-		version = VERSION,
+	return table.freeze(entries)
+end
+
+function MatchResultContract.validate(value: unknown): Result.Result<MatchResult, ContractError>
+	local rawVersion = if type(value) == "table" then (value :: any).version else nil
+	local fields = if rawVersion == LEGACY_VERSION
+		then LEGACY_ROOT_FIELDS
+		elseif rawVersion == CURRENT_VERSION then CURRENT_ROOT_FIELDS
+		else nil
+	local record = if fields == nil then nil else exact(value, fields)
+	if record == nil then
+		return failure("INVALID_RESULT", "result")
+	end
+	local matchId = Ids.validateMatchId(record.matchId)
+	local mapId = Ids.validateMapId(record.mapId)
+	local difficultyId = Ids.validateDifficultyId(record.difficultyId)
+	local resultId = opaque(record.resultId, "result")
+	local ticketId = opaque(record.ticketId, "ticket")
+	local createdAt = integer(record.createdAt, 0, Validation.MAX_SAFE_INTEGER)
+	local entries = validateEntries(record.entries)
+	if
+		resultId == nil
+		or #resultId > 43
+		or ticketId == nil
+		or not matchId.ok
+		or not mapId.ok
+		or not difficultyId.ok
+		or (record.outcome ~= "Victory" and record.outcome ~= "Defeat")
+		or createdAt == nil
+		or type(record.rewardingMatch) ~= "boolean"
+		or entries == nil
+	then
+		return failure("INVALID_FIELD", "result")
+	end
+
+	local common = {
+		version = rawVersion :: number,
 		resultId = resultId,
 		matchId = matchId.value,
 		ticketId = ticketId,
@@ -197,8 +241,49 @@ function MatchResultContract.validate(value: unknown): Result.Result<MatchResult
 		outcome = record.outcome :: Outcome,
 		createdAt = createdAt,
 		rewardingMatch = record.rewardingMatch :: boolean,
-		entries = table.freeze(entries),
-	}))
+		entries = entries,
+	}
+	if rawVersion == LEGACY_VERSION then
+		return Result.ok(table.freeze(common) :: MatchResult)
+	end
+
+	local highestCompletedWave = integer(record.highestCompletedWave, 0, MAX_COUNTER)
+	local elapsedSeconds = integer(record.elapsedSeconds, 0, MAX_COUNTER)
+	local seed = integer(record.seed, 1, MAX_SEED)
+	local contentVersion = integer(record.contentVersion, 1, Validation.MAX_SAFE_INTEGER)
+	local modeKind = record.modeKind
+	local terminationReason = record.terminationReason
+	local validTermination = terminationReason == "Victory"
+		or terminationReason == "BaseDefeated"
+		or terminationReason == "PlayerEnded"
+		or terminationReason == "AllParticipantsGone"
+		or terminationReason == "Shutdown"
+		or terminationReason == "TechnicalTermination"
+	if
+		(modeKind ~= "Finite" and modeKind ~= "Endless")
+		or highestCompletedWave == nil
+		or elapsedSeconds == nil
+		or seed == nil
+		or contentVersion == nil
+		or not validTermination
+		or ((terminationReason == "Victory") ~= (record.outcome == "Victory"))
+		or (record.outcome == "Victory" and modeKind ~= "Finite")
+		or (modeKind == "Endless" and (record.outcome ~= "Defeat" or terminationReason == "Victory"))
+	then
+		return failure("INVALID_FIELD", "result")
+	end
+	for _, entry in entries do
+		if entry.wavesCompleted > highestCompletedWave then
+			return failure("INVALID_FIELD", "result.entries")
+		end
+	end
+	common.modeKind = modeKind
+	common.highestCompletedWave = highestCompletedWave
+	common.elapsedSeconds = elapsedSeconds
+	common.seed = seed
+	common.contentVersion = contentVersion
+	common.terminationReason = terminationReason
+	return Result.ok(table.freeze(common) :: MatchResult)
 end
 
 return table.freeze(MatchResultContract)

@@ -13,6 +13,8 @@ export type ResultKind = "Victory" | "Defeat"
 export type ViewerRole = "Participant" | "Spectator"
 export type RewardStatus = "Granted" | "Pending" | "Ineligible" | "Failed"
 export type TargetMode = "First" | "Last" | "Strongest" | "Weakest" | "Closest"
+export type ModeKind = "Finite" | "Endless"
+export type BossKind = "None" | "MiniBoss" | "Boss"
 export type UiActionKind =
 	"SelectHotbar"
 	| "FocusBase"
@@ -46,17 +48,29 @@ export type UiActionCallback = (UiAction) -> ()
 export type HotbarSlot = {
 	slot: number,
 	displayName: string,
+	description: string?,
 	cost: number,
 	available: boolean,
 	selected: boolean,
 	reason: string?,
 }
 
+export type BossState = {
+	runtimeEnemyId: number,
+	displayName: string,
+	currentHealth: number,
+	maximumHealth: number,
+	threatClass: "MiniBoss" | "Boss",
+}
+
 export type WaveState = {
 	current: number,
-	total: number,
+	total: number?,
 	enemiesRemaining: number,
 	status: string?,
+	modeKind: ModeKind?,
+	bossKind: BossKind?,
+	boss: BossState?,
 }
 
 export type BaseState = {
@@ -74,6 +88,7 @@ export type TowerSelection = {
 	towerId: string,
 	revision: number,
 	displayName: string,
+	description: string?,
 	isOwner: boolean,
 	level: number,
 	maxLevel: number,
@@ -131,6 +146,7 @@ export type RenderSnapshot = {
 	base: BaseState,
 	battleCash: number,
 	hotbar: { HotbarSlot },
+	tutorialStep: number?,
 	ready: ReadyState?,
 	selection: TowerSelection?,
 	feedback: FeedbackState?,
@@ -153,6 +169,7 @@ export type TowerVisual = {
 	rotationDegrees: number?,
 	selected: boolean?,
 	range: number?,
+	level: number,
 }
 
 export type EnemyVisual = {
@@ -196,6 +213,10 @@ export type Metrics = {
 	inputFamily: InputFamily,
 	waveText: string,
 	enemyText: string,
+	bossVisible: boolean,
+	bossText: string,
+	tutorialVisible: boolean,
+	tutorialText: string,
 	baseText: string,
 	cashText: string,
 	feedbackText: string,
@@ -259,6 +280,12 @@ type ViewInstances = {
 	baseButton: TextButton,
 	baseFill: Frame,
 	cashLabel: TextLabel,
+	bossPanel: Frame,
+	bossLabel: TextLabel,
+	bossHealth: Frame,
+	bossHealthFill: Frame,
+	tutorialPanel: Frame,
+	tutorialLabel: TextLabel,
 	hotbar: Frame,
 	hotbarButtons: { TextButton },
 	hintLabel: TextLabel,
@@ -311,8 +338,12 @@ type TowerRecord = {
 	model: Model,
 	primaryPart: BasePart,
 	definitionId: string,
+	muzzles: { BasePart },
 	selection: Highlight?,
 	rangeIndicator: Part?,
+	levelDisplay: BillboardGui,
+	levelText: TextLabel,
+	level: number,
 	isPrimitiveFallback: boolean,
 }
 
@@ -371,6 +402,9 @@ local BUTTON_CONNECTION_COUNT = 20
 local MAX_TOWERS = 64
 local MAX_ENEMIES = 256
 local MAX_ATTACK_EFFECTS = 32
+local MAX_MUZZLES_PER_TOWER = 8
+local MAX_MUZZLE_OFFSET_STUDS = 16
+local MAX_MODEL_LABEL_OFFSET_STUDS = 64
 local EFFECT_DURATION_SECONDS = 0.12
 
 local MATCH_STATES: { [MatchState]: boolean } = table.freeze({
@@ -599,6 +633,7 @@ local function canonicalSelection(value: unknown): CanonicalSelection?
 	local towerId = rawget(selection, "towerId")
 	local revision = rawget(selection, "revision")
 	local displayName = rawget(selection, "displayName")
+	local description = rawget(selection, "description")
 	local isOwner = rawget(selection, "isOwner")
 	local level = rawget(selection, "level")
 	local maxLevel = rawget(selection, "maxLevel")
@@ -615,6 +650,7 @@ local function canonicalSelection(value: unknown): CanonicalSelection?
 		not safeId(towerId)
 		or not safeInteger(revision, 0, 2 ^ 31 - 1)
 		or not safeText(displayName, 40)
+		or (description ~= nil and not safeText(description, 160))
 		or type(isOwner) ~= "boolean"
 		or not safeInteger(level, 1, 100)
 		or not safeInteger(maxLevel, level :: number, 100)
@@ -648,6 +684,7 @@ local function canonicalSelection(value: unknown): CanonicalSelection?
 		towerId = towerId :: string,
 		revision = revision :: number,
 		displayName = displayName :: string,
+		description = description :: string?,
 		isOwner = isOwner :: boolean,
 		level = level :: number,
 		maxLevel = maxLevel :: number,
@@ -771,6 +808,34 @@ local function canonicalPlacement(value: unknown): CanonicalPlacement?
 	})
 end
 
+local function canonicalBoss(value: unknown): BossState?
+	if type(value) ~= "table" or getmetatable(value) ~= nil then
+		return nil
+	end
+	local boss = value :: { [any]: unknown }
+	local runtimeEnemyId = rawget(boss, "runtimeEnemyId")
+	local displayName = rawget(boss, "displayName")
+	local currentHealth = rawget(boss, "currentHealth")
+	local maximumHealth = rawget(boss, "maximumHealth")
+	local threatClass = rawget(boss, "threatClass")
+	if
+		not safeInteger(runtimeEnemyId, 1, 2 ^ 31 - 1)
+		or not safeText(displayName, 64)
+		or not safeInteger(maximumHealth, 1, 2 ^ 31 - 1)
+		or not safeInteger(currentHealth, 0, maximumHealth :: number)
+		or (threatClass ~= "MiniBoss" and threatClass ~= "Boss")
+	then
+		return nil
+	end
+	return table.freeze({
+		runtimeEnemyId = runtimeEnemyId :: number,
+		displayName = displayName :: string,
+		currentHealth = currentHealth :: number,
+		maximumHealth = maximumHealth :: number,
+		threatClass = threatClass :: "MiniBoss" | "Boss",
+	})
+end
+
 local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	if type(value) ~= "table" or getmetatable(value) ~= nil then
 		return nil
@@ -785,6 +850,7 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	local baseValue = rawget(snapshot, "base")
 	local battleCash = rawget(snapshot, "battleCash")
 	local hotbarValue = rawget(snapshot, "hotbar")
+	local tutorialStep = rawget(snapshot, "tutorialStep")
 	if
 		not safeId(matchId)
 		or not safeInteger(revision, 0, 2 ^ 31 - 1)
@@ -799,6 +865,7 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 		or getmetatable(baseValue) ~= nil
 		or not safeInteger(battleCash, 0, 2 ^ 31 - 1)
 		or type(hotbarValue) ~= "table"
+		or (tutorialStep ~= nil and not safeInteger(tutorialStep, 5, 8))
 	then
 		return nil
 	end
@@ -808,11 +875,26 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	local total = rawget(wave, "total")
 	local enemiesRemaining = rawget(wave, "enemiesRemaining")
 	local waveStatus = rawget(wave, "status")
+	local modeKind = rawget(wave, "modeKind")
+	local bossKind = rawget(wave, "bossKind")
+	local bossValue = rawget(wave, "boss")
+	if modeKind == nil then
+		modeKind = "Finite"
+	end
+	if bossKind == nil then
+		bossKind = "None"
+	end
+	local boss = if bossValue == nil then nil else canonicalBoss(bossValue)
 	if
-		not safeInteger(total, 1, 1_000)
-		or not safeInteger(current, 0, total :: number)
+		(modeKind ~= "Finite" and modeKind ~= "Endless")
+		or (modeKind == "Finite" and not safeInteger(total, 1, 1_000))
+		or (modeKind == "Finite" and not safeInteger(current, 0, total :: number))
+		or (modeKind == "Endless" and total ~= nil)
+		or (modeKind == "Endless" and not safeInteger(current, 0, 2 ^ 31 - 1))
 		or not safeInteger(enemiesRemaining, 0, 100_000)
 		or (waveStatus ~= nil and not safeText(waveStatus, 64, true))
+		or (bossKind ~= "None" and bossKind ~= "MiniBoss" and bossKind ~= "Boss")
+		or (bossValue ~= nil and boss == nil)
 	then
 		return nil
 	end
@@ -842,6 +924,7 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 		local slot = slotValue :: { [any]: unknown }
 		local slotIndex = rawget(slot, "slot")
 		local displayName = rawget(slot, "displayName")
+		local description = rawget(slot, "description")
 		local cost = rawget(slot, "cost")
 		local available = rawget(slot, "available")
 		local selected = rawget(slot, "selected")
@@ -849,6 +932,7 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 		if
 			slotIndex ~= index
 			or not safeText(displayName, 32)
+			or (description ~= nil and not safeText(description, 160))
 			or not safeInteger(cost, 0, 2 ^ 31 - 1)
 			or type(available) ~= "boolean"
 			or type(selected) ~= "boolean"
@@ -862,6 +946,7 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 		hotbar[index] = table.freeze({
 			slot = index,
 			displayName = displayName :: string,
+			description = description :: string?,
 			cost = cost :: number,
 			available = available :: boolean,
 			selected = selected :: boolean,
@@ -987,13 +1072,17 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 		inputFamily = inputFamily :: InputFamily,
 		wave = table.freeze({
 			current = current :: number,
-			total = total :: number,
+			total = total :: number?,
 			enemiesRemaining = enemiesRemaining :: number,
 			status = waveStatus :: string?,
+			modeKind = modeKind :: ModeKind,
+			bossKind = bossKind :: BossKind,
+			boss = boss,
 		}),
 		base = table.freeze({ health = health :: number, maxHealth = maxHealth :: number }),
 		battleCash = battleCash :: number,
 		hotbar = table.freeze(hotbar),
+		tutorialStep = tutorialStep :: number?,
 		ready = ready,
 		selection = selection,
 		feedback = feedback,
@@ -1239,6 +1328,28 @@ local function cloneVisualModel(
 	return model, primaryPart, true
 end
 
+local function orderedMuzzles(model: Model): { BasePart }
+	local indexed = {} :: { [number]: BasePart }
+	for _, descendant in model:GetDescendants() do
+		local index = descendant:GetAttribute("MuzzleIndex")
+		if descendant:IsA("BasePart") and safeInteger(index, 1, MAX_MUZZLES_PER_TOWER) then
+			local canonicalIndex = index :: number
+			local current = indexed[canonicalIndex]
+			if current == nil or descendant.Name < current.Name then
+				indexed[canonicalIndex] = descendant
+			end
+		end
+	end
+	local muzzles = table.create(MAX_MUZZLES_PER_TOWER) :: { BasePart }
+	for index = 1, MAX_MUZZLES_PER_TOWER do
+		local muzzle = indexed[index]
+		if muzzle ~= nil then
+			table.insert(muzzles, muzzle)
+		end
+	end
+	return muzzles
+end
+
 local function makeSelectionHighlight(model: Model, applyProductionStyle: boolean): Highlight
 	local highlight = Instance.new("Highlight")
 	highlight.Name = "SelectionHighlight"
@@ -1262,6 +1373,68 @@ local function makeRangeIndicator(model: Model, applyProductionStyle: boolean): 
 	return indicator
 end
 
+local function modelTopOffset(model: Model, primaryPart: BasePart, margin: number): number
+	local primaryY = primaryPart.CFrame.Position.Y
+	local topY = primaryY + primaryPart.Size.Y * 0.5
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart") and descendant.Transparency < 1 then
+			local cframe = descendant.CFrame
+			local size = descendant.Size
+			local halfHeight = (
+				math.abs(cframe.RightVector.Y) * size.X
+				+ math.abs(cframe.UpVector.Y) * size.Y
+				+ math.abs(cframe.LookVector.Y) * size.Z
+			) * 0.5
+			topY = math.max(topY, cframe.Position.Y + halfHeight)
+		end
+	end
+	return math.clamp(topY - primaryY + margin, 0.5, MAX_MODEL_LABEL_OFFSET_STUDS)
+end
+
+local function towerLevelColor(level: number): Color3
+	if level >= 3 then
+		return COLORS.Warning
+	elseif level == 2 then
+		return COLORS.Good
+	end
+	return COLORS.Text
+end
+
+local function setTowerLevel(record: TowerRecord, level: number)
+	record.level = level
+	record.levelText.Text = `LEVEL {level}`
+	record.levelText.TextColor3 = towerLevelColor(level)
+end
+
+local function makeTowerLevelDisplay(
+	model: Model,
+	primaryPart: BasePart,
+	applyProductionStyle: boolean
+): (BillboardGui, TextLabel)
+	local display = Instance.new("BillboardGui")
+	display.Name = "ATDLevelDisplay"
+	display.Adornee = primaryPart
+	display.Size = UDim2.fromOffset(78, 22)
+	display.StudsOffsetWorldSpace = Vector3.new(0, modelTopOffset(model, primaryPart, 0.55), 0)
+	if applyProductionStyle then
+		display.AlwaysOnTop = true
+		display.LightInfluence = 0
+		display.MaxDistance = 180
+	end
+	display.Parent = model
+
+	local label = makeLabel("Value", display, applyProductionStyle)
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundColor3 = COLORS.Background
+	label.BackgroundTransparency = 0.2
+	label.TextScaled = true
+	label.TextStrokeColor3 = COLORS.Background
+	label.TextStrokeTransparency = 0.15
+	label.Text = "LEVEL 1"
+	label.TextColor3 = towerLevelColor(1)
+	return display, label
+end
+
 local function makeEnemyHealthDisplay(
 	model: Model,
 	primaryPart: BasePart,
@@ -1275,8 +1448,8 @@ local function makeEnemyHealthDisplay(
 		display.LightInfluence = 0
 		display.MaxDistance = 220
 		display.Size = UDim2.fromOffset(96, 30)
-		display.StudsOffsetWorldSpace = Vector3.new(0, 2.1, 0)
 	end
+	display.StudsOffsetWorldSpace = Vector3.new(0, modelTopOffset(model, primaryPart, 0.45), 0)
 	display.Parent = model
 
 	local bar = makeFrame("Bar", display)
@@ -1360,6 +1533,20 @@ local function createInstances(
 		baseFill.BackgroundColor3 = COLORS.Good
 		baseFill.ZIndex = baseButton.ZIndex - 1
 		local cashLabel = makeLabel("BattleCash", topHud, applyProductionStyle)
+		local bossPanel = makeFrame("BossStatus", root)
+		bossPanel.BackgroundColor3 = COLORS.Panel
+		bossPanel.BackgroundTransparency = 0.04
+		bossPanel.Visible = false
+		local bossHealth = makeFrame("Health", bossPanel)
+		bossHealth.BackgroundColor3 = COLORS.Background
+		local bossHealthFill = makeFrame("Fill", bossHealth)
+		bossHealthFill.BackgroundColor3 = COLORS.Bad
+		local bossLabel = makeLabel("Label", bossPanel, applyProductionStyle)
+		local tutorialPanel = makeFrame("TutorialGuidance", root)
+		tutorialPanel.BackgroundColor3 = COLORS.Selected
+		tutorialPanel.BackgroundTransparency = 0.04
+		tutorialPanel.Visible = false
+		local tutorialLabel = makeLabel("Label", tutorialPanel, applyProductionStyle)
 
 		local hotbar = makeFrame("TowerHotbar", root)
 		local hotbarButtons = table.create(HOTBAR_SLOTS) :: { TextButton }
@@ -1460,6 +1647,12 @@ local function createInstances(
 			baseButton = baseButton,
 			baseFill = baseFill,
 			cashLabel = cashLabel,
+			bossPanel = bossPanel,
+			bossLabel = bossLabel,
+			bossHealth = bossHealth,
+			bossHealthFill = bossHealthFill,
+			tutorialPanel = tutorialPanel,
+			tutorialLabel = tutorialLabel,
 			hotbar = hotbar,
 			hotbarButtons = hotbarButtons,
 			hintLabel = hintLabel,
@@ -1532,6 +1725,22 @@ local function applyLayout(instances: ViewInstances, layout: ResponsiveLayout)
 	instances.baseFill.AnchorPoint = Vector2.new(0, 1)
 	instances.baseFill.Position = UDim2.fromScale(0, 1)
 	instances.baseFill.Size = UDim2.fromScale(1, 0.12)
+	instances.bossPanel.AnchorPoint = Vector2.new(0.5, 0)
+	instances.bossPanel.Position = UDim2.new(0.5, 0, 0, hudHeight + 18)
+	instances.bossPanel.Size = UDim2.fromOffset(math.min(layout.hudWidth, 620), 52)
+	instances.bossLabel.Position = UDim2.fromOffset(10, 3)
+	instances.bossLabel.Size = UDim2.new(1, -20, 0, 27)
+	instances.bossLabel.TextSize = layout.textSize - 1
+	instances.bossHealth.Position = UDim2.fromOffset(10, 34)
+	instances.bossHealth.Size = UDim2.new(1, -20, 0, 10)
+	instances.bossHealthFill.Position = UDim2.fromScale(0, 0)
+	instances.bossHealthFill.Size = UDim2.fromScale(0, 1)
+	instances.tutorialPanel.AnchorPoint = Vector2.new(0.5, 0)
+	instances.tutorialPanel.Position = UDim2.new(0.5, 0, 0, hudHeight + 18)
+	instances.tutorialPanel.Size = UDim2.fromOffset(math.min(layout.hudWidth, 620), 58)
+	instances.tutorialLabel.Position = UDim2.fromOffset(10, 4)
+	instances.tutorialLabel.Size = UDim2.new(1, -20, 1, -8)
+	instances.tutorialLabel.TextSize = math.max(13, layout.textSize - 2)
 
 	local hotbarHeight = if layout.mode == "Compact" then 170 elseif layout.mode == "TenFoot" then 132 else 112
 	instances.hotbar.AnchorPoint = Vector2.new(0.5, 1)
@@ -1568,7 +1777,7 @@ local function applyLayout(instances: ViewInstances, layout: ResponsiveLayout)
 	end
 
 	instances.feedback.AnchorPoint = Vector2.new(0.5, 0)
-	instances.feedback.Position = UDim2.new(0.5, 0, 0, hudHeight + 18)
+	instances.feedback.Position = UDim2.new(0.5, 0, 0, hudHeight + 78)
 	instances.feedback.Size = UDim2.fromOffset(math.min(layout.hudWidth, 720), layout.touchTarget)
 	instances.feedback.TextSize = layout.textSize - 1
 
@@ -1647,7 +1856,7 @@ local function applyLayout(instances: ViewInstances, layout: ResponsiveLayout)
 	instances.resultHint.TextSize = math.max(13, layout.textSize - 4)
 
 	instances.spectatorPanel.AnchorPoint = Vector2.new(0.5, 0)
-	instances.spectatorPanel.Position = UDim2.new(0.5, 0, 0, 82)
+	instances.spectatorPanel.Position = UDim2.new(0.5, 0, 0, hudHeight + 138)
 	instances.spectatorPanel.Size = UDim2.fromOffset(math.min(520, layout.hudWidth), 160)
 	instances.spectatorBanner.Position = UDim2.fromOffset(12, 8)
 	instances.spectatorBanner.Size = UDim2.new(1, -24, 0, 34)
@@ -1959,6 +2168,13 @@ local function construct(
 	return ok(view)
 end
 
+local TUTORIAL_COPY: { [number]: string } = table.freeze({
+	[5] = "1 OF 3 • PLACE A TOWER\nChoose a starter tower, then place it inside a highlighted garden region.",
+	[6] = "2 OF 3 • UPGRADE A TOWER\nSelect one of your placed towers and buy an upgrade with match-only Battle Cash.",
+	[7] = "3 OF 3 • FINISH THE MATCH\nKeep defending. Victory or an ordinary defeat will record this first run.",
+	[8] = "MATCH RECORDED\nUse Return to Lobby; your tutorial and rewards are already saved server-side.",
+})
+
 local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 	local instances = data.instances
 	local viewport = snapshot.viewport or Vector2.new(1280, 720)
@@ -1978,12 +2194,53 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 		instances.enemyLabel.Text = "♟ ENEMIES —"
 		instances.baseButton.Text = "♥ BASE —"
 		instances.cashLabel.Text = "$ BATTLE CASH —"
+	elseif snapshot.wave.modeKind == "Endless" then
+		instances.waveLabel.Text = `◆ WAVE {snapshot.wave.current} • ENDLESS`
+		instances.enemyLabel.Text = `♟ ENEMIES {snapshot.wave.enemiesRemaining}`
+		instances.baseButton.Text = `♥ BASE {snapshot.base.health} / {snapshot.base.maxHealth}`
+		instances.cashLabel.Text = `$ {snapshot.battleCash} BATTLE CASH`
 	else
 		instances.waveLabel.Text = `◆ WAVE {snapshot.wave.current} / {snapshot.wave.total}`
 		instances.enemyLabel.Text = `♟ ENEMIES {snapshot.wave.enemiesRemaining}`
 		instances.baseButton.Text = `♥ BASE {snapshot.base.health} / {snapshot.base.maxHealth}`
 		instances.cashLabel.Text = `$ {snapshot.battleCash} BATTLE CASH`
 	end
+	local bossKind = snapshot.wave.bossKind or "None"
+	local boss = snapshot.wave.boss
+	local presentedBossKind = if boss == nil then bossKind else boss.threatClass
+	instances.bossPanel.Visible = presentedBossKind ~= "None"
+		and snapshot.state ~= "Loading"
+		and snapshot.state ~= "Results"
+	instances.bossPanel.BackgroundColor3 = if snapshot.reducedMotion == true or snapshot.lowEffects == true
+		then COLORS.Panel
+		else COLORS.Neutral
+	instances.bossLabel.TextColor3 = if presentedBossKind == "Boss" then COLORS.Bad else COLORS.Warning
+	if boss == nil then
+		instances.bossLabel.Text = if bossKind == "Boss"
+			then "⚠ BOSS WAVE • MAJOR THREAT INCOMING"
+			elseif bossKind == "MiniBoss" then "⚠ MINIBOSS WAVE • DURABLE THREAT INCOMING"
+			else ""
+		instances.bossHealth.Visible = false
+		instances.bossHealthFill.Size = UDim2.fromScale(0, 1)
+	else
+		instances.bossLabel.Text =
+			`⚠ {string.upper(boss.threatClass)} • {string.upper(boss.displayName)} • {boss.currentHealth} / {boss.maximumHealth} HP`
+		instances.bossHealth.Visible = true
+		instances.bossHealthFill.Size = UDim2.fromScale(boss.currentHealth / boss.maximumHealth, 1)
+	end
+	local tutorialText = if snapshot.tutorialStep == nil then nil else TUTORIAL_COPY[snapshot.tutorialStep]
+	instances.tutorialPanel.Visible = tutorialText ~= nil
+	instances.tutorialLabel.Text = tutorialText or ""
+	local noticeY = instances.topHud.Position.Y.Offset + instances.topHud.Size.Y.Offset + 8
+	instances.bossPanel.Position = UDim2.new(0.5, 0, 0, noticeY)
+	if instances.bossPanel.Visible then
+		noticeY += instances.bossPanel.Size.Y.Offset + 8
+	end
+	instances.tutorialPanel.Position = UDim2.new(0.5, 0, 0, noticeY)
+	if instances.tutorialPanel.Visible then
+		noticeY += instances.tutorialPanel.Size.Y.Offset + 8
+	end
+	instances.feedback.Position = UDim2.new(0.5, 0, 0, noticeY)
 	local healthRatio = snapshot.base.health / snapshot.base.maxHealth
 	if data.applyProductionStyle then
 		instances.baseFill.Size =
@@ -2012,7 +2269,14 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 		setButtonEnabled(button, metadata.available and (snapshot.state == "PreWave" or snapshot.state == "WaveActive"))
 	end
 	local hint = snapshot.inputHint or defaultHint(snapshot)
-	instances.hintLabel.Text = hint
+	local selectedDescription: string? = nil
+	for _, metadata in snapshot.hotbar do
+		if metadata.selected and metadata.description ~= nil then
+			selectedDescription = metadata.description
+			break
+		end
+	end
+	instances.hintLabel.Text = selectedDescription or hint
 	local placement = snapshot.placement
 	instances.touchPlacementPanel.Visible = placement ~= nil
 	if placement ~= nil then
@@ -2060,10 +2324,12 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 			then "✓ YOUR TOWER — CONTROLS AVAILABLE"
 			else "⌁ INSPECTION ONLY — OWNED BY ANOTHER PLAYER"
 		instances.towerStatus.TextColor3 = if selection.isOwner then COLORS.Good else COLORS.Warning
-		instances.towerStats.Text = `Damage {selection.damage}  •  Range {selection.range}\nCooldown {string.format(
-			"%.2fs",
-			selection.cooldownSeconds
-		)}`
+		local roleDescription = if selection.description == nil then "" else `{selection.description}\n`
+		instances.towerStats.Text =
+			`{roleDescription}Damage {selection.damage}  •  Range {selection.range}\nCooldown {string.format(
+				"%.2fs",
+				selection.cooldownSeconds
+			)}`
 		instances.towerTarget.Text = `◎ TARGET: {string.upper(selection.targetMode)}`
 		instances.upgradeButton.Text = if selection.upgradeCost == nil
 			then "▲ MAX LEVEL"
@@ -2130,6 +2396,12 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 	instances.rematchDeclineButton.Visible = result ~= nil and travel ~= nil and travel.rematchState ~= nil
 	setButtonEnabled(instances.rematchApproveButton, travel ~= nil and travel.canApprove)
 	setButtonEnabled(instances.rematchDeclineButton, travel ~= nil and travel.canDecline)
+	if selection ~= nil then
+		local towerRecord = data.towerRecords[selection.towerId]
+		if towerRecord ~= nil and towerRecord.level ~= selection.level then
+			setTowerLevel(towerRecord, selection.level)
+		end
+	end
 
 	local nextFocusMode = focusMode(snapshot)
 	if snapshot.inputFamily == "Gamepad" and (data.inputFamily ~= "Gamepad" or data.lastFocusMode ~= nextFocusMode) then
@@ -2222,6 +2494,7 @@ local function canonicalWorld(value: unknown): ({ TowerVisual }?, { EnemyVisual 
 		local rotationDegrees = rawget(tower, "rotationDegrees")
 		local selected = rawget(tower, "selected")
 		local range = rawget(tower, "range")
+		local level = rawget(tower, "level")
 		if
 			not safeId(id)
 			or identifiers[id :: string]
@@ -2230,6 +2503,7 @@ local function canonicalWorld(value: unknown): ({ TowerVisual }?, { EnemyVisual 
 			or (rotationDegrees ~= nil and (not finiteNumber(rotationDegrees) or math.abs(rotationDegrees :: number) > 360))
 			or (selected ~= nil and type(selected) ~= "boolean")
 			or (range ~= nil and (not finiteNumber(range) or (range :: number) < 0 or (range :: number) > 10_000))
+			or not safeInteger(level, 1, 100)
 		then
 			return nil, nil
 		end
@@ -2241,6 +2515,7 @@ local function canonicalWorld(value: unknown): ({ TowerVisual }?, { EnemyVisual 
 			rotationDegrees = rotationDegrees :: number?,
 			selected = selected :: boolean?,
 			range = range :: number?,
+			level = level :: number,
 		})
 	end
 	for index = 1, enemyCount do
@@ -2306,14 +2581,22 @@ function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
 				end
 				table.insert(createdModels, model)
 				model.Name = tower.id
-				stagedTowers[tower.id] = {
+				local levelDisplay, levelText = makeTowerLevelDisplay(model, primaryPart, data.applyProductionStyle)
+				local initialLevel = tower.level
+				local towerRecord: TowerRecord = {
 					model = model,
 					primaryPart = primaryPart,
 					definitionId = tower.definitionId,
+					muzzles = orderedMuzzles(model),
 					selection = makeSelectionHighlight(model, data.applyProductionStyle),
 					rangeIndicator = makeRangeIndicator(model, data.applyProductionStyle),
+					levelDisplay = levelDisplay,
+					levelText = levelText,
+					level = initialLevel,
 					isPrimitiveFallback = isPrimitiveFallback,
 				}
+				setTowerLevel(towerRecord, initialLevel)
+				stagedTowers[tower.id] = towerRecord
 			end
 		end
 		for _, enemy in enemies :: { EnemyVisual } do
@@ -2362,6 +2645,9 @@ function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
 			local record = data.towerRecords[tower.id]
 			if record == nil then
 				error("tower record missing", 0)
+			end
+			if record.level ~= tower.level then
+				setTowerLevel(record, tower.level)
 			end
 			local position = if record.isPrimitiveFallback
 				then tower.position + Vector3.new(0, record.primaryPart.Size.Y * 0.5, 0)
@@ -2447,9 +2733,18 @@ end
 local function attackPositions(data: ViewData, event: AttackEvent): (Vector3?, Vector3?)
 	local origin = event.origin
 	local target = event.target
-	if origin == nil then
-		local towerRecord = data.towerRecords[event.towerId]
-		origin = if towerRecord == nil then nil else towerRecord.primaryPart.CFrame.Position
+	local towerRecord = data.towerRecords[event.towerId]
+	if origin == nil and towerRecord ~= nil then
+		origin = towerRecord.primaryPart.CFrame.Position
+	end
+	if origin ~= nil and towerRecord ~= nil and #towerRecord.muzzles > 0 then
+		-- Attack events do not identify a per-shot muzzle. Always choose the first
+		-- bounded authored marker rather than implying unsupported alternation.
+		local muzzle = towerRecord.muzzles[1]
+		local muzzlePosition = muzzle.CFrame.Position
+		if (muzzlePosition - origin).Magnitude <= MAX_MUZZLE_OFFSET_STUDS then
+			origin = muzzlePosition
+		end
 	end
 	if target == nil then
 		local enemyRecord = data.enemyRecords[event.targetId]
@@ -2512,6 +2807,27 @@ function ViewMethods.playAttackEffect(self: View, value: unknown): Outcome<boole
 		effect.Transparency = if data.reducedMotion then 0.35 else 0.12
 		if data.applyProductionStyle then
 			effect.Material = Enum.Material.Neon
+		end
+		if not data.lowEffects then
+			local muzzleFlash = makeWorldPart("MuzzleFlash", effect, data.applyProductionStyle)
+			muzzleFlash.Shape = Enum.PartType.Ball
+			muzzleFlash.Size = Vector3.new(0.48, 0.48, 0.48)
+			muzzleFlash.CFrame = CFrame.new(origin)
+			muzzleFlash.Color = COLORS.Warning
+			muzzleFlash.Transparency = if data.reducedMotion then 0.28 else 0.08
+			if data.applyProductionStyle then
+				muzzleFlash.Material = Enum.Material.Neon
+			end
+
+			local impactFlash = makeWorldPart("ImpactFlash", effect, data.applyProductionStyle)
+			impactFlash.Shape = Enum.PartType.Ball
+			impactFlash.Size = Vector3.new(0.72, 0.72, 0.72)
+			impactFlash.CFrame = CFrame.new(target)
+			impactFlash.Color = COLORS.Effect
+			impactFlash.Transparency = if data.reducedMotion then 0.32 else 0.12
+			if data.applyProductionStyle then
+				impactFlash.Material = Enum.Material.Neon
+			end
 		end
 		if event.damage ~= nil then
 			local display = Instance.new("BillboardGui")
@@ -2577,6 +2893,10 @@ function ViewMethods.getMetrics(self: View): Metrics
 			inputFamily = data.inputFamily,
 			waveText = "",
 			enemyText = "",
+			bossVisible = false,
+			bossText = "",
+			tutorialVisible = false,
+			tutorialText = "",
 			baseText = "",
 			cashText = "",
 			feedbackText = "",
@@ -2589,6 +2909,8 @@ function ViewMethods.getMetrics(self: View): Metrics
 			spectatorVisible = false,
 			rewardText = "",
 			travelText = "",
+			touchPlacementVisible = false,
+			touchPlacementText = "",
 			worldTowerCount = 0,
 			worldEnemyCount = 0,
 			attackEffectCount = 0,
@@ -2605,6 +2927,10 @@ function ViewMethods.getMetrics(self: View): Metrics
 		inputFamily = data.inputFamily,
 		waveText = instances.waveLabel.Text,
 		enemyText = instances.enemyLabel.Text,
+		bossVisible = instances.bossPanel.Visible,
+		bossText = instances.bossLabel.Text,
+		tutorialVisible = instances.tutorialPanel.Visible,
+		tutorialText = instances.tutorialLabel.Text,
 		baseText = instances.baseButton.Text,
 		cashText = instances.cashLabel.Text,
 		feedbackText = instances.feedback.Text,

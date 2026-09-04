@@ -310,12 +310,26 @@ local function configurationCopy(value: QueueProtocol.Configuration): QueueProto
 	})
 end
 
+local function tagged(tags: { string }?, wanted: string): boolean
+	for _, tag in tags or {} do
+		if tag == wanted then
+			return true
+		end
+	end
+	return false
+end
+
+local function playerSelectable(tags: { string }?): boolean
+	return not tagged(tags, "hidden") and not tagged(tags, "development")
+end
+
 local function configurationValid(
 	configuration: ConfigTypes.CoreConfiguration,
 	value: QueueProtocol.Configuration
 ): boolean
 	local map = configuration.maps.byId[value.mapId]
-	if map == nil or configuration.difficulties.byId[value.difficultyId] == nil then
+	local difficulty = configuration.difficulties.byId[value.difficultyId]
+	if map == nil or difficulty == nil or not playerSelectable(map.tags) or not playerSelectable(difficulty.tags) then
 		return false
 	end
 	local supported = false
@@ -330,14 +344,17 @@ end
 
 local function defaultConfiguration(configuration: ConfigTypes.CoreConfiguration): QueueProtocol.Configuration?
 	for _, map in configuration.maps.ordered do
-		for _, difficultyId in map.supportedDifficultyIds do
-			if configuration.difficulties.byId[difficultyId] ~= nil then
-				return configurationCopy({
-					mapId = map.id,
-					difficultyId = difficultyId,
-					privacy = "Public",
-					maxPlayers = QueueProtocol.MAX_PLAYERS,
-				})
+		if playerSelectable(map.tags) then
+			for _, difficultyId in map.supportedDifficultyIds do
+				local difficulty = configuration.difficulties.byId[difficultyId]
+				if difficulty ~= nil and playerSelectable(difficulty.tags) then
+					return configurationCopy({
+						mapId = map.id,
+						difficultyId = difficultyId,
+						privacy = "Public",
+						maxPlayers = QueueProtocol.MAX_PLAYERS,
+					})
+				end
 			end
 		end
 	end

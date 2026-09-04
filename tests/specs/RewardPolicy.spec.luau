@@ -20,6 +20,17 @@ local function evidence(overrides: { [string]: any }?): any
 	return value
 end
 
+local function currentEvidence(difficultyId: string, modeKind: "Finite" | "Endless", waveNumber: number): any
+	return evidence({
+		resultVersion = 2,
+		difficultyId = difficultyId,
+		modeKind = modeKind,
+		highestCompletedWave = waveNumber,
+		wavesCompleted = waveNumber,
+		outcome = if modeKind == "Endless" then "Defeat" else "Victory",
+	})
+end
+
 return TestHarness.suite("authoritative persistent Gold reward policy", {
 	TestHarness.case("awards exact victory and one-time first-clear amounts", function(assertions)
 		local first = RewardPolicy.evaluate(evidence(), true)
@@ -67,6 +78,54 @@ return TestHarness.suite("authoritative persistent Gold reward policy", {
 		local evaluated = RewardPolicy.evaluate(evidence({ connectedAtResults = false, wavesCompleted = 2 }), false)
 		assertions.isTrue(evaluated.value.eligible)
 		assertions.equal(evaluated.value.totalGold, 250)
+	end),
+	TestHarness.case("applies the locked finite reward table without changing v1 records", function(assertions)
+		local expected = {
+			["difficulty:easy-v1"] = { 50, 150, 150, 350 },
+			["difficulty:normal-v1"] = { 65, 235, 225, 525 },
+			["difficulty:hard-v1"] = { 85, 365, 325, 775 },
+		}
+		for difficultyId, amounts in expected do
+			local evaluated = RewardPolicy.evaluate(currentEvidence(difficultyId, "Finite", 20), true)
+			assertions.isTrue(evaluated.ok)
+			assertions.equal(evaluated.value.participationGold, amounts[1])
+			assertions.equal(evaluated.value.victoryGold, amounts[2])
+			assertions.equal(evaluated.value.firstClearGold, amounts[3])
+			assertions.equal(evaluated.value.totalGold, amounts[4])
+		end
+		local localFallback = RewardPolicy.evaluate(currentEvidence("difficulty:local", "Finite", 5), true)
+		assertions.isTrue(localFallback.ok)
+		assertions.equal(localFallback.value.totalGold, 0)
+	end),
+	TestHarness.case("uses only completed-wave milestones for one capped Endless terminal award", function(assertions)
+		local expected = {
+			[4] = 0,
+			[5] = 25,
+			[9] = 25,
+			[10] = 50,
+			[109] = 275,
+			[110] = 300,
+			[10_000] = 300,
+		}
+		for waveNumber, totalGold in expected do
+			local evaluated =
+				RewardPolicy.evaluate(currentEvidence("difficulty:endless-v1", "Endless", waveNumber), true)
+			assertions.isTrue(evaluated.ok)
+			assertions.equal(evaluated.value.totalGold, totalGold)
+			assertions.equal(evaluated.value.victoryGold, 0)
+			assertions.equal(evaluated.value.firstClearGold, 0)
+			assertions.equal(evaluated.value.eligible, waveNumber >= 5)
+		end
+		local impossible = currentEvidence("difficulty:endless-v1", "Endless", 10)
+		impossible.outcome = "Victory"
+		assertions.isFalse(RewardPolicy.evaluate(impossible, true).ok)
+
+		local earlyLeaver = currentEvidence("difficulty:endless-v1", "Endless", 110)
+		earlyLeaver.wavesCompleted = 9
+		earlyLeaver.connectedAtResults = false
+		local earlyLeaverReward = RewardPolicy.evaluate(earlyLeaver, true)
+		assertions.isTrue(earlyLeaverReward.ok)
+		assertions.equal(earlyLeaverReward.value.totalGold, 25)
 	end),
 	TestHarness.case("fails closed on malformed evidence", function(assertions)
 		assertions.isFalse(RewardPolicy.evaluate({}, true).ok)

@@ -7,6 +7,7 @@ local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 
+local ContentSelection = require(ReplicatedStorage.Shared.config.ContentSelection)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
 local MatchLoadoutProtocol = require(ReplicatedStorage.Shared.match.MatchLoadoutProtocol)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
@@ -14,7 +15,9 @@ local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifec
 local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
 local Ids = require(ReplicatedStorage.Shared.util.Ids)
 local Result = require(ReplicatedStorage.Shared.util.Result)
+local Validation = require(ReplicatedStorage.Shared.util.Validation)
 
+local DirectStudioParticipantLoadout = require(script.Parent.DirectStudioParticipantLoadout)
 local PlayableMatchRuntime = require(script.Parent.PlayableMatchRuntime)
 
 export type LifecycleAdapter = {
@@ -32,6 +35,7 @@ export type LifecycleAdapter = {
 export type SnapshotSender = (recipient: unknown, snapshot: PlayableMatchProtocol.Snapshot) -> boolean
 export type AttackSender = (recipient: unknown, event: PlayableMatchProtocol.AttackEvent) -> boolean
 export type LoadoutProvider = (userId: number) -> MatchLoadoutProtocol.Snapshot?
+export type TutorialStepProvider = (userId: number, matchId: string) -> unknown
 export type LifecycleState = "Constructed" | "Initialized" | "Started" | "Shutdown" | "Failed"
 
 export type RosterInputs = {
@@ -43,6 +47,12 @@ export type RosterInputs = {
 	difficultyId: string?,
 	managedAdmissions: boolean?,
 	connectedParticipantUserIds: { number }?,
+	tutorialStepProvider: TutorialStepProvider?,
+}
+
+export type DirectContentSelection = {
+	mapId: string,
+	difficultyId: string,
 }
 
 export type Environment = {
@@ -100,12 +110,14 @@ type ServiceData = {
 	fixedDifficultyId: Ids.DifficultyId?,
 	managedAdmissions: boolean,
 	initialConnectedParticipantUserIds: { number },
+	tutorialStepProvider: TutorialStepProvider?,
+	studioDirectUserIds: boolean,
 }
 
 local SERVICE_NAME = "PlayableMatch"
 local SNAPSHOT_INTERVAL_SECONDS = 0.1
-local CONTENT_FOLDER_NAME = "ATDPlayableTemplates"
-local CONTENT_CONTRACT = "playable-local-match-v1"
+local CONTENT_FOLDER_NAME = ContentSelection.PLAYABLE_TEMPLATE_ROOT_NAME
+local CONTENT_CONTRACT = ContentSelection.PLAYABLE_TEMPLATE_CONTRACT_VERSION
 
 local Methods = {}
 Methods.__index = Methods
@@ -120,7 +132,9 @@ export type TestConstructor = (
 	AttackSender,
 	Environment,
 	LoadoutProvider?,
-	RosterInputs?
+	RosterInputs?,
+	DirectContentSelection?,
+	boolean?
 ) -> Service
 
 local DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ServiceData }
@@ -208,6 +222,7 @@ local function normalizeRosterInputs(
 		or (value.difficultyId ~= nil and type(value.difficultyId) ~= "string")
 		or (value.managedAdmissions ~= nil and type(value.managedAdmissions) ~= "boolean")
 		or (value.connectedParticipantUserIds ~= nil and type(value.connectedParticipantUserIds) ~= "table")
+		or (value.tutorialStepProvider ~= nil and type(value.tutorialStepProvider) ~= "function")
 	then
 		return nil, nil, nil
 	end
@@ -230,6 +245,14 @@ local function resolveLoadout(data: ServiceData, userId: number): MatchLoadoutPr
 	local retained = data.frozenLoadouts[userId]
 	if retained ~= nil then
 		return retained
+	end
+	if data.studioDirectUserIds and userId < 0 then
+		local created = DirectStudioParticipantLoadout.create(userId, data.configuration)
+		if not created.ok then
+			return nil
+		end
+		data.frozenLoadouts[userId] = created.value
+		return created.value
 	end
 	local called, value = pcall(data.loadoutProvider, userId)
 	if not called then
@@ -334,7 +357,7 @@ local function hasAuthenticatedContent(configuration: ConfigTypes.CoreConfigurat
 	local instance = matchingFolders[1]
 	if
 		instance:GetAttribute("ATDContentContract") ~= CONTENT_CONTRACT
-		or instance:GetAttribute("ContentVersion") ~= 1
+		or instance:GetAttribute("ContentVersion") ~= ContentSelection.CONTENT_VERSION
 	then
 		return false
 	end
@@ -363,7 +386,7 @@ local function hasAuthenticatedContent(configuration: ConfigTypes.CoreConfigurat
 		expectedCount += 1
 	end
 	local children = instance:GetChildren()
-	if expectedCount ~= 7 or #children ~= expectedCount then
+	if #children ~= expectedCount then
 		return false
 	end
 	local seen: { [string]: boolean } = {}
@@ -408,6 +431,7 @@ local function constructRuntime(data: ServiceData, retainedOnly: boolean?): Play
 		participantLoadouts = loadouts,
 		connectedParticipantUserIds = connectedParticipantUserIds,
 		rewarding = data.rewarding,
+		studioDirectUserIds = data.studioDirectUserIds,
 	})
 	return if result.ok then result.value else nil
 end
@@ -426,7 +450,20 @@ local function runtimeSnapshot(
 	local result = if runtime:isParticipantConnected(userId)
 		then runtime:getSnapshot(userId, serverTime)
 		else runtime:getSpectatorSnapshot(serverTime, userId)
-	return if result.ok then result.value else nil
+	if not result.ok then
+		return nil
+	end
+	local snapshot = result.value
+	local provider = data.tutorialStepProvider
+	if provider ~= nil and snapshot.viewerRole == "Participant" then
+		local called, step = pcall(provider, userId, snapshot.matchId)
+		if called and type(step) == "number" and Validation.isSafeInteger(step) and step >= 5 and step <= 8 then
+			local projected = table.clone(snapshot)
+			projected.tutorialStep = step
+			snapshot = table.freeze(projected) :: PlayableMatchProtocol.Snapshot
+		end
+	end
+	return snapshot
 end
 
 local function publishAll(data: ServiceData, serverTime: number)
@@ -784,6 +821,38 @@ function Methods.getResultEvidence(self: Service): Result.Result<PlayableMatchRu
 	return if evidence.ok then Result.ok(evidence.value) else Result.err(evidence.error.code)
 end
 
+function Methods.refreshTutorial(self: Service, userId: number): boolean
+	local data = requireData(self)
+	local runtime = data.runtime
+	if
+		data.state ~= "Started"
+		or runtime == nil
+		or type(userId) ~= "number"
+		or not Validation.isSafeInteger(userId)
+		or userId <= 0
+		or not runtime:isParticipantConnected(userId)
+	then
+		return false
+	end
+	local refreshed = runtime:refreshPresentation()
+	data.publishPending = data.publishPending or refreshed.accepted
+	return refreshed.accepted
+end
+
+function Methods.terminateEndless(
+	self: Service,
+	reason: PlayableMatchProtocol.TerminationReason
+): PlayableMatchRuntime.ActionOutcome
+	local data = requireData(self)
+	local runtime = data.runtime
+	if data.state ~= "Started" or runtime == nil then
+		return table.freeze({ accepted = false, reason = "Unavailable" })
+	end
+	local outcome = runtime:terminateEndless(reason, data.environment.now())
+	data.publishPending = data.publishPending or outcome.accepted
+	return outcome
+end
+
 function Methods.setRewardView(self: Service, userId: number, rewardView: unknown): PlayableMatchRuntime.ActionOutcome
 	local data = requireData(self)
 	local runtime = data.runtime
@@ -970,7 +1039,9 @@ local function construct(
 	attackSender: AttackSender,
 	environment: Environment,
 	loadoutProvider: LoadoutProvider,
-	rosterInputs: RosterInputs?
+	rosterInputs: RosterInputs?,
+	directContentSelection: DirectContentSelection?,
+	isStudio: boolean
 ): Service
 	local expectedUserIdOrder, expectedUserIds, frozenLoadouts = normalizeRosterInputs(rosterInputs, configuration)
 	if rosterInputs ~= nil and frozenLoadouts == nil then
@@ -978,6 +1049,7 @@ local function construct(
 	end
 	local rewarding = rosterInputs ~= nil and rosterInputs.rewarding == true
 	local managedAdmissions = rosterInputs ~= nil and rosterInputs.managedAdmissions == true
+	local studioDirectUserIds = isStudio and directContentSelection ~= nil and rosterInputs == nil and not rewarding
 	local initialConnectedParticipantUserIds: { number } = {}
 	if rosterInputs ~= nil and rosterInputs.connectedParticipantUserIds ~= nil then
 		local connectedSeen: { [number]: boolean } = {}
@@ -999,6 +1071,49 @@ local function construct(
 	local fixedMatchId: Ids.MatchId? = nil
 	local fixedMapId: Ids.MapId? = nil
 	local fixedDifficultyId: Ids.DifficultyId? = nil
+	if directContentSelection ~= nil then
+		if
+			rosterInputs ~= nil
+			or type(directContentSelection) ~= "table"
+			or getmetatable(directContentSelection :: any) ~= nil
+			or type(directContentSelection.mapId) ~= "string"
+			or type(directContentSelection.difficultyId) ~= "string"
+		then
+			error("[ATD_PLAYABLE_MATCH_SERVICE][code=INVALID_DIRECT_CONTENT_SELECTION]", 0)
+		end
+		for key in next, directContentSelection :: any do
+			if key ~= "mapId" and key ~= "difficultyId" then
+				error("[ATD_PLAYABLE_MATCH_SERVICE][code=INVALID_DIRECT_CONTENT_SELECTION]", 0)
+			end
+		end
+		local mapId = Ids.validateMapId(directContentSelection.mapId)
+		local difficultyId = Ids.validateDifficultyId(directContentSelection.difficultyId)
+		local mapDefinition = if mapId.ok then configuration.maps.byId[mapId.value] else nil
+		local difficulty = if difficultyId.ok then configuration.difficulties.byId[difficultyId.value] else nil
+		local schedules = if mapId.ok then configuration.waves.byMapId[mapId.value] else nil
+		local schedule = if schedules == nil or not difficultyId.ok then nil else schedules[difficultyId.value]
+		local supported = false
+		if mapDefinition ~= nil and difficultyId.ok then
+			for _, supportedId in mapDefinition.supportedDifficultyIds do
+				supported = supported or supportedId == difficultyId.value
+			end
+		end
+		if
+			not mapId.ok
+			or not difficultyId.ok
+			or difficulty == nil
+			or schedule == nil
+			or not supported
+			or not (
+				(difficulty.kind == "Finite" and schedule.kind == "AuthoredFinite")
+				or (difficulty.kind == "Endless" and schedule.kind == "GeneratedEndless")
+			)
+		then
+			error("[ATD_PLAYABLE_MATCH_SERVICE][code=INVALID_DIRECT_CONTENT_SELECTION]", 0)
+		end
+		fixedMapId = mapId.value
+		fixedDifficultyId = difficultyId.value
+	end
 	if
 		rosterInputs ~= nil
 		and (rosterInputs.matchId ~= nil or rosterInputs.mapId ~= nil or rosterInputs.difficultyId ~= nil)
@@ -1064,6 +1179,8 @@ local function construct(
 		fixedDifficultyId = fixedDifficultyId,
 		managedAdmissions = managedAdmissions,
 		initialConnectedParticipantUserIds = table.freeze(initialConnectedParticipantUserIds),
+		tutorialStepProvider = if rosterInputs == nil then nil else rosterInputs.tutorialStepProvider,
+		studioDirectUserIds = studioDirectUserIds,
 	}
 	local service = setmetatable({}, Methods) :: Service
 	table.freeze(service)
@@ -1091,7 +1208,8 @@ function PlayableMatchService.new(
 	snapshotSender: SnapshotSender,
 	attackSender: AttackSender,
 	loadoutProvider: LoadoutProvider,
-	rosterInputs: RosterInputs?
+	rosterInputs: RosterInputs?,
+	directContentSelection: DirectContentSelection?
 ): Service
 	if type(loadoutProvider) ~= "function" then
 		error("[ATD_PLAYABLE_MATCH_SERVICE][code=LOADOUT_PROVIDER_MISSING]", 0)
@@ -1104,7 +1222,9 @@ function PlayableMatchService.new(
 		attackSender,
 		PRODUCTION_ENVIRONMENT,
 		loadoutProvider,
-		rosterInputs
+		rosterInputs,
+		directContentSelection,
+		RunService:IsStudio()
 	)
 end
 
@@ -1132,7 +1252,9 @@ if isExactTestModule() then
 		attackSender: AttackSender,
 		environment: Environment,
 		loadoutProvider: LoadoutProvider?,
-		rosterInputs: RosterInputs?
+		rosterInputs: RosterInputs?,
+		directContentSelection: DirectContentSelection?,
+		isStudio: boolean?
 	): Service
 		local provider = loadoutProvider
 			or function(userId: number): MatchLoadoutProtocol.Snapshot?
@@ -1163,7 +1285,9 @@ if isExactTestModule() then
 			attackSender,
 			environment,
 			provider,
-			rosterInputs
+			rosterInputs,
+			directContentSelection,
+			isStudio == true
 		)
 	end
 end

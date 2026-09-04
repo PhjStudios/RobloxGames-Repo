@@ -80,6 +80,18 @@ local bindings: { ServerRateLimiter.PolicyBinding } = {
 		policy = requirePolicy(4, 1),
 	}),
 	table.freeze({
+		endpoint = "AdvanceLobbyTutorial",
+		policy = requirePolicy(3, 0.5),
+	}),
+	table.freeze({
+		endpoint = "SkipLobbyTutorial",
+		policy = requirePolicy(2, 0.2),
+	}),
+	table.freeze({
+		endpoint = "ReplayLobbyTutorial",
+		policy = requirePolicy(2, 0.2),
+	}),
+	table.freeze({
 		endpoint = "GetLobbyParty",
 		policy = requirePolicy(4, 1),
 	}),

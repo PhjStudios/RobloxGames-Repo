@@ -315,6 +315,23 @@ return TestHarness.suite("server-owned lobby queue", {
 			join(assertions, rig, "queue:one", 10, "config-captain")
 			local joined = join(assertions, rig, "queue:one", 20, "config-member")
 			local original = joined.snapshot.configuration
+			assertions.equal(original.mapId, "map:backyard-garden-v1")
+			assertions.equal(original.difficultyId, "difficulty:easy-v1")
+			local hiddenDevelopmentSelection = rig.service:configure(10, {
+				transactionId = "transaction:configure-hidden-development",
+				expectedRevision = joined.revision,
+				queueId = "queue:one",
+				configuration = {
+					mapId = "map:phase07-graybox",
+					difficultyId = "difficulty:local",
+					privacy = "Public",
+					maxPlayers = 4,
+				},
+			})
+			assertions.isFalse(hiddenDevelopmentSelection.ok)
+			if not hiddenDevelopmentSelection.ok then
+				assertions.equal(hiddenDevelopmentSelection.error.code, "INVALID_SELECTION")
+			end
 			local nonCaptain = rig.service:configure(20, {
 				transactionId = "transaction:configure-noncaptain",
 				expectedRevision = joined.revision,

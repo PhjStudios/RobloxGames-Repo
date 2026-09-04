@@ -206,6 +206,93 @@ local function migrateFourToFive(profile: { [any]: any }, now: number): boolean
 	return true
 end
 
+local LEGACY_TUTORIAL_FIELDS = table.freeze({
+	firstJoin = true,
+	tutorialCompleted = true,
+	tutorialStep = true,
+})
+
+local function validLegacyTutorial(value: unknown): boolean
+	if type(value) ~= "table" or getmetatable(value :: any) ~= nil then
+		return false
+	end
+	local count = 0
+	for key in next, value :: { [any]: unknown } do
+		if type(key) ~= "string" or LEGACY_TUTORIAL_FIELDS[key] ~= true then
+			return false
+		end
+		count += 1
+	end
+	return count == 3
+		and type((value :: any).firstJoin) == "boolean"
+		and type((value :: any).tutorialCompleted) == "boolean"
+		and type((value :: any).tutorialStep) == "number"
+		and Validation.isSafeInteger((value :: any).tutorialStep)
+		and (value :: any).tutorialStep >= 0
+		and (value :: any).tutorialStep <= 20
+end
+
+local function tutorialStartersExceedCapacity(profile: { [any]: any }): boolean?
+	local unitCount = countUnits(profile.units)
+	if unitCount == nil then
+		return nil
+	end
+	local ownsDart = false
+	local ownsBombardier = false
+	for _, unit in profile.units do
+		if type(unit) ~= "table" or getmetatable(unit) ~= nil then
+			return nil
+		end
+		local towerId = rawget(unit, "towerId")
+		ownsDart = ownsDart or towerId == ProfileSchema.DART_STARTER_TOWER_ID
+		ownsBombardier = ownsBombardier or towerId == ProfileSchema.BOMBARDIER_STARTER_TOWER_ID
+	end
+	local missingStarterCount = (if ownsDart then 0 else 1) + (if ownsBombardier then 0 else 1)
+	return unitCount + missingStarterCount > ProfileSchema.MAX_UNITS
+end
+
+local function migrateFiveToSix(profile: { [any]: any }, now: number): boolean
+	if not validLegacyTutorial(profile.tutorial) then
+		return false
+	end
+	local migration = profile.migration
+	local stats = profile.stats
+	local startersExceedCapacity = tutorialStartersExceedCapacity(profile)
+	if
+		type(migration) ~= "table"
+		or getmetatable(migration) ~= nil
+		or type(migration.migrationCount) ~= "number"
+		or not Validation.isSafeInteger(migration.migrationCount)
+		or migration.migrationCount < 0
+		or type(stats) ~= "table"
+		or getmetatable(stats) ~= nil
+		or type(stats.matchesPlayed) ~= "number"
+		or not Validation.isSafeInteger(stats.matchesPlayed)
+		or stats.matchesPlayed < 0
+		or startersExceedCapacity == nil
+	then
+		return false
+	end
+	local legacy = profile.tutorial
+	-- A legacy inventory is never discarded or replaced to make room for the
+	-- tutorial starters. Profiles that cannot fit every missing starter are
+	-- grandfathered past onboarding instead of being stranded at step zero.
+	local grandfathered = legacy.tutorialCompleted == true or stats.matchesPlayed > 0 or startersExceedCapacity
+	profile.tutorial = {
+		version = ProfileSchema.TUTORIAL_VERSION,
+		firstJoin = not grandfathered,
+		tutorialCompleted = grandfathered,
+		tutorialStep = if grandfathered then ProfileSchema.MAX_TUTORIAL_STEP else 0,
+		attempt = 1,
+		skipped = false,
+		trackedMatchId = "",
+	}
+	migration.lastMigratedAt = now
+	migration.migrationCount += 1
+	profile.schemaVersion = 6
+	return true
+end
+
 function ProfileMigrations.migrate(
 	rawProfile: unknown,
 	towers: ConfigTypes.TowerCatalog,
@@ -278,6 +365,9 @@ function ProfileMigrations.migrate(
 		elseif version == 4 then
 			migrated = migrateFourToFive(working, now)
 			version = 5
+		elseif version == 5 then
+			migrated = migrateFiveToSix(working, now)
+			version = 6
 		end
 		if not migrated then
 			return failure("MIGRATION_FAILED", "profile", "Stored profile failed a deterministic migration step")

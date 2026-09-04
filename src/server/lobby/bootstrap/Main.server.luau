@@ -23,6 +23,7 @@ local ServerRequestDispatcher = require(script.Parent.Parent.networking.ServerRe
 local ProfileService = require(script.Parent.Parent.profile.ProfileService)
 local ProfileSchema = require(script.Parent.Parent.profile.ProfileSchema)
 local ProfileStoreAdapter = require(script.Parent.Parent.profile.ProfileStoreAdapter)
+local TutorialService = require(script.Parent.Parent.profile.TutorialService)
 local PendingResultService = require(script.Parent.Parent.profile.PendingResultService)
 local ActiveMatchRouteService = require(script.Parent.Parent.travel.ActiveMatchRouteService)
 local MemoryStoreTravelAdapter = require(script.Parent.Parent.travel.MemoryStoreTravelAdapter)
@@ -46,6 +47,7 @@ local SettingsService = require(script.Parent.Parent.Parent.lobby.settings.Setti
 local LobbyReconnectService = require(script.Parent.Parent.Parent.lobby.travel.LobbyReconnectService)
 local PlayerReadyOwnership = require(script.Parent.Parent.Parent.lobby.travel.PlayerReadyOwnership)
 local LobbyReturnCoordinator = require(script.Parent.Parent.Parent.lobby.travel.LobbyReturnCoordinator)
+local TutorialTravelRecovery = require(script.Parent.Parent.Parent.lobby.travel.TutorialTravelRecovery)
 local LobbyTravelCoordinator = require(script.Parent.Parent.Parent.lobby.travel.LobbyTravelCoordinator)
 local PendingClaimCoordinator = require(script.Parent.Parent.Parent.lobby.travel.PendingClaimCoordinator)
 
@@ -165,6 +167,10 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		error("[ATD_LOBBY_BOOTSTRAP][code=PROFILE_SERVICE_CREATION_FAILED]", 0)
 	end
 	local profile = profileResult.value
+	local tutorial = required(
+		TutorialService.new(profile, configuration.coreConfiguration, { clock = os.time }),
+		"TUTORIAL_SERVICE_UNAVAILABLE"
+	)
 	local inventoryResult = InventoryService.new(profile, configuration.coreConfiguration)
 	local acquisitionResult = AcquisitionService.new(profile, configuration.coreConfiguration, nil, nil, nil)
 	local settingsResult = SettingsService.new(profile)
@@ -220,6 +226,9 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 	local routeBlockedByUserId: { [number]: boolean } = {}
 	local activeRouteViewByUserId: { [number]: LobbyProtocol.ActiveRouteView } = {}
 	local returnedRouteCleanupByUserId: { [number]: string } = {}
+	local tutorialInitializationPendingByUserId: { [number]: boolean } = {}
+	local tutorialReturnPendingByUserId: { [number]: string } = {}
+	local tutorialTravelRecoveryPlayerByUserId: { [number]: Player } = {}
 
 	local memoryAdapter = required(
 		if RunService:IsStudio()
@@ -358,11 +367,31 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 			beginStart = function(locked): boolean
 				return travel ~= nil and travel:beginStart(locked)
 			end,
-			onChanged = function(_queueId: string, _snapshot: QueueProtocol.Snapshot)
-				task.defer(function()
+			onChanged = function(queueId: string, snapshot: QueueProtocol.Snapshot)
+				scheduleRuntimeWorker(function()
 					if not runtimeCleaned then
+						for _, member in snapshot.members do
+							local eventId = `{queueId}|{snapshot.revision}`
+							local qualifies = TutorialService.isSoloEasyQueue(member.userId, snapshot)
+							local observed = tutorial:observeSoloEasyQueue(member.userId, snapshot, eventId)
+							if
+								snapshot.state == "Open"
+								and not qualifies
+								and observed.ok
+								and not observed.value.advanced
+								and observed.value.tutorial.tutorialStep == 4
+							then
+								tutorial:repairTravel(member.userId, `queue-change|{eventId}`)
+							end
+						end
 						publishQueueViews()
 						publishPartyViews()
+						for _, member in snapshot.members do
+							local player = Players:GetPlayerByUserId(member.userId)
+							if player ~= nil then
+								publishViews(player)
+							end
+						end
 					end
 				end)
 			end,
@@ -484,7 +513,25 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		end
 	end
 	if #displayAnchors > 0 then
-		local displayResult = QueueWorldDisplayService.new(displayAnchors)
+		local displayResult = QueueWorldDisplayService.new(displayAnchors, {
+			mapDisplayName = function(mapId: string): string?
+				local definition = configuration.coreConfiguration.maps.byId[mapId]
+				return if definition == nil then nil else definition.displayName
+			end,
+			difficultyDisplayName = function(difficultyId: string): string?
+				local definition = configuration.coreConfiguration.difficulties.byId[difficultyId]
+				return if definition == nil then nil else definition.displayName
+			end,
+			playerDisplayName = function(userId: number): string?
+				local player = Players:GetPlayerByUserId(userId)
+				if player == nil then
+					return nil
+				end
+				return if player.DisplayName == player.Name
+					then `@{player.Name}`
+					else `{player.DisplayName} (@{player.Name})`
+			end,
+		})
 		if displayResult.ok then
 			worldDisplay = displayResult.value
 		end
@@ -604,6 +651,37 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 			activeRouteViewByUserId[player.UserId] = result.value
 			routeBlockedByUserId[player.UserId] = result.value.status == "Available"
 			sendActiveRoute(player, result.value)
+			if result.value.status == "None" and tutorialTravelRecoveryPlayerByUserId[player.UserId] == player then
+				local recovered = TutorialTravelRecovery.recover({
+					clock = os.time,
+					activeRoutes = activeRoutes,
+					tutorial = tutorial,
+					isCurrent = function(recoveryUserId: number): boolean
+						return not runtimeCleaned
+							and recoveryUserId == player.UserId
+							and player.Parent == Players
+							and profile:getState(recoveryUserId) == "Ready"
+							and tutorialTravelRecoveryPlayerByUserId[recoveryUserId] == player
+					end,
+				}, player.UserId, `lobby-ready|{player.UserId}`, false)
+				if recovered.ok and recovered.value then
+					tutorialTravelRecoveryPlayerByUserId[player.UserId] = nil
+					publishViews(player)
+				elseif recovered.ok then
+					local currentTutorial = tutorial:getView(player.UserId)
+					local currentStep = if currentTutorial.ok then currentTutorial.value.tutorial.tutorialStep else nil
+					if type(currentStep) == "number" and (currentStep < 4 or currentStep > 8) then
+						tutorialTravelRecoveryPlayerByUserId[player.UserId] = nil
+						routeBlockedByUserId[player.UserId] = false
+					else
+						routeBlockedByUserId[player.UserId] = true
+					end
+				else
+					-- Keep queue admission closed until a strict route read or the
+					-- profile mutation resolves this recovery candidate.
+					routeBlockedByUserId[player.UserId] = true
+				end
+			end
 		end)
 	end
 
@@ -630,7 +708,16 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 			if runtimeCleaned or player.Parent ~= Players or profile:getState(userId) ~= "Ready" then
 				return
 			end
+			local initialized = tutorial:initialize(userId)
+			if not initialized.ok then
+				tutorialInitializationPendingByUserId[userId] = true
+				return
+			end
+			tutorialInitializationPendingByUserId[userId] = nil
+			local initializedStep = initialized.value.tutorial.tutorialStep
 
+			local hasValidReturn = false
+			local returnStateConfirmed = false
 			local joined, joinData = pcall(player.GetJoinData, player)
 			if joined and type(joinData) == "table" then
 				local launchHint = PlatformInviteAdapter.parseLaunchData((joinData :: any).LaunchData)
@@ -643,6 +730,14 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 				end
 				local admitted = returns:admitJoinData(userId, (joinData :: any).TeleportData)
 				if admitted.ok then
+					hasValidReturn = true
+					returnStateConfirmed = true
+					local observedReturn = tutorial:observeLobbyReturn(userId, admitted.value.matchId)
+					if observedReturn.ok then
+						tutorialReturnPendingByUserId[userId] = nil
+					else
+						tutorialReturnPendingByUserId[userId] = admitted.value.matchId
+					end
 					returnedRouteCleanupByUserId[userId] = admitted.value.matchId
 					retireReturnedRoute(player)
 					if admitted.value.arrivedCount >= admitted.value.expectedCount then
@@ -655,7 +750,20 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 							end)
 						end)
 					end
+				elseif
+					type(admitted.error) == "table"
+					and (admitted.error.code == "INVALID_JOIN_DATA" or admitted.error.code == "RETURN_FINALIZED")
+				then
+					-- Malformed/absent data and an already-finalized receipt are the
+					-- only negative outcomes that prove no valid Return is pending.
+					returnStateConfirmed = true
 				end
+			end
+
+			if returnStateConfirmed and not hasValidReturn and initializedStep >= 4 and initializedStep <= 8 then
+				tutorialTravelRecoveryPlayerByUserId[userId] = player
+			elseif tutorialTravelRecoveryPlayerByUserId[userId] == player then
+				tutorialTravelRecoveryPlayerByUserId[userId] = nil
 			end
 
 			refreshRoute(player)
@@ -682,6 +790,17 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 			)
 		end
 		profile:queueImportantSave(player.UserId)
+		publishViews(player)
+		return ServerRequestDispatcher.success(result.value)
+	end
+
+	local function finishTutorial(player: Player, result: any): ServerRequestDispatcher.HandlerOutcome
+		if type(result) ~= "table" or result.ok ~= true then
+			local code = if type(result) == "table" and type(result.error) == "table" then result.error.code else nil
+			return ServerRequestDispatcher.reject(
+				if code == "STALE_REVISION" then PUBLIC_ERRORS.STALE_REQUEST else PUBLIC_ERRORS.UNAVAILABLE
+			)
+		end
 		publishViews(player)
 		return ServerRequestDispatcher.success(result.value)
 	end
@@ -860,7 +979,6 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 		end
 	)
-
 	network:registerRequest(
 		LobbyProtocol.ENDPOINTS.GET_PARTY,
 		LobbyProtocol.EmptyPayloadSchema,
@@ -873,6 +991,39 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 			local result = party:getSnapshot(context.player.UserId)
 			return if result.ok
 				then ServerRequestDispatcher.success(result.value)
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+		end
+	)
+	network:registerRequest(
+		LobbyProtocol.ENDPOINTS.ADVANCE_TUTORIAL,
+		LobbyProtocol.TutorialActionIntentSchema,
+		LobbyProtocol.TutorialMutationReceiptSchema,
+		authorizeLiveContext,
+		function(context, payload)
+			return if ready(context.player)
+				then finishTutorial(context.player, tutorial:advance(context.player.UserId, payload))
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+		end
+	)
+	network:registerRequest(
+		LobbyProtocol.ENDPOINTS.SKIP_TUTORIAL,
+		LobbyProtocol.TutorialActionIntentSchema,
+		LobbyProtocol.TutorialMutationReceiptSchema,
+		authorizeLiveContext,
+		function(context, payload)
+			return if ready(context.player)
+				then finishTutorial(context.player, tutorial:skip(context.player.UserId, payload))
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+		end
+	)
+	network:registerRequest(
+		LobbyProtocol.ENDPOINTS.REPLAY_TUTORIAL,
+		LobbyProtocol.TutorialActionIntentSchema,
+		LobbyProtocol.TutorialMutationReceiptSchema,
+		authorizeLiveContext,
+		function(context, payload)
+			return if ready(context.player)
+				then finishTutorial(context.player, tutorial:replay(context.player.UserId, payload))
 				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 		end
 	)
@@ -1039,9 +1190,15 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		QueueProtocol.MutationReceiptSchema,
 		authorizeLiveContext,
 		function(context, payload)
-			return if ready(context.player)
-				then finishQueue(queue:leave(context.player.UserId, payload))
-				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+			if not ready(context.player) then
+				return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+			end
+			local result = queue:leave(context.player.UserId, payload)
+			if result.ok then
+				tutorial:repairTravel(context.player.UserId, `queue-leave|{result.value.transactionId}`)
+				publishViews(context.player)
+			end
+			return finishQueue(result)
 		end
 	)
 	network:registerRequest(
@@ -1127,6 +1284,11 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 						routeBlockedByUserId[player.UserId] = nil
 						activeRouteViewByUserId[player.UserId] = nil
 						returnedRouteCleanupByUserId[player.UserId] = nil
+						tutorialInitializationPendingByUserId[player.UserId] = nil
+						tutorialReturnPendingByUserId[player.UserId] = nil
+						if tutorialTravelRecoveryPlayerByUserId[player.UserId] == player then
+							tutorialTravelRecoveryPlayerByUserId[player.UserId] = nil
+						end
 					end)
 				end)
 			)
@@ -1153,6 +1315,19 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 										for _, player in Players:GetPlayers() do
 											if profile:getState(player.UserId) == "Ready" then
 												table.insert(readyPlayers, player)
+												if tutorialInitializationPendingByUserId[player.UserId] then
+													processPlayerReady(player)
+												else
+													local matchId = tutorialReturnPendingByUserId[player.UserId]
+													if matchId ~= nil then
+														local observedReturn =
+															tutorial:observeLobbyReturn(player.UserId, matchId)
+														if observedReturn.ok then
+															tutorialReturnPendingByUserId[player.UserId] = nil
+															publishViews(player)
+														end
+													end
+												end
 												refreshRoute(player)
 											end
 										end

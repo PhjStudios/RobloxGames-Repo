@@ -78,6 +78,8 @@ return TestHarness.suite("authenticated match loadout protocol", {
 		local badUser = loadout(1)
 		badUser.userId = 0
 		assertions.isFalse(MatchLoadoutProtocol.validate(badUser, configuration).ok)
+		badUser.userId = -1
+		assertions.isFalse(MatchLoadoutProtocol.validate(badUser, configuration).ok)
 		local private = loadout(1)
 		private.sessionLock = "PRIVATE"
 		assertions.isFalse(MatchLoadoutProtocol.validate(private, configuration).ok)

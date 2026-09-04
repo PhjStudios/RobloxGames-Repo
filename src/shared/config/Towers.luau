@@ -9,9 +9,6 @@ local ALL_TARGET_MODES: { ConfigTypes.TargetMode } = {
 	"Weakest",
 	"Closest",
 }
-
--- This intentionally small roster exercises distinct pacing choices without
--- pulling the full Phase 30 content roster into the local-match outcome.
 local Towers: { ConfigTypes.TowerDefinition } = {
 	{
 		id = "tower:dart-ant",
@@ -138,6 +135,51 @@ local Towers: { ConfigTypes.TowerDefinition } = {
 			},
 		},
 		tags = { "production", "role.heavy", "attack.direct" },
+	},
+	{
+		id = "tower:bombardier-ant",
+		displayName = "Bombardier Ant",
+		description = "Arcing seed pods burst across tightly packed swarms.",
+		modelAssetKey = "tower.bombardier-ant-model",
+		iconAssetKey = "icon.bombardier-ant",
+		placementCost = 195,
+		footprintRadiusStuds = 1.8,
+		placementCap = 5,
+		supportedTargetModes = ALL_TARGET_MODES,
+		defaultTargetMode = "First",
+		levels = {
+			{
+				upgradeCost = 0,
+				rangeStuds = 21,
+				attack = {
+					behavior = { kind = "AttackBehavior", key = "attack.splash" },
+					damage = 20,
+					cooldownSeconds = 1.4,
+					splashRadiusStuds = 5.5,
+				},
+			},
+			{
+				upgradeCost = 145,
+				rangeStuds = 23,
+				attack = {
+					behavior = { kind = "AttackBehavior", key = "attack.splash" },
+					damage = 34,
+					cooldownSeconds = 1.25,
+					splashRadiusStuds = 6,
+				},
+			},
+			{
+				upgradeCost = 250,
+				rangeStuds = 26,
+				attack = {
+					behavior = { kind = "AttackBehavior", key = "attack.splash" },
+					damage = 58,
+					cooldownSeconds = 1.1,
+					splashRadiusStuds = 6.5,
+				},
+			},
+		},
+		tags = { "production", "starter", "role.area", "attack.splash" },
 	},
 }
 

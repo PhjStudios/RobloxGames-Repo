@@ -34,6 +34,14 @@ local function legacySettings(profile: any)
 	profile.settings.reducedMotionEnabled = nil
 end
 
+local function legacyTutorial(profile: any)
+	profile.tutorial = {
+		firstJoin = true,
+		tutorialCompleted = false,
+		tutorialStep = 0,
+	}
+end
+
 local function versionTwo(assertions: Assertions, fixture: TowerFixtures.AuthenticatedFixture): any
 	local profile = ProfileSchema.clone(current(assertions, fixture))
 	profile.schemaVersion = 2
@@ -42,6 +50,7 @@ local function versionTwo(assertions: Assertions, fixture: TowerFixtures.Authent
 	profile.pendingResults = nil
 	profile.claimedResults = nil
 	legacySettings(profile)
+	legacyTutorial(profile)
 	return profile
 end
 
@@ -52,6 +61,7 @@ local function versionThree(assertions: Assertions, fixture: TowerFixtures.Authe
 	profile.pendingResults = nil
 	profile.claimedResults = nil
 	profile.migration.migrationCount = math.max(0, profile.migration.migrationCount - 1)
+	legacyTutorial(profile)
 	return profile
 end
 
@@ -59,6 +69,14 @@ local function versionFour(assertions: Assertions, fixture: TowerFixtures.Authen
 	local profile = ProfileSchema.clone(current(assertions, fixture))
 	profile.schemaVersion = 4
 	profile.pendingResults = nil
+	legacyTutorial(profile)
+	return profile
+end
+
+local function versionFive(assertions: Assertions, fixture: TowerFixtures.AuthenticatedFixture): any
+	local profile = ProfileSchema.clone(current(assertions, fixture))
+	profile.schemaVersion = 5
+	legacyTutorial(profile)
 	return profile
 end
 
@@ -91,7 +109,7 @@ return TestHarness.suite("ProfileMigrations", {
 		assertions.equal(migrated.profile.migration.createdAt, NOW - 100)
 	end),
 
-	TestHarness.case("runs v1 migrations sequentially through v2 v3 v4 and v5", function(assertions)
+	TestHarness.case("runs v1 migrations sequentially through v2 v3 v4 v5 and v6", function(assertions)
 		local fixture = TowerFixtures.createAuthenticatedFixture()
 		local migrated = success(
 			assertions,
@@ -99,21 +117,22 @@ return TestHarness.suite("ProfileMigrations", {
 		)
 		assertions.equal(migrated.outcome, "Migrated")
 		assertions.equal(migrated.fromVersion, 1)
-		assertions.equal(#migrated.appliedVersions, 4)
+		assertions.equal(#migrated.appliedVersions, 5)
 		assertions.equal(migrated.appliedVersions[1], 2)
 		assertions.equal(migrated.appliedVersions[2], 3)
 		assertions.equal(migrated.appliedVersions[3], 4)
 		assertions.equal(migrated.appliedVersions[4], 5)
-		assertions.equal(migrated.profile.schemaVersion, 5)
+		assertions.equal(migrated.appliedVersions[5], 6)
+		assertions.equal(migrated.profile.schemaVersion, 6)
 		assertions.equal(migrated.profile.settings.version, 2)
 		assertions.isFalse(migrated.profile.settings.reducedMotionEnabled)
 		assertions.equal(migrated.profile.stats.towersAcquired, 1)
 		assertions.equal(migrated.profile.migration.migratedFromVersion, 1)
-		assertions.equal(migrated.profile.migration.migrationCount, 4)
+		assertions.equal(migrated.profile.migration.migrationCount, 5)
 		assertions.equal(migrated.profile.migration.lastMigratedAt, NOW)
 	end),
 
-	TestHarness.case("runs v2 through v5 without fabricating transaction or reward history", function(assertions)
+	TestHarness.case("runs v2 through v6 without fabricating transaction or reward history", function(assertions)
 		local fixture = TowerFixtures.createAuthenticatedFixture()
 		local migrated = success(
 			assertions,
@@ -121,41 +140,98 @@ return TestHarness.suite("ProfileMigrations", {
 		)
 		assertions.equal(migrated.outcome, "Migrated")
 		assertions.equal(migrated.fromVersion, 2)
-		assertions.equal(#migrated.appliedVersions, 3)
+		assertions.equal(#migrated.appliedVersions, 4)
 		assertions.equal(migrated.appliedVersions[1], 3)
 		assertions.equal(migrated.appliedVersions[2], 4)
 		assertions.equal(migrated.appliedVersions[3], 5)
+		assertions.equal(migrated.appliedVersions[4], 6)
 		assertions.equal(#migrated.profile.receipts, 0)
 		assertions.equal(#migrated.profile.pendingResults, 0)
 		assertions.equal(#migrated.profile.claimedResults, 0)
-		assertions.equal(migrated.profile.migration.migrationCount, 3)
+		assertions.equal(migrated.profile.migration.migrationCount, 4)
 	end),
 
-	TestHarness.case("adds reward and pending-inbox state from v3 through v5", function(assertions)
+	TestHarness.case("adds reward pending-inbox and tutorial state from v3 through v6", function(assertions)
 		local fixture = TowerFixtures.createAuthenticatedFixture()
 		local migrated = success(
 			assertions,
 			ProfileMigrations.migrate(versionThree(assertions, fixture), fixture.configuration.towers, NOW)
 		)
 		assertions.equal(migrated.fromVersion, 3)
-		assertions.equal(#migrated.appliedVersions, 2)
+		assertions.equal(#migrated.appliedVersions, 3)
 		assertions.equal(migrated.appliedVersions[1], 4)
 		assertions.equal(migrated.appliedVersions[2], 5)
+		assertions.equal(migrated.appliedVersions[3], 6)
 		assertions.equal(next(migrated.profile.firstClears), nil)
 		assertions.equal(#migrated.profile.pendingResults, 0)
 		assertions.equal(#migrated.profile.claimedResults, 0)
 	end),
 
-	TestHarness.case("adds only an empty pending-result inbox in the v4 to v5 migration", function(assertions)
+	TestHarness.case("adds pending-result and tutorial state from v4 through v6", function(assertions)
 		local fixture = TowerFixtures.createAuthenticatedFixture()
 		local migrated = success(
 			assertions,
 			ProfileMigrations.migrate(versionFour(assertions, fixture), fixture.configuration.towers, NOW)
 		)
 		assertions.equal(migrated.fromVersion, 4)
-		assertions.equal(#migrated.appliedVersions, 1)
+		assertions.equal(#migrated.appliedVersions, 2)
 		assertions.equal(migrated.appliedVersions[1], 5)
+		assertions.equal(migrated.appliedVersions[2], 6)
 		assertions.equal(#migrated.profile.pendingResults, 0)
+	end),
+
+	TestHarness.case("migrates v5 tutorial placeholders without inventing legacy progress", function(assertions)
+		local fixture = TowerFixtures.createAuthenticatedFixture()
+		local fresh = success(
+			assertions,
+			ProfileMigrations.migrate(versionFive(assertions, fixture), fixture.configuration.towers, NOW)
+		)
+		assertions.equal(fresh.appliedVersions[1], 6)
+		assertions.equal(fresh.profile.tutorial.version, 1)
+		assertions.equal(fresh.profile.tutorial.tutorialStep, 0)
+		assertions.isTrue(fresh.profile.tutorial.firstJoin)
+
+		local experienced = versionFive(assertions, fixture)
+		experienced.stats.matchesPlayed = 1
+		local grandfathered =
+			success(assertions, ProfileMigrations.migrate(experienced, fixture.configuration.towers, NOW))
+		assertions.equal(grandfathered.profile.tutorial.tutorialStep, 9)
+		assertions.isTrue(grandfathered.profile.tutorial.tutorialCompleted)
+		assertions.isFalse(grandfathered.profile.tutorial.skipped)
+	end),
+
+	TestHarness.case("grandfathers a full v5 inventory without replacing owned units", function(assertions)
+		local fixture = TowerFixtures.createAuthenticatedFixture()
+		local legacy = versionFive(assertions, fixture)
+		legacy.units = {}
+		for index = 1, ProfileSchema.MAX_UNITS do
+			local unitId = if index == 1 then ProfileSchema.DART_STARTER_UNIT_ID else `unit:legacy-full-{index}`
+			legacy.units[unitId] = {
+				unitId = unitId,
+				towerId = fixture.single.id,
+				favorite = index % 2 == 0,
+				locked = index % 3 == 0,
+				acquiredAt = NOW - index,
+				acquisitionSequence = index,
+			}
+		end
+		legacy.equippedUnitIds = { ProfileSchema.DART_STARTER_UNIT_ID }
+		legacy.stats.towersAcquired = ProfileSchema.MAX_UNITS
+
+		local migrated = success(assertions, ProfileMigrations.migrate(legacy, fixture.configuration.towers, NOW))
+		local unitCount = 0
+		local ownsBombardier = false
+		for _, unit in migrated.profile.units do
+			unitCount += 1
+			ownsBombardier = ownsBombardier or unit.towerId == ProfileSchema.BOMBARDIER_STARTER_TOWER_ID
+		end
+		assertions.equal(unitCount, ProfileSchema.MAX_UNITS)
+		assertions.isFalse(ownsBombardier)
+		assertions.equal(migrated.profile.units["unit:legacy-full-64"].towerId, fixture.single.id)
+		assertions.equal(migrated.profile.tutorial.tutorialStep, ProfileSchema.MAX_TUTORIAL_STEP)
+		assertions.isTrue(migrated.profile.tutorial.tutorialCompleted)
+		assertions.isFalse(migrated.profile.tutorial.firstJoin)
+		assertions.isFalse(migrated.profile.tutorial.skipped)
 	end),
 
 	TestHarness.case(

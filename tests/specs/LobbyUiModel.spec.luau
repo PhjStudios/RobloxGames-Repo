@@ -69,6 +69,7 @@ local function readyState()
 		banner = {
 			bannerId = "banner:starter",
 			displayName = "Colony Chest",
+			policyDisclosure = "Earn-only Gold. Duplicates remain separate units.",
 			onePullCost = 100,
 			tenPullCost = 900,
 			pityCount = 2,
@@ -324,4 +325,40 @@ return TestHarness.suite("Lobby UI canonical render model", {
 			assertions.isNil(LobbyUiModel.canonicalize(secret))
 		end
 	),
+
+	TestHarness.case("validates tutorial guidance and player-facing content catalog options", function(assertions)
+		local ready = readyState()
+		ready.tutorialGuidance = {
+			step = 3,
+			title = "Enter your first defense",
+			message = "Choose the release map and Easy difficulty.",
+			canAdvance = false,
+			canSkip = true,
+			canReplay = false,
+		}
+		ready.queueMapOptions = {
+			{
+				mapId = "map:backyard-garden-v1",
+				displayName = "Backyard Garden",
+				selectable = true,
+				difficulties = {
+					{ difficultyId = "difficulty:easy-v1", displayName = "Easy", selectable = true },
+				},
+			},
+		}
+		local canonical = LobbyUiModel.canonicalize(ready)
+		assertions.isNotNil(canonical)
+		assertions.contains(
+			((canonical :: LobbyUiModel.RenderState).banner :: LobbyUiModel.Banner).policyDisclosure,
+			"Duplicates remain separate units"
+		)
+		assertions.equal(((canonical :: LobbyUiModel.RenderState).tutorialGuidance :: any).step, 3)
+		assertions.equal(
+			((canonical :: LobbyUiModel.RenderState).queueMapOptions :: any)[1].displayName,
+			"Backyard Garden"
+		)
+
+		ready.tutorialGuidance.canAdvance = true
+		assertions.isNil(LobbyUiModel.canonicalize(ready))
+	end),
 })

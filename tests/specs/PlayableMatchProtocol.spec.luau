@@ -148,6 +148,48 @@ return TestHarness.suite("playable match wire protocol", {
 		healthyResult.wavePhase = "Results"
 		assertions.isTrue(Protocol.validateSnapshot(healthyResult).ok)
 	end),
+	TestHarness.case("distinguishes unbounded Endless snapshots and validates boss summaries", function(assertions)
+		local legacyFinite = validSnapshot()
+		assertions.isTrue(Protocol.validateSnapshot(legacyFinite).ok)
+
+		local endless = validSnapshot()
+		endless.modeKind = "Endless"
+		endless.mapId = "map:backyard-garden-v1"
+		endless.mapDisplayName = "Backyard Garden"
+		endless.difficultyId = "difficulty:endless-v1"
+		endless.difficultyDisplayName = "Endless"
+		endless.totalWaves = nil
+		endless.contentVersion = 1
+		endless.seed = 443
+		endless.bossKind = "Boss"
+		endless.enemies[1].enemyId = "enemy:garden-queen"
+		endless.enemies[1].displayName = "Garden Queen"
+		endless.enemies[1].threatClass = "Boss"
+		endless.boss = {
+			runtimeEnemyId = endless.enemies[1].runtimeEnemyId,
+			displayName = endless.enemies[1].displayName,
+			currentHealth = endless.enemies[1].currentHealth,
+			maximumHealth = endless.enemies[1].maximumHealth,
+			threatClass = "Boss",
+		}
+		assertions.isTrue(Protocol.validateSnapshot(endless).ok)
+
+		local finiteTotal = table.clone(endless)
+		finiteTotal.totalWaves = 40
+		assertions.isFalse(Protocol.validateSnapshot(finiteTotal).ok)
+		local missingSeed = table.clone(endless)
+		missingSeed.seed = nil
+		assertions.isFalse(Protocol.validateSnapshot(missingSeed).ok)
+		local staleBoss = table.clone(endless)
+		staleBoss.boss = table.clone(endless.boss)
+		staleBoss.boss.currentHealth += 1
+		assertions.isFalse(Protocol.validateSnapshot(staleBoss).ok)
+		local victory = table.clone(endless)
+		victory.state = "Results"
+		victory.wavePhase = "Results"
+		victory.result = "Victory"
+		assertions.isFalse(Protocol.validateSnapshot(victory).ok)
+	end),
 	TestHarness.case("bounds arrays and separates participant and spectator loadout fields", function(assertions)
 		local full = validSnapshot()
 		local towerTemplate = full.towers[1]
@@ -182,6 +224,16 @@ return TestHarness.suite("playable match wire protocol", {
 		spectator.stats.upgrades = 0
 		spectator.stats.sells = 0
 		assertions.isTrue(Protocol.validateSnapshot(spectator).ok)
+		local guidedParticipant = validSnapshot()
+		guidedParticipant.tutorialStep = 5
+		assertions.isTrue(Protocol.validateSnapshot(guidedParticipant).ok)
+		guidedParticipant.tutorialStep = 8
+		assertions.isTrue(Protocol.validateSnapshot(guidedParticipant).ok)
+		guidedParticipant.tutorialStep = 4
+		assertions.isFalse(Protocol.validateSnapshot(guidedParticipant).ok)
+		spectator.tutorialStep = 7
+		assertions.isFalse(Protocol.validateSnapshot(spectator).ok)
+		spectator.tutorialStep = nil
 		spectator.battleCash = 1
 		assertions.isFalse(Protocol.validateSnapshot(spectator).ok)
 		local one = validSnapshot()

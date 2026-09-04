@@ -49,6 +49,11 @@ return TestHarness.suite("ProfileSchema", {
 			assertions.equal(starterUnit.towerId, fixture.single.id)
 			assertions.equal(profile.stats.towersAcquired, 1)
 			assertions.isTrue(profile.tutorial.firstJoin)
+			assertions.equal(profile.tutorial.version, 1)
+			assertions.equal(profile.tutorial.tutorialStep, 0)
+			assertions.equal(profile.tutorial.attempt, 1)
+			assertions.isFalse(profile.tutorial.skipped)
+			assertions.equal(profile.tutorial.trackedMatchId, "")
 			assertions.isFalse(profile.settings.reducedMotionEnabled)
 			assertions.equal(next(profile.firstClears), nil)
 			assertions.equal(#profile.pendingResults, 0)
@@ -137,6 +142,18 @@ return TestHarness.suite("ProfileSchema", {
 			ProfileSchema.validate(malformed, fixture.configuration.towers),
 			"INVALID_PROFILE"
 		)
+
+		malformed = ProfileSchema.clone(profile)
+		malformed.tutorial.tutorialStep = 5
+		malformed.tutorial.firstJoin = false
+		expectProfileError(assertions, ProfileSchema.validate(malformed, fixture.configuration.towers), "INVALID_FIELD")
+
+		malformed = ProfileSchema.clone(profile)
+		malformed.tutorial.tutorialStep = 9
+		malformed.tutorial.firstJoin = false
+		malformed.tutorial.tutorialCompleted = true
+		malformed.tutorial.skipped = true
+		assertions.isTrue(ProfileSchema.validate(malformed, fixture.configuration.towers).ok)
 	end),
 
 	TestHarness.case("validates bounded first clears and durable claimed-result receipts", function(assertions)

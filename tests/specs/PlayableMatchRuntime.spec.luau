@@ -3,10 +3,14 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local TestHarness = require(script.Parent.Parent.Support.TestHarness)
+local ConfigurationFixtures = require(script.Parent.Parent.Fixtures.ConfigurationFixtures)
 
 local ConfigurationValidator = require(ReplicatedStorage.Shared.config.ConfigurationValidator)
+local ContentSelection = require(ReplicatedStorage.Shared.config.ContentSelection)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
 
+local DirectStudioParticipantLoadout =
+	require(script.Parent.Parent.ProductionServerPlayable.DirectStudioParticipantLoadout)
 local PlayableMatchRuntime = require(script.Parent.Parent.ProductionServerPlayable.PlayableMatchRuntime)
 
 type Assertions = TestHarness.Assertions
@@ -61,7 +65,7 @@ local function expectRejected(
 	assertions.isTrue(table.isfrozen(outcome))
 end
 
-local function makeRuntimeMap(shortPath: boolean?): any
+local function makeRuntimeMap(shortPath: boolean?, mapId: string?): any
 	local positions: { Vector3 } = {}
 	if shortPath then
 		positions = { Vector3.new(-1, 0, 0), Vector3.new(1, 0, 0) }
@@ -92,7 +96,7 @@ local function makeRuntimeMap(shortPath: boolean?): any
 
 	local endpoint = positions[#positions]
 	return {
-		mapId = "map:phase07-graybox",
+		mapId = mapId or ContentSelection.DEVELOPMENT_MAP_ID,
 		base = { cframe = CFrame.new(endpoint), position = endpoint },
 		bounds = { cframe = CFrame.new(0, 0, 0), size = Vector3.new(100, 20, 100) },
 		lanes = {
@@ -130,6 +134,51 @@ local function newRuntime(
 			runtimeMap = makeRuntimeMap(shortPath),
 			participantUserIds = participants or { USER_ONE },
 			rewarding = rewarding,
+		})
+	)
+end
+
+local function newSplashRuntime(assertions: Assertions): Runtime
+	local sources = ConfigurationFixtures.validSources()
+	local tower = sources.towers[1]
+	for _, level in tower.levels do
+		level.rangeStuds = 100
+		level.attack.behavior = { kind = "AttackBehavior", key = "attack.splash" }
+		level.attack.damage = 1
+		level.attack.cooldownSeconds = 10
+		level.attack.splashRadiusStuds = 1.5
+		level.attack.statusEffects = nil
+	end
+	sources.enemies[1].maxHealth = 100
+	local firstWave = sources.waves[1].waves[1]
+	firstWave.groups = {
+		{
+			enemyId = "enemy:worker-ant",
+			laneId = "lane.main",
+			count = 19,
+			startDelaySeconds = 0,
+			spawnIntervalSeconds = 0,
+		},
+		{
+			enemyId = "enemy:worker-ant",
+			laneId = "lane.main",
+			count = 1,
+			startDelaySeconds = 2,
+			spawnIntervalSeconds = 0,
+		},
+	}
+	local validated = success(assertions, ConfigurationValidator.validate(sources))
+	local runtimeMap = makeRuntimeMap(false, "map:garden")
+	runtimeMap.lanes[1].id = "lane.main"
+	return success(
+		assertions,
+		PlayableMatchRuntime.new({
+			matchId = MATCH_ID,
+			mapId = "map:garden",
+			difficultyId = "difficulty:normal",
+			configuration = validated,
+			runtimeMap = runtimeMap,
+			participantUserIds = { USER_ONE },
 		})
 	)
 end
@@ -297,10 +346,84 @@ return TestHarness.suite("authoritative playable match runtime", {
 			assertions.equal(initial.matchId, MATCH_ID)
 			assertions.equal(initial.state, "Ready")
 			assertions.equal(initial.battleCash, 500)
-			assertions.equal(#initial.towerOptions, 3)
+			assertions.equal(#initial.towerOptions, #CONFIGURATION.towers.ordered)
 			assertions.equal(initial.towerOptions[1].towerId, "tower:dart-ant")
 			assertions.equal(initial.totalWaves, 5)
 			assertions.equal(initial.maximumBaseHealth, 30)
+			assertions.isTrue(success(assertions, runtime:cleanup()))
+		end
+	),
+
+	TestHarness.case(
+		"keeps four direct Studio identities distinct and forbids the exception for rewards",
+		function(assertions)
+			local studioUserIds = { -1, -2, -3, -4 }
+			local loadouts = {}
+			for _, userId in studioUserIds do
+				table.insert(
+					loadouts,
+					success(assertions, DirectStudioParticipantLoadout.create(userId, CONFIGURATION))
+				)
+			end
+			expectError(
+				assertions,
+				PlayableMatchRuntime.new({
+					matchId = MATCH_ID,
+					configuration = CONFIGURATION,
+					runtimeMap = makeRuntimeMap(),
+					participantLoadouts = loadouts,
+				}),
+				"INVALID_PARTICIPANTS",
+				"new"
+			)
+			expectError(
+				assertions,
+				PlayableMatchRuntime.new({
+					matchId = MATCH_ID,
+					configuration = CONFIGURATION,
+					runtimeMap = makeRuntimeMap(),
+					participantLoadouts = loadouts,
+					rewarding = true,
+					studioDirectUserIds = true,
+				}),
+				"INVALID_DEPENDENCIES",
+				"new"
+			)
+
+			local runtime = success(
+				assertions,
+				PlayableMatchRuntime.new({
+					matchId = MATCH_ID,
+					configuration = CONFIGURATION,
+					runtimeMap = makeRuntimeMap(),
+					participantLoadouts = loadouts,
+					rewarding = false,
+					studioDirectUserIds = true,
+				})
+			)
+			assertions.equal(runtime:getMetrics().participantCount, 4)
+			for _, userId in studioUserIds do
+				local initial = snapshot(assertions, runtime, userId, 100)
+				assertions.equal(initial.viewerRole, "Participant")
+				assertions.equal(initial.loadoutRevision, 1)
+				assertions.equal(#initial.towerOptions, 2)
+			end
+			readyAll(assertions, runtime, studioUserIds, 100)
+			local positions = towerPositions()
+			for index, userId in studioUserIds do
+				expectAccepted(
+					assertions,
+					runtime:placeTower(userId, MATCH_ID, "tower:dart-ant", 1, 1, positions[index], 0, 100)
+				)
+			end
+			local observedOwners = {}
+			for _, tower in snapshot(assertions, runtime, -1, 100).towers do
+				assertions.isFalse(observedOwners[tower.ownerUserId] == true)
+				observedOwners[tower.ownerUserId] = true
+			end
+			for _, userId in studioUserIds do
+				assertions.isTrue(observedOwners[userId] == true)
+			end
 			assertions.isTrue(success(assertions, runtime:cleanup()))
 		end
 	),
@@ -556,6 +679,61 @@ return TestHarness.suite("authoritative playable match runtime", {
 	end),
 
 	TestHarness.case(
+		"dispatches bounded deterministic splash damage only to enemies inside the configured radius",
+		function(assertions)
+			local left = newSplashRuntime(assertions)
+			local right = newSplashRuntime(assertions)
+			local positions = {
+				Vector3.new(-6, 0, -4),
+				Vector3.new(-2, 0, -4),
+				Vector3.new(2, 0, -4),
+				Vector3.new(6, 0, -4),
+			}
+			local outcomes = {}
+			for _, runtime in { left, right } do
+				readyAll(assertions, runtime, { USER_ONE }, 100)
+				advanceFrom(assertions, runtime, 100, 108.25, PlayableMatchRuntime.MAX_STEP_SECONDS)
+				local before = snapshot(assertions, runtime, USER_ONE, 108.25)
+				assertions.equal(#before.enemies, 20)
+				for _, position in positions do
+					expectAccepted(
+						assertions,
+						runtime:placeTower(USER_ONE, MATCH_ID, "tower:worker", position, 0, 108.25)
+					)
+				end
+				table.insert(outcomes, success(assertions, runtime:step(108.5)))
+			end
+
+			local leftAttacks = outcomes[1].attacks
+			local rightAttacks = outcomes[2].attacks
+			assertions.equal(#leftAttacks, PlayableMatchRuntime.MAX_ATTACKS_PER_STEP)
+			assertions.equal(#rightAttacks, #leftAttacks)
+			for index, leftAttack in leftAttacks do
+				local rightAttack = rightAttacks[index]
+				assertions.equal(leftAttack.sequence, index)
+				assertions.equal(rightAttack.sequence, leftAttack.sequence)
+				assertions.equal(rightAttack.runtimeTowerId, leftAttack.runtimeTowerId)
+				assertions.equal(rightAttack.runtimeEnemyId, leftAttack.runtimeEnemyId)
+				assertions.equal(rightAttack.actualDamage, leftAttack.actualDamage)
+				assertions.equal(leftAttack.runtimeTowerId, math.min(4, math.floor((index - 1) / 19) + 1))
+			end
+
+			local after = snapshot(assertions, left, USER_ONE, 108.5)
+			assertions.equal(#after.enemies, 20)
+			for index, enemy in after.enemies do
+				if index == 20 then
+					assertions.equal(enemy.currentHealth, 100)
+				else
+					assertions.isTrue(enemy.currentHealth < 100)
+				end
+			end
+			assertEquivalentSnapshot(assertions, after, snapshot(assertions, right, USER_ONE, 108.5))
+			assertions.isTrue(success(assertions, left:cleanup()))
+			assertions.isTrue(success(assertions, right:cleanup()))
+		end
+	),
+
+	TestHarness.case(
 		"resolves every finite wave once grants stipends and freezes victorious Results",
 		function(assertions)
 			local participants = { USER_ONE, USER_TWO, USER_THREE, USER_FOUR }
@@ -587,6 +765,7 @@ return TestHarness.suite("authoritative playable match runtime", {
 			assertions.equal(completed.state, "Results")
 			assertions.equal(completed.result, "Victory")
 			assertions.equal(completed.wavePhase, "Results")
+			assertions.equal(completed.bossKind, "None")
 			assertions.equal(completed.baseHealth, 30)
 			assertions.equal(completed.stats.wavesCompleted, 5)
 			assertions.isTrue(completed.battleCash >= 570)
@@ -638,8 +817,10 @@ return TestHarness.suite("authoritative playable match runtime", {
 			assertions,
 			PlayableMatchRuntime.new({
 				matchId = MATCH_ID,
+				mapId = ContentSelection.RELEASE_MAP_ID,
+				difficultyId = ContentSelection.EASY_DIFFICULTY_ID,
 				configuration = CONFIGURATION,
-				runtimeMap = makeRuntimeMap(true),
+				runtimeMap = makeRuntimeMap(true, ContentSelection.RELEASE_MAP_ID),
 				participantUserIds = { USER_ONE, USER_TWO },
 				connectedParticipantUserIds = { USER_ONE },
 				rewarding = true,
@@ -711,6 +892,50 @@ return TestHarness.suite("authoritative playable match runtime", {
 		assertions.equal((spectatorSnapshot.reward :: any).battleCashEarned, 0)
 		assertions.isTrue(success(assertions, runtime:cleanup()))
 	end),
+
+	TestHarness.case(
+		"runs Endless without a finite total or victory and records explicit termination",
+		function(assertions)
+			local seed = 1_234_567
+			local runtime = success(
+				assertions,
+				PlayableMatchRuntime.new({
+					matchId = "match:endless-runtime",
+					mapId = ContentSelection.RELEASE_MAP_ID,
+					difficultyId = ContentSelection.ENDLESS_DIFFICULTY_ID,
+					configuration = CONFIGURATION,
+					runtimeMap = makeRuntimeMap(false, ContentSelection.RELEASE_MAP_ID),
+					participantUserIds = { USER_ONE },
+					rewarding = true,
+					seed = seed,
+				})
+			)
+			local initial = snapshot(assertions, runtime, USER_ONE, 100)
+			assertions.equal(initial.modeKind, "Endless")
+			assertions.isNil(initial.totalWaves)
+			assertions.equal(initial.seed, seed)
+			assertions.equal(initial.contentVersion, ContentSelection.CONTENT_VERSION)
+			assertions.isTrue(initial.rewarding)
+			expectAccepted(assertions, runtime:submitReady(USER_ONE, "match:endless-runtime", 100))
+			assertions.equal(runtime:getMetrics().state, "Playing")
+			expectRejected(assertions, runtime:terminateEndless("Victory", 101), "Unavailable")
+			expectAccepted(assertions, runtime:terminateEndless("PlayerEnded", 101))
+
+			local finished = snapshot(assertions, runtime, USER_ONE, 101)
+			assertions.equal(finished.state, "Results")
+			assertions.equal(finished.result, "Defeat")
+			assertions.isNil(finished.totalWaves)
+			local evidence = success(assertions, runtime:getResultEvidence())
+			assertions.equal(evidence.modeKind, "Endless")
+			assertions.equal(evidence.highestCompletedWave, 0)
+			assertions.equal(evidence.elapsedSeconds, 1)
+			assertions.equal(evidence.seed, seed)
+			assertions.equal(evidence.contentVersion, ContentSelection.CONTENT_VERSION)
+			assertions.equal(evidence.terminationReason, "PlayerEnded")
+			assertions.equal(evidence.outcome, "Defeat")
+			assertions.isTrue(success(assertions, runtime:cleanup()))
+		end
+	),
 
 	TestHarness.case(
 		"counts completed-wave reward evidence per connected participant without replay on rejoin",

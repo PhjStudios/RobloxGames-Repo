@@ -2,6 +2,7 @@
 
 local PayloadValidation = require(script.Parent.Parent.network.PayloadValidation)
 local QueueProtocol = require(script.Parent.Parent.queue.QueueProtocol)
+local TutorialProtocol = require(script.Parent.Parent.profile.TutorialProtocol)
 local Result = require(script.Parent.Parent.util.Result)
 local Validation = require(script.Parent.Parent.util.Validation)
 
@@ -99,6 +100,9 @@ local LobbyProtocol = {
 		GET_BANNER = "GetLobbyBanner",
 		PULL_CHEST = "PullLobbyChest",
 		UPDATE_SETTINGS = "UpdateLobbySettings",
+		ADVANCE_TUTORIAL = "AdvanceLobbyTutorial",
+		SKIP_TUTORIAL = "SkipLobbyTutorial",
+		REPLAY_TUTORIAL = "ReplayLobbyTutorial",
 		GET_PARTY = "GetLobbyParty",
 		CREATE_PARTY = "CreateLobbyParty",
 		INVITE_PARTY = "InviteLobbyParty",
@@ -148,6 +152,8 @@ local LobbyProtocol = {
 		status = PayloadValidation.enum({ "Initializing", "Unavailable", "Stale", "Failed" }),
 		route = ACTIVE_ROUTE,
 	})),
+	TutorialActionIntentSchema = TutorialProtocol.ActionIntentSchema,
+	TutorialMutationReceiptSchema = TutorialProtocol.MutationReceiptSchema,
 }
 
 local function issue(path: { Validation.PathSegment }, message: string)

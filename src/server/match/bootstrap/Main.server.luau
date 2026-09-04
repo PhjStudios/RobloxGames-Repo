@@ -4,7 +4,9 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerStorage = game:GetService("ServerStorage")
 
+local ContentSelection = require(ReplicatedStorage.Shared.config.ContentSelection)
 local PlaceRoles = require(ReplicatedStorage.Shared.config.PlaceRoles)
 local BaseProtocol = require(ReplicatedStorage.Shared.match.BaseProtocol)
 local EnemyProtocol = require(ReplicatedStorage.Shared.match.EnemyProtocol)
@@ -23,6 +25,7 @@ local ServerRequestDispatcher = require(script.Parent.Parent.networking.ServerRe
 local ProfileService = require(script.Parent.Parent.profile.ProfileService)
 local ProfileStoreAdapter = require(script.Parent.Parent.profile.ProfileStoreAdapter)
 local PendingResultService = require(script.Parent.Parent.profile.PendingResultService)
+local TutorialService = require(script.Parent.Parent.profile.TutorialService)
 local ActiveMatchRouteService = require(script.Parent.Parent.travel.ActiveMatchRouteService)
 local MatchTicketContract = require(script.Parent.Parent.travel.MatchTicketContract)
 local MemoryStoreTravelAdapter = require(script.Parent.Parent.travel.MemoryStoreTravelAdapter)
@@ -33,11 +36,13 @@ local TeleportAdapter = require(script.Parent.Parent.travel.TeleportAdapter)
 local TravelRecordStore = require(script.Parent.Parent.travel.TravelRecordStore)
 local MatchAdmissionService = require(script.Parent.Parent.Parent.match.admission.MatchAdmissionService)
 local MatchLifecycleService = require(script.Parent.Parent.Parent.match.lifecycle.MatchLifecycleService)
+local DirectStudioContentSelection = require(script.Parent.Parent.Parent.match.playable.DirectStudioContentSelection)
 local PlayableMatchService = require(script.Parent.Parent.Parent.match.playable.PlayableMatchService)
 local ProfileRewardClaimService = require(script.Parent.Parent.Parent.match.rewards.ProfileRewardClaimService)
 local ResultLedgerService = require(script.Parent.Parent.Parent.match.rewards.ResultLedgerService)
 local ResultLedgerStoreAdapter = require(script.Parent.Parent.Parent.match.rewards.ResultLedgerStoreAdapter)
 local MatchTravelHost = require(script.Parent.Parent.Parent.match.travel.MatchTravelHost)
+local MatchTutorialObserver = require(script.Parent.Parent.Parent.match.travel.MatchTutorialObserver)
 local RematchRecoveryScope = require(script.Parent.Parent.Parent.match.travel.RematchRecoveryScope)
 local UnexpectedReturnService = require(script.Parent.Parent.Parent.match.travel.UnexpectedReturnService)
 
@@ -178,8 +183,26 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		PlayableMatchProtocol.AttackEventSchema
 	)
 
-	local matchLifecycle = MatchLifecycleService.new(configuration.log, sendMatchSnapshot)
-	local storeResult = if RunService:IsStudio()
+	local isStudio = RunService:IsStudio()
+	local directSelection: DirectStudioContentSelection.Selection? = nil
+	local initialMapId = ContentSelection.DEVELOPMENT_MAP_ID
+	if isStudio then
+		local templateRoot = ServerStorage:FindFirstChild(DirectStudioContentSelection.ROOT_NAME)
+		local directSelectionResult = DirectStudioContentSelection.resolve(
+			configuration.coreConfiguration,
+			true,
+			function(attributeName)
+				return if templateRoot == nil then nil else templateRoot:GetAttribute(attributeName)
+			end
+		)
+		if not directSelectionResult.ok then
+			error(`[ATD_MATCH_BOOTSTRAP][code=DIRECT_STUDIO_CONTENT_{directSelectionResult.error.code}]`, 0)
+		end
+		directSelection = directSelectionResult.value
+		initialMapId = directSelection.mapId
+	end
+	local matchLifecycle = MatchLifecycleService.new(configuration.log, sendMatchSnapshot, initialMapId)
+	local storeResult = if isStudio
 		then ProfileStoreAdapter.newStudioDevelopment()
 		else ProfileStoreAdapter.newPublished(configuration.deployment)
 	if not storeResult.ok then
@@ -190,6 +213,62 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		error("[ATD_MATCH_BOOTSTRAP][code=PROFILE_SERVICE_CREATION_FAILED]", 0)
 	end
 	local profile = profileResult.value
+	local tutorial = requireResult(
+		TutorialService.new(profile, configuration.coreConfiguration, { clock = os.time }),
+		"TUTORIAL_SERVICE_UNAVAILABLE"
+	)
+	local tutorialViewsByUserId: { [number]: any } = {}
+	local tutorialUserByMatchId: { [string]: number } = {}
+	local pendingTutorialArrivalsByMatchId: { [string]: any } = {}
+	local ticketedPlayableByMatchId: { [string]: PlayableMatchService.Service } = {}
+
+	local function rememberTutorial(userId: number, observed: unknown): boolean
+		if not resultOk(observed) then
+			return false
+		end
+		local observation = (observed :: any).value
+		local view = if type(observation) == "table" then observation.tutorial else nil
+		if type(view) ~= "table" then
+			return false
+		end
+		tutorialViewsByUserId[userId] = view
+		return true
+	end
+
+	local function tutorialStepProvider(userId: number, matchId: string): number?
+		local view = tutorialViewsByUserId[userId]
+		if
+			type(view) == "table"
+			and view.trackedMatchId == matchId
+			and type(view.tutorialStep) == "number"
+			and view.tutorialStep >= 5
+			and view.tutorialStep <= 8
+		then
+			return view.tutorialStep
+		end
+		return nil
+	end
+
+	local function retryTutorialArrival(matchId: string): boolean
+		local pending = pendingTutorialArrivalsByMatchId[matchId]
+		if pending == nil then
+			return true
+		end
+		local called, observed = pcall(tutorial.observeMatchArrival, tutorial, pending.userId, pending.evidence)
+		if not called or not rememberTutorial(pending.userId, observed) then
+			return false
+		end
+		pendingTutorialArrivalsByMatchId[matchId] = nil
+		local view = tutorialViewsByUserId[pending.userId]
+		if type(view) ~= "table" or view.trackedMatchId ~= matchId then
+			tutorialUserByMatchId[matchId] = nil
+		end
+		local service = ticketedPlayableByMatchId[matchId]
+		if service ~= nil then
+			service:refreshTutorial(pending.userId)
+		end
+		return true
+	end
 	local function snapshotLoadout(userId: number, saved: any): MatchLoadoutProtocol.Snapshot?
 		local slots = table.create(#saved.equippedUnitIds)
 		for slot, unitId in saved.equippedUnitIds do
@@ -218,19 +297,25 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 
 	local playable: PlayableMatchService.Service? = nil
 	local travelHost: MatchTravelHost.Service? = nil
-	local ticketedReservedHost = not RunService:IsStudio()
-		and game.PrivateServerId ~= ""
-		and game.PrivateServerOwnerId == 0
-	if not ticketedReservedHost then
+	if isStudio then
+		local studioSelection = directSelection :: DirectStudioContentSelection.Selection
 		playable = PlayableMatchService.new(
 			configuration.log,
 			matchLifecycle,
 			configuration.coreConfiguration,
 			sendPlayableSnapshot,
 			sendAttack,
-			loadoutFor
+			loadoutFor,
+			nil,
+			{
+				mapId = studioSelection.mapId,
+				difficultyId = studioSelection.difficultyId,
+			}
 		)
 	else
+		if game.PrivateServerId == "" or game.PrivateServerOwnerId ~= 0 then
+			error("[ATD_MATCH_BOOTSTRAP][code=AUTHENTICATED_TICKET_HOST_REQUIRED]", 0)
+		end
 		local lobbyPlaceId = PlaceRoles.getConfiguredPlaceId(configuration.deployment, PlaceRoles.LOBBY_ROLE)
 		local matchPlaceId = PlaceRoles.getConfiguredPlaceId(configuration.deployment, PlaceRoles.MATCH_ROLE)
 		if lobbyPlaceId == nil or matchPlaceId == nil or game.JobId == "" then
@@ -852,6 +937,58 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			rewardClaims = rewardClaims,
 			snapshotSender = sendTravelSnapshot,
 			playableFactory = function(ticket, connectedUserIds)
+				local coreConfiguration = configuration.coreConfiguration
+				local mapDefinition = coreConfiguration.maps.byId[ticket.mapId]
+				local difficulty = coreConfiguration.difficulties.byId[ticket.difficultyId]
+				local schedules = coreConfiguration.waves.byMapId[ticket.mapId]
+				local schedule = if schedules == nil then nil else schedules[ticket.difficultyId]
+				local supported = false
+				if mapDefinition ~= nil then
+					for _, difficultyId in mapDefinition.supportedDifficultyIds do
+						supported = supported or difficultyId == ticket.difficultyId
+					end
+				end
+				if mapDefinition == nil or difficulty == nil or schedule == nil or not supported then
+					return Result.err("CONTENT_SELECTION_FAILED")
+				end
+				if
+					ticket.mapId == TutorialService.RELEASE_MAP_ID
+					and ticket.difficultyId == TutorialService.EASY_DIFFICULTY_ID
+					and ticket.privacy == "PartyOnly"
+					and #ticket.expectedUserIds == 1
+					and #connectedUserIds == 1
+					and connectedUserIds[1] == ticket.expectedUserIds[1]
+				then
+					local userId = ticket.expectedUserIds[1]
+					tutorialUserByMatchId[ticket.matchId] = userId
+					pendingTutorialArrivalsByMatchId[ticket.matchId] = {
+						userId = userId,
+						evidence = table.freeze({
+							matchId = ticket.matchId,
+							mapId = ticket.mapId,
+							difficultyId = ticket.difficultyId,
+							privacy = ticket.privacy,
+							expectedUserIds = table.freeze(table.clone(ticket.expectedUserIds)),
+							authenticatedParticipant = true,
+							spectator = false,
+						}),
+					}
+				end
+				-- The authenticated ticket owns content selection. MatchLifecycle
+				-- starts on the explicit graybox fallback, then atomically replaces it
+				-- before constructing the one playable authority graph.
+				local selectedMap = matchLifecycle:selectMap(ticket.mapId)
+				if not selectedMap.ok then
+					return Result.err("MAP_SELECTION_FAILED")
+				end
+				local rewarding = ContentSelection.rewardingForSelection(
+					configuration.coreConfiguration,
+					ticket.mapId,
+					ticket.difficultyId
+				)
+				if rewarding == nil then
+					return Result.err("CONTENT_REWARD_POLICY_INVALID")
+				end
 				local service = PlayableMatchService.new(
 					configuration.log,
 					matchLifecycle,
@@ -868,27 +1005,62 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 							end
 							return frozen
 						end)(),
-						rewarding = true,
+						rewarding = rewarding,
 						matchId = ticket.matchId,
 						mapId = ticket.mapId,
 						difficultyId = ticket.difficultyId,
 						managedAdmissions = true,
 						connectedParticipantUserIds = connectedUserIds,
+						tutorialStepProvider = tutorialStepProvider,
 					}
 				)
 				local definition = service:getServiceDefinition()
 				local initialized = pcall(definition.initialize)
+				if initialized then
+					retryTutorialArrival(ticket.matchId)
+				end
 				local started = initialized and pcall(definition.start)
 				if not started then
 					pcall(definition.shutdown)
+				else
+					ticketedPlayableByMatchId[ticket.matchId] = service
 				end
 				return if started then Result.ok(service) else Result.err("PLAYABLE_START_FAILED")
 			end,
 			stopPlayable = function(service)
+				for matchId, candidate in ticketedPlayableByMatchId do
+					if candidate == service then
+						ticketedPlayableByMatchId[matchId] = nil
+						pendingTutorialArrivalsByMatchId[matchId] = nil
+						tutorialUserByMatchId[matchId] = nil
+					end
+				end
 				pcall(service:getServiceDefinition().shutdown)
+			end,
+			observeDurableResult = function(userId, evidence)
+				if
+					type(evidence) ~= "table"
+					or type(evidence.matchId) ~= "string"
+					or tutorialUserByMatchId[evidence.matchId] ~= userId
+				then
+					return Result.ok(false)
+				end
+				local observed = MatchTutorialObserver.observeDurableResult(tutorial, userId, evidence)
+				if not observed.ok then
+					return observed
+				end
+				rememberTutorial(userId, observed)
+				return observed
 			end,
 			createRematch = createRematch,
 			stepDependencies = function()
+				local pendingMatchIds = {}
+				for matchId in pendingTutorialArrivalsByMatchId do
+					table.insert(pendingMatchIds, matchId)
+				end
+				for _, matchId in pendingMatchIds do
+					retryTutorialArrival(matchId)
+				end
 				profileTransfer:step()
 				unexpectedOwnershipTransfer:step()
 				unexpectedReturns:step()
@@ -974,6 +1146,27 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 
 	local function playableFor(player: Player): PlayableMatchService.Service?
 		return if travelHost ~= nil then travelHost:getPlayable(player) else playable
+	end
+
+	local function observeTutorialAction(
+		selected: PlayableMatchService.Service,
+		userId: number,
+		matchId: string,
+		kind: "Placement" | "Upgrade"
+	)
+		if tutorialUserByMatchId[matchId] ~= userId then
+			return
+		end
+		local called: boolean
+		local observed: unknown
+		if kind == "Placement" then
+			called, observed = pcall(tutorial.observePlacement, tutorial, userId, matchId)
+		else
+			called, observed = pcall(tutorial.observeUpgrade, tutorial, userId, matchId)
+		end
+		if called and rememberTutorial(userId, observed) then
+			selected:refreshTutorial(userId)
+		end
 	end
 
 	-- Preserve the Phase 8 ready/snapshot compatibility boundary. Superseded
@@ -1092,9 +1285,12 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			if selected == nil then
 				return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 			end
-			return actionOutcome(
-				selected:submitPlacement(context.player, payload :: PlayableMatchProtocol.PlacementPayload)
-			)
+			local intent = payload :: PlayableMatchProtocol.PlacementPayload
+			local receipt = selected:submitPlacement(context.player, intent)
+			if receipt ~= nil and receipt.accepted then
+				observeTutorialAction(selected, context.player.UserId, intent.matchId, "Placement")
+			end
+			return actionOutcome(receipt)
 		end
 	)
 	network:registerRequest(
@@ -1104,11 +1300,15 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		authorizeLiveContext,
 		function(context, payload)
 			local selected = playableFor(context.player)
-			return if selected == nil
-				then ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
-				else actionOutcome(
-					selected:submitUpgrade(context.player, payload :: PlayableMatchProtocol.TowerPayload)
-				)
+			if selected == nil then
+				return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+			end
+			local intent = payload :: PlayableMatchProtocol.TowerPayload
+			local receipt = selected:submitUpgrade(context.player, intent)
+			if receipt ~= nil and receipt.accepted then
+				observeTutorialAction(selected, context.player.UserId, intent.matchId, "Upgrade")
+			end
+			return actionOutcome(receipt)
 		end
 	)
 	network:registerRequest(

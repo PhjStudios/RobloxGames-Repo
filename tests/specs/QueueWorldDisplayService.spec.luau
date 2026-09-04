@@ -40,7 +40,17 @@ return TestHarness.suite("read-only queue world display", {
 		local result = QueueWorldDisplayService.new({ {
 			queueId = "queue:backyard-squad",
 			adornee = part,
-		} })
+		} }, {
+			mapDisplayName = function(_mapId)
+				return "Backyard Garden"
+			end,
+			difficultyDisplayName = function(_difficultyId)
+				return "Easy"
+			end,
+			playerDisplayName = function(_userId)
+				return "Scout (@ScoutAnt)"
+			end,
+		})
 		assertions.isTrue(result.ok)
 		if not result.ok then
 			part:Destroy()
@@ -57,7 +67,15 @@ return TestHarness.suite("read-only queue world display", {
 			} })
 		).ok)
 		assertions.equal(service:getMetrics().portraitCount, 1)
-		assertions.isNotNil(part:FindFirstChild(QueueWorldDisplayService.DISPLAY_NAME))
+		local display = part:FindFirstChild(QueueWorldDisplayService.DISPLAY_NAME)
+		assertions.isNotNil(display)
+		local configuration = (display :: Instance):FindFirstChild("Configuration", true) :: TextLabel
+		local roster = (display :: Instance):FindFirstChild("Roster", true) :: TextLabel
+		assertions.contains(configuration.Text, "Backyard Garden")
+		assertions.contains(configuration.Text, "Easy")
+		assertions.contains(roster.Text, "Scout (@ScoutAnt)")
+		assertions.isNil(string.find(configuration.Text, "map:", 1, true))
+		assertions.isNil(string.find(roster.Text, "101", 1, true))
 		assertions.isTrue(service:update("queue:backyard-squad", snapshot({})).ok)
 		assertions.equal(service:getMetrics().portraitCount, 0)
 		assertions.isTrue(service:cleanup().ok)

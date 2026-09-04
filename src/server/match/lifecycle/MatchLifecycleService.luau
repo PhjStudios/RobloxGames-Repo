@@ -132,6 +132,11 @@ export type RuntimeMapSnapshotError = {
 	operation: "getRuntimeMapSnapshot",
 }
 
+export type MapSelectionError = {
+	code: SnapshotErrorCode,
+	operation: "selectMap",
+}
+
 export type ConnectedRecipient = {
 	recipient: unknown,
 	userId: number,
@@ -209,6 +214,7 @@ export type StudioWaveError = {
 
 export type MapLoaderAdapter = {
 	load: (self: MapLoaderAdapter, mapId: unknown) -> unknown,
+	unload: ((self: MapLoaderAdapter) -> unknown)?,
 	cleanup: (self: MapLoaderAdapter) -> unknown,
 }
 
@@ -270,6 +276,7 @@ export type IsStudio = () -> unknown
 export type TestDependencies = {
 	mapLoader: MapLoaderAdapter,
 	generateMatchId: () -> unknown,
+	initialMapId: string?,
 	roster: RosterAdapter,
 	playerSource: PlayerSource,
 	createStateMachine: ((matchId: unknown) -> unknown)?,
@@ -298,6 +305,7 @@ type ServiceData = {
 	shutdownFailure: string?,
 	serviceDefinition: ServiceLifecycle.ServiceDefinition?,
 	runtimeMapSnapshot: RuntimeMapSnapshot?,
+	selectedMapId: Ids.MapId,
 	waveActivationToken: WaveActivationToken?,
 	waveActivationOperationActive: boolean,
 	waveActivationReentryViolation: boolean,
@@ -586,13 +594,13 @@ local function isDetachedFrozenValue(
 	return true
 end
 
-local function validateRuntimeMapSnapshot(value: unknown): RuntimeMapSnapshot?
+local function validateRuntimeMapSnapshot(value: unknown, expectedMapId: Ids.MapId): RuntimeMapSnapshot?
 	if type(value) ~= "table" or getmetatable(value :: any) ~= nil or not table.isfrozen(value :: any) then
 		return nil
 	end
 	local snapshot = value :: any
 	if
-		snapshot.mapId ~= FIXED_MAP_ID
+		snapshot.mapId ~= expectedMapId
 		or type(snapshot.lanes) ~= "table"
 		or not table.isfrozen(snapshot.lanes)
 		or rawlen(snapshot.lanes) < 1
@@ -1474,9 +1482,9 @@ local function initialize(data: ServiceData)
 		failAfterRollback(data, "PLAYER_SNAPSHOT_FAILED")
 	end
 
-	local loaded, loadResult = pcall((mapLoader :: MapLoaderAdapter).load, mapLoader, FIXED_MAP_ID)
+	local loaded, loadResult = pcall((mapLoader :: MapLoaderAdapter).load, mapLoader, data.selectedMapId)
 	local loadedSnapshot = if loaded and isSuccess(loadResult) then (loadResult :: any).value else nil
-	data.runtimeMapSnapshot = validateRuntimeMapSnapshot(loadedSnapshot)
+	data.runtimeMapSnapshot = validateRuntimeMapSnapshot(loadedSnapshot, data.selectedMapId)
 	data.mapLoaded = data.runtimeMapSnapshot ~= nil
 	if not data.mapLoaded and not transition(machine :: StateMachineAdapter, "Closing") then
 		failAfterRollback(data, "TRANSITION_FAILED")
@@ -2004,6 +2012,57 @@ function ServiceMethods.getRuntimeMapSnapshot(self: Service): Result.Result<Runt
 		return runtimeMapSnapshotFailure("INTERNAL_ERROR")
 	end
 	return Result.ok(snapshot)
+end
+
+function ServiceMethods.selectMap(self: Service, mapIdValue: unknown): Result.Result<boolean, MapSelectionError>
+	local data = requireData(self)
+	local validatedId = Ids.validateMapId(mapIdValue)
+	local mapLoader = data.mapLoader
+	if
+		not validatedId.ok
+		or not data.available
+		or (data.state ~= "Initialized" and data.state ~= "Started")
+		or data.waveActivationCommitted
+		or data.baseDefeatCommitted
+		or data.studioWaveActivated
+		or mapLoader == nil
+		or type((mapLoader :: any).unload) ~= "function"
+	then
+		return Result.err(table.freeze({ code = "UNAVAILABLE", operation = "selectMap" }))
+	end
+	if data.runtimeMapSnapshot ~= nil and data.runtimeMapSnapshot.mapId == validatedId.value then
+		return Result.ok(false)
+	end
+
+	local previousMapId = data.selectedMapId
+	local unloaded, unloadResult = pcall((mapLoader :: any).unload, mapLoader)
+	if not unloaded or not isSuccess(unloadResult) then
+		return Result.err(table.freeze({ code = "INTERNAL_ERROR", operation = "selectMap" }))
+	end
+	data.mapLoaded = false
+	data.runtimeMapSnapshot = nil
+	local loaded, loadResult = pcall((mapLoader :: MapLoaderAdapter).load, mapLoader, validatedId.value)
+	local loadedSnapshot = if loaded and isSuccess(loadResult) then (loadResult :: any).value else nil
+	local snapshot = validateRuntimeMapSnapshot(loadedSnapshot, validatedId.value)
+	if snapshot ~= nil then
+		data.selectedMapId = validatedId.value
+		data.runtimeMapSnapshot = snapshot
+		data.mapLoaded = true
+		return Result.ok(true)
+	end
+
+	-- Restore the development map when selection fails so direct Studio work and
+	-- a later authenticated arrival never inherit a half-loaded lifecycle.
+	local rollbackLoaded, rollbackResult = pcall((mapLoader :: MapLoaderAdapter).load, mapLoader, previousMapId)
+	local rollbackValue = if rollbackLoaded and isSuccess(rollbackResult) then (rollbackResult :: any).value else nil
+	local rollbackSnapshot = validateRuntimeMapSnapshot(rollbackValue, previousMapId)
+	if rollbackSnapshot ~= nil then
+		data.runtimeMapSnapshot = rollbackSnapshot
+		data.mapLoaded = true
+	else
+		data.available = false
+	end
+	return Result.err(table.freeze({ code = "UNAVAILABLE", operation = "selectMap" }))
 end
 
 function ServiceMethods.isRuntimeMapSnapshot(self: Service, value: unknown): boolean
@@ -2708,7 +2767,8 @@ local function construct(
 	schedule: Schedule,
 	cancel: Cancel,
 	snapshotSender: SnapshotSender,
-	isStudio: IsStudio
+	isStudio: IsStudio,
+	initialMapIdValue: unknown?
 ): Service
 	if not Log.isLogger(logger) then
 		staticError("INVALID_LOGGER")
@@ -2755,6 +2815,11 @@ local function construct(
 	if not matchIdResult.ok then
 		staticError("INVALID_MATCH_ID")
 	end
+	local requestedInitialMapId = if initialMapIdValue == nil then FIXED_MAP_ID else initialMapIdValue
+	local initialMapId = Ids.validateMapId(requestedInitialMapId)
+	if not initialMapId.ok then
+		staticError("INVALID_MAP_ID")
+	end
 
 	local created, machineResult = pcall(createStateMachine, matchIdResult.value)
 	if not created or not isSuccess(machineResult) then
@@ -2790,6 +2855,7 @@ local function construct(
 		shutdownFailure = nil,
 		serviceDefinition = nil,
 		runtimeMapSnapshot = nil,
+		selectedMapId = initialMapId.value,
 		waveActivationToken = nil,
 		waveActivationOperationActive = false,
 		waveActivationReentryViolation = false,
@@ -2951,7 +3017,7 @@ local function productionIsStudio(): unknown
 	return RunService:IsStudio()
 end
 
-function MatchLifecycleService.new(logger: Log.Logger, snapshotSender: SnapshotSender): Service
+function MatchLifecycleService.new(logger: Log.Logger, snapshotSender: SnapshotSender, initialMapId: string?): Service
 	local mapLoaderModule = require(script.Parent.Parent.maps.MapLoader)
 	local rosterModule = require(script.Parent.Parent.roster.ParticipantRoster)
 	local readyCoordinatorModule = require(script.Parent.Parent.ready.ReadyCheckCoordinator)
@@ -2974,7 +3040,8 @@ function MatchLifecycleService.new(logger: Log.Logger, snapshotSender: SnapshotS
 		productionSchedule,
 		productionCancel,
 		snapshotSender,
-		productionIsStudio
+		productionIsStudio,
+		initialMapId
 	)
 end
 
@@ -2986,6 +3053,7 @@ if isExactTestModule() then
 		local allowedFields = {
 			mapLoader = true,
 			generateMatchId = true,
+			initialMapId = true,
 			createStateMachine = true,
 			roster = true,
 			playerSource = true,
@@ -3033,7 +3101,8 @@ if isExactTestModule() then
 			dependencyValue.schedule or inertTestSchedule,
 			dependencyValue.cancel or inertTestCancel,
 			dependencyValue.snapshotSender or inertTestSnapshotSender,
-			dependencyValue.isStudio or inertTestIsStudio
+			dependencyValue.isStudio or inertTestIsStudio,
+			dependencyValue.initialMapId
 		)
 	end
 end

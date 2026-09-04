@@ -31,10 +31,12 @@ type FakePlayerSource = MatchLifecycleService.PlayerSource & {
 
 type FakeLoader = MatchLifecycleService.MapLoaderAdapter & {
 	loadCount: number,
+	unloadCount: number,
 	cleanupCount: number,
 	snapshotOverride: MatchStateMachine.StateSnapshot?,
 	lastMapId: unknown,
 	loadResult: unknown,
+	unloadResult: unknown,
 	cleanupResult: unknown,
 	loadCallback: (() -> ())?,
 	cleanupCallback: (() -> ())?,
@@ -152,10 +154,12 @@ end
 local function fakeLoader(loadResult: unknown, cleanupResult: unknown): FakeLoader
 	local loader = {
 		loadCount = 0,
+		unloadCount = 0,
 		cleanupCount = 0,
 		snapshotOverride = nil,
 		lastMapId = nil,
 		loadResult = loadResult,
+		unloadResult = Result.ok(true),
 		cleanupResult = cleanupResult,
 		loadCallback = nil,
 		cleanupCallback = nil,
@@ -176,6 +180,10 @@ local function fakeLoader(loadResult: unknown, cleanupResult: unknown): FakeLoad
 			callback()
 		end
 		return self.cleanupResult
+	end
+	function loader.unload(self: FakeLoader): unknown
+		self.unloadCount += 1
+		return self.unloadResult
 	end
 	return loader :: FakeLoader
 end
@@ -232,7 +240,8 @@ local function newService(
 	createStateMachine: ((unknown) -> unknown)?,
 	roster: ParticipantRoster.Roster?,
 	playerSource: FakePlayerSource?,
-	runtimeOverrides: RuntimeOverrides?
+	runtimeOverrides: RuntimeOverrides?,
+	initialMapId: string?
 ): MatchLifecycleService.Service
 	local dependencies = {
 		mapLoader = loader,
@@ -242,6 +251,7 @@ local function newService(
 		createStateMachine = createStateMachine,
 		roster = roster or newRoster(),
 		playerSource = playerSource or fakePlayerSource(),
+		initialMapId = initialMapId,
 	} :: any
 	if runtimeOverrides ~= nil then
 		dependencies.clock = runtimeOverrides.clock
@@ -782,6 +792,60 @@ return TestHarness.suite("match lifecycle service", {
 		if not afterShutdown.ok then
 			assertions.equal(afterShutdown.error.code, "UNAVAILABLE")
 		end
+	end),
+
+	TestHarness.case("atomically replaces the development map before gameplay commitment", function(assertions)
+		local loader = fakeLoader(Result.ok(RUNTIME_MAP_SNAPSHOT), Result.ok(true))
+		local service = newService(loader, nil)
+		local definition = service:getServiceDefinition()
+		invoke(definition.initialize)
+
+		local releaseSnapshot = frozenClone(RUNTIME_MAP_SNAPSHOT)
+		local releaseMutable = table.clone(releaseSnapshot)
+		releaseMutable.mapId = "map:backyard-garden-v1"
+		loader.loadResult = Result.ok(table.freeze(releaseMutable))
+		local selected = service:selectMap("map:backyard-garden-v1")
+		assertions.isTrue(selected.ok)
+		if selected.ok then
+			assertions.isTrue(selected.value)
+		end
+		assertions.equal(loader.unloadCount, 1)
+		assertions.equal(loader.loadCount, 2)
+		assertions.equal(loader.lastMapId, "map:backyard-garden-v1")
+		local retained = service:getRuntimeMapSnapshot()
+		assertions.isTrue(retained.ok)
+		if retained.ok then
+			assertions.equal(retained.value.mapId, "map:backyard-garden-v1")
+			assertDetachedAndFrozen(assertions, retained.value)
+		end
+
+		local repeated = service:selectMap("map:backyard-garden-v1")
+		assertions.isTrue(repeated.ok)
+		if repeated.ok then
+			assertions.isFalse(repeated.value)
+		end
+		assertions.equal(loader.unloadCount, 1)
+		assertions.equal(loader.loadCount, 2)
+		invoke(definition.shutdown)
+	end),
+
+	TestHarness.case("loads an explicit server-owned initial map without a graybox swap", function(assertions)
+		local releaseMutable = table.clone(frozenClone(RUNTIME_MAP_SNAPSHOT))
+		releaseMutable.mapId = "map:backyard-garden-v1"
+		local loader = fakeLoader(Result.ok(table.freeze(releaseMutable)), Result.ok(true))
+		local service = newService(loader, nil, nil, nil, nil, "map:backyard-garden-v1")
+		local definition = service:getServiceDefinition()
+		invoke(definition.initialize)
+
+		assertions.equal(loader.loadCount, 1)
+		assertions.equal(loader.unloadCount, 0)
+		assertions.equal(loader.lastMapId, "map:backyard-garden-v1")
+		local retained = service:getRuntimeMapSnapshot()
+		assertions.isTrue(retained.ok)
+		if retained.ok then
+			assertions.equal(retained.value.mapId, "map:backyard-garden-v1")
+		end
+		invoke(definition.shutdown)
 	end),
 
 	TestHarness.case("integrates the exact deadline revision window and coalesced final snapshot", function(assertions)

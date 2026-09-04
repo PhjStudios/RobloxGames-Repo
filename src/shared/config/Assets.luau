@@ -22,6 +22,18 @@ local Assets: { ConfigTypes.AssetDefinition } = {
 	{ key = "icon.soldier-ant", kind = "Icon" },
 	{ key = "icon.queen-ant", kind = "Icon" },
 	{ key = "icon.phase07-graybox", kind = "Icon" },
+	{ key = "tower.bombardier-ant-model", kind = "TowerModel" },
+	{ key = "enemy.broodling-ant-model", kind = "EnemyModel" },
+	{ key = "enemy.royal-guard-ant-model", kind = "EnemyModel" },
+	{ key = "map.backyard-garden-v1-model", kind = "MapModel" },
+	{ key = "icon.bombardier-ant", kind = "Icon" },
+	{ key = "icon.broodling-ant", kind = "Icon" },
+	{ key = "icon.royal-guard-ant", kind = "Icon" },
+	{ key = "icon.backyard-garden-v1", kind = "Icon" },
+	{ key = "icon.difficulty-easy-v1", kind = "Icon" },
+	{ key = "icon.difficulty-normal-v1", kind = "Icon" },
+	{ key = "icon.difficulty-hard-v1", kind = "Icon" },
+	{ key = "icon.difficulty-endless-v1", kind = "Icon" },
 }
 
 return table.freeze(Assets)

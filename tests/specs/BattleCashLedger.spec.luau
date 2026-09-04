@@ -245,6 +245,43 @@ return TestHarness.suite("BattleCashLedger", {
 		assertions.isTrue(success(assertions, ledger:cleanup()))
 	end),
 
+	TestHarness.case("keeps authoritative Endless income constant-memory and numerically bounded", function(assertions)
+		local ledger = newLedger(assertions, 0, 1, 1)
+		initialize(assertions, ledger, 10)
+		for _ = 1, BattleCashLedger.MAX_RECEIPTS + 1_000 do
+			local income = success(assertions, ledger:recordAuthoritativeDamageIncome(10, 1))
+			assertions.isTrue(income.applied)
+		end
+		assertions.equal(ledger:getStats().receiptCount, 0)
+
+		local refund = success(assertions, ledger:refundAuthoritativeSale(10, BattleCashLedger.MAX_BATTLE_CASH))
+		assertions.isTrue(refund.applied)
+		assertions.equal(refund.snapshot.balance, BattleCashLedger.MAX_BATTLE_CASH)
+		for waveNumber = 1, 10_000 do
+			local stipend = success(assertions, ledger:grantAuthoritativeWaveStipend(waveNumber, 1_000_000))
+			assertions.isTrue(stipend.applied)
+			assertions.equal(stipend.totalCredited, 0)
+		end
+		local replay = success(assertions, ledger:grantAuthoritativeWaveStipend(10_000, 1_000_000))
+		assertions.isFalse(replay.applied)
+		expectError(
+			assertions,
+			ledger:grantAuthoritativeWaveStipend(10_002, 1_000_000),
+			"INVALID_SEQUENCE",
+			"grantAuthoritativeWaveStipend"
+		)
+
+		local final = success(assertions, ledger:getSnapshot(10))
+		assertions.equal(final.balance, BattleCashLedger.MAX_BATTLE_CASH)
+		assertions.isTrue(final.damageHealthRemoved <= BattleCashLedger.MAX_COUNTER)
+		local stats = ledger:getStats()
+		assertions.equal(stats.receiptCount, 0)
+		assertions.equal(stats.outstandingSpendCount, 0)
+		assertions.equal(stats.lastAuthoritativeWave, 10_000)
+		assertions.isTrue(stats.totalBalance <= BattleCashLedger.MAX_COUNTER)
+		assertions.isTrue(success(assertions, ledger:cleanup()))
+	end),
+
 	TestHarness.case("fails atomically at safe-integer arithmetic boundaries", function(assertions)
 		local maximum = Validation.MAX_SAFE_INTEGER
 		local ledger = newLedger(assertions, maximum, 1, 1)

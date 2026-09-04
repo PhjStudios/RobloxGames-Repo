@@ -15,8 +15,22 @@ end
 local function hotbar(available: boolean?): { any }
 	local enabled = available ~= false
 	return {
-		{ slot = 1, displayName = "Scout", cost = 100, available = enabled, selected = false },
-		{ slot = 2, displayName = "Ranger", cost = 175, available = enabled, selected = true },
+		{
+			slot = 1,
+			displayName = "Scout",
+			description = "Fast attacks excel against scouts and swarms.",
+			cost = 100,
+			available = enabled,
+			selected = false,
+		},
+		{
+			slot = 2,
+			displayName = "Ranger",
+			description = "Reliable single-target damage at long range.",
+			cost = 175,
+			available = enabled,
+			selected = true,
+		},
 		{ slot = 3, displayName = "Cannon", cost = 300, available = false, selected = false, reason = "NEED CASH" },
 	}
 end
@@ -41,6 +55,7 @@ local function selection(isOwner: boolean): any
 		towerId = "tower:owned-7",
 		revision = 11,
 		displayName = "Ranger",
+		description = "Reliable single-target damage at long range.",
 		isOwner = isOwner,
 		level = 1,
 		maxLevel = 3,
@@ -149,6 +164,21 @@ local function templateRoot(): (Folder, Model, Model)
 	folder:SetAttribute("ContentVersion", 1)
 	folder.Parent = root
 	local tower = addTemplate(folder, "tower.dart-ant-model", "TowerModel", "tower:dart-ant")
+	local muzzle = Instance.new("Part")
+	muzzle.Name = "Muzzle1"
+	muzzle.Size = Vector3.new(0.3, 0.3, 0.8)
+	muzzle.CFrame = CFrame.new(0, 2, -1)
+	muzzle.Anchored = true
+	muzzle.CanCollide = false
+	muzzle.CanTouch = false
+	muzzle.CanQuery = false
+	muzzle:SetAttribute("MuzzleIndex", 1)
+	muzzle.Parent = tower
+	local secondMuzzle = muzzle:Clone()
+	secondMuzzle.Name = "Muzzle2"
+	secondMuzzle.CFrame = CFrame.new(1, 2, -1)
+	secondMuzzle:SetAttribute("MuzzleIndex", 2)
+	secondMuzzle.Parent = tower
 	local enemy = addTemplate(folder, "enemy.scout-ant-model", "EnemyModel", "enemy:scout-ant")
 	return root, tower, enemy
 end
@@ -169,6 +199,7 @@ return TestHarness.suite("playable local Match presentation", {
 			assertions.isFalse(gui.IgnoreGuiInset)
 			assertions.isNotNil(root:FindFirstChild("TopHUD"))
 			assertions.isNotNil(root:FindFirstChild("TowerHotbar"))
+			assertions.isNotNil(root:FindFirstChild("BossStatus"))
 			assertions.isNotNil(root:FindFirstChild("ReadyOverlay"))
 			assertions.isNotNil(root:FindFirstChild("TowerPanel"))
 			assertions.isNotNil(root:FindFirstChild("ResultsOverlay"))
@@ -203,6 +234,10 @@ return TestHarness.suite("playable local Match presentation", {
 				assertions.contains((child(hotbarPanel, "TowerSlot1", "TextButton") :: TextButton).Text, "Scout")
 				assertions.contains((child(hotbarPanel, "TowerSlot2", "TextButton") :: TextButton).Text, "$175")
 				assertions.contains((child(hotbarPanel, "TowerSlot3", "TextButton") :: TextButton).Text, "NEED CASH")
+				assertions.contains(
+					(child(hotbarPanel, "InputHint", "TextLabel") :: TextLabel).Text,
+					"single-target damage"
+				)
 
 				fixture.activations[1]()
 				fixture.activations[6]()
@@ -215,6 +250,105 @@ return TestHarness.suite("playable local Match presentation", {
 			end)
 		end
 	),
+
+	TestHarness.case(
+		"renders unbounded Endless waves and static boss health under reduced effects",
+		function(assertions)
+			withView(function(view, fixture)
+				local endless = snapshot()
+				endless.wave = {
+					current = 1_250,
+					total = nil,
+					enemiesRemaining = 12,
+					status = "Resolving",
+					modeKind = "Endless",
+					bossKind = "Boss",
+					boss = {
+						runtimeEnemyId = 77,
+						displayName = "Queen Ant",
+						currentHealth = 2_500,
+						maximumHealth = 10_000,
+						threatClass = "Boss",
+					},
+				}
+				endless.reducedMotion = true
+				endless.lowEffects = true
+				assertions.isTrue(view:render(endless).ok)
+				local metrics = view:getMetrics()
+				assertions.contains(metrics.waveText, "1250")
+				assertions.contains(metrics.waveText, "ENDLESS")
+				assertions.isTrue(metrics.bossVisible)
+				assertions.contains(metrics.bossText, "QUEEN ANT")
+				assertions.contains(metrics.bossText, "2500 / 10000 HP")
+
+				local _, root = guiTree(fixture)
+				local bossPanel = child(root, "BossStatus", "Frame") :: Frame
+				local health = child(bossPanel, "Health", "Frame") :: Frame
+				local fill = child(health, "Fill", "Frame") :: Frame
+				assertions.isTrue(math.abs(fill.Size.X.Scale - 0.25) < 1e-5)
+
+				local incoming = snapshot()
+				incoming.wave.bossKind = "MiniBoss"
+				assertions.isTrue(view:render(incoming).ok)
+				assertions.isTrue(view:getMetrics().bossVisible)
+				assertions.contains(view:getMetrics().bossText, "INCOMING")
+
+				local bossWaveWithSurvivingMiniboss = snapshot()
+				bossWaveWithSurvivingMiniboss.wave.bossKind = "Boss"
+				bossWaveWithSurvivingMiniboss.wave.boss = {
+					runtimeEnemyId = 78,
+					displayName = "Royal Guard Ant",
+					currentHealth = 900,
+					maximumHealth = 1_200,
+					threatClass = "MiniBoss",
+				}
+				assertions.isTrue(view:render(bossWaveWithSurvivingMiniboss).ok)
+				assertions.contains(view:getMetrics().bossText, "ROYAL GUARD ANT")
+
+				local nextWaveWithSurvivingBoss = snapshot()
+				nextWaveWithSurvivingBoss.wave.bossKind = "None"
+				nextWaveWithSurvivingBoss.wave.boss = {
+					runtimeEnemyId = 79,
+					displayName = "Queen Ant",
+					currentHealth = 800,
+					maximumHealth = 10_000,
+					threatClass = "Boss",
+				}
+				assertions.isTrue(view:render(nextWaveWithSurvivingBoss).ok)
+				assertions.isTrue(view:getMetrics().bossVisible)
+				assertions.contains(view:getMetrics().bossText, "QUEEN ANT")
+
+				local ordinary = snapshot()
+				assertions.isTrue(view:render(ordinary).ok)
+				assertions.isFalse(view:getMetrics().bossVisible)
+			end)
+		end
+	),
+
+	TestHarness.case("renders only bounded server-projected Match tutorial guidance", function(assertions)
+		withView(function(view)
+			for step, expected in
+				{
+					[5] = "PLACE A TOWER",
+					[6] = "UPGRADE A TOWER",
+					[7] = "FINISH THE MATCH",
+					[8] = "MATCH RECORDED",
+				}
+			do
+				local guided = snapshot()
+				guided.tutorialStep = step
+				assertions.isTrue(view:render(guided).ok)
+				assertions.isTrue(view:getMetrics().tutorialVisible)
+				assertions.contains(view:getMetrics().tutorialText, expected)
+			end
+
+			local unguided = snapshot()
+			assertions.isTrue(view:render(unguided).ok)
+			assertions.isFalse(view:getMetrics().tutorialVisible)
+			unguided.tutorialStep = 4
+			assertions.isFalse(view:render(unguided).ok)
+		end)
+	end),
 
 	TestHarness.case("hides absent slots for one-slot desktop and shrinking touch loadouts", function(assertions)
 		withView(function(view, fixture)
@@ -299,6 +433,7 @@ return TestHarness.suite("playable local Match presentation", {
 				local panel = child(root, "TowerPanel", "Frame") :: Frame
 				assertions.contains((child(panel, "OwnerState", "TextLabel") :: TextLabel).Text, "YOUR TOWER")
 				assertions.contains((child(panel, "Stats", "TextLabel") :: TextLabel).Text, "Cooldown 0.80s")
+				assertions.contains((child(panel, "Stats", "TextLabel") :: TextLabel).Text, "single-target damage")
 				assertions.contains((child(panel, "TargetMode", "TextLabel") :: TextLabel).Text, "FIRST")
 
 				for index = 8, 11 do
@@ -584,6 +719,18 @@ return TestHarness.suite("playable local Match presentation", {
 			local twoSelected = snapshot()
 			twoSelected.hotbar[1].selected = true
 			assertions.isFalse(view:render(twoSelected).ok)
+			assertions.isFalse(view:syncWorld({
+				towers = {
+					{ id = "tower:invalid", definitionId = "tower:dart-ant", position = Vector3.new(), level = 0 },
+				},
+				enemies = {},
+			}).ok)
+			assertions.isFalse(view:syncWorld({
+				towers = {
+					{ id = "tower:missing-level", definitionId = "tower:dart-ant", position = Vector3.new() },
+				},
+				enemies = {},
+			}).ok)
 		end)
 	end),
 
@@ -598,6 +745,7 @@ return TestHarness.suite("playable local Match presentation", {
 						position = Vector3.new(0, 0, 0),
 						selected = true,
 						range = 24,
+						level = 1,
 					},
 				},
 				enemies = {
@@ -634,15 +782,53 @@ return TestHarness.suite("playable local Match presentation", {
 				sequence = 1,
 				towerId = "tower:one",
 				targetId = "enemy:one",
+				origin = Vector3.new(1, 3, 2),
+				target = Vector3.new(4, 2, 12),
 				damage = 12,
 			}
 			assertions.isTrue(view:playAttackEffect(attack).ok)
 			assertions.equal(view:getMetrics().attackEffectCount, 1)
 			local effects = world:FindFirstChild("AttackEffects") :: Folder
-			assertions.isNotNil((effects:GetChildren()[1] :: Part):FindFirstChild("DamageNumber"))
+			local effect = effects:GetChildren()[1] :: Part
+			local normalEffectTransparency = effect.Transparency
+			assertions.isNotNil(effect:FindFirstChild("DamageNumber"))
+			local muzzleFlash = effect:FindFirstChild("MuzzleFlash") :: Part
+			local impactFlash = effect:FindFirstChild("ImpactFlash") :: Part
+			assertions.isNotNil(muzzleFlash)
+			assertions.isNotNil(impactFlash)
+			assertions.equal(muzzleFlash.CFrame.Position, attack.origin)
+			assertions.equal(impactFlash.CFrame.Position, attack.target)
 			assertions.isFalse(view:playAttackEffect(attack).ok)
 			fixture.clock = 11
 			assertions.equal(view:stepEffects(11).value, 0)
+
+			local reducedMotion = snapshot()
+			reducedMotion.reducedMotion = true
+			assertions.isTrue(view:render(reducedMotion).ok)
+			attack.sequence = 2
+			assertions.isTrue(view:playAttackEffect(attack).ok)
+			local reducedEffect = effects:GetChildren()[1] :: Part
+			assertions.isNotNil(reducedEffect:FindFirstChild("MuzzleFlash"))
+			assertions.isNotNil(reducedEffect:FindFirstChild("ImpactFlash"))
+			assertions.isTrue(reducedEffect.Transparency > normalEffectTransparency)
+			assertions.equal(view:stepEffects(11.039).value, 1)
+			assertions.equal(view:stepEffects(11.041).value, 0)
+
+			fixture.clock = 11.1
+			local lowDetail = snapshot()
+			lowDetail.lowEffects = true
+			assertions.isTrue(view:render(lowDetail).ok)
+			for sequence = 3, 12 do
+				attack.sequence = sequence
+				assertions.isTrue(view:playAttackEffect(attack).ok)
+			end
+			assertions.equal(view:getMetrics().attackEffectCount, 8)
+			for _, lowDetailEffect in effects:GetChildren() do
+				assertions.isNil(lowDetailEffect:FindFirstChild("MuzzleFlash"))
+				assertions.isNil(lowDetailEffect:FindFirstChild("ImpactFlash"))
+			end
+			fixture.clock = 12
+			assertions.equal(view:stepEffects(12).value, 0)
 
 			local preferences = snapshot()
 			preferences.enemyHealthBars = false
@@ -656,6 +842,7 @@ return TestHarness.suite("playable local Match presentation", {
 						position = Vector3.new(0, 0, 0),
 						selected = true,
 						range = 24,
+						level = 1,
 					},
 				},
 				enemies = {
@@ -690,6 +877,25 @@ return TestHarness.suite("playable local Match presentation", {
 		"clones authenticated content models with selection and numeric enemy health",
 		function(assertions)
 			local templates, towerTemplate, enemyTemplate = templateRoot()
+			local tallVisual = Instance.new("Part")
+			tallVisual.Name = "TallVisual"
+			tallVisual.Size = Vector3.new(1, 1, 8)
+			tallVisual.CFrame = CFrame.new(0, 4, 0) * CFrame.Angles(math.pi / 2, 0, 0)
+			tallVisual.Anchored = true
+			tallVisual.CanCollide = false
+			tallVisual.CanTouch = false
+			tallVisual.CanQuery = false
+			tallVisual.Parent = enemyTemplate
+			local invisibleHelper = Instance.new("Part")
+			invisibleHelper.Name = "InvisibleHelper"
+			invisibleHelper.Size = Vector3.new(2, 100, 2)
+			invisibleHelper.CFrame = CFrame.new(0, 50, 0)
+			invisibleHelper.Transparency = 1
+			invisibleHelper.Anchored = true
+			invisibleHelper.CanCollide = false
+			invisibleHelper.CanTouch = false
+			invisibleHelper.CanQuery = false
+			invisibleHelper.Parent = enemyTemplate
 			withView(function(view, fixture)
 				assertions.isTrue(view:render(snapshot()).ok)
 				assertions.isTrue(view:syncWorld({
@@ -700,6 +906,7 @@ return TestHarness.suite("playable local Match presentation", {
 							position = Vector3.new(2, 0, 3),
 							rotationDegrees = 45,
 							selected = true,
+							level = 2,
 						},
 					},
 					enemies = {
@@ -722,12 +929,40 @@ return TestHarness.suite("playable local Match presentation", {
 				assertions.isTrue((towerClone:FindFirstChild("SelectionHighlight") :: Highlight).Enabled)
 				local health = enemyClone:FindFirstChild("HealthDisplay") :: BillboardGui
 				assertions.equal((health:FindFirstChild("Value") :: TextLabel).Text, "6 / 10")
+				assertions.isTrue(health.StudsOffsetWorldSpace.Y > 8)
+				assertions.isTrue(health.StudsOffsetWorldSpace.Y < 9)
+				local levelDisplay = towerClone:FindFirstChild("ATDLevelDisplay") :: BillboardGui
+				local levelText = levelDisplay:FindFirstChild("Value") :: TextLabel
+				assertions.equal(levelText.Text, "LEVEL 2")
+				assertions.isTrue(view:playAttackEffect({
+					matchId = "match:playable-view",
+					sequence = 2,
+					towerId = "tower:one",
+					targetId = "enemy:one",
+					origin = Vector3.new(2, 0, 3),
+					target = Vector3.new(4, 0, 8),
+				}).ok)
+				local effects = world:FindFirstChild("AttackEffects") :: Folder
+				local muzzleFlash = (effects:GetChildren()[1] :: Part):FindFirstChild("MuzzleFlash") :: Part
+				local liveMuzzle = towerClone:FindFirstChild("Muzzle1") :: Part
+				assertions.equal(muzzleFlash.CFrame.Position, liveMuzzle.CFrame.Position)
+
+				local upgraded = snapshot()
+				upgraded.selection = selection(true)
+				upgraded.selection.towerId = "tower:one"
+				upgraded.selection.level = 3
+				assertions.isTrue(view:render(upgraded).ok)
+				assertions.equal(levelText.Text, "LEVEL 3")
+
+				local deselected = snapshot()
+				assertions.isTrue(view:render(deselected).ok)
+				assertions.equal(levelText.Text, "LEVEL 3")
 				assertions.equal(view:getMetrics().worldTowerCount, 1)
 				assertions.equal(view:getMetrics().worldEnemyCount, 1)
 
 				assertions.isFalse(view:syncWorld({
 					towers = {
-						{ id = "tower:missing", definitionId = "tower:unknown", position = Vector3.new() },
+						{ id = "tower:missing", definitionId = "tower:unknown", position = Vector3.new(), level = 1 },
 					},
 					enemies = {},
 				}).ok)
@@ -742,7 +977,7 @@ return TestHarness.suite("playable local Match presentation", {
 			view:render(snapshot())
 			view:syncWorld({
 				towers = {
-					{ id = "tower:one", definitionId = "tower:dart-ant", position = Vector3.new() },
+					{ id = "tower:one", definitionId = "tower:dart-ant", position = Vector3.new(), level = 1 },
 				},
 				enemies = {
 					{

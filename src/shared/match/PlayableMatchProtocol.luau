@@ -8,6 +8,15 @@ local RewardProtocol = require(script.Parent.RewardProtocol)
 
 export type MatchState = "Ready" | "Playing" | "Results"
 export type MatchResult = "None" | "Victory" | "Defeat"
+export type ModeKind = "Finite" | "Endless"
+export type TerminationReason =
+	"Victory"
+	| "BaseDefeated"
+	| "PlayerEnded"
+	| "AllParticipantsGone"
+	| "Shutdown"
+	| "TechnicalTermination"
+export type ThreatClass = "Standard" | "Elite" | "MiniBoss" | "Boss"
 export type WavePhase = "Ready" | "Intermission" | "Spawning" | "Resolving" | "Results"
 export type ViewerRole = "Participant" | "Spectator"
 export type TargetMode = "First" | "Last" | "Strongest" | "Weakest" | "Closest"
@@ -71,6 +80,15 @@ export type EnemySnapshot = {
 	maximumHealth: number,
 	position: Vector3,
 	pathProgress: number,
+	threatClass: ThreatClass?,
+}
+
+export type BossSummary = {
+	runtimeEnemyId: number,
+	displayName: string,
+	currentHealth: number,
+	maximumHealth: number,
+	threatClass: "MiniBoss" | "Boss",
 }
 
 export type ResultStats = {
@@ -97,9 +115,15 @@ export type Snapshot = {
 	mapDisplayName: string,
 	difficultyId: string,
 	difficultyDisplayName: string,
+	tutorialStep: number?,
+	modeKind: ModeKind?,
+	contentVersion: number?,
+	seed: number?,
 	serverTime: number,
 	waveNumber: number,
-	totalWaves: number,
+	totalWaves: number?,
+	bossKind: "None" | "MiniBoss" | "Boss"?,
+	boss: BossSummary?,
 	wavePhase: WavePhase,
 	nextWaveServerTime: number,
 	baseHealth: number,
@@ -160,7 +184,8 @@ local MAX_ACTIVE_ENEMIES = 20
 local MIN_TOWER_OPTIONS = 0
 local MAX_TOWER_OPTIONS = 5
 local MAX_LEVEL = 10
-local MAX_WAVES = 1_000
+local MAX_FINITE_WAVES = 1_000
+local MAX_WAVE_NUMBER = 1_000_000_000_000
 local MAX_NAME_BYTES = 64
 local MAX_DESCRIPTION_BYTES = 160
 local MAX_FINITE_NUMBER = 1.7976931348623157e308
@@ -251,11 +276,20 @@ local ENEMY_SNAPSHOT = PayloadValidation.record({
 	maximumHealth = POSITIVE_SAFE_INTEGER,
 	position = PayloadValidation.vector3(),
 	pathProgress = NONNEGATIVE_NUMBER,
+	threatClass = PayloadValidation.optional(PayloadValidation.enum({ "Standard", "Elite", "MiniBoss", "Boss" })),
+})
+
+local BOSS_SUMMARY = PayloadValidation.record({
+	runtimeEnemyId = POSITIVE_SAFE_INTEGER,
+	displayName = PayloadValidation.string(MAX_NAME_BYTES, 1),
+	currentHealth = NONNEGATIVE_SAFE_INTEGER,
+	maximumHealth = POSITIVE_SAFE_INTEGER,
+	threatClass = PayloadValidation.enum({ "MiniBoss", "Boss" }),
 })
 
 local RESULT_STATS = PayloadValidation.record({
 	durationSeconds = NONNEGATIVE_NUMBER,
-	wavesCompleted = PayloadValidation.integer(0, MAX_WAVES),
+	wavesCompleted = PayloadValidation.integer(0, MAX_WAVE_NUMBER),
 	damageDealt = NONNEGATIVE_SAFE_INTEGER,
 	battleCashEarned = NONNEGATIVE_SAFE_INTEGER,
 	battleCashSpent = NONNEGATIVE_SAFE_INTEGER,
@@ -290,9 +324,15 @@ local SNAPSHOT = PayloadValidation.record({
 	mapDisplayName = PayloadValidation.string(MAX_NAME_BYTES, 1),
 	difficultyId = PayloadValidation.id("difficulty"),
 	difficultyDisplayName = PayloadValidation.string(MAX_NAME_BYTES, 1),
+	tutorialStep = PayloadValidation.optional(PayloadValidation.integer(5, 8)),
+	modeKind = PayloadValidation.optional(PayloadValidation.enum({ "Finite", "Endless" })),
+	contentVersion = PayloadValidation.optional(POSITIVE_SAFE_INTEGER),
+	seed = PayloadValidation.optional(NONNEGATIVE_SAFE_INTEGER),
 	serverTime = NONNEGATIVE_NUMBER,
-	waveNumber = PayloadValidation.integer(0, MAX_WAVES),
-	totalWaves = PayloadValidation.integer(1, MAX_WAVES),
+	waveNumber = PayloadValidation.integer(0, MAX_WAVE_NUMBER),
+	totalWaves = PayloadValidation.optional(PayloadValidation.integer(1, MAX_FINITE_WAVES)),
+	bossKind = PayloadValidation.optional(PayloadValidation.enum({ "None", "MiniBoss", "Boss" })),
+	boss = PayloadValidation.optional(BOSS_SUMMARY),
 	wavePhase = PayloadValidation.enum({ "Ready", "Intermission", "Spawning", "Resolving", "Results" }),
 	nextWaveServerTime = NONNEGATIVE_NUMBER,
 	baseHealth = NONNEGATIVE_SAFE_INTEGER,
@@ -390,6 +430,8 @@ local PlayableMatchProtocol = {
 	ACTION_REASONS = ACTION_REASONS,
 	MAX_ACTIVE_TOWERS = MAX_ACTIVE_TOWERS,
 	MAX_ACTIVE_ENEMIES = MAX_ACTIVE_ENEMIES,
+	MAX_FINITE_WAVES = MAX_FINITE_WAVES,
+	MAX_WAVE_NUMBER = MAX_WAVE_NUMBER,
 	MIN_TOWER_OPTIONS = MIN_TOWER_OPTIONS,
 	MAX_TOWER_OPTIONS = MAX_TOWER_OPTIONS,
 	GetSnapshotPayloadSchema = GetSnapshotPayloadSchema,
@@ -438,6 +480,7 @@ function PlayableMatchProtocol.validateSnapshot(value: unknown): Result.Result<S
 		end
 	elseif
 		snapshot.loadoutRevision ~= 0
+		or snapshot.tutorialStep ~= nil
 		or snapshot.battleCash ~= 0
 		or #snapshot.towerOptions ~= 0
 		or snapshot.stats.damageDealt ~= 0
@@ -485,9 +528,35 @@ function PlayableMatchProtocol.validateSnapshot(value: unknown): Result.Result<S
 			)
 		end
 	end
-	if snapshot.waveNumber > snapshot.totalWaves then
+	local modeKind = snapshot.modeKind or "Finite"
+	if modeKind == "Finite" and (snapshot.totalWaves == nil or snapshot.waveNumber > snapshot.totalWaves) then
 		return Result.err(
 			Validation.issue("INVALID_TOTAL", { "payload", "waveNumber" }, "Wave number exceeds total waves")
+		)
+	elseif
+		modeKind == "Endless"
+		and (snapshot.totalWaves ~= nil or snapshot.contentVersion == nil or snapshot.seed == nil or snapshot.seed < 1)
+	then
+		return Result.err(
+			Validation.issue(
+				"INVALID_REFERENCE",
+				{ "payload", "modeKind" },
+				"Endless snapshots require stable generation metadata and no finite total"
+			)
+		)
+	end
+	if snapshot.stats.wavesCompleted > snapshot.waveNumber then
+		return Result.err(
+			Validation.issue(
+				"INVALID_TOTAL",
+				{ "payload", "stats", "wavesCompleted" },
+				"Completed waves exceed the authoritative wave ordinal"
+			)
+		)
+	end
+	if modeKind == "Endless" and snapshot.result == "Victory" then
+		return Result.err(
+			Validation.issue("INVALID_REFERENCE", { "payload", "result" }, "Endless has no victory result")
 		)
 	end
 	local seenTowerIds: { [string]: boolean } = {}
@@ -530,6 +599,23 @@ function PlayableMatchProtocol.validateSnapshot(value: unknown): Result.Result<S
 					{ "payload", "enemies", index, "currentHealth" },
 					"Enemy health exceeds maximum"
 				)
+			)
+		end
+	end
+	if snapshot.boss ~= nil then
+		local matched = false
+		for _, enemy in snapshot.enemies do
+			if enemy.runtimeEnemyId == snapshot.boss.runtimeEnemyId then
+				matched = enemy.displayName == snapshot.boss.displayName
+					and enemy.currentHealth == snapshot.boss.currentHealth
+					and enemy.maximumHealth == snapshot.boss.maximumHealth
+					and enemy.threatClass == snapshot.boss.threatClass
+				break
+			end
+		end
+		if not matched then
+			return Result.err(
+				Validation.issue("INVALID_REFERENCE", { "payload", "boss" }, "Boss summary must reference an enemy")
 			)
 		end
 	end

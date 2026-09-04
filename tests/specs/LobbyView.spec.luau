@@ -114,6 +114,7 @@ local function readyState(screen: string?, inputFamily: string?): any
 		banner = {
 			bannerId = "banner:starter",
 			displayName = "Starter Tower Chest",
+			policyDisclosure = "Gold is earned through play. Duplicates remain separate units.",
 			onePullCost = 250,
 			tenPullCost = 2_250,
 			pityCount = 2,
@@ -449,7 +450,10 @@ return TestHarness.suite("persistent Lobby presentation", {
 			local chestScroll = child(chests, "ChestScroll", "ScrollingFrame") :: ScrollingFrame
 			assertions.equal((child(chestScroll, "Heading", "TextLabel") :: TextLabel).Text, "Starter Tower Chest")
 			assertions.contains((child(chestScroll, "Policy", "TextLabel") :: TextLabel).Text, "EARN-ONLY GOLD")
-			assertions.contains((child(chestScroll, "Policy", "TextLabel") :: TextLabel).Text, "No Robux")
+			assertions.contains(
+				(child(chestScroll, "Policy", "TextLabel") :: TextLabel).Text,
+				"Duplicates remain separate units"
+			)
 			local odds = (child(chestScroll, "Odds", "TextLabel") :: TextLabel).Text
 			assertions.contains(odds, "Dart Ant: 60%")
 			assertions.contains(odds, "Rapid Ant: 30%")
@@ -860,6 +864,55 @@ return TestHarness.suite("persistent Lobby presentation", {
 			end)
 		end
 	),
+
+	TestHarness.case("renders contextual tutorial actions and catalog names without internal IDs", function(assertions)
+		withView(function(view, fixture)
+			local state = squadState("Queue", true)
+			state.tutorialGuidance = {
+				step = 1,
+				title = "Gold and Battle Cash",
+				message = "Gold is permanent; Battle Cash is match-only.",
+				primaryActionText = "GOT IT",
+				canAdvance = true,
+				canSkip = true,
+				canReplay = false,
+			}
+			state.queueMapOptions = {
+				{
+					mapId = "map:backyard-garden-v1",
+					displayName = "Backyard Garden",
+					selectable = true,
+					difficulties = {
+						{ difficultyId = "difficulty:easy-v1", displayName = "Easy", selectable = true },
+					},
+				},
+			}
+			state.queueSnapshots[1].configuration.mapId = "map:backyard-garden-v1"
+			state.queueSnapshots[1].configuration.difficultyId = "difficulty:easy-v1"
+			state.queueSnapshots[1].configuration.privacy = "PartyOnly"
+			assertions.isTrue(view:render(state).ok)
+			local _, root = guiTree(fixture)
+			local tutorial = child(root, "ATDTutorialGuidance", "Frame") :: Frame
+			assertions.isTrue(tutorial.Visible)
+			assertions.contains((child(tutorial, "Message", "TextLabel") :: TextLabel).Text, "Battle Cash")
+			activate(fixture, child(tutorial, "Primary", "TextButton") :: TextButton)
+			assertions.equal(fixture.actions[#fixture.actions].kind, "AdvanceTutorial")
+			activate(fixture, child(tutorial, "Skip", "TextButton") :: TextButton)
+			assertions.equal(fixture.actions[#fixture.actions].kind, "SkipTutorial")
+
+			local content = child(root, "Content", "Frame")
+			local queue = child(child(content, "QueueScreen", "Frame"), "QueueContent", "ScrollingFrame")
+			local configuration = (child(queue, "Configuration", "TextLabel") :: TextLabel).Text
+			local status = (child(queue, "Status", "TextLabel") :: TextLabel).Text
+			assertions.contains(configuration, "Backyard Garden")
+			assertions.contains(configuration, "Easy")
+			assertions.contains(configuration, "Party Only")
+			assertions.isNil(string.find(configuration, "PartyOnly", 1, true))
+			assertions.isNil(string.find(configuration, "map:", 1, true))
+			assertions.isNil(string.find(configuration, "difficulty:", 1, true))
+			assertions.isNil(string.find(status, "queue:", 1, true))
+		end)
+	end),
 
 	TestHarness.case("cleans GUI focus and every stale callback across respawn style recreation", function(assertions)
 		local fixture = makeFixture()

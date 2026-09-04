@@ -11,11 +11,13 @@ local Workspace = game:GetService("Workspace")
 
 local AcquisitionProtocol = require(ReplicatedStorage.Shared.acquisition.AcquisitionProtocol)
 local ConfigurationValidator = require(ReplicatedStorage.Shared.config.ConfigurationValidator)
+local ContentSelection = require(ReplicatedStorage.Shared.config.ContentSelection)
 local InventoryProtocol = require(ReplicatedStorage.Shared.inventory.InventoryProtocol)
 local LobbyProtocol = require(ReplicatedStorage.Shared.lobby.LobbyProtocol)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
 local PartyProtocol = require(ReplicatedStorage.Shared.party.PartyProtocol)
 local ProfileProtocol = require(ReplicatedStorage.Shared.profile.ProfileProtocol)
+local TutorialProtocol = require(ReplicatedStorage.Shared.profile.TutorialProtocol)
 local QueueProtocol = require(ReplicatedStorage.Shared.queue.QueueProtocol)
 local RemoteRegistry = require(ReplicatedStorage.Shared.network.RemoteRegistry)
 local RequestProtocol = require(ReplicatedStorage.Shared.network.RequestProtocol)
@@ -163,7 +165,7 @@ local READY_REFRESH_SECONDS = 10
 local REQUEST_TIMEOUT_SECONDS = 8
 local TOAST_TICK_SECONDS = 0.25
 local DEFAULT_VIEWPORT = Vector2.new(1280, 720)
-local STARTER_BANNER_ID = "banner:starter"
+local RELEASE_BANNER_ID = ContentSelection.RELEASE_BANNER_ID
 local CHEST_RESULTS_MODAL_ID = "modal:chest-results:current"
 
 local DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ControllerData }
@@ -300,6 +302,10 @@ local function towerCards(data: ControllerData): { any }
 		counts[entry.towerId] = entry.copies
 	end
 	local cards = table.create(#inventory.units)
+	local starterUnitIds: { [string]: boolean } = {}
+	for _, unitId in ContentSelection.STARTER_UNIT_IDS do
+		starterUnitIds[unitId] = true
+	end
 	for index, unit in inventory.units do
 		local definition = data.configuration.towers.byId[unit.towerId]
 		if definition == nil then
@@ -311,9 +317,9 @@ local function towerCards(data: ControllerData): { any }
 			towerId = unit.towerId,
 			displayName = definition.displayName,
 			description = definition.description or "",
-			acquisitionSource = if unit.unitId == "unit:starter-1"
+			acquisitionSource = if starterUnitIds[unit.unitId] == true
 				then "Starter Profile Grant"
-				else "Starter Tower Chest • Earn-only Gold",
+				else "Earn-only Tower Chest",
 			copies = counts[unit.towerId] or 1,
 			favorite = unit.favorite,
 			locked = unit.locked,
@@ -351,6 +357,7 @@ local function bannerForView(data: ControllerData)
 	return {
 		bannerId = banner.bannerId,
 		displayName = banner.displayName,
+		policyDisclosure = banner.policyDisclosure,
 		onePullCost = banner.onePullCost,
 		tenPullCost = banner.tenPullCost,
 		pityCount = banner.currentPityCount,
@@ -388,6 +395,107 @@ local function safeAccessibility(dependencies: Dependencies): Accessibility
 	return { textScale = 1, transparency = 0 }
 end
 
+local function tagged(tags: { string }?, wanted: string): boolean
+	for _, tag in tags or {} do
+		if tag == wanted then
+			return true
+		end
+	end
+	return false
+end
+
+local function queueMapOptions(data: ControllerData): { any }
+	local options = table.create(#data.configuration.maps.ordered)
+	for _, map in data.configuration.maps.ordered do
+		local selectableMap = not tagged(map.tags, "hidden") and not tagged(map.tags, "development")
+		local difficulties = table.create(#map.supportedDifficultyIds)
+		for _, difficultyId in map.supportedDifficultyIds do
+			local difficulty = data.configuration.difficulties.byId[difficultyId]
+			if difficulty ~= nil then
+				table.insert(difficulties, {
+					difficultyId = difficulty.id,
+					displayName = difficulty.displayName,
+					selectable = selectableMap
+						and not tagged(difficulty.tags, "hidden")
+						and not tagged(difficulty.tags, "development"),
+				})
+			end
+		end
+		table.insert(options, {
+			mapId = map.id,
+			displayName = map.displayName,
+			selectable = selectableMap,
+			difficulties = difficulties,
+		})
+	end
+	return options
+end
+
+local function tutorialGuidance(data: ControllerData): any?
+	if data.profile.state ~= "Ready" or data.profile.tutorial == nil then
+		return nil
+	end
+	local tutorial = data.profile.tutorial :: ProfileProtocol.TutorialView
+	local step = math.clamp(tutorial.tutorialStep, 0, TutorialProtocol.COMPLETE_STEP)
+	if tutorial.version == nil then
+		return nil
+	end
+	local title = "Getting started"
+	local message = "Preparing your permanent starter loadout safely."
+	local primaryActionText: string? = nil
+	local canAdvance = false
+	local canReplay = false
+	if step == 1 then
+		title = "Gold and Battle Cash"
+		message =
+			"Gold is permanent and opens earn-only chests; every chest's exact odds and pity are listed in Chests. Battle Cash is earned and spent only inside a match."
+		primaryActionText = "GOT IT"
+		canAdvance = true
+	elseif step == 2 then
+		title = "Starter loadout"
+		message =
+			"Your server-validated attacking loadout is ready. Dart Ant handles steady targets and Bombardier Ant covers groups; open Inventory any time to adjust it."
+		primaryActionText = "LOADOUT READY"
+		canAdvance = true
+	elseif step == 3 then
+		title = "Enter your first defense"
+		message =
+			"Open Queue, choose Backyard Garden on Easy, keep Party Only, and enter alone. Progress advances only when the server sees that exact setup."
+	elseif step == 4 then
+		title = "Start when ready"
+		message =
+			"Your solo Easy queue is ready. Start the trip; the authenticated travel ticket carries the selected map and difficulty."
+	elseif step == 5 then
+		title = "Place a tower"
+		message = "Choose a starter tower and place it inside a highlighted placement region."
+	elseif step == 6 then
+		title = "Upgrade a tower"
+		message = "Select one of your placed towers and buy an upgrade with match-only Battle Cash."
+	elseif step == 7 then
+		title = "Finish the run"
+		message =
+			"Keep defending. A durable server result—not a client claim—records the run even after an ordinary defeat."
+	elseif step == 8 then
+		title = "Return safely"
+		message =
+			"Return to the Lobby. Your onboarding completes only after the matching run and saved profile are observed here."
+	elseif step == TutorialProtocol.COMPLETE_STEP then
+		title = if tutorial.skipped == true then "Onboarding skipped" else "Onboarding complete"
+		message = "Need a refresher? Replay the concise guide without receiving duplicate starter rewards."
+		primaryActionText = "REPLAY HELP"
+		canReplay = true
+	end
+	return {
+		step = step,
+		title = title,
+		message = message,
+		primaryActionText = primaryActionText,
+		canAdvance = canAdvance,
+		canSkip = step >= 1 and step < TutorialProtocol.COMPLETE_STEP,
+		canReplay = canReplay,
+	}
+end
+
 local function render(data: ControllerData): boolean
 	if not data.active or data.state ~= "Started" or data.dependencies == nil then
 		return false
@@ -410,7 +518,7 @@ local function render(data: ControllerData): boolean
 		elseif not effectiveReady then "Loading your protected profile and inventory…"
 		elseif
 			data.profile.migrationOutcome == "Created"
-		then "Welcome! Your starter tower and earn-only Gold are ready."
+		then "Welcome! Your starter towers and earn-only Gold are ready."
 		elseif data.profile.migrationOutcome == "Migrated" then "Welcome back. Your profile was migrated safely."
 		else "Welcome back. Your saved loadout is ready."
 	local toasts = table.create(#toastSnapshot.value)
@@ -449,6 +557,8 @@ local function render(data: ControllerData): boolean
 		squadMutationPending = data.mutationPending,
 		modals = if effectiveReady then data.modals else {},
 		toasts = toasts,
+		tutorialGuidance = tutorialGuidance(data),
+		queueMapOptions = queueMapOptions(data),
 	}
 	if effectiveReady then
 		local settings = data.profile.settings :: ProfileProtocol.SettingsView
@@ -553,6 +663,45 @@ local function issueRequest(
 	return true
 end
 
+local function issueTutorialMutation(data: ControllerData, endpoint: string): boolean
+	if data.profile.state ~= "Ready" then
+		return false
+	end
+	local transactionId = (data.dependencies :: Dependencies).newTransactionId()
+	return issueRequest(
+		data,
+		endpoint,
+		{
+			transactionId = transactionId,
+			expectedRevision = data.revision,
+		},
+		true,
+		function(value)
+			local validated = TutorialProtocol.validateMutationReceipt(value)
+			if not validated.ok or validated.value.transactionId ~= transactionId then
+				return false
+			end
+			local profile = data.profile :: any
+			data.profile = table.freeze({
+				state = "Ready",
+				retryable = false,
+				revision = validated.value.revision,
+				gold = profile.gold,
+				settings = profile.settings,
+				tutorial = validated.value.tutorial,
+				stats = profile.stats,
+				firstClears = profile.firstClears,
+				migrationOutcome = profile.migrationOutcome,
+			})
+			updateProfileRevision(data, validated.value.revision)
+			if validated.value.changed then
+				notify(data, "Success", "Guide updated", "Your onboarding progress was saved.", "tutorial:updated")
+			end
+			return true
+		end
+	)
+end
+
 local function applyProfile(data: ControllerData, value: unknown): boolean
 	local validated = ProfileProtocol.validateSnapshot(value)
 	if not validated.ok then
@@ -625,11 +774,14 @@ issueBanner = function(data: ControllerData): boolean
 	return issueRequest(
 		data,
 		LobbyProtocol.ENDPOINTS.GET_BANNER,
-		{ bannerId = STARTER_BANNER_ID },
+		{ bannerId = RELEASE_BANNER_ID },
 		false,
 		function(value)
 			local validated = AcquisitionProtocol.validateBannerView(value)
 			if not validated.ok then
+				return false
+			end
+			if validated.value.bannerId ~= RELEASE_BANNER_ID then
 				return false
 			end
 			if validated.value.profileRevision < data.revision then
@@ -865,7 +1017,7 @@ local function issueInvitePrompt(data: ControllerData): boolean
 					data,
 					"Warning",
 					"Invite unavailable",
-					"Invite permission was denied. You can still invite a present player by UserId.",
+					"Invite permission was denied. You can still invite a present player by name.",
 					"party:prompt-denied"
 				)
 			else
@@ -873,7 +1025,7 @@ local function issueInvitePrompt(data: ControllerData): boolean
 					data,
 					"Warning",
 					"Invite unavailable",
-					"The Roblox invite prompt is unavailable here. Use the same-server invite field instead.",
+					"The Roblox invite prompt is unavailable here. Use the same-server player-name field instead.",
 					"party:prompt-unavailable"
 				)
 			end
@@ -1012,7 +1164,7 @@ local function pullResultsMessage(data: ControllerData, receipt: AcquisitionProt
 	for index, outcome in receipt.results do
 		local definition = data.configuration.towers.byId[outcome.towerId]
 		parts[index] = `{index}. {if outcome.isNew then "NEW" else "DUPLICATE"}: {if definition == nil
-			then outcome.towerId
+			then "Unknown tower"
 			else definition.displayName}`
 	end
 	return table.concat(parts, "\n")
@@ -1209,6 +1361,12 @@ local function onAction(data: ControllerData, action: LobbyView.Action)
 		if #data.modals == 0 then
 			data.activeScreen = "Queue"
 		end
+	elseif action.kind == "AdvanceTutorial" then
+		issueTutorialMutation(data, LobbyProtocol.ENDPOINTS.ADVANCE_TUTORIAL)
+	elseif action.kind == "SkipTutorial" then
+		issueTutorialMutation(data, LobbyProtocol.ENDPOINTS.SKIP_TUTORIAL)
+	elseif action.kind == "ReplayTutorial" then
+		issueTutorialMutation(data, LobbyProtocol.ENDPOINTS.REPLAY_TUTORIAL)
 	elseif action.kind == "SelectQueue" and action.queueId ~= nil and data.queueSnapshots ~= nil then
 		for _, queue in data.queueSnapshots do
 			if queue.queueId == action.queueId then
@@ -1771,6 +1929,21 @@ local REQUEST_SPECS = table.freeze({
 		LobbyProtocol.ENDPOINTS.UPDATE_SETTINGS,
 		SettingsProtocol.UpdateIntentSchema,
 		SettingsProtocol.UpdateReceiptSchema,
+	},
+	{
+		LobbyProtocol.ENDPOINTS.ADVANCE_TUTORIAL,
+		LobbyProtocol.TutorialActionIntentSchema,
+		LobbyProtocol.TutorialMutationReceiptSchema,
+	},
+	{
+		LobbyProtocol.ENDPOINTS.SKIP_TUTORIAL,
+		LobbyProtocol.TutorialActionIntentSchema,
+		LobbyProtocol.TutorialMutationReceiptSchema,
+	},
+	{
+		LobbyProtocol.ENDPOINTS.REPLAY_TUTORIAL,
+		LobbyProtocol.TutorialActionIntentSchema,
+		LobbyProtocol.TutorialMutationReceiptSchema,
 	},
 	{ LobbyProtocol.ENDPOINTS.GET_PARTY, LobbyProtocol.EmptyPayloadSchema, PartyProtocol.ViewerSnapshotSchema },
 	{ LobbyProtocol.ENDPOINTS.CREATE_PARTY, PartyProtocol.CreateIntentSchema, PartyProtocol.MutationReceiptSchema },

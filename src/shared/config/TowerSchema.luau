@@ -69,6 +69,7 @@ local ATTACK_FIELDS: { [string]: boolean } = table.freeze({
 	behavior = true,
 	cooldownSeconds = true,
 	damage = true,
+	splashRadiusStuds = true,
 	statusEffects = true,
 })
 
@@ -82,6 +83,9 @@ local validatedCatalogs: { [ConfigTypes.TowerCatalog]: boolean } = setmetatable(
 }) :: any
 
 local TowerSchema = {}
+
+local MAX_SPLASH_RADIUS_STUDS = 128
+TowerSchema.MAX_SPLASH_RADIUS_STUDS = MAX_SPLASH_RADIUS_STUDS
 
 local function validateAttack(
 	value: unknown,
@@ -112,6 +116,21 @@ local function validateAttack(
 		return nil, cooldownIssue
 	end
 
+	local splashRadiusStuds: number? = nil
+	if Validation.getField(record :: Validation.RawObject, "splashRadiusStuds") ~= nil then
+		local splashRadiusIssue: Validation.Issue?
+		splashRadiusStuds, splashRadiusIssue = SchemaPrimitives.boundedNumber(
+			record :: Validation.RawObject,
+			"splashRadiusStuds",
+			path,
+			0.01,
+			MAX_SPLASH_RADIUS_STUDS
+		)
+		if splashRadiusIssue ~= nil then
+			return nil, splashRadiusIssue
+		end
+	end
+
 	local statusEffects: { ConfigTypes.StatusEffectReference }? = nil
 	local rawStatusEffects = Validation.getField(record :: Validation.RawObject, "statusEffects")
 	if rawStatusEffects ~= nil then
@@ -132,6 +151,7 @@ local function validateAttack(
 		behavior = behavior :: ConfigTypes.AttackBehaviorReference,
 		damage = damage :: number,
 		cooldownSeconds = cooldownSeconds :: number,
+		splashRadiusStuds = splashRadiusStuds,
 		statusEffects = statusEffects,
 	})
 	return attack, nil

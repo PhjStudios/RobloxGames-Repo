@@ -49,11 +49,11 @@ local function frozenLoadout(userId: number, settingsOverride: any?): MatchLoado
 	return validated.value
 end
 
-local function runtimeMap(): any
+local function runtimeMap(mapId: string?): any
 	local first = Vector3.new(-1, 0, 0)
 	local last = Vector3.new(1, 0, 0)
 	return {
-		mapId = "map:phase07-graybox",
+		mapId = mapId or "map:phase07-graybox",
 		base = { cframe = CFrame.new(last), position = last },
 		bounds = { cframe = CFrame.new(), size = Vector3.new(100, 20, 100) },
 		lanes = {
@@ -123,7 +123,12 @@ local function removeActive(active: { Player }, player: Player)
 	end
 end
 
-local function makeRig(extraContent: boolean?, rosterInputs: PlayableMatchService.RosterInputs?): any
+local function makeRig(
+	extraContent: boolean?,
+	rosterInputs: PlayableMatchService.RosterInputs?,
+	directContentSelection: PlayableMatchService.DirectContentSelection?,
+	isStudio: boolean?
+): any
 	local root = contentRoot()
 	if extraContent then
 		local catalog = root:FindFirstChild("ATDPlayableTemplates") :: Folder
@@ -146,7 +151,11 @@ local function makeRig(extraContent: boolean?, rosterInputs: PlayableMatchServic
 	local legacyState = "WaveActive"
 	local lifecycle: any = {}
 	function lifecycle:getRuntimeMapSnapshot()
-		return Result.ok(runtimeMap())
+		local selectedMapId = if directContentSelection ~= nil
+			then directContentSelection.mapId
+			elseif rosterInputs == nil then nil
+			else rosterInputs.mapId
+		return Result.ok(runtimeMap(selectedMapId))
 	end
 	function lifecycle:getSnapshot()
 		return Result.ok(table.freeze({ state = legacyState, matchId = "match:legacy", revision = 1 }))
@@ -230,7 +239,9 @@ local function makeRig(extraContent: boolean?, rosterInputs: PlayableMatchServic
 		end,
 		environment,
 		nil,
-		rosterInputs
+		rosterInputs,
+		directContentSelection,
+		isStudio
 	)
 	return {
 		service = service,
@@ -305,22 +316,91 @@ local function runToResults(assertions: Assertions, rig: any)
 end
 
 return TestHarness.suite("playable match service integration", {
-	TestHarness.case(
-		"accepts exactly seven unique authenticated direct models and rejects extras",
-		function(assertions)
-			local exact = makeRig()
-			startRig(exact)
-			assertions.equal(exact.service:getMetrics().state, "Started")
-			assertions.equal(#exact.publications, 1)
-			cleanupRig(exact)
+	TestHarness.case("accepts the complete authenticated model catalog and rejects extras", function(assertions)
+		local exact = makeRig()
+		startRig(exact)
+		assertions.equal(exact.service:getMetrics().state, "Started")
+		assertions.equal(#exact.publications, 1)
+		cleanupRig(exact)
 
-			local extra = makeRig(true)
-			local initialized = pcall(extra.definition.initialize)
-			assertions.isFalse(initialized)
-			assertions.equal(extra.service:getMetrics().state, "Failed")
-			cleanupRig(extra)
+		local extra = makeRig(true)
+		local initialized = pcall(extra.definition.initialize)
+		assertions.isFalse(initialized)
+		assertions.equal(extra.service:getMetrics().state, "Failed")
+		cleanupRig(extra)
+	end),
+
+	TestHarness.case(
+		"runs an explicit direct selection through the same non-rewarding authority graph",
+		function(assertions)
+			local rig = makeRig(false, nil, {
+				mapId = "map:backyard-garden-v1",
+				difficultyId = "difficulty:easy-v1",
+			})
+			startRig(rig)
+			local snapshot = currentSnapshot(assertions, rig, rig.first)
+			assertions.equal(snapshot.mapId, "map:backyard-garden-v1")
+			assertions.equal(snapshot.difficultyId, "difficulty:easy-v1")
+			assertions.equal(snapshot.modeKind, "Finite")
+			assertions.equal(snapshot.totalWaves, 20)
+			assertions.isFalse(snapshot.rewarding)
+			cleanupRig(rig)
 		end
 	),
+
+	TestHarness.case("mints deterministic negative-id starters only for a direct Studio runtime", function(assertions)
+		local selection = {
+			mapId = "map:backyard-garden-v1",
+			difficultyId = "difficulty:easy-v1",
+		}
+		local publishedBoundary = makeRig(false, nil, selection, false)
+		publishedBoundary.bindPlayer(publishedBoundary.first, -1)
+		startRig(publishedBoundary)
+		local spectator = currentSnapshot(assertions, publishedBoundary, publishedBoundary.first)
+		assertions.equal(spectator.viewerRole, "Spectator")
+		assertions.equal(publishedBoundary.service:getMetrics().frozenLoadoutCount, 0)
+		cleanupRig(publishedBoundary)
+
+		local studio = makeRig(false, nil, selection, true)
+		studio.bindPlayer(studio.first, -1)
+		startRig(studio)
+		local initial = currentSnapshot(assertions, studio, studio.first)
+		assertions.equal(initial.viewerRole, "Participant")
+		assertions.isFalse(initial.rewarding)
+		assertions.equal(initial.loadoutRevision, 1)
+		assertions.equal(#initial.towerOptions, 2)
+		assertions.equal(initial.towerOptions[1].unitId, "unit:starter-1")
+		assertions.equal(initial.towerOptions[1].towerId, "tower:dart-ant")
+		assertions.equal(initial.towerOptions[2].unitId, "unit:starter-2")
+		assertions.equal(initial.towerOptions[2].towerId, "tower:bombardier-ant")
+
+		ready(assertions, studio, studio.first)
+		local placed = studio.service:submitPlacement(studio.first, {
+			matchId = initial.matchId,
+			loadoutRevision = initial.loadoutRevision,
+			slot = 1,
+			towerId = "tower:dart-ant",
+			position = Vector3.new(0, 0, 8),
+			rotationDegrees = 0,
+		})
+		assertions.isNotNil(placed)
+		assertions.isTrue((placed :: any).accepted)
+		local afterPlacement = currentSnapshot(assertions, studio, studio.first)
+		assertions.equal(afterPlacement.towers[1].ownerUserId, -1)
+
+		removeActive(studio.active, studio.first)
+		studio.fireRemoving(studio.first)
+		assertions.equal((studio.service:getMetrics().runtime :: any).connectedParticipantCount, 0)
+		table.insert(studio.active, studio.first)
+		studio.fireAdded(studio.first)
+		local reconnected = currentSnapshot(assertions, studio, studio.first)
+		assertions.equal(reconnected.viewerRole, "Participant")
+		assertions.equal(reconnected.towers[1].ownerUserId, -1)
+		cleanupRig(studio)
+		assertions.equal(studio.service:getMetrics().state, "Shutdown")
+		assertions.equal(studio.service:getMetrics().frozenLoadoutCount, 0)
+		assertions.isNil(studio.service:getMetrics().runtime)
+	end),
 
 	TestHarness.case("returns the old replay receipt while publishing the fresh Ready match", function(assertions)
 		local rig = makeRig()
@@ -548,6 +628,54 @@ return TestHarness.suite("playable match service integration", {
 		cleanupRig(rig)
 	end),
 
+	TestHarness.case(
+		"projects cached Match tutorial steps only to their authenticated participant",
+		function(assertions)
+			local tutorialStep = 5
+			local providerCalls = {}
+			local matchId = "match:tutorial-service"
+			local rig = makeRig(false, {
+				expectedUserIds = { 101, 202 },
+				frozenLoadouts = { frozenLoadout(101), frozenLoadout(202) },
+				rewarding = true,
+				managedAdmissions = true,
+				connectedParticipantUserIds = { 101 },
+				matchId = matchId,
+				mapId = "map:backyard-garden-v1",
+				difficultyId = "difficulty:easy-v1",
+				tutorialStepProvider = function(userId, requestedMatchId)
+					table.insert(providerCalls, { userId = userId, matchId = requestedMatchId })
+					return tutorialStep
+				end,
+			})
+			startRig(rig)
+			local initial = currentSnapshot(assertions, rig, rig.first)
+			assertions.equal(initial.tutorialStep, 5)
+			assertions.equal(rig.publications[#rig.publications].tutorialStep, 5)
+
+			tutorialStep = 6
+			assertions.isTrue(rig.service:refreshTutorial(101))
+			rig.setClock(100.25)
+			rig.fireHeartbeat()
+			local guided = rig.publications[#rig.publications]
+			assertions.equal(guided.tutorialStep, 6)
+			assertions.isTrue(guided.revision > initial.revision)
+
+			table.insert(rig.active, rig.second)
+			assertions.isTrue(rig.service:admitAuthorized(rig.second, false).accepted)
+			local callsBeforeSpectator = #providerCalls
+			local spectator = currentSnapshot(assertions, rig, rig.second)
+			assertions.equal(spectator.viewerRole, "Spectator")
+			assertions.isNil(spectator.tutorialStep)
+			assertions.equal(#providerCalls, callsBeforeSpectator)
+
+			tutorialStep = 9
+			assertions.isTrue(rig.service:refreshTutorial(101))
+			assertions.isNil(currentSnapshot(assertions, rig, rig.first).tutorialStep)
+			cleanupRig(rig)
+		end
+	),
+
 	TestHarness.case("bounds frozen loadouts across rejected joins and player churn", function(assertions)
 		local rig = makeRig()
 		startRig(rig)
@@ -572,6 +700,9 @@ return TestHarness.suite("playable match service integration", {
 				expectedUserIds = { 202, 101 },
 				frozenLoadouts = { frozenLoadout(202), frozenLoadout(101) },
 				rewarding = true,
+				matchId = "match:ticket-roster",
+				mapId = "map:backyard-garden-v1",
+				difficultyId = "difficulty:easy-v1",
 			})
 			startRig(rig)
 			local first = currentSnapshot(assertions, rig, rig.first)
@@ -599,6 +730,9 @@ return TestHarness.suite("playable match service integration", {
 				expectedUserIds = { 101, 202 },
 				frozenLoadouts = { frozenLoadout(101), frozenLoadout(202, spectatorSettings) },
 				rewarding = true,
+				matchId = "match:ticket-roster-late",
+				mapId = "map:backyard-garden-v1",
+				difficultyId = "difficulty:easy-v1",
 			})
 			startRig(late)
 			ready(assertions, late, late.first)

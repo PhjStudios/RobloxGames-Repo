@@ -173,6 +173,12 @@ local function sameResult(left: MatchResultContract.MatchResult, right: MatchRes
 		or left.outcome ~= right.outcome
 		or left.createdAt ~= right.createdAt
 		or left.rewardingMatch ~= right.rewardingMatch
+		or left.modeKind ~= right.modeKind
+		or left.highestCompletedWave ~= right.highestCompletedWave
+		or left.elapsedSeconds ~= right.elapsedSeconds
+		or left.seed ~= right.seed
+		or left.contentVersion ~= right.contentVersion
+		or left.terminationReason ~= right.terminationReason
 		or #left.entries ~= #right.entries
 	then
 		return false

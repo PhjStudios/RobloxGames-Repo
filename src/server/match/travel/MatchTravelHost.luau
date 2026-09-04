@@ -3,6 +3,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ConfigurationValidator = require(ReplicatedStorage.Shared.config.ConfigurationValidator)
+local ContentSelection = require(ReplicatedStorage.Shared.config.ContentSelection)
 local MatchLoadoutProtocol = require(ReplicatedStorage.Shared.match.MatchLoadoutProtocol)
 local MatchTravelProtocol = require(ReplicatedStorage.Shared.match.MatchTravelProtocol)
 local TravelProtocol = require(ReplicatedStorage.Shared.travel.TravelProtocol)
@@ -61,6 +62,7 @@ export type Dependencies = {
 	teleport: unknown,
 	resultLedger: unknown,
 	rewardClaims: unknown,
+	observeDurableResult: ((number, unknown) -> unknown)?,
 	snapshotSender: (unknown, MatchTravelProtocol.Snapshot) -> unknown,
 	playableFactory: (unknown, { number }) -> unknown,
 	stopPlayable: (unknown) -> unknown,
@@ -131,6 +133,9 @@ type HostData = {
 	resultFailed: boolean,
 	resultFailureReason: string?,
 	resultRecord: any?,
+	resultReady: boolean,
+	durableResultObservedByUserId: { [number]: boolean },
+	rematchSuppressedForTutorial: boolean,
 	lastIntentRenewalAt: number,
 	lastRewardAttemptAt: number,
 	rewardTerminalByUserId: { [number]: boolean },
@@ -551,6 +556,7 @@ local function createRematch(data: HostData)
 		data.rematch ~= nil
 		or data.ticket == nil
 		or roster == nil
+		or data.rematchSuppressedForTutorial
 		or data.shutdownRequested
 		or data.returnBusy
 		or data.activeReturnWork ~= nil
@@ -601,6 +607,57 @@ local function persistCachedResult(data: HostData): (boolean, string?)
 	end
 	data.resultCreated = true
 	return true, nil
+end
+
+local function observeDurableResults(data: HostData, resultRecord: any): boolean
+	local observer = data.dependencies.observeDurableResult
+	if observer == nil then
+		return true
+	end
+	local complete = true
+	for _, entry in resultRecord.entries do
+		if
+			entry.authenticatedParticipant
+			and not entry.spectator
+			and not data.durableResultObservedByUserId[entry.userId]
+		then
+			local evidence = table.freeze({
+				matchId = resultRecord.matchId,
+				mapId = resultRecord.mapId,
+				difficultyId = resultRecord.difficultyId,
+				authenticatedParticipant = true,
+				spectator = false,
+				durable = true,
+			})
+			local called, observed = pcall(observer, entry.userId, evidence)
+			if called and resultOk(observed) then
+				data.durableResultObservedByUserId[entry.userId] = true
+				local observation = (observed :: any).value
+				if type(observation) == "table" and type(observation.tutorial) == "table" then
+					local tutorial = observation.tutorial
+					local ticket = data.ticket
+					-- Step 8 requires a Lobby return tied to this exact Match. A fresh
+					-- rematch would strand the solo journey on an unreachable match ID,
+					-- so the authoritative host omits the offer entirely.
+					if
+						ticket ~= nil
+						and #ticket.expectedUserIds == 1
+						and tutorial.tutorialStep == 8
+						and tutorial.trackedMatchId == resultRecord.matchId
+					then
+						data.rematchSuppressedForTutorial = true
+					end
+					local playable = data.playable
+					if playable ~= nil and type(playable.refreshTutorial) == "function" then
+						pcall(playable.refreshTutorial, playable, entry.userId)
+					end
+				end
+			else
+				complete = false
+			end
+		end
+	end
+	return complete
 end
 
 local function applyPipelineView(data: HostData, userId: number, status: string, reason: string): boolean
@@ -688,26 +745,38 @@ local function processResults(data: HostData, currentTime: number): boolean
 		return false
 	end
 	local evidence = (evidenceResult :: any).value
+	local rewardingMatch =
+		ContentSelection.rewardingForSelection(data.dependencies.configuration, ticket.mapId, ticket.difficultyId)
 	if
 		evidence.matchId ~= ticket.matchId
 		or evidence.mapId ~= ticket.mapId
 		or evidence.difficultyId ~= ticket.difficultyId
-		or evidence.rewardingMatch ~= true
+		or rewardingMatch == nil
+		or evidence.rewardingMatch ~= rewardingMatch
 	then
 		markResultFailed(data, "RESULT_EVIDENCE_FAILED", currentTime)
 		return false
 	end
 	if data.resultRecord == nil then
+		local resultVersion = if evidence.modeKind == "Finite" or evidence.modeKind == "Endless"
+			then MatchResultContract.CURRENT_VERSION
+			else MatchResultContract.LEGACY_VERSION
 		local validated = MatchResultContract.validate({
-			version = MatchResultContract.VERSION,
+			version = resultVersion,
 			resultId = ticket.resultId,
 			matchId = ticket.matchId,
 			ticketId = ticket.ticketId,
 			mapId = ticket.mapId,
 			difficultyId = ticket.difficultyId,
 			outcome = evidence.outcome,
+			modeKind = evidence.modeKind,
+			highestCompletedWave = evidence.highestCompletedWave,
+			elapsedSeconds = evidence.elapsedSeconds,
+			seed = evidence.seed,
+			contentVersion = evidence.contentVersion,
+			terminationReason = evidence.terminationReason,
 			createdAt = currentTime,
-			rewardingMatch = true,
+			rewardingMatch = rewardingMatch,
 			entries = evidence.entries,
 		})
 		if not validated.ok then
@@ -720,7 +789,6 @@ local function processResults(data: HostData, currentTime: number): boolean
 		data.resultRecord = validated.value
 	end
 	local resultRecord = data.resultRecord
-	local newlyCreated = false
 	if not data.resultCreated then
 		local created, code = persistCachedResult(data)
 		if not created then
@@ -733,10 +801,15 @@ local function processResults(data: HostData, currentTime: number): boolean
 			end
 			return false
 		end
-		newlyCreated = true
+	end
+	local observationComplete = observeDurableResults(data, resultRecord)
+	local newlyReady = false
+	if observationComplete and not data.resultReady then
+		data.resultReady = true
+		newlyReady = true
 	end
 	if currentTime < data.lastRewardAttemptAt + REWARD_RETRY_SECONDS then
-		return newlyCreated
+		return newlyReady
 	end
 	data.lastRewardAttemptAt = currentTime
 	for _, entry in resultRecord.entries do
@@ -762,7 +835,7 @@ local function processResults(data: HostData, currentTime: number): boolean
 			end
 		end
 	end
-	return newlyCreated
+	return newlyReady
 end
 
 local function rematchView(data: HostData): MatchTravelProtocol.RematchView?
@@ -1059,10 +1132,28 @@ local function beginReturn(data: HostData, requesterUserId: number): (ReturnWork
 	if requester == nil then
 		return nil, "RETURN_UNAVAILABLE"
 	end
-	if requester.role == "Participant" and not data.resultCreated and not data.resultFailed then
+	local ticket = data.ticket
+	if requester.role == "Participant" and data.resultCreated and not data.resultReady and not data.resultFailed then
 		return nil, "RETURN_UNAVAILABLE"
 	end
-	local ticket = data.ticket
+	if requester.role == "Participant" and not data.resultCreated and not data.resultFailed then
+		-- A deliberate in-match return is an Endless terminal action only for a
+		-- singleton run. One squad member must never be able to terminate the
+		-- authoritative match for everyone else.
+		local currentTime = now(data)
+		local playable = data.playable
+		local terminated = false
+		if currentTime ~= nil and playable ~= nil and #ticket.expectedUserIds == 1 then
+			local called, outcome = pcall(playable.terminateEndless, playable, "PlayerEnded")
+			terminated = called and type(outcome) == "table" and outcome.accepted == true
+		end
+		if terminated then
+			processResults(data, currentTime :: number)
+		end
+		if not data.resultCreated and not data.resultFailed then
+			return nil, "RETURN_UNAVAILABLE"
+		end
+	end
 	local spectatorOnly = requester.role == "Spectator"
 	local userIds: { number } = {}
 	local players: { unknown } = {}
@@ -1695,6 +1786,7 @@ function Methods.getMetrics(self: Service): any
 		spectatorCount = spectators,
 		pendingArrivalCount = pending,
 		resultCreated = data.resultCreated,
+		resultReady = data.resultReady,
 		resultFailed = data.resultFailed,
 		routesBound = data.routesBound,
 		cleaned = data.cleaned,
@@ -1738,19 +1830,41 @@ function Methods.cleanup(self: Service): Result.Result<boolean, HostError>
 		return failure("UNAVAILABLE", "cleanup")
 	end
 	if terminalTicket ~= nil and terminalTime ~= nil and not data.resultCreated and not data.resultFailed then
-		if data.resultRecord ~= nil then
+		if data.resultRecord == nil and data.playable ~= nil then
+			-- Consume an already-terminal runtime before asking an active Endless run
+			-- to stop. Playable and host heartbeats are separate callbacks, so cleanup
+			-- may observe valid Results evidence before the host's next normal step.
+			processResults(data, terminalTime)
+			if not data.resultCreated and not data.resultFailed and data.resultRecord == nil then
+				local called, outcome = pcall(data.playable.terminateEndless, data.playable, "Shutdown")
+				if called and type(outcome) == "table" and outcome.accepted == true then
+					processResults(data, terminalTime)
+				end
+			end
+		end
+		if data.resultRecord ~= nil and not data.resultCreated and not data.resultFailed then
 			-- A validated result record is stronger evidence than a zero-award
 			-- shutdown tombstone. Preserve and retry this exact immutable value; an
 			-- ambiguous prior create is idempotently resolved by ResultLedgerService.
 			if not persistCachedResult(data) then
 				return failure("UNAVAILABLE", "cleanup")
 			end
-		elseif not markResultFailed(data, "MATCH_TERMINAL_CLEANUP", terminalTime) then
+		elseif
+			not data.resultCreated
+			and not data.resultFailed
+			and not markResultFailed(data, "MATCH_TERMINAL_CLEANUP", terminalTime)
+		then
 			-- Do not erase the only active host/ticket context while its pending
 			-- profile receipts still lack a durable terminal result record. The
 			-- lifecycle shutdown wrapper owns a bounded set of later attempts.
 			return failure("UNAVAILABLE", "cleanup")
 		end
+	end
+	if data.resultCreated and not data.resultFailed and not data.resultReady then
+		if data.resultRecord == nil or not observeDurableResults(data, data.resultRecord) then
+			return failure("UNAVAILABLE", "cleanup")
+		end
+		data.resultReady = true
 	end
 	if terminalTicket ~= nil and terminalTime ~= nil then
 		pcall(
@@ -1820,6 +1934,7 @@ function Methods.cleanup(self: Service): Result.Result<boolean, HostError>
 	table.clear(data.publishedFingerprintByUserId)
 	table.clear(data.receipts)
 	table.clear(data.receiptOrder)
+	table.clear(data.durableResultObservedByUserId)
 	data.playable = nil
 	data.ticket = nil
 	return Result.ok(true)
@@ -1857,6 +1972,7 @@ function MatchTravelHost.new(dependenciesValue: unknown): Result.Result<Service,
 		or not hasMethods(dependencies.teleport, { "teleportPublic", "connectInitFailed" })
 		or not hasMethods(dependencies.resultLedger, { "create", "markFailed", "renewIntent" })
 		or not hasMethods(dependencies.rewardClaims, { "claim" })
+		or (dependencies.observeDurableResult ~= nil and type(dependencies.observeDurableResult) ~= "function")
 		or type(dependencies.snapshotSender) ~= "function"
 		or type(dependencies.playableFactory) ~= "function"
 		or type(dependencies.stopPlayable) ~= "function"
@@ -1918,6 +2034,9 @@ function MatchTravelHost.new(dependenciesValue: unknown): Result.Result<Service,
 		resultFailed = false,
 		resultFailureReason = nil,
 		resultRecord = nil,
+		resultReady = false,
+		durableResultObservedByUserId = {},
+		rematchSuppressedForTutorial = false,
 		lastIntentRenewalAt = 0,
 		lastRewardAttemptAt = 0,
 		rewardTerminalByUserId = {},

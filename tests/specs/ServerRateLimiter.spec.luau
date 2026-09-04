@@ -236,9 +236,10 @@ return TestHarness.suite("server authoritative rate limiter", {
 
 	TestHarness.case("binds exact production request rates and no outbound policy", function(assertions)
 		assertions.isTrue(table.isfrozen(ProductionRateLimits))
-		assertions.equal(rawlen(ProductionRateLimits), 46)
+		assertions.equal(rawlen(ProductionRateLimits), 49)
 
 		local expected = {
+			AdvanceLobbyTutorial = { capacity = 3, refillPerSecond = 0.5 },
 			EquipLobbyTower = { capacity = 4, refillPerSecond = 1 },
 			FavoriteLobbyTower = { capacity = 4, refillPerSecond = 1 },
 			GetBaseSnapshot = { capacity = 2, refillPerSecond = 0.25 },
@@ -285,6 +286,8 @@ return TestHarness.suite("server authoritative rate limiter", {
 			StartLobbyQueue = { capacity = 2, refillPerSecond = 0.2 },
 			GetLobbyActiveRoute = { capacity = 3, refillPerSecond = 0.5 },
 			ReconnectLobbyActiveMatch = { capacity = 2, refillPerSecond = 0.2 },
+			ReplayLobbyTutorial = { capacity = 2, refillPerSecond = 0.2 },
+			SkipLobbyTutorial = { capacity = 2, refillPerSecond = 0.2 },
 		}
 		for _, binding in ProductionRateLimits do
 			assertions.isTrue(table.isfrozen(binding))
@@ -330,7 +333,7 @@ return TestHarness.suite("server authoritative rate limiter", {
 				"SubmitTowerTargetMode",
 				"SubmitTowerUpgrade",
 			}
-			assertions.equal(matchResult.value:count(), 46)
+			assertions.equal(matchResult.value:count(), 49)
 			assertions.equal(matchResult.value:activeCount(), #expectedActive)
 			for index, endpoint in expectedActive do
 				assertions.equal(matchResult.value:listActive()[index].endpoint, endpoint)
@@ -344,6 +347,7 @@ return TestHarness.suite("server authoritative rate limiter", {
 				"EquipLobbyTower",
 				"FavoriteLobbyTower",
 				"AcceptLobbyPartyInvite",
+				"AdvanceLobbyTutorial",
 				"ConfigureLobbyQueue",
 				"CreateLobbyParty",
 				"DeclineLobbyPartyInvite",
@@ -363,15 +367,17 @@ return TestHarness.suite("server authoritative rate limiter", {
 				"PromptLobbyPartyInvite",
 				"PullLobbyChest",
 				"ReconnectLobbyActiveMatch",
+				"ReplayLobbyTutorial",
 				"RetryLobbyProfile",
 				"SetLobbyPartyPrivacy",
+				"SkipLobbyTutorial",
 				"StartLobbyQueue",
 				"TransferLobbyPartyLeadership",
 				"UnequipLobbyTower",
 				"UpdateLobbySettings",
 			}
 			table.sort(expectedActive)
-			assertions.equal(lobbyResult.value:count(), 46)
+			assertions.equal(lobbyResult.value:count(), 49)
 			assertions.equal(lobbyResult.value:activeCount(), #expectedActive)
 			for index, endpoint in expectedActive do
 				assertions.equal(lobbyResult.value:listActive()[index].endpoint, endpoint)

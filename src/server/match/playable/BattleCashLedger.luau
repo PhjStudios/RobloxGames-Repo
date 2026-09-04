@@ -64,6 +64,7 @@ export type Stats = {
 	totalWaveStipendBattleCash: number,
 	totalCreditedBattleCash: number,
 	totalRefundedBattleCash: number,
+	lastAuthoritativeWave: number,
 }
 
 export type SpendToken = {}
@@ -79,9 +80,12 @@ export type Operation =
 	| "getSnapshot"
 	| "listSnapshots"
 	| "recordDamageIncome"
+	| "recordAuthoritativeDamageIncome"
 	| "grantWaveStipend"
+	| "grantAuthoritativeWaveStipend"
 	| "credit"
 	| "refund"
+	| "refundAuthoritativeSale"
 	| "cleanup"
 
 export type ErrorCode =
@@ -101,6 +105,7 @@ export type ErrorCode =
 	| "CAPACITY_EXCEEDED"
 	| "ARITHMETIC_OVERFLOW"
 	| "REVISION_EXHAUSTED"
+	| "INVALID_SEQUENCE"
 	| "CLEANED"
 
 export type LedgerError = {
@@ -167,12 +172,15 @@ type LedgerData = {
 	totalWaveStipendBattleCash: number,
 	totalCreditedBattleCash: number,
 	totalRefundedBattleCash: number,
+	lastAuthoritativeWave: number,
 }
 
 local MAX_PARTICIPANTS = 4
 local MAX_OUTSTANDING_SPENDS = 256
 local MAX_RECEIPTS = 16_384
 local MAX_DAMAGE_RATE_COMPONENT = 1_000_000
+local MAX_BATTLE_CASH = 2_147_483_647
+local MAX_COUNTER = 1_000_000_000_000
 
 local Methods = {}
 Methods.__index = Methods
@@ -187,6 +195,8 @@ local BattleCashLedger = {
 	MAX_OUTSTANDING_SPENDS = MAX_OUTSTANDING_SPENDS,
 	MAX_PARTICIPANTS = MAX_PARTICIPANTS,
 	MAX_RECEIPTS = MAX_RECEIPTS,
+	MAX_BATTLE_CASH = MAX_BATTLE_CASH,
+	MAX_COUNTER = MAX_COUNTER,
 }
 
 local function makeError(code: ErrorCode, operation: Operation): LedgerError
@@ -229,6 +239,14 @@ end
 
 local function checkedIncrement(value: number): number?
 	return if value < Validation.MAX_SAFE_INTEGER then value + 1 else nil
+end
+
+local function boundedAdd(left: number, right: number, maximum: number): number
+	return math.min(maximum, left + math.min(right, maximum))
+end
+
+local function availableCredit(balance: number, requested: number): number
+	return math.min(requested, math.max(0, MAX_BATTLE_CASH - math.min(balance, MAX_BATTLE_CASH)))
 end
 
 local function snapshot(data: LedgerData, participant: ParticipantData): ParticipantSnapshot
@@ -775,6 +793,69 @@ function Methods.recordDamageIncome(
 	return Result.ok(mutationResult(data, participant, true, "DamageIncome", receiptKey, healthRemoved, grant))
 end
 
+-- Runtime simulation is already serialized and owns the attack sequence, so
+-- retaining one replay receipt per hit only creates an unbounded-memory failure
+-- mode. This path records authoritative damage without a receipt and saturates
+-- long-run counters and spendable cash at their explicit protocol bounds.
+function Methods.recordAuthoritativeDamageIncome(
+	self: Ledger,
+	userIdValue: unknown,
+	actualHealthRemovedValue: unknown,
+	eligibleValue: unknown?
+): Result.Result<BalanceMutation, LedgerError>
+	local data = requireData(self)
+	local operation: Operation = "recordAuthoritativeDamageIncome"
+	local stateError = requireActive(data, operation)
+	if stateError ~= nil then
+		return Result.err(stateError)
+	end
+	if not validNonnegativeAmount(actualHealthRemovedValue) then
+		return failure("INVALID_AMOUNT", operation)
+	end
+	local eligible = if eligibleValue == nil then true else eligibleValue
+	if type(eligible) ~= "boolean" then
+		return failure("INVALID_ELIGIBILITY", operation)
+	end
+	local participant, participantError = participantFor(data, userIdValue, operation)
+	if participant == nil then
+		return Result.err(participantError :: LedgerError)
+	end
+	if participant.revision >= Validation.MAX_SAFE_INTEGER then
+		return failure("REVISION_EXHAUSTED", operation)
+	end
+
+	local healthRemoved = actualHealthRemovedValue :: number
+	local calculatedGrant = 0
+	local nextRemainder = participant.damageRemainder
+	if eligible then
+		local grant, remainder = calculateDamageGrant(
+			participant.damageRemainder,
+			healthRemoved,
+			data.damageNumerator,
+			data.damageDenominator
+		)
+		if grant == nil or remainder == nil then
+			return failure("ARITHMETIC_OVERFLOW", operation)
+		end
+		calculatedGrant = grant
+		nextRemainder = remainder
+	end
+	local grant = availableCredit(participant.balance, calculatedGrant)
+	participant.balance += grant
+	participant.damageIncome = boundedAdd(participant.damageIncome, grant, MAX_COUNTER)
+	participant.damageRemainder = nextRemainder
+	if eligible then
+		participant.damageHealthRemoved = boundedAdd(participant.damageHealthRemoved, healthRemoved, MAX_COUNTER)
+		data.totalDamageHealthRemoved = boundedAdd(data.totalDamageHealthRemoved, healthRemoved, MAX_COUNTER)
+	end
+	participant.revision += 1
+	data.totalBalance = boundedAdd(data.totalBalance, grant, MAX_COUNTER)
+	data.totalDamageIncomeBattleCash = boundedAdd(data.totalDamageIncomeBattleCash, grant, MAX_COUNTER)
+	return Result.ok(
+		mutationResult(data, participant, true, "DamageIncome", "authoritative.damage", healthRemoved, grant)
+	)
+end
+
 function Methods.grantWaveStipend(
 	self: Ledger,
 	receiptKeyValue: unknown,
@@ -864,6 +945,76 @@ function Methods.grantWaveStipend(
 	}))
 end
 
+-- The wave ordinal is the replay barrier. Requiring the next exact ordinal
+-- keeps idempotency state constant-size across an arbitrarily long run.
+function Methods.grantAuthoritativeWaveStipend(
+	self: Ledger,
+	waveNumberValue: unknown,
+	amountPerParticipantValue: unknown
+): Result.Result<WaveStipendResult, LedgerError>
+	local data = requireData(self)
+	local operation: Operation = "grantAuthoritativeWaveStipend"
+	local stateError = requireActive(data, operation)
+	if stateError ~= nil then
+		return Result.err(stateError)
+	end
+	if
+		type(waveNumberValue) ~= "number"
+		or not Validation.isSafeInteger(waveNumberValue :: number)
+		or (waveNumberValue :: number) < 1
+		or not validNonnegativeAmount(amountPerParticipantValue)
+	then
+		return failure("INVALID_AMOUNT", operation)
+	end
+	local waveNumber = waveNumberValue :: number
+	local amount = amountPerParticipantValue :: number
+	if waveNumber == data.lastAuthoritativeWave then
+		return Result.ok(table.freeze({
+			applied = false,
+			receiptKey = `authoritative.wave.{waveNumber}`,
+			amountPerParticipant = amount,
+			participantCount = 0,
+			totalCredited = 0,
+			snapshots = listSnapshotsTrusted(data),
+		}))
+	elseif waveNumber ~= data.lastAuthoritativeWave + 1 then
+		return failure("INVALID_SEQUENCE", operation)
+	end
+
+	local grants: { [number]: number } = {}
+	local participantCount = 0
+	local totalGrant = 0
+	for _, userId in data.orderedUserIds do
+		local participant = data.participantsByUserId[userId]
+		if participant.active then
+			if participant.revision >= Validation.MAX_SAFE_INTEGER then
+				return failure("REVISION_EXHAUSTED", operation)
+			end
+			local grant = availableCredit(participant.balance, amount)
+			grants[userId] = grant
+			participantCount += 1
+			totalGrant += grant
+		end
+	end
+	for userId, grant in grants do
+		local participant = data.participantsByUserId[userId]
+		participant.balance += grant
+		participant.waveStipends = boundedAdd(participant.waveStipends, grant, MAX_COUNTER)
+		participant.revision += 1
+	end
+	data.lastAuthoritativeWave = waveNumber
+	data.totalBalance = boundedAdd(data.totalBalance, totalGrant, MAX_COUNTER)
+	data.totalWaveStipendBattleCash = boundedAdd(data.totalWaveStipendBattleCash, totalGrant, MAX_COUNTER)
+	return Result.ok(table.freeze({
+		applied = true,
+		receiptKey = `authoritative.wave.{waveNumber}`,
+		amountPerParticipant = amount,
+		participantCount = participantCount,
+		totalCredited = totalGrant,
+		snapshots = listSnapshotsTrusted(data),
+	}))
+end
+
 function Methods.credit(
 	self: Ledger,
 	userIdValue: unknown,
@@ -912,6 +1063,37 @@ function Methods.refund(
 	return creditFixed(data, participant, amountValue :: number, receiptKeyValue :: string, "Refund", "refund")
 end
 
+function Methods.refundAuthoritativeSale(
+	self: Ledger,
+	userIdValue: unknown,
+	amountValue: unknown
+): Result.Result<BalanceMutation, LedgerError>
+	local data = requireData(self)
+	local operation: Operation = "refundAuthoritativeSale"
+	local stateError = requireActive(data, operation)
+	if stateError ~= nil then
+		return Result.err(stateError)
+	end
+	if not validNonnegativeAmount(amountValue) then
+		return failure("INVALID_AMOUNT", operation)
+	end
+	local participant, participantError = participantFor(data, userIdValue, operation)
+	if participant == nil then
+		return Result.err(participantError :: LedgerError)
+	end
+	if participant.revision >= Validation.MAX_SAFE_INTEGER then
+		return failure("REVISION_EXHAUSTED", operation)
+	end
+	local requested = amountValue :: number
+	local grant = availableCredit(participant.balance, requested)
+	participant.balance += grant
+	participant.refunds = boundedAdd(participant.refunds, grant, MAX_COUNTER)
+	participant.revision += 1
+	data.totalBalance = boundedAdd(data.totalBalance, grant, MAX_COUNTER)
+	data.totalRefundedBattleCash = boundedAdd(data.totalRefundedBattleCash, grant, MAX_COUNTER)
+	return Result.ok(mutationResult(data, participant, true, "Refund", "authoritative.refund", requested, grant))
+end
+
 function Methods.getStats(self: Ledger): Stats
 	local data = requireData(self)
 	return table.freeze({
@@ -932,6 +1114,7 @@ function Methods.getStats(self: Ledger): Stats
 		totalWaveStipendBattleCash = data.totalWaveStipendBattleCash,
 		totalCreditedBattleCash = data.totalCreditedBattleCash,
 		totalRefundedBattleCash = data.totalRefundedBattleCash,
+		lastAuthoritativeWave = data.lastAuthoritativeWave,
 	})
 end
 
@@ -967,6 +1150,7 @@ local function clearData(data: LedgerData)
 	data.totalWaveStipendBattleCash = 0
 	data.totalCreditedBattleCash = 0
 	data.totalRefundedBattleCash = 0
+	data.lastAuthoritativeWave = 0
 end
 
 function Methods.cleanup(self: Ledger): Result.Result<boolean, LedgerError>
@@ -1030,6 +1214,7 @@ function BattleCashLedger.new(
 		totalWaveStipendBattleCash = 0,
 		totalCreditedBattleCash = 0,
 		totalRefundedBattleCash = 0,
+		lastAuthoritativeWave = 0,
 	}
 	return Result.ok(ledger)
 end

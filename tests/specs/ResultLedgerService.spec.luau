@@ -33,6 +33,20 @@ local function matchResult(resultId: string?): any
 	}
 end
 
+local function currentEndlessResult(): any
+	local result = matchResult("result:endless-ledger")
+	result.version = 2
+	result.mapId = "map:backyard-garden-v1"
+	result.difficultyId = "difficulty:endless-v1"
+	result.modeKind = "Endless"
+	result.highestCompletedWave = 10
+	result.elapsedSeconds = 312
+	result.seed = 44_321
+	result.contentVersion = 1
+	result.terminationReason = "BaseDefeated"
+	return result
+end
+
 local function service(assertions): (any, any)
 	local store = IsolatedResultLedgerStore.new()
 	local created = ResultLedgerService.new(store, function()
@@ -95,6 +109,23 @@ return TestHarness.suite("durable idempotent result ledger", {
 		assertions.isTrue(claim.ok)
 		assertions.equal(claim.value.state, "Pending")
 		assertions.isFalse(ledger:getForUser(matchResult().resultId, 11).ok)
+	end),
+	TestHarness.case("persists v2 Endless metadata idempotently and rejects conflicts", function(assertions)
+		local ledger = service(assertions)
+		local result = currentEndlessResult()
+		assertions.isTrue(ledger:create(result).value)
+		assertions.isFalse(ledger:create(result).value)
+		local pending = ledger:getForUser(result.resultId, 10)
+		assertions.isTrue(pending.ok)
+		assertions.equal(pending.value.result.version, 2)
+		assertions.equal(pending.value.result.modeKind, "Endless")
+		assertions.equal(pending.value.result.highestCompletedWave, 10)
+		assertions.equal(pending.value.result.seed, 44_321)
+
+		local conflicting = currentEndlessResult()
+		conflicting.seed = 44_322
+		assertions.isFalse(ledger:create(conflicting).ok)
+		assertions.equal(ledger:getForUser(result.resultId, 10).value.result.seed, 44_321)
 	end),
 	TestHarness.case("acknowledges an award idempotently and rejects conflicting terminals", function(assertions)
 		local ledger = service(assertions)

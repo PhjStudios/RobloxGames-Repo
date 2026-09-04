@@ -106,13 +106,15 @@ return TestHarness.suite("persistent saved loadout controls local Match", {
 			local firstInventory = success(assertions, InventoryService.new(firstProfile, CONFIGURATION))
 			local starterInventory = success(assertions, firstInventory:getSnapshot(USER_ID))
 			assertions.equal(starterInventory.revision, starter.revision)
-			assertions.equal(#starterInventory.units, 1)
-			assertions.equal(#starterInventory.equipped, 1)
+			assertions.equal(#starterInventory.units, 2)
+			assertions.equal(#starterInventory.equipped, 2)
 			assertions.equal(starterInventory.equipped[1].towerId, "tower:dart-ant")
+			assertions.equal(starterInventory.equipped[2].towerId, "tower:bombardier-ant")
 
 			local starterLoadout = matchLoadout(assertions, starterInventory, starter.settings)
-			assertions.equal(#starterLoadout.slots, 1)
+			assertions.equal(#starterLoadout.slots, 2)
 			assertions.equal(starterLoadout.slots[1].towerId, "tower:dart-ant")
+			assertions.equal(starterLoadout.slots[2].towerId, "tower:bombardier-ant")
 			assertions.isTrue(table.isfrozen(starterLoadout))
 			assertions.isTrue(table.isfrozen(starterLoadout.slots))
 
@@ -155,8 +157,8 @@ return TestHarness.suite("persistent saved loadout controls local Match", {
 			assertions.equal(generatedCalls, 1)
 
 			local afterPull = success(assertions, firstInventory:getSnapshot(USER_ID))
-			assertions.equal(#afterPull.units, 2)
-			assertions.equal(#afterPull.equipped, 1)
+			assertions.equal(#afterPull.units, 3)
+			assertions.equal(#afterPull.equipped, 2)
 			local equipped = success(
 				assertions,
 				firstInventory:equip(USER_ID, {
@@ -189,7 +191,7 @@ return TestHarness.suite("persistent saved loadout controls local Match", {
 			local returnedInventoryService = success(assertions, InventoryService.new(secondProfile, CONFIGURATION))
 			local returnedInventory = success(assertions, returnedInventoryService:getSnapshot(USER_ID))
 			assertions.equal(returnedInventory.revision, returned.revision)
-			assertions.equal(#returnedInventory.units, 2)
+			assertions.equal(#returnedInventory.units, 3)
 			assertions.equal(#returnedInventory.equipped, 2)
 			assertions.equal(returnedInventory.equipped[1].towerId, "tower:dart-ant")
 			assertions.equal(returnedInventory.equipped[2].towerId, "tower:rapid-ant")

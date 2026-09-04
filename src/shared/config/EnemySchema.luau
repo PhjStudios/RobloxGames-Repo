@@ -22,6 +22,7 @@ local ENEMY_FIELDS: { [string]: boolean } = table.freeze({
 	moveSpeedStudsPerSecond = true,
 	resistanceProfile = true,
 	tags = true,
+	threatClass = true,
 })
 
 local ENEMY_RUNTIME_FIELDS: { [string]: boolean } = table.freeze({
@@ -47,6 +48,13 @@ local validatedCatalogs: { [ConfigTypes.EnemyCatalog]: boolean } = setmetatable(
 }) :: any
 
 local EnemySchema = {}
+
+local THREAT_CLASSES: { [string]: boolean } = table.freeze({
+	Boss = true,
+	Elite = true,
+	MiniBoss = true,
+	Standard = true,
+})
 
 local function validateDefinitionAt(
 	value: unknown,
@@ -148,6 +156,25 @@ local function validateDefinitionAt(
 	end
 	local damageIncomeClass = rawDamageIncomeClass :: ConfigTypes.DamageIncomeClass
 
+	local threatClass: ConfigTypes.EnemyThreatClass = "Standard"
+	local rawThreatClass = Validation.getField(record :: Validation.RawObject, "threatClass")
+	if rawThreatClass ~= nil then
+		local threatClassPath = Validation.appendPath(path, "threatClass")
+		if type(rawThreatClass) ~= "string" then
+			return nil,
+				Validation.issueWithType(
+					"INVALID_TYPE",
+					threatClassPath,
+					"Enemy threat class must be a string",
+					rawThreatClass
+				)
+		end
+		if THREAT_CLASSES[rawThreatClass] ~= true then
+			return nil, Validation.issue("INVALID_ENUM", threatClassPath, "Enemy threat class is not recognized")
+		end
+		threatClass = rawThreatClass :: ConfigTypes.EnemyThreatClass
+	end
+
 	local tags, tagsIssue = SchemaPrimitives.optionalTags(record :: Validation.RawObject, path)
 	if tagsIssue ~= nil then
 		return nil, tagsIssue
@@ -195,6 +222,7 @@ local function validateDefinitionAt(
 		moveSpeedStudsPerSecond = moveSpeedStudsPerSecond :: number,
 		leakDamage = leakDamage :: number,
 		damageIncomeClass = damageIncomeClass,
+		threatClass = threatClass,
 		tags = tags,
 		resistanceProfile = resistanceProfile,
 		behaviors = behaviors,

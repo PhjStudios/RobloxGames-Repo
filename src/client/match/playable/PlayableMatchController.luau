@@ -104,6 +104,7 @@ export type Dependencies = {
 	getViewportSize: () -> Vector2,
 	raycastPlacement: (Vector2) -> Vector3?,
 	pickTower: (Vector2, { PlayableMatchProtocol.TowerSnapshot }, PlayableInputMap.InputFamily) -> number?,
+	focusOverview: () -> boolean,
 	focusBase: () -> boolean,
 	focusSpectatorTarget: (Vector3) -> boolean,
 	restoreCamera: () -> (),
@@ -189,6 +190,8 @@ type ControllerData = {
 	retiredMatchIds: { [string]: boolean },
 	retiredMatchRing: { string },
 	matchGeneration: number,
+	overviewMatchId: string?,
+	lastRenderedViewport: Vector2?,
 	selectedSlot: number?,
 	selectedTowerId: number?,
 	touchPlacementPosition: Vector3?,
@@ -441,6 +444,7 @@ local function validateDependencies(value: unknown): boolean
 		or type(dependencies.getViewportSize) ~= "function"
 		or type(dependencies.raycastPlacement) ~= "function"
 		or type(dependencies.pickTower) ~= "function"
+		or type(dependencies.focusOverview) ~= "function"
 		or type(dependencies.focusBase) ~= "function"
 		or type(dependencies.focusSpectatorTarget) ~= "function"
 		or type(dependencies.restoreCamera) ~= "function"
@@ -559,6 +563,18 @@ local function findOption(snapshot: PlayableMatchProtocol.Snapshot, slot: number
 	return snapshot.towerOptions[slot]
 end
 
+local function findOptionForTower(
+	snapshot: PlayableMatchProtocol.Snapshot,
+	towerId: string
+): PlayableMatchProtocol.TowerOption?
+	for _, option in snapshot.towerOptions do
+		if option.towerId == towerId then
+			return option
+		end
+	end
+	return nil
+end
+
 local function nextTargetMode(current: PlayableMatchProtocol.TargetMode): PlayableMatchProtocol.TargetMode
 	for index, mode in PlayableMatchProtocol.TARGET_MODES do
 		if mode == current then
@@ -615,10 +631,15 @@ end
 
 local function resultSummary(snapshot: PlayableMatchProtocol.Snapshot): string
 	local stats = snapshot.stats
-	if snapshot.result == "Victory" then
-		return `All {snapshot.totalWaves} waves cleared • Base {stats.baseHealthRemaining} HP • Damage {stats.damageDealt}`
+	local context = string.sub(`{snapshot.mapDisplayName} • {snapshot.difficultyDisplayName}`, 1, 72)
+	if snapshot.modeKind == "Endless" then
+		return `{context} • Endless • {stats.wavesCompleted} waves cleared • Base {stats.baseHealthRemaining} HP • Damage {stats.damageDealt}`
 	end
-	return `Base overrun after {stats.wavesCompleted}/{snapshot.totalWaves} waves • Damage {stats.damageDealt}`
+	local totalWaves = snapshot.totalWaves or stats.wavesCompleted
+	if snapshot.result == "Victory" then
+		return `{context} • All {totalWaves} waves cleared • Base {stats.baseHealthRemaining} HP • Damage {stats.damageDealt}`
+	end
+	return `{context} • Base overrun after {stats.wavesCompleted}/{totalWaves} waves • Damage {stats.damageDealt}`
 end
 
 local function compatibleTravelSnapshot(
@@ -712,6 +733,17 @@ local function travelView(data: ControllerData, snapshot: PlayableMatchProtocol.
 	}
 end
 
+local function readViewport(dependencies: Dependencies): Vector2?
+	local viewportRead, viewportValue = pcall(dependencies.getViewportSize)
+	if viewportRead and typeof(viewportValue) == "Vector2" then
+		local candidate = viewportValue :: Vector2
+		if candidate.X >= 240 and candidate.X < math.huge and candidate.Y >= 320 and candidate.Y < math.huge then
+			return candidate
+		end
+	end
+	return nil
+end
+
 local function renderSnapshot(data: ControllerData): boolean
 	if data.state ~= "Started" or not data.callbacksEnabled then
 		return false
@@ -722,14 +754,7 @@ local function renderSnapshot(data: ControllerData): boolean
 		local dependencies = data.dependencies :: Dependencies
 		local hint = setInputContext(data)
 		local family = inputFamily(data)
-		local viewport: Vector2? = nil
-		local viewportRead, viewportValue = pcall(dependencies.getViewportSize)
-		if viewportRead and typeof(viewportValue) == "Vector2" then
-			local candidate = viewportValue :: Vector2
-			if candidate.X >= 240 and candidate.X < math.huge and candidate.Y >= 320 and candidate.Y < math.huge then
-				viewport = candidate
-			end
-		end
+		local viewport = readViewport(dependencies)
 		local loadingHotbar = table.create(PlayableMatchProtocol.MAX_TOWER_OPTIONS)
 		for slot = 1, PlayableMatchProtocol.MAX_TOWER_OPTIONS do
 			loadingHotbar[slot] = {
@@ -747,7 +772,14 @@ local function renderSnapshot(data: ControllerData): boolean
 			viewerRole = "Participant",
 			state = "Loading",
 			inputFamily = family,
-			wave = { current = 0, total = 1, enemiesRemaining = 0, status = "Connecting" },
+			wave = {
+				current = 0,
+				total = 1,
+				enemiesRemaining = 0,
+				status = "Connecting",
+				modeKind = "Finite",
+				bossKind = "None",
+			},
 			base = { health = 0, maxHealth = 1 },
 			battleCash = 0,
 			hotbar = loadingHotbar,
@@ -761,6 +793,7 @@ local function renderSnapshot(data: ControllerData): boolean
 		if not isSuccess(rendered) then
 			return false
 		end
+		data.lastRenderedViewport = viewport
 		local worldResult = dependencies.view:syncWorld({ towers = {}, enemies = {} })
 		if not isSuccess(worldResult) then
 			return false
@@ -790,14 +823,7 @@ local function renderSnapshot(data: ControllerData): boolean
 	end
 	local hint = setInputContext(data)
 	local family = inputFamily(data)
-	local viewport: Vector2? = nil
-	local viewportRead, viewportValue = pcall(dependencies.getViewportSize)
-	if viewportRead and typeof(viewportValue) == "Vector2" then
-		local candidate = viewportValue :: Vector2
-		if candidate.X >= 240 and candidate.X < math.huge and candidate.Y >= 320 and candidate.Y < math.huge then
-			viewport = candidate
-		end
-	end
+	local viewport = readViewport(dependencies)
 
 	local hotbar = table.create(#snapshot.towerOptions)
 	for slot, option in snapshot.towerOptions do
@@ -812,6 +838,7 @@ local function renderSnapshot(data: ControllerData): boolean
 		hotbar[slot] = {
 			slot = slot,
 			displayName = option.displayName,
+			description = option.description,
 			cost = option.placementCost,
 			available = available and data.actionPending == nil,
 			selected = data.selectedSlot == slot,
@@ -822,6 +849,7 @@ local function renderSnapshot(data: ControllerData): boolean
 	local selectedTower = findTower(snapshot, data.selectedTowerId)
 	local selection: any = nil
 	if selectedTower ~= nil then
+		local selectedOption = findOptionForTower(snapshot, selectedTower.towerId)
 		local owner = selectedTower.ownerUserId == dependencies.localUserId
 		local actionsAvailable = snapshot.state == "Playing"
 			and snapshot.viewerRole == "Participant"
@@ -831,6 +859,7 @@ local function renderSnapshot(data: ControllerData): boolean
 			towerId = `tower-runtime:{selectedTower.runtimeTowerId}`,
 			revision = selectedTower.revision,
 			displayName = selectedTower.displayName,
+			description = if selectedOption == nil then nil else selectedOption.description,
 			isOwner = owner,
 			level = selectedTower.level,
 			maxLevel = math.max(3, selectedTower.level),
@@ -856,7 +885,11 @@ local function renderSnapshot(data: ControllerData): boolean
 		ready = {
 			enabled = data.actionPending == nil,
 			countdownSeconds = nil,
-			status = `{snapshot.participants.readyCount}/{snapshot.participants.participantCount} players ready`,
+			status = string.sub(
+				`{snapshot.mapDisplayName} • {snapshot.difficultyDisplayName}\n{snapshot.participants.readyCount}/{snapshot.participants.participantCount} players ready`,
+				1,
+				96
+			),
 		}
 	end
 	local resultState: any = nil
@@ -886,10 +919,14 @@ local function renderSnapshot(data: ControllerData): boolean
 			total = snapshot.totalWaves,
 			enemiesRemaining = snapshot.enemiesAlive,
 			status = snapshot.wavePhase,
+			modeKind = snapshot.modeKind or "Finite",
+			bossKind = snapshot.bossKind or "None",
+			boss = snapshot.boss,
 		},
 		base = { health = snapshot.baseHealth, maxHealth = snapshot.maximumBaseHealth },
 		battleCash = snapshot.battleCash,
 		hotbar = hotbar,
+		tutorialStep = snapshot.tutorialStep,
 		ready = ready,
 		selection = selection,
 		feedback = if data.feedbackCode == nil then nil else { code = data.feedbackCode },
@@ -915,6 +952,7 @@ local function renderSnapshot(data: ControllerData): boolean
 	if not isSuccess(renderResult) then
 		return false
 	end
+	data.lastRenderedViewport = viewport
 
 	local towerVisuals = table.create(#snapshot.towers)
 	for index, tower in snapshot.towers do
@@ -924,6 +962,7 @@ local function renderSnapshot(data: ControllerData): boolean
 			position = tower.position,
 			rotationDegrees = tower.rotationDegrees,
 			selected = tower.runtimeTowerId == data.selectedTowerId,
+			level = tower.level,
 			range = tower.rangeStuds,
 		}
 	end
@@ -957,10 +996,21 @@ local function resetForReplacement(data: ControllerData, previousMatchId: string
 	cancelTravelGet(data)
 	cancelTravelMutation(data)
 	data.spectatorTargetId = nil
+	data.overviewMatchId = nil
 	data.feedbackCode = nil
 	data.feedbackExpiresAt = 0
 	data.recoveryQueued = false
 	data.matchGeneration += 1
+end
+
+local function focusOverviewIfNeeded(data: ControllerData, matchId: string)
+	if data.overviewMatchId == matchId then
+		return
+	end
+	local focused, resultValue = pcall((data.dependencies :: Dependencies).focusOverview)
+	if focused and resultValue == true then
+		data.overviewMatchId = matchId
+	end
 end
 
 local function applySnapshot(
@@ -974,6 +1024,7 @@ local function applySnapshot(
 			if snapshot.revision < current.revision then
 				return false
 			elseif snapshot.revision == current.revision then
+				focusOverviewIfNeeded(data, snapshot.matchId)
 				data.lastSnapshotAt = (data.dependencies :: Dependencies).now()
 				data.recoveryQueued = false
 				if data.renderPending then
@@ -990,6 +1041,7 @@ local function applySnapshot(
 		end
 	end
 	data.snapshot = snapshot
+	focusOverviewIfNeeded(data, snapshot.matchId)
 	if snapshot.viewerRole ~= "Spectator" then
 		data.spectatorTargetId = nil
 	elseif data.spectatorTargetId ~= nil then
@@ -1871,6 +1923,8 @@ local function cleanup(data: ControllerData): boolean
 	data.snapshot = nil
 	data.travelSnapshot = nil
 	data.spectatorTargetId = nil
+	data.overviewMatchId = nil
+	data.lastRenderedViewport = nil
 	data.selectedSlot = nil
 	data.selectedTowerId = nil
 	data.touchPlacementPosition = nil
@@ -1958,7 +2012,10 @@ local function onRenderStep(data: ControllerData, generation: number)
 	end
 	local family = inputFamily(data)
 	local viewMetrics = (data.dependencies :: Dependencies).view:getMetrics()
-	if type(viewMetrics) == "table" and (viewMetrics :: any).inputFamily ~= family then
+	local viewport = readViewport(data.dependencies :: Dependencies)
+	local viewportChanged = viewport ~= nil
+		and (data.lastRenderedViewport == nil or viewport ~= data.lastRenderedViewport)
+	if (type(viewMetrics) == "table" and (viewMetrics :: any).inputFamily ~= family) or viewportChanged then
 		renderSnapshot(data)
 	end
 end
@@ -2056,6 +2113,8 @@ local function construct(logger: Log.Logger, dependencyFactory: DependencyFactor
 		retiredMatchIds = {},
 		retiredMatchRing = {},
 		matchGeneration = 0,
+		overviewMatchId = nil,
+		lastRenderedViewport = nil,
 		selectedSlot = nil,
 		selectedTowerId = nil,
 		touchPlacementPosition = nil,
@@ -2241,6 +2300,71 @@ local function makeProductionDependencies(
 	local initialCameraSubject = if initialCamera == nil then nil else initialCamera.CameraSubject
 	local initialCameraCFrame = if initialCamera == nil then nil else initialCamera.CFrame
 	local baseFocused = false
+	local function resolveMapFraming(): (Model?, Folder?, BasePart?, BasePart?)
+		local runtimeMap = Workspace:FindFirstChild(RUNTIME_MAP_NAME)
+		if runtimeMap == nil or not runtimeMap:IsA("Model") then
+			return nil, nil, nil, nil
+		end
+		local markers = runtimeMap:FindFirstChild("Markers")
+		if markers == nil or not markers:IsA("Folder") then
+			return runtimeMap, nil, nil, nil
+		end
+		local bounds = markers:FindFirstChild("MapBounds")
+		if bounds == nil or not bounds:IsA("BasePart") then
+			return runtimeMap, markers, nil, nil
+		end
+		local cameraAnchors = markers:FindFirstChild("CameraAnchors")
+		if cameraAnchors == nil or not cameraAnchors:IsA("Folder") then
+			return runtimeMap, markers, bounds, nil
+		end
+		local selectedAnchor: BasePart? = nil
+		local selectedId: string? = nil
+		for _, candidate in cameraAnchors:GetChildren() do
+			if candidate:IsA("BasePart") then
+				local anchorId = candidate:GetAttribute("ATD_AnchorId")
+				if type(anchorId) == "string" then
+					if anchorId == "overview" then
+						return runtimeMap, markers, bounds, candidate
+					end
+					if selectedId == nil or anchorId < selectedId then
+						selectedAnchor = candidate
+						selectedId = anchorId
+					end
+				end
+			end
+		end
+		return runtimeMap, markers, bounds, selectedAnchor
+	end
+	local function applyOverviewCamera(): boolean
+		local camera = Workspace.CurrentCamera
+		local _, _, _, anchor = resolveMapFraming()
+		if camera == nil or anchor == nil then
+			return false
+		end
+		camera.CameraType = Enum.CameraType.Scriptable
+		camera.CFrame = anchor.CFrame
+		baseFocused = false
+		return true
+	end
+	local function boundFocusPosition(bounds: BasePart, position: Vector3): Vector3
+		local localPosition = bounds.CFrame:PointToObjectSpace(position)
+		local halfSize = bounds.Size * 0.5
+		return bounds.CFrame:PointToWorldSpace(
+			Vector3.new(
+				math.clamp(localPosition.X, -halfSize.X, halfSize.X),
+				math.clamp(localPosition.Y, -halfSize.Y, halfSize.Y),
+				math.clamp(localPosition.Z, -halfSize.Z, halfSize.Z)
+			)
+		)
+	end
+	local function focusCFrame(bounds: BasePart, position: Vector3, heightScale: number, depthScale: number): CFrame
+		local horizontalSpan = math.max(bounds.Size.X, bounds.Size.Z)
+		local height = math.clamp(horizontalSpan * heightScale, 18, 54)
+		local depth = math.clamp(horizontalSpan * depthScale, 22, 62)
+		local target = boundFocusPosition(bounds, position)
+		local cameraPosition = target + bounds.CFrame.UpVector * height - bounds.CFrame.LookVector * depth
+		return CFrame.lookAt(cameraPosition, target, bounds.CFrame.UpVector)
+	end
 	local function restoreInitialCamera(): boolean
 		local camera = Workspace.CurrentCamera
 		if camera == nil or camera ~= initialCamera then
@@ -2352,31 +2476,33 @@ local function makeProductionDependencies(
 			end
 			return bestId
 		end,
+		focusOverview = applyOverviewCamera,
 		focusBase = function()
 			if baseFocused then
-				return restoreInitialCamera()
+				return applyOverviewCamera()
 			end
 			local camera = Workspace.CurrentCamera
-			local runtimeMap = Workspace:FindFirstChild(RUNTIME_MAP_NAME)
-			if camera == nil or runtimeMap == nil then
+			local _, markers, bounds = resolveMapFraming()
+			if camera == nil or markers == nil or bounds == nil then
 				return false
 			end
-			local base = runtimeMap:FindFirstChild("DefenderBase", true)
+			local base = markers:FindFirstChild("DefenderBase")
 			if base == nil or not base:IsA("BasePart") then
 				return false
 			end
 			camera.CameraType = Enum.CameraType.Scriptable
-			camera.CFrame = CFrame.lookAt(base.Position + Vector3.new(0, 48, 40), base.Position)
+			camera.CFrame = focusCFrame(bounds, base.Position, 0.24, 0.28)
 			baseFocused = true
 			return true
 		end,
 		focusSpectatorTarget = function(position)
 			local camera = Workspace.CurrentCamera
-			if camera == nil then
+			local _, _, bounds = resolveMapFraming()
+			if camera == nil or bounds == nil then
 				return false
 			end
 			camera.CameraType = Enum.CameraType.Scriptable
-			camera.CFrame = CFrame.lookAt(position + Vector3.new(0, 22, 28), position)
+			camera.CFrame = focusCFrame(bounds, position, 0.15, 0.18)
 			baseFocused = false
 			return true
 		end,

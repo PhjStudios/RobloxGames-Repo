@@ -56,6 +56,7 @@ export type BannerOdd = {
 export type Banner = {
 	bannerId: string,
 	displayName: string,
+	policyDisclosure: string,
 	onePullCost: number,
 	tenPullCost: number,
 	pityCount: number,
@@ -83,6 +84,29 @@ export type Toast = {
 	title: string,
 	message: string,
 	repeatCount: number,
+}
+
+export type TutorialGuidance = {
+	step: number,
+	title: string,
+	message: string,
+	primaryActionText: string?,
+	canAdvance: boolean,
+	canSkip: boolean,
+	canReplay: boolean,
+}
+
+export type DifficultyOption = {
+	difficultyId: string,
+	displayName: string,
+	selectable: boolean,
+}
+
+export type MapOption = {
+	mapId: string,
+	displayName: string,
+	selectable: boolean,
+	difficulties: { DifficultyOption },
 }
 
 export type RenderState = {
@@ -116,6 +140,8 @@ export type RenderState = {
 	squadMutationPending: boolean,
 	modals: { Modal },
 	toasts: { Toast },
+	tutorialGuidance: TutorialGuidance?,
+	queueMapOptions: { MapOption }?,
 }
 
 local MAX_INVENTORY = 200
@@ -186,6 +212,8 @@ local ROOT_FIELDS: { [string]: boolean } = table.freeze({
 	squadMutationPending = true,
 	modals = true,
 	toasts = true,
+	tutorialGuidance = true,
+	queueMapOptions = true,
 })
 
 local TOWER_FIELDS: { [string]: boolean } = table.freeze({
@@ -225,6 +253,7 @@ local SETTINGS_FIELDS: { [string]: boolean } = table.freeze({
 local BANNER_FIELDS: { [string]: boolean } = table.freeze({
 	bannerId = true,
 	displayName = true,
+	policyDisclosure = true,
 	onePullCost = true,
 	tenPullCost = true,
 	pityCount = true,
@@ -258,6 +287,29 @@ local TOAST_FIELDS: { [string]: boolean } = table.freeze({
 	title = true,
 	message = true,
 	repeatCount = true,
+})
+
+local TUTORIAL_FIELDS: { [string]: boolean } = table.freeze({
+	step = true,
+	title = true,
+	message = true,
+	primaryActionText = true,
+	canAdvance = true,
+	canSkip = true,
+	canReplay = true,
+})
+
+local MAP_OPTION_FIELDS: { [string]: boolean } = table.freeze({
+	mapId = true,
+	displayName = true,
+	selectable = true,
+	difficulties = true,
+})
+
+local DIFFICULTY_OPTION_FIELDS: { [string]: boolean } = table.freeze({
+	difficultyId = true,
+	displayName = true,
+	selectable = true,
 })
 
 local LobbyUiModel = {
@@ -438,6 +490,7 @@ local function canonicalBanner(value: unknown): Banner?
 	end
 	local bannerId = rawget(record, "bannerId")
 	local displayName = rawget(record, "displayName")
+	local policyDisclosure = rawget(record, "policyDisclosure")
 	local oneCost = rawget(record, "onePullCost")
 	local tenCost = rawget(record, "tenPullCost")
 	local pity = rawget(record, "pityCount")
@@ -450,6 +503,7 @@ local function canonicalBanner(value: unknown): Banner?
 	if
 		not safeId(bannerId)
 		or not safeText(displayName, 64)
+		or not safeText(policyDisclosure, 256)
 		or not integer(oneCost, 1, MAX_GOLD)
 		or not integer(tenCost, 1, MAX_GOLD)
 		or not integer(pity, 0, MAX_PITY)
@@ -497,6 +551,7 @@ local function canonicalBanner(value: unknown): Banner?
 	return table.freeze({
 		bannerId = bannerId :: string,
 		displayName = displayName :: string,
+		policyDisclosure = policyDisclosure :: string,
 		onePullCost = oneCost :: number,
 		tenPullCost = tenCost :: number,
 		pityCount = pity :: number,
@@ -595,6 +650,117 @@ local function canonicalToasts(value: unknown): { Toast }?
 	return table.freeze(result)
 end
 
+local function canonicalTutorial(value: unknown): TutorialGuidance?
+	if value == nil then
+		return nil
+	end
+	local record = exactRecord(value, TUTORIAL_FIELDS)
+	if record == nil then
+		return nil
+	end
+	local step = rawget(record, "step")
+	local title = rawget(record, "title")
+	local message = rawget(record, "message")
+	local primaryActionText = rawget(record, "primaryActionText")
+	local canAdvance = rawget(record, "canAdvance")
+	local canSkip = rawget(record, "canSkip")
+	local canReplay = rawget(record, "canReplay")
+	if
+		not integer(step, 0, 9)
+		or not safeText(title, 64)
+		or not safeText(message, MAX_MODAL_MESSAGE_BYTES)
+		or (primaryActionText ~= nil and not safeText(primaryActionText, 32))
+		or type(canAdvance) ~= "boolean"
+		or type(canSkip) ~= "boolean"
+		or type(canReplay) ~= "boolean"
+		or (canAdvance and primaryActionText == nil)
+		or (canReplay and primaryActionText == nil)
+		or (canAdvance and canReplay)
+	then
+		return nil
+	end
+	return table.freeze({
+		step = step :: number,
+		title = title :: string,
+		message = message :: string,
+		primaryActionText = primaryActionText :: string?,
+		canAdvance = canAdvance :: boolean,
+		canSkip = canSkip :: boolean,
+		canReplay = canReplay :: boolean,
+	})
+end
+
+local function canonicalMapOptions(value: unknown): { MapOption }?
+	if value == nil then
+		return nil
+	end
+	local count, array = denseCount(value, 32)
+	if count == nil then
+		return nil
+	end
+	local result = table.create(count) :: { MapOption }
+	local seenMaps: { [string]: boolean } = {}
+	for index = 1, count do
+		local record = exactRecord((array :: { [any]: unknown })[index], MAP_OPTION_FIELDS)
+		if record == nil then
+			return nil
+		end
+		local mapId = rawget(record, "mapId")
+		local displayName = rawget(record, "displayName")
+		local selectable = rawget(record, "selectable")
+		local difficultyCount, difficultyArray = denseCount(rawget(record, "difficulties"), 32)
+		if
+			not safeId(mapId)
+			or seenMaps[mapId :: string]
+			or not safeText(displayName, 64)
+			or type(selectable) ~= "boolean"
+			or difficultyCount == nil
+			or difficultyCount < 1
+		then
+			return nil
+		end
+		seenMaps[mapId :: string] = true
+		local difficulties = table.create(difficultyCount) :: { DifficultyOption }
+		local seenDifficulties: { [string]: boolean } = {}
+		local selectableDifficulty = false
+		for difficultyIndex = 1, difficultyCount do
+			local difficulty =
+				exactRecord((difficultyArray :: { [any]: unknown })[difficultyIndex], DIFFICULTY_OPTION_FIELDS)
+			if difficulty == nil then
+				return nil
+			end
+			local difficultyId = rawget(difficulty, "difficultyId")
+			local difficultyName = rawget(difficulty, "displayName")
+			local difficultySelectable = rawget(difficulty, "selectable")
+			if
+				not safeId(difficultyId)
+				or seenDifficulties[difficultyId :: string]
+				or not safeText(difficultyName, 64)
+				or type(difficultySelectable) ~= "boolean"
+			then
+				return nil
+			end
+			seenDifficulties[difficultyId :: string] = true
+			selectableDifficulty = selectableDifficulty or difficultySelectable == true
+			difficulties[difficultyIndex] = table.freeze({
+				difficultyId = difficultyId :: string,
+				displayName = difficultyName :: string,
+				selectable = difficultySelectable :: boolean,
+			})
+		end
+		if selectable == true and not selectableDifficulty then
+			return nil
+		end
+		result[index] = table.freeze({
+			mapId = mapId :: string,
+			displayName = displayName :: string,
+			selectable = selectable :: boolean,
+			difficulties = table.freeze(difficulties),
+		})
+	end
+	return table.freeze(result)
+end
+
 function LobbyUiModel.canonicalize(value: unknown): RenderState?
 	local record = exactRecord(value, ROOT_FIELDS)
 	if record == nil then
@@ -614,6 +780,14 @@ function LobbyUiModel.canonicalize(value: unknown): RenderState?
 	local didMigrate = rawget(record, "didMigrate")
 	local modals = canonicalModals(rawget(record, "modals"))
 	local toasts = canonicalToasts(rawget(record, "toasts"))
+	local tutorialGuidance = canonicalTutorial(rawget(record, "tutorialGuidance"))
+	local queueMapOptions = canonicalMapOptions(rawget(record, "queueMapOptions"))
+	if rawget(record, "tutorialGuidance") ~= nil and tutorialGuidance == nil then
+		return nil
+	end
+	if rawget(record, "queueMapOptions") ~= nil and queueMapOptions == nil then
+		return nil
+	end
 	if
 		type(profileState) ~= "string"
 		or rawget(PROFILE_STATES, profileState) ~= true
@@ -812,6 +986,8 @@ function LobbyUiModel.canonicalize(value: unknown): RenderState?
 		squadMutationPending = squadMutationPending :: boolean,
 		modals = modals,
 		toasts = toasts,
+		tutorialGuidance = tutorialGuidance,
+		queueMapOptions = queueMapOptions,
 	})
 end
 

@@ -67,6 +67,9 @@ export type ActionKind =
 	| "ConfigureQueue"
 	| "StartQueue"
 	| "ReconnectActiveMatch"
+	| "AdvanceTutorial"
+	| "SkipTutorial"
+	| "ReplayTutorial"
 
 export type Action = {
 	kind: ActionKind,
@@ -143,6 +146,11 @@ type Instances = {
 	readiness: TextLabel,
 	gold: TextLabel,
 	backButton: TextButton,
+	tutorialPanel: Frame,
+	tutorialTitle: TextLabel,
+	tutorialMessage: TextLabel,
+	tutorialPrimary: TextButton,
+	tutorialSkip: TextButton,
 	navigation: Frame,
 	navigationButtons: { [PrimaryScreen]: TextButton },
 	content: Frame,
@@ -438,6 +446,18 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		gold.TextXAlignment = Enum.TextXAlignment.Right
 		local backButton = button("Back", header, "‹ BACK", Theme.ZIndex.Navigation + 1)
 
+		local tutorialPanel = makeFrame("ATDTutorialGuidance", root, Theme.ZIndex.Navigation)
+		tutorialPanel.BackgroundColor3 = Theme.Colors.SurfaceRaised
+		addCorner(tutorialPanel, Theme.Radii.Medium)
+		addStroke(tutorialPanel, Theme.Colors.Focus, Theme.Stroke.Normal)
+		local tutorialTitle = label("Title", tutorialPanel, "GETTING STARTED", Theme.ZIndex.Navigation + 1)
+		tutorialTitle.Font = Enum.Font.GothamBold
+		local tutorialMessage = label("Message", tutorialPanel, "", Theme.ZIndex.Navigation + 1)
+		local tutorialPrimary = button("Primary", tutorialPanel, "CONTINUE", Theme.ZIndex.Navigation + 1)
+		tutorialPrimary.SelectionOrder = 8
+		local tutorialSkip = button("Skip", tutorialPanel, "SKIP", Theme.ZIndex.Navigation + 1)
+		tutorialSkip.SelectionOrder = 9
+
 		local navigation = makeFrame("Navigation", root, Theme.ZIndex.Navigation)
 		addCorner(navigation, Theme.Radii.Medium)
 		local navigationButtons = {} :: { [PrimaryScreen]: TextButton }
@@ -487,7 +507,7 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		partyInviteInput.BackgroundColor3 = Theme.Colors.SurfaceRaised
 		partyInviteInput.BorderSizePixel = 0
 		partyInviteInput.ClearTextOnFocus = false
-		partyInviteInput.PlaceholderText = "Present player UserId"
+		partyInviteInput.PlaceholderText = "Present player name"
 		partyInviteInput.PlaceholderColor3 = Theme.Colors.TextMuted
 		partyInviteInput.Text = ""
 		partyInviteInput.TextColor3 = Theme.Colors.Text
@@ -499,7 +519,7 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		addCorner(partyInviteInput, Theme.Radii.Small)
 		addStroke(partyInviteInput, Theme.Colors.SurfaceMuted, Theme.Stroke.Normal)
 		local partyCreateButton = button("CreateParty", party, "CREATE PARTY", Theme.ZIndex.Content + 2)
-		local partyInviteButton = button("InviteMember", party, "INVITE USERID", Theme.ZIndex.Content + 2)
+		local partyInviteButton = button("InviteMember", party, "INVITE PLAYER", Theme.ZIndex.Content + 2)
 		local partyPlatformInviteButton = button("InviteFriends", party, "INVITE FRIENDS", Theme.ZIndex.Content + 2)
 		local partyPrivacyButton = button("Privacy", party, "PRIVACY", Theme.ZIndex.Content + 2)
 		local partyLeaveButton = button("LeaveParty", party, "LEAVE", Theme.ZIndex.Content + 2)
@@ -721,6 +741,11 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 			readiness = readiness,
 			gold = gold,
 			backButton = backButton,
+			tutorialPanel = tutorialPanel,
+			tutorialTitle = tutorialTitle,
+			tutorialMessage = tutorialMessage,
+			tutorialPrimary = tutorialPrimary,
+			tutorialSkip = tutorialSkip,
 			navigation = navigation,
 			navigationButtons = navigationButtons,
 			content = content,
@@ -806,7 +831,7 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 	return result
 end
 
-local function applyLayout(instances: Instances, layout: ResponsiveLayout.Layout)
+local function applyLayout(instances: Instances, layout: ResponsiveLayout.Layout, showTutorial: boolean)
 	local margin = layout.safeMargin
 	local wideCompact = layout.mode == "Compact" and layout.logicalWidth >= 600
 	instances.header.Position = UDim2.fromOffset(margin, margin)
@@ -820,7 +845,19 @@ local function applyLayout(instances: Instances, layout: ResponsiveLayout.Layout
 	instances.backButton.Position = UDim2.fromOffset(12, 10)
 	instances.backButton.Size = UDim2.fromOffset(math.max(96, layout.touchTarget * 2), layout.touchTarget)
 
-	local contentTop = margin + layout.headerHeight + layout.panelPadding
+	local tutorialHeight = if layout.mode == "Compact" then 104 else 76
+	instances.tutorialPanel.Position = UDim2.fromOffset(margin, margin + layout.headerHeight + layout.panelPadding)
+	instances.tutorialPanel.Size = UDim2.new(1, -margin * 2, 0, tutorialHeight)
+	instances.tutorialTitle.Position = UDim2.fromOffset(14, 4)
+	instances.tutorialTitle.Size = UDim2.new(0.63, -14, 0, 24)
+	instances.tutorialMessage.Position = UDim2.fromOffset(14, 27)
+	instances.tutorialMessage.Size = UDim2.new(0.63, -14, 1, -31)
+	instances.tutorialPrimary.Position = UDim2.new(0.65, 0, 0, 7)
+	instances.tutorialPrimary.Size = UDim2.new(0.34, -7, 0, layout.touchTarget)
+	instances.tutorialSkip.Position = UDim2.new(0.65, 0, 1, -(layout.touchTarget + 7))
+	instances.tutorialSkip.Size = UDim2.new(0.34, -7, 0, layout.touchTarget)
+	local tutorialSpace = if showTutorial then tutorialHeight + layout.panelPadding else 0
+	local contentTop = margin + layout.headerHeight + layout.panelPadding + tutorialSpace
 	local contentFrameHeight: number
 	if layout.mode == "Compact" then
 		local navigationColumns = if wideCompact then #NAVIGATION_ORDER else 3
@@ -1248,27 +1285,89 @@ local function selectedQueue(snapshot: LobbyUiModel.RenderState?): any
 	return nil
 end
 
-local function nextConfiguredId(
+local function privacyDisplayName(value: string): string
+	if value == "PartyOnly" then
+		return "Party Only"
+	elseif value == "InviteOnly" then
+		return "Invite Only"
+	end
+	return "Public"
+end
+
+local function mapOption(snapshot: LobbyUiModel.RenderState, mapId: string): LobbyUiModel.MapOption?
+	for _, option in snapshot.queueMapOptions or {} do
+		if option.mapId == mapId then
+			return option
+		end
+	end
+	return nil
+end
+
+local function mapDisplayName(snapshot: LobbyUiModel.RenderState, mapId: string): string
+	local option = mapOption(snapshot, mapId)
+	return if option == nil then "Unavailable map" else option.displayName
+end
+
+local function difficultyDisplayName(snapshot: LobbyUiModel.RenderState, mapId: string, difficultyId: string): string
+	local option = mapOption(snapshot, mapId)
+	for _, difficulty in if option == nil then {} else option.difficulties do
+		if difficulty.difficultyId == difficultyId then
+			return difficulty.displayName
+		end
+	end
+	return "Unavailable difficulty"
+end
+
+local function nextMap(snapshot: LobbyUiModel.RenderState, current: string): LobbyUiModel.MapOption?
+	local options = snapshot.queueMapOptions or {}
+	local currentIndex = 0
+	for index, option in options do
+		if option.mapId == current then
+			currentIndex = index
+			break
+		end
+	end
+	for offset = 1, #options do
+		local option = options[(currentIndex + offset - 1) % #options + 1]
+		if option.selectable then
+			return option
+		end
+	end
+	return nil
+end
+
+local function firstDifficulty(option: LobbyUiModel.MapOption): LobbyUiModel.DifficultyOption?
+	for _, difficulty in option.difficulties do
+		if difficulty.selectable then
+			return difficulty
+		end
+	end
+	return nil
+end
+
+local function nextDifficulty(
 	snapshot: LobbyUiModel.RenderState,
-	current: string,
-	field: "mapId" | "difficultyId"
-): string
-	local values = {} :: { string }
-	local seen: { [string]: boolean } = {}
-	for _, queue in snapshot.queueSnapshots or {} do
-		local value = queue.configuration[field]
-		if not seen[value] then
-			seen[value] = true
-			table.insert(values, value)
+	mapId: string,
+	current: string
+): LobbyUiModel.DifficultyOption?
+	local option = mapOption(snapshot, mapId)
+	if option == nil then
+		return nil
+	end
+	local currentIndex = 0
+	for index, difficulty in option.difficulties do
+		if difficulty.difficultyId == current then
+			currentIndex = index
+			break
 		end
 	end
-	table.sort(values)
-	for index, value in values do
-		if value == current then
-			return values[index % #values + 1]
+	for offset = 1, #option.difficulties do
+		local difficulty = option.difficulties[(currentIndex + offset - 1) % #option.difficulties + 1]
+		if difficulty.selectable then
+			return difficulty
 		end
 	end
-	return values[1] or current
+	return nil
 end
 
 local function emitQueueConfiguration(data: ViewData, field: string)
@@ -1284,15 +1383,62 @@ local function emitQueueConfiguration(data: ViewData, field: string)
 		maxPlayers = queue.configuration.maxPlayers,
 	}
 	if field == "mapId" then
-		configuration.mapId = nextConfiguredId(snapshot, configuration.mapId, "mapId")
+		if snapshot.queueMapOptions ~= nil and #snapshot.queueMapOptions > 0 then
+			local option = nextMap(snapshot, configuration.mapId)
+			local difficulty = if option == nil then nil else firstDifficulty(option)
+			if option == nil or difficulty == nil then
+				return
+			end
+			configuration.mapId = option.mapId
+			configuration.difficultyId = difficulty.difficultyId
+		end
 	elseif field == "difficultyId" then
-		configuration.difficultyId = nextConfiguredId(snapshot, configuration.difficultyId, "difficultyId")
+		if snapshot.queueMapOptions ~= nil and #snapshot.queueMapOptions > 0 then
+			local difficulty = nextDifficulty(snapshot, configuration.mapId, configuration.difficultyId)
+			if difficulty == nil then
+				return
+			end
+			configuration.difficultyId = difficulty.difficultyId
+		end
 	elseif field == "privacy" then
 		configuration.privacy = if configuration.privacy == "Public" then "PartyOnly" else "Public"
 	else
 		configuration.maxPlayers = math.max(#queue.members, configuration.maxPlayers % 4 + 1)
 	end
 	emit(data, { kind = "ConfigureQueue", queueId = queue.queueId, configuration = configuration })
+end
+
+local function resolvePresentPlayer(textValue: string): number?
+	local wanted = string.lower(string.gsub(textValue, "^@", ""))
+	if wanted == "" then
+		return nil
+	end
+	local exact: number? = nil
+	local succeeded, present = pcall(function()
+		return Players:GetPlayers()
+	end)
+	if not succeeded then
+		local numeric = tonumber(wanted)
+		return if numeric ~= nil
+				and numeric % 1 == 0
+				and numeric > 0
+				and numeric <= MAX_SAFE_USER_ID
+			then numeric
+			else nil
+	end
+	for _, player in present :: { Player } do
+		if string.lower(player.Name) == wanted or string.lower(player.DisplayName) == wanted then
+			if exact ~= nil and exact ~= player.UserId then
+				return nil
+			end
+			exact = player.UserId
+		end
+	end
+	if exact ~= nil then
+		return exact
+	end
+	local numeric = tonumber(wanted)
+	return if numeric ~= nil and numeric % 1 == 0 and numeric > 0 and numeric <= MAX_SAFE_USER_ID then numeric else nil
 end
 
 local function connectStatic(data: ViewData): boolean
@@ -1319,6 +1465,19 @@ local function connectStatic(data: ViewData): boolean
 		or not connectButton(data, data.instances.playButton, function()
 			emit(data, { kind = "Play" })
 		end)
+		or not connectButton(data, data.instances.tutorialPrimary, function()
+			local guidance = if data.current == nil then nil else data.current.tutorialGuidance
+			if guidance ~= nil then
+				if guidance.canReplay then
+					emit(data, { kind = "ReplayTutorial" })
+				elseif guidance.canAdvance then
+					emit(data, { kind = "AdvanceTutorial" })
+				end
+			end
+		end)
+		or not connectButton(data, data.instances.tutorialSkip, function()
+			emit(data, { kind = "SkipTutorial" })
+		end)
 		or not connectButton(data, data.instances.partyCreateButton, function()
 			emit(data, { kind = "CreateParty" })
 		end)
@@ -1328,13 +1487,8 @@ local function connectStatic(data: ViewData): boolean
 			if input.Text ~= bounded then
 				input.Text = bounded
 			end
-			local targetUserId = tonumber(bounded)
-			if
-				targetUserId ~= nil
-				and targetUserId % 1 == 0
-				and targetUserId > 0
-				and targetUserId <= MAX_SAFE_USER_ID
-			then
+			local targetUserId = resolvePresentPlayer(bounded)
+			if targetUserId ~= nil then
 				emit(data, { kind = "InvitePartyMember", targetUserId = targetUserId })
 			end
 		end)
@@ -1702,6 +1856,23 @@ local function renderInventory(data: ViewData, snapshot: LobbyUiModel.RenderStat
 	end
 end
 
+local function playerDisplayName(userId: number, localUserId: number): string
+	if userId == localUserId then
+		return "You"
+	end
+	local succeeded, player = pcall(function()
+		return Players:GetPlayerByUserId(userId)
+	end)
+	if not succeeded or player == nil then
+		return "Player"
+	end
+	local resolved = player :: Player
+	if resolved.DisplayName == resolved.Name then
+		return `@{resolved.Name}`
+	end
+	return `{resolved.DisplayName} (@{resolved.Name})`
+end
+
 local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, layout: ResponsiveLayout.Layout)
 	local instances = data.instances
 	local interactive = snapshot.profileState == "Ready" and #snapshot.modals == 0 and not snapshot.squadMutationPending
@@ -1736,7 +1907,7 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 	instances.partyCreateButton.Visible = party == nil
 	setButtonEnabled(instances.partyCreateButton, party == nil and interactive)
 	instances.partyInviteInput.Visible = party ~= nil
-	instances.partyInviteInput.PlaceholderText = "Present player UserId"
+	instances.partyInviteInput.PlaceholderText = "Present player name"
 	instances.partyInviteInput.Active = isLeader and interactive and partyHasRoom
 	instances.partyInviteInput.Selectable = instances.partyInviteInput.Active
 	instances.partyInviteButton.Visible = party ~= nil
@@ -1752,14 +1923,14 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 	if party == nil then
 		instances.partyStatus.Text = `NO PARTY • {#snapshot.partySnapshot.incomingInvitations} bounded invitation(s)`
 	else
-		instances.partyStatus.Text =
-			`PARTY {#party.members}/4 • {party.privacy} • {party.queueState} • REV {party.revision}`
-		instances.partyPrivacyButton.Text = `PRIVACY\n{string.upper(party.privacy)}`
+		local privacyName = privacyDisplayName(party.privacy)
+		instances.partyStatus.Text = `PARTY {#party.members}/4 • {privacyName} • {party.queueState}`
+		instances.partyPrivacyButton.Text = `PRIVACY\n{string.upper(privacyName)}`
 		for index, member in party.members do
 			local memberLabel = makeButton(
 				`PartyMember{index}`,
 				instances.partyList,
-				`{if member.isLeader then "CAPTAIN • " else ""}USER {member.userId}\n{if member.profileReady
+				`{if member.isLeader then "CAPTAIN • " else ""}{playerDisplayName(member.userId, snapshot.localUserId)}\n{if member.profileReady
 					then "PROFILE READY"
 					else "PROFILE LOADING"}`,
 				Theme.ZIndex.Content + 3
@@ -1772,7 +1943,7 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 				local kick = makeButton(
 					`KickMember{index}`,
 					instances.partyList,
-					`REMOVE USER {member.userId}`,
+					`REMOVE {playerDisplayName(member.userId, snapshot.localUserId)}`,
 					Theme.ZIndex.Content + 3
 				)
 				kick.LayoutOrder = index * 3 + 1
@@ -1788,7 +1959,7 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 				local transfer = makeButton(
 					`TransferMember{index}`,
 					instances.partyList,
-					`TRANSFER LEADERSHIP TO {member.userId}`,
+					`TRANSFER TO {playerDisplayName(member.userId, snapshot.localUserId)}`,
 					Theme.ZIndex.Content + 3
 				)
 				transfer.LayoutOrder = index * 3 + 2
@@ -1808,7 +1979,7 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 		local accept = makeButton(
 			`AcceptInvitation{index}`,
 			instances.partyList,
-			`ACCEPT INVITE FROM USER {invitation.inviterUserId}`,
+			`ACCEPT INVITE FROM {playerDisplayName(invitation.inviterUserId, snapshot.localUserId)}`,
 			Theme.ZIndex.Content + 3
 		)
 		accept.LayoutOrder = 100 + index * 2
@@ -1824,7 +1995,7 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 		local decline = makeButton(
 			`DeclineInvitation{index}`,
 			instances.partyList,
-			`DECLINE INVITE FROM USER {invitation.inviterUserId}`,
+			`DECLINE INVITE FROM {playerDisplayName(invitation.inviterUserId, snapshot.localUserId)}`,
 			Theme.ZIndex.Content + 3
 		)
 		decline.LayoutOrder = 101 + index * 2
@@ -1877,10 +2048,13 @@ local function renderQueue(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 		return
 	end
 	for index, queue in snapshot.queueSnapshots do
+		local mapName = mapDisplayName(snapshot, queue.configuration.mapId)
+		local difficultyName =
+			difficultyDisplayName(snapshot, queue.configuration.mapId, queue.configuration.difficultyId)
 		local selector = makeButton(
 			`Queue{index}`,
 			instances.queueList,
-			`{queue.queueId}\n{#queue.members}/{queue.configuration.maxPlayers} • {queue.state}`,
+			`{mapName} • {difficultyName}\n{#queue.members}/{queue.configuration.maxPlayers} • {queue.state}`,
 			Theme.ZIndex.Content + 3
 		)
 		selector.LayoutOrder = index
@@ -1910,16 +2084,22 @@ local function renderQueue(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 	local roster = table.create(#queue.members)
 	for index, member in queue.members do
 		isMember = isMember or member.userId == snapshot.localUserId
-		roster[index] = `{if member.isCaptain then "CAPTAIN " else ""}USER {member.userId} • {member.readiness}`
+		roster[index] = `{if member.isCaptain then "CAPTAIN • " else ""}{playerDisplayName(
+			member.userId,
+			snapshot.localUserId
+		)} • {member.readiness}`
 	end
 	local status = queue.publicStatus or queue.state
-	instances.queueStatus.Text = `{queue.queueId} • {string.upper(status)} • REV {queue.revision}`
+	instances.queueStatus.Text = `MATCH QUEUE • {string.upper(status)}`
 	instances.queueRoster.Text = if #roster == 0 then "ROSTER • EMPTY" else `ROSTER\n{table.concat(roster, "\n")}`
+	local mapName = mapDisplayName(snapshot, queue.configuration.mapId)
+	local difficultyName = difficultyDisplayName(snapshot, queue.configuration.mapId, queue.configuration.difficultyId)
+	local privacyName = privacyDisplayName(queue.configuration.privacy)
 	instances.queueConfiguration.Text =
-		`MAP {queue.configuration.mapId} • DIFFICULTY {queue.configuration.difficultyId}\n{queue.configuration.privacy} • CAPACITY {queue.configuration.maxPlayers}`
-	instances.queueMapButton.Text = `MAP\n{queue.configuration.mapId}`
-	instances.queueDifficultyButton.Text = `DIFFICULTY\n{queue.configuration.difficultyId}`
-	instances.queuePrivacyButton.Text = `PRIVACY\n{queue.configuration.privacy}`
+		`MAP {mapName} • DIFFICULTY {difficultyName}\n{privacyName} • CAPACITY {queue.configuration.maxPlayers}`
+	instances.queueMapButton.Text = `MAP\n{mapName}`
+	instances.queueDifficultyButton.Text = `DIFFICULTY\n{difficultyName}`
+	instances.queuePrivacyButton.Text = `PRIVACY\n{privacyName}`
 	instances.queueCapacityButton.Text = `CAPACITY\n{queue.configuration.maxPlayers}`
 	local open = queue.state == "Open"
 	setButtonEnabled(instances.queueJoinButton, interactive and open and not isMember)
@@ -2095,7 +2275,7 @@ renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 		error("invalid responsive layout", 0)
 	end
 	data.compactMode = layout.mode == "Compact"
-	applyLayout(instances, layout)
+	applyLayout(instances, layout, snapshot.tutorialGuidance ~= nil)
 	instances.root.Size = UDim2.fromScale(1 / uiScale, 1 / uiScale)
 	instances.uiScale.Scale = uiScale
 	instances.gui:SetAttribute("ATDReducedMotion", effectiveReducedMotion)
@@ -2111,6 +2291,7 @@ renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 	instances.readiness.Text = string.upper(snapshot.statusText)
 	instances.gold.Text = if snapshot.profileState == "Ready" then `GOLD {snapshot.gold}` else "GOLD —"
 	instances.header.Visible = snapshot.profileState == "Ready"
+	instances.tutorialPanel.Visible = snapshot.profileState == "Ready" and snapshot.tutorialGuidance ~= nil
 	instances.navigation.Visible = snapshot.profileState == "Ready"
 	instances.content.Visible = snapshot.profileState == "Ready"
 	instances.blocking.Visible = snapshot.profileState ~= "Ready"
@@ -2120,6 +2301,22 @@ renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 		and (snapshot.screen ~= "Home" or #snapshot.modals > 0)
 	instances.title.Visible = not instances.backButton.Visible
 	setButtonEnabled(instances.backButton, instances.backButton.Visible)
+	local guidance = snapshot.tutorialGuidance
+	if guidance ~= nil then
+		instances.tutorialTitle.Text = `STEP {guidance.step} • {string.upper(guidance.title)}`
+		instances.tutorialMessage.Text = guidance.message
+		instances.tutorialPrimary.Text = guidance.primaryActionText or "CONTINUE"
+		instances.tutorialPrimary.Visible = guidance.canAdvance or guidance.canReplay
+		instances.tutorialSkip.Visible = guidance.canSkip
+		setButtonEnabled(
+			instances.tutorialPrimary,
+			(guidance.canAdvance or guidance.canReplay) and #snapshot.modals == 0 and not snapshot.squadMutationPending
+		)
+		setButtonEnabled(
+			instances.tutorialSkip,
+			guidance.canSkip and #snapshot.modals == 0 and not snapshot.squadMutationPending
+		)
+	end
 
 	if snapshot.profileState ~= "Ready" then
 		instances.blockingTitle.Text = if snapshot.profileState == "Loading"
@@ -2167,8 +2364,7 @@ renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 			end
 		else
 			instances.chestTitle.Text = banner.displayName
-			instances.chestPolicy.Text =
-				"EARN-ONLY GOLD • Exact final odds are disclosed below. No Robux, products, passes, or paid conversion."
+			instances.chestPolicy.Text = `EARN-ONLY GOLD • {banner.policyDisclosure}`
 			instances.chestPity.Text = `PITY {banner.pityCount} / {banner.hardPityPullCount}`
 			local oddsLines = table.create(#banner.odds)
 			for index, odd in banner.odds do
@@ -2270,6 +2466,7 @@ local function construct(
 		return failure("CONNECTION_FAILED")
 	end
 	instances.header.Visible = false
+	instances.tutorialPanel.Visible = false
 	instances.navigation.Visible = false
 	instances.content.Visible = false
 	instances.modalScrim.Visible = false

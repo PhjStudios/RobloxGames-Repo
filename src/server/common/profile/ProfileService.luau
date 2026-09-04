@@ -921,6 +921,12 @@ local function scheduleJoinedPlayerLoad(service: Service, data: ServiceData, pla
 		return false
 	end
 	local userId = player.UserId
+	-- Server & Clients test players use negative identities. Profiles remain
+	-- positive-only, so reject before scheduling rather than creating one failed
+	-- profile-load task on every heartbeat.
+	if not validUserId(userId) then
+		return false
+	end
 	if data.joinLoadPlayers[userId] ~= nil then
 		return false
 	end

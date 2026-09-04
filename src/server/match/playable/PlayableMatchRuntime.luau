@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 
 local ConfigurationValidator = require(ReplicatedStorage.Shared.config.ConfigurationValidator)
+local ContentSelection = require(ReplicatedStorage.Shared.config.ContentSelection)
 local MatchLoadoutProtocol = require(ReplicatedStorage.Shared.match.MatchLoadoutProtocol)
 local PlacementGeometry = require(ReplicatedStorage.Shared.match.PlacementGeometry)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
@@ -14,6 +15,8 @@ local Result = require(ReplicatedStorage.Shared.util.Result)
 local Validation = require(ReplicatedStorage.Shared.util.Validation)
 
 local BattleCashLedger = require(script.Parent.BattleCashLedger)
+local DirectStudioParticipantLoadout = require(script.Parent.DirectStudioParticipantLoadout)
+local EndlessWaveGenerator = require(script.Parent.EndlessWaveGenerator)
 local TargetQuery = require(script.Parent.TargetQuery)
 
 export type RuntimeMap = {
@@ -50,6 +53,8 @@ export type Dependencies = {
 	participantLoadouts: { MatchLoadoutProtocol.Snapshot },
 	connectedParticipantUserIds: { number }?,
 	rewarding: boolean?,
+	studioDirectUserIds: boolean?,
+	seed: number?,
 }
 
 export type ActionOutcome = {
@@ -78,6 +83,10 @@ export type Metrics = {
 	connectedParticipantCount: number,
 	readyCount: number,
 	rewarding: boolean,
+	modeKind: "Finite" | "Endless",
+	seed: number,
+	contentVersion: number,
+	activeWaveOriginCount: number,
 	cleaned: boolean,
 }
 
@@ -98,6 +107,12 @@ export type ResultEvidence = {
 	mapId: Ids.MapId,
 	difficultyId: Ids.DifficultyId,
 	outcome: "Victory" | "Defeat",
+	modeKind: "Finite" | "Endless",
+	highestCompletedWave: number,
+	elapsedSeconds: number,
+	seed: number,
+	contentVersion: number,
+	terminationReason: PlayableMatchProtocol.TerminationReason,
 	rewardingMatch: boolean,
 	entries: { ResultParticipantEvidence },
 }
@@ -143,6 +158,7 @@ type EnemyRecord = {
 	pathProgress: number,
 	position: Vector3,
 	spawnServerTime: number,
+	originWaveNumber: number,
 }
 
 type SpawnEntry = {
@@ -150,6 +166,15 @@ type SpawnEntry = {
 	groupIndex: number,
 	memberIndex: number,
 	definition: ConfigTypes.EnemyDefinition,
+	originWaveNumber: number,
+	healthMultiplier: number,
+	moveSpeedMultiplier: number,
+}
+
+type WaveOrigin = {
+	wave: ConfigTypes.AuthoredWaveDefinition,
+	aliveCount: number,
+	resolved: boolean,
 }
 
 type ParticipantStats = {
@@ -165,8 +190,11 @@ type RuntimeData = {
 	matchId: Ids.MatchId,
 	configuration: ConfigTypes.CoreConfiguration,
 	mapDefinition: ConfigTypes.MapDefinition,
-	difficulty: ConfigTypes.FiniteDifficultyDefinition,
-	schedule: ConfigTypes.FiniteWaveScheduleDefinition,
+	difficulty: ConfigTypes.DifficultyDefinition,
+	schedule: ConfigTypes.WaveScheduleDefinition,
+	modeKind: "Finite" | "Endless",
+	seed: number,
+	contentVersion: number,
 	economy: ConfigTypes.DifficultyEconomyDefinition,
 	ledger: BattleCashLedger.Ledger,
 	state: PlayableMatchProtocol.MatchState,
@@ -184,6 +212,7 @@ type RuntimeData = {
 	connectedAtResults: { [number]: boolean },
 	rewardViewsByUserId: { [number]: RewardProtocol.RewardView },
 	rewarding: boolean,
+	studioDirectUserIds: boolean,
 	path: { PathPoint },
 	pathTotalDistance: number,
 	basePosition: Vector3,
@@ -197,11 +226,17 @@ type RuntimeData = {
 	attackSequence: number,
 	waveNumber: number,
 	wavesCompleted: number,
+	currentWave: ConfigTypes.AuthoredWaveDefinition?,
+	waveOrigins: { [number]: WaveOrigin },
+	resolvedWaveNumbers: { [number]: WaveOrigin },
+	activeWaveOriginCount: number,
 	spawnQueue: { SpawnEntry },
 	spawnCursor: number,
 	nextWaveServerTime: number,
 	startedServerTime: number,
+	endedServerTime: number,
 	lastSimulationServerTime: number,
+	terminationReason: PlayableMatchProtocol.TerminationReason?,
 	baseHealth: number,
 	busy: boolean,
 	cleaned: boolean,
@@ -221,9 +256,16 @@ local MAX_SPAWNS_PER_STEP = 8
 local MAX_ATTACKS_PER_STEP = 64
 local PREPARE_SECONDS = 6
 local MAX_PARTICIPANTS = 4
+local MAX_SPAWNS_PER_WAVE = 96
+local MAX_ACTIVE_WAVE_ORIGINS = 4
+local MAX_ENEMY_HEALTH = 1_000_000
+local MAX_ENEMY_MOVE_SPEED = 24
+local MAX_RESULT_COUNTER = 1_000_000_000_000
 local BASIS_POINTS_PER_WHOLE = 10_000
 local MAX_TOWERS = PlayableMatchProtocol.MAX_ACTIVE_TOWERS
 local MAX_ENEMIES = PlayableMatchProtocol.MAX_ACTIVE_ENEMIES
+local DEVELOPMENT_MAP_ID = ContentSelection.DEVELOPMENT_MAP_ID
+local DEVELOPMENT_DIFFICULTY_ID = ContentSelection.DEVELOPMENT_DIFFICULTY_ID
 
 local ACCEPTED: ActionOutcome = table.freeze({ accepted = true, reason = "Accepted" })
 
@@ -233,9 +275,15 @@ local PlayableMatchRuntime = {
 	MAX_FIXED_STEPS_PER_CALL = MAX_FIXED_STEPS_PER_CALL,
 	MAX_SPAWNS_PER_STEP = MAX_SPAWNS_PER_STEP,
 	MAX_ATTACKS_PER_STEP = MAX_ATTACKS_PER_STEP,
+	MAX_SPAWNS_PER_WAVE = MAX_SPAWNS_PER_WAVE,
+	MAX_ACTIVE_WAVE_ORIGINS = MAX_ACTIVE_WAVE_ORIGINS,
+	MAX_ENEMY_HEALTH = MAX_ENEMY_HEALTH,
+	MAX_ENEMY_MOVE_SPEED = MAX_ENEMY_MOVE_SPEED,
 	PREPARE_SECONDS = PREPARE_SECONDS,
 	MAX_TOWERS = MAX_TOWERS,
 	MAX_ENEMIES = MAX_ENEMIES,
+	DEVELOPMENT_MAP_ID = DEVELOPMENT_MAP_ID,
+	DEVELOPMENT_DIFFICULTY_ID = DEVELOPMENT_DIFFICULTY_ID,
 }
 
 local function isExactTestModule(): boolean
@@ -302,6 +350,10 @@ local function checkedIncrement(value: number): number?
 	return value + 1
 end
 
+local function boundedAdd(left: number, right: number): number
+	return math.min(MAX_RESULT_COUNTER, left + math.min(right, MAX_RESULT_COUNTER))
+end
+
 local function floorBasisPoints(amount: number, basisPoints: number): number
 	local whole = math.floor(amount / BASIS_POINTS_PER_WHOLE)
 	local remainder = amount - whole * BASIS_POINTS_PER_WHOLE
@@ -322,7 +374,8 @@ end
 
 local function normalizeParticipants(
 	value: unknown,
-	configuration: ConfigTypes.CoreConfiguration
+	configuration: ConfigTypes.CoreConfiguration,
+	studioDirectUserIds: boolean
 ): ({ number }?, { [number]: MatchLoadoutProtocol.Snapshot }?)
 	if type(value) ~= "table" or getmetatable(value :: any) ~= nil then
 		return nil, nil
@@ -335,7 +388,12 @@ local function normalizeParticipants(
 	local loadoutsByUserId: { [number]: MatchLoadoutProtocol.Snapshot } = {}
 	local seen: { [number]: boolean } = {}
 	for _, candidate in source do
-		local validated = MatchLoadoutProtocol.validate(candidate, configuration)
+		local candidateUserId = if type(candidate) == "table" then rawget(candidate :: any, "userId") else nil
+		local validated: any = if studioDirectUserIds
+				and type(candidateUserId) == "number"
+				and candidateUserId < 0
+			then DirectStudioParticipantLoadout.validate(candidate, configuration)
+			else MatchLoadoutProtocol.validate(candidate, configuration)
 		if not validated.ok or seen[validated.value.userId] then
 			return nil, nil
 		end
@@ -452,6 +510,59 @@ local function normalizeMap(
 	return points, lane.totalDistance, map.base.position, bounds, zones, exclusions
 end
 
+local function playableWaveValid(
+	wave: ConfigTypes.AuthoredWaveDefinition,
+	laneId: string,
+	configuration: ConfigTypes.CoreConfiguration
+): boolean
+	if #wave.groups < 1 or #wave.groups > EndlessWaveGenerator.MAX_GROUPS then
+		return false
+	end
+	local spawnCount = 0
+	for _, group in wave.groups do
+		if group.laneId ~= laneId or configuration.enemies.byId[group.enemyId] == nil then
+			return false
+		end
+		spawnCount += group.count
+		if spawnCount > MAX_SPAWNS_PER_WAVE then
+			return false
+		end
+	end
+	return true
+end
+
+local function supportedAttackContent(configuration: ConfigTypes.CoreConfiguration): boolean
+	for _, definition in configuration.towers.ordered do
+		for _, level in definition.levels do
+			local attack = level.attack
+			if attack ~= nil then
+				local key = attack.behavior.key
+				if key ~= "attack.direct" and key ~= "attack.single-target" and key ~= "attack.splash" then
+					return false
+				end
+				if key == "attack.splash" then
+					local rawAttack = attack :: any
+					if
+						not isFiniteNumber(rawAttack.splashRadiusStuds)
+						or rawAttack.splashRadiusStuds <= 0
+						or (
+							rawAttack.splashDamageMultiplier ~= nil
+							and (
+								not isFiniteNumber(rawAttack.splashDamageMultiplier)
+								or rawAttack.splashDamageMultiplier <= 0
+								or rawAttack.splashDamageMultiplier > 1
+							)
+						)
+					then
+						return false
+					end
+				end
+			end
+		end
+	end
+	return true
+end
+
 local function positionAtProgress(data: RuntimeData, progressValue: number): Vector3
 	local progress = math.clamp(progressValue, 0, data.pathTotalDistance)
 	for index = 2, #data.path do
@@ -530,16 +641,78 @@ local function enemyIds(data: RuntimeData): { number }
 	return ids
 end
 
-local function buildSpawnQueue(data: RuntimeData, wave: ConfigTypes.AuthoredWaveDefinition, serverTime: number)
+local function finishMatch(
+	data: RuntimeData,
+	result: "Victory" | "Defeat",
+	terminationReason: PlayableMatchProtocol.TerminationReason,
+	serverTime: number
+): boolean
+	if data.state == "Results" then
+		return false
+	end
+	data.state = "Results"
+	data.result = result
+	data.terminationReason = terminationReason
+	data.endedServerTime = math.max(data.startedServerTime, serverTime)
+	data.wavePhase = "Results"
+	data.nextWaveServerTime = 0
+	table.clear(data.spawnQueue)
+	data.spawnCursor = 1
+	table.clear(data.enemies)
+	table.clear(data.waveOrigins)
+	table.clear(data.resolvedWaveNumbers)
+	data.activeWaveOriginCount = 0
+	for _, userId in data.participants do
+		data.connectedAtResults[userId] = data.connectedParticipantSet[userId] == true
+	end
+	return advanceRevision(data)
+end
+
+local function waveFor(data: RuntimeData, waveNumber: number): (ConfigTypes.AuthoredWaveDefinition?, number?, number?)
+	if data.schedule.kind == "AuthoredFinite" then
+		local wave = data.schedule.waves[waveNumber]
+		return wave, if wave == nil then nil else 1, if wave == nil then nil else 1
+	end
+	local opening = data.schedule.authoredOpeningWaves[waveNumber]
+	if opening ~= nil then
+		return opening, 1, 1
+	end
+	local generated = EndlessWaveGenerator.generate(
+		data.configuration,
+		data.schedule.generator.key,
+		data.seed,
+		waveNumber,
+		data.mapDefinition.lanes[1].id
+	)
+	if not generated.ok then
+		return nil, nil, nil
+	end
+	return generated.value.wave, generated.value.healthMultiplier, generated.value.moveSpeedMultiplier
+end
+
+local function buildSpawnQueue(
+	data: RuntimeData,
+	waveNumber: number,
+	wave: ConfigTypes.AuthoredWaveDefinition,
+	serverTime: number,
+	healthMultiplier: number,
+	moveSpeedMultiplier: number
+): boolean
 	local queue: { SpawnEntry } = {}
 	for groupIndex, group in wave.groups do
 		local definition = data.configuration.enemies.byId[group.enemyId]
+		if definition == nil or #queue + group.count > MAX_SPAWNS_PER_WAVE then
+			return false
+		end
 		for memberIndex = 1, group.count do
 			table.insert(queue, {
 				spawnServerTime = serverTime + group.startDelaySeconds + (memberIndex - 1) * group.spawnIntervalSeconds,
 				groupIndex = groupIndex,
 				memberIndex = memberIndex,
-				definition = definition :: ConfigTypes.EnemyDefinition,
+				definition = definition,
+				originWaveNumber = waveNumber,
+				healthMultiplier = healthMultiplier,
+				moveSpeedMultiplier = moveSpeedMultiplier,
 			})
 		end
 	end
@@ -554,18 +727,42 @@ local function buildSpawnQueue(data: RuntimeData, wave: ConfigTypes.AuthoredWave
 	end)
 	data.spawnQueue = queue
 	data.spawnCursor = 1
+	return true
 end
 
 local function startNextWave(data: RuntimeData, serverTime: number): boolean
 	local nextWave = data.waveNumber + 1
-	local wave = data.schedule.waves[nextWave]
-	if wave == nil then
+	if nextWave > MAX_RESULT_COUNTER then
+		return finishMatch(data, "Defeat", "TechnicalTermination", serverTime)
+	end
+	if
+		data.modeKind == "Finite"
+		and nextWave > (data.difficulty :: ConfigTypes.FiniteDifficultyDefinition).waveCount
+	then
 		return false
 	end
+	if data.activeWaveOriginCount >= MAX_ACTIVE_WAVE_ORIGINS or data.spawnCursor <= #data.spawnQueue then
+		return false
+	end
+	local wave, healthMultiplier, moveSpeedMultiplier = waveFor(data, nextWave)
+	if wave == nil or healthMultiplier == nil or moveSpeedMultiplier == nil then
+		return finishMatch(data, "Defeat", "TechnicalTermination", serverTime)
+	end
+	if not buildSpawnQueue(data, nextWave, wave, serverTime, healthMultiplier, moveSpeedMultiplier) then
+		return finishMatch(data, "Defeat", "TechnicalTermination", serverTime)
+	end
 	data.waveNumber = nextWave
+	data.currentWave = wave
+	data.waveOrigins[nextWave] = {
+		wave = wave,
+		aliveCount = 0,
+		resolved = false,
+	}
+	data.activeWaveOriginCount += 1
 	data.wavePhase = "Spawning"
-	data.nextWaveServerTime = 0
-	buildSpawnQueue(data, wave, serverTime)
+	local finiteFinal = data.modeKind == "Finite"
+		and nextWave >= (data.difficulty :: ConfigTypes.FiniteDifficultyDefinition).waveCount
+	data.nextWaveServerTime = if finiteFinal then 0 else serverTime + wave.deadlineSeconds
 	return advanceRevision(data)
 end
 
@@ -582,18 +779,36 @@ local function spawnDueEnemies(data: RuntimeData, serverTime: number): boolean
 		if nextId == nil then
 			break
 		end
-		local maximumHealth =
-			math.max(1, math.floor(entry.definition.maxHealth * data.difficulty.modifiers.enemyHealthMultiplier + 0.5))
+		local maximumHealth = math.clamp(
+			math.floor(
+				entry.definition.maxHealth * data.difficulty.modifiers.enemyHealthMultiplier * entry.healthMultiplier
+					+ 0.5
+			),
+			1,
+			MAX_ENEMY_HEALTH
+		)
+		local origin = data.waveOrigins[entry.originWaveNumber]
+		if origin == nil then
+			return changed
+		end
 		data.enemies[runtimeEnemyId] = {
 			runtimeEnemyId = runtimeEnemyId,
 			definition = entry.definition,
 			currentHealth = maximumHealth,
 			maximumHealth = maximumHealth,
-			moveSpeed = entry.definition.moveSpeedStudsPerSecond * data.difficulty.modifiers.enemyMoveSpeedMultiplier,
+			moveSpeed = math.clamp(
+				entry.definition.moveSpeedStudsPerSecond
+					* data.difficulty.modifiers.enemyMoveSpeedMultiplier
+					* entry.moveSpeedMultiplier,
+				0.1,
+				MAX_ENEMY_MOVE_SPEED
+			),
 			pathProgress = 0,
 			position = data.path[1].position,
 			spawnServerTime = entry.spawnServerTime,
+			originWaveNumber = entry.originWaveNumber,
 		}
+		origin.aliveCount += 1
 		data.nextEnemyId = nextId
 		data.spawnCursor += 1
 		spawned += 1
@@ -606,24 +821,15 @@ local function spawnDueEnemies(data: RuntimeData, serverTime: number): boolean
 	return changed
 end
 
-local function finishMatch(data: RuntimeData, result: "Victory" | "Defeat"): boolean
-	if data.state == "Results" then
-		return false
+local function removeEnemy(data: RuntimeData, enemy: EnemyRecord)
+	data.enemies[enemy.runtimeEnemyId] = nil
+	local origin = data.waveOrigins[enemy.originWaveNumber]
+	if origin ~= nil then
+		origin.aliveCount = math.max(0, origin.aliveCount - 1)
 	end
-	data.state = "Results"
-	data.result = result
-	data.wavePhase = "Results"
-	data.nextWaveServerTime = 0
-	table.clear(data.spawnQueue)
-	data.spawnCursor = 1
-	table.clear(data.enemies)
-	for _, userId in data.participants do
-		data.connectedAtResults[userId] = data.connectedParticipantSet[userId] == true
-	end
-	return advanceRevision(data)
 end
 
-local function moveEnemies(data: RuntimeData, elapsed: number): boolean
+local function moveEnemies(data: RuntimeData, elapsed: number, serverTime: number): boolean
 	if elapsed <= 0 then
 		return false
 	end
@@ -635,10 +841,10 @@ local function moveEnemies(data: RuntimeData, elapsed: number): boolean
 			enemy.position = positionAtProgress(data, enemy.pathProgress)
 			changed = true
 			if enemy.pathProgress >= data.pathTotalDistance then
-				data.enemies[runtimeEnemyId] = nil
+				removeEnemy(data, enemy)
 				data.baseHealth = math.max(0, data.baseHealth - enemy.definition.leakDamage)
 				if data.baseHealth == 0 then
-					finishMatch(data, "Defeat")
+					finishMatch(data, "Defeat", "BaseDefeated", serverTime)
 					return true
 				end
 			end
@@ -664,36 +870,29 @@ local function targetCandidates(data: RuntimeData): { TargetQuery.TargetableEnem
 	return candidates
 end
 
-local function attackWithTower(data: RuntimeData, tower: TowerRecord, serverTime: number): AttackEvent?
-	local level = tower.definition.levels[tower.level]
-	local attack = level.attack
-	if attack == nil then
-		return nil
-	end
-	local selectionResult =
-		TargetQuery.select(CFrame.new(tower.position), level.rangeStuds, tower.targetMode, targetCandidates(data))
-	if not selectionResult.ok or selectionResult.value == nil then
-		return nil
-	end
-	local target = data.enemies[selectionResult.value.runtimeEnemyId]
-	if target == nil or target.currentHealth <= 0 then
-		return nil
-	end
-	local actualDamage = math.min(attack.damage, target.currentHealth)
+local function applyAttackDamage(
+	data: RuntimeData,
+	tower: TowerRecord,
+	target: EnemyRecord,
+	damage: number,
+	serverTime: number
+): AttackEvent?
+	local actualDamage = math.min(math.max(0, math.floor(damage + 0.5)), target.currentHealth)
 	if actualDamage <= 0 then
 		return nil
 	end
 	local nextSequence = checkedIncrement(data.attackSequence)
 	if nextSequence == nil then
+		finishMatch(data, "Defeat", "TechnicalTermination", serverTime)
 		return nil
 	end
-	local incomeResult = data.ledger:recordDamageIncome(
+	local incomeResult = data.ledger:recordAuthoritativeDamageIncome(
 		tower.ownerUserId,
 		actualDamage,
-		`damage.attack.{nextSequence}`,
 		target.definition.damageIncomeClass == "EligibleHealthRemoved"
 	)
 	if not incomeResult.ok then
+		finishMatch(data, "Defeat", "TechnicalTermination", serverTime)
 		return nil
 	end
 	data.attackSequence = nextSequence
@@ -702,10 +901,10 @@ local function attackWithTower(data: RuntimeData, tower: TowerRecord, serverTime
 	local targetPosition = target.position
 	local stats = data.participantStats[tower.ownerUserId]
 	if stats ~= nil then
-		stats.damageDealt += actualDamage
+		stats.damageDealt = boundedAdd(stats.damageDealt, actualDamage)
 	end
 	if killed then
-		data.enemies[target.runtimeEnemyId] = nil
+		removeEnemy(data, target)
 	end
 	return table.freeze({
 		matchId = data.matchId,
@@ -720,6 +919,98 @@ local function attackWithTower(data: RuntimeData, tower: TowerRecord, serverTime
 	})
 end
 
+type AttackBehavior = (
+	RuntimeData,
+	TowerRecord,
+	ConfigTypes.TowerAttackDefinition,
+	EnemyRecord,
+	number,
+	number
+) -> { AttackEvent }
+
+local function directAttack(
+	data: RuntimeData,
+	tower: TowerRecord,
+	attack: ConfigTypes.TowerAttackDefinition,
+	target: EnemyRecord,
+	serverTime: number,
+	_eventBudget: number
+): { AttackEvent }
+	local event = applyAttackDamage(data, tower, target, attack.damage, serverTime)
+	return if event == nil then {} else { event }
+end
+
+local function splashAttack(
+	data: RuntimeData,
+	tower: TowerRecord,
+	attack: ConfigTypes.TowerAttackDefinition,
+	target: EnemyRecord,
+	serverTime: number,
+	eventBudget: number
+): { AttackEvent }
+	local rawAttack = attack :: any
+	local radius = if isFiniteNumber(rawAttack.splashRadiusStuds) then rawAttack.splashRadiusStuds else 0
+	local secondaryMultiplier = if isFiniteNumber(rawAttack.splashDamageMultiplier)
+		then math.clamp(rawAttack.splashDamageMultiplier, 0, 1)
+		else 1
+	local targetIds = { target.runtimeEnemyId }
+	for _, runtimeEnemyId in enemyIds(data) do
+		local candidate = data.enemies[runtimeEnemyId]
+		if
+			candidate ~= nil
+			and candidate.runtimeEnemyId ~= target.runtimeEnemyId
+			and (candidate.position - target.position).Magnitude <= radius
+		then
+			table.insert(targetIds, runtimeEnemyId)
+		end
+	end
+	local events: { AttackEvent } = {}
+	for index, runtimeEnemyId in targetIds do
+		if #events >= eventBudget or data.state ~= "Playing" then
+			break
+		end
+		local candidate = data.enemies[runtimeEnemyId]
+		if candidate ~= nil then
+			local damage = if index == 1 then attack.damage else attack.damage * secondaryMultiplier
+			local event = applyAttackDamage(data, tower, candidate, damage, serverTime)
+			if event ~= nil then
+				table.insert(events, event)
+			end
+		end
+	end
+	return events
+end
+
+local ATTACK_BEHAVIORS: { [string]: AttackBehavior } = table.freeze({
+	["attack.direct"] = directAttack,
+	["attack.single-target"] = directAttack,
+	["attack.splash"] = splashAttack,
+})
+
+local function attackWithTower(
+	data: RuntimeData,
+	tower: TowerRecord,
+	serverTime: number,
+	eventBudget: number
+): { AttackEvent }
+	local level = tower.definition.levels[tower.level]
+	local attack = level.attack
+	if attack == nil then
+		return {}
+	end
+	local selectionResult =
+		TargetQuery.select(CFrame.new(tower.position), level.rangeStuds, tower.targetMode, targetCandidates(data))
+	if not selectionResult.ok or selectionResult.value == nil then
+		return {}
+	end
+	local target = data.enemies[selectionResult.value.runtimeEnemyId]
+	if target == nil or target.currentHealth <= 0 then
+		return {}
+	end
+	local behavior = ATTACK_BEHAVIORS[attack.behavior.key]
+	return if behavior == nil then {} else behavior(data, tower, attack, target, serverTime, eventBudget)
+end
+
 local function processAttacks(data: RuntimeData, serverTime: number, maximumEvents: number): { AttackEvent }
 	local events: { AttackEvent } = {}
 	for _, runtimeTowerId in towerIds(data) do
@@ -728,9 +1019,11 @@ local function processAttacks(data: RuntimeData, serverTime: number, maximumEven
 			local level = tower.definition.levels[tower.level]
 			local attack = level.attack
 			if attack ~= nil and tower.cooldownEndsServerTime <= serverTime and #events < maximumEvents then
-				local event = attackWithTower(data, tower, serverTime)
-				if event ~= nil then
-					table.insert(events, event)
+				local attackEvents = attackWithTower(data, tower, serverTime, maximumEvents - #events)
+				if #attackEvents > 0 then
+					for _, event in attackEvents do
+						table.insert(events, event)
+					end
 					tower.cooldownEndsServerTime = serverTime + attack.cooldownSeconds
 				else
 					-- A ready tower never banks idle cooldown intervals into a burst.
@@ -745,45 +1038,69 @@ local function processAttacks(data: RuntimeData, serverTime: number, maximumEven
 	return events
 end
 
-local function completeWaveIfResolved(data: RuntimeData, serverTime: number): boolean
-	if
-		data.state ~= "Playing"
-		or data.wavePhase ~= "Resolving"
-		or data.spawnCursor <= #data.spawnQueue
-		or next(data.enemies) ~= nil
-	then
+local function completeResolvedWaves(data: RuntimeData, serverTime: number): boolean
+	if data.state ~= "Playing" then
 		return false
 	end
-	local wave = data.schedule.waves[data.waveNumber]
-	if wave == nil then
-		return false
-	end
-	data.wavesCompleted = data.waveNumber
-	for userId in data.connectedParticipantSet do
-		local stats = data.participantStats[userId]
-		if stats ~= nil and stats.lastCreditedWave ~= data.waveNumber then
-			-- A resolved wave can be revisited when a downstream stipend operation
-			-- retries. Record the last distinct wave separately so reconnecting for
-			-- wave three earns one wave, rather than inheriting the global ordinal.
-			stats.wavesParticipated += 1
-			stats.lastCreditedWave = data.waveNumber
+	local changed = false
+	for waveNumber, origin in data.waveOrigins do
+		local queuePending = waveNumber == data.waveNumber and data.spawnCursor <= #data.spawnQueue
+		if not origin.resolved and not queuePending and origin.aliveCount == 0 then
+			origin.resolved = true
+			data.activeWaveOriginCount = math.max(0, data.activeWaveOriginCount - 1)
+			data.resolvedWaveNumbers[waveNumber] = origin
+			changed = true
 		end
 	end
-	local reward = if wave.rewardClass == "Final"
-		then data.economy.waveRewards.final
-		elseif wave.rewardClass == "Milestone" then data.economy.waveRewards.milestone
-		else data.economy.waveRewards.standard
-	local stipend =
-		data.ledger:grantWaveStipend(`stipend.wave.{data.waveNumber}`, reward.battleCashStipendPerActivePlayer)
-	if not stipend.ok then
-		return false
+	while true do
+		local nextWave = data.wavesCompleted + 1
+		local origin = data.resolvedWaveNumbers[nextWave]
+		if origin == nil then
+			break
+		end
+		local wave = origin.wave
+		local reward = if wave.rewardClass == "Final"
+			then data.economy.waveRewards.final
+			elseif wave.rewardClass == "Milestone" then data.economy.waveRewards.milestone
+			else data.economy.waveRewards.standard
+		local stipend = data.ledger:grantAuthoritativeWaveStipend(nextWave, reward.battleCashStipendPerActivePlayer)
+		if not stipend.ok then
+			finishMatch(data, "Defeat", "TechnicalTermination", serverTime)
+			return true
+		end
+		data.wavesCompleted = nextWave
+		data.resolvedWaveNumbers[nextWave] = nil
+		data.waveOrigins[nextWave] = nil
+		for userId in data.connectedParticipantSet do
+			local stats = data.participantStats[userId]
+			if stats ~= nil and stats.lastCreditedWave < nextWave then
+				stats.wavesParticipated = boundedAdd(stats.wavesParticipated, 1)
+				stats.lastCreditedWave = nextWave
+			end
+		end
+		changed = true
 	end
-	if data.waveNumber >= #data.schedule.waves then
-		return finishMatch(data, "Victory")
+	if
+		data.modeKind == "Finite"
+		and data.wavesCompleted >= (data.difficulty :: ConfigTypes.FiniteDifficultyDefinition).waveCount
+		and data.activeWaveOriginCount == 0
+	then
+		return finishMatch(data, "Victory", "Victory", serverTime)
 	end
-	data.wavePhase = "Intermission"
-	data.nextWaveServerTime = serverTime + data.difficulty.timing.earlyClearIntermissionSeconds
-	return advanceRevision(data)
+	local currentOrigin = data.waveOrigins[data.waveNumber]
+	if data.waveNumber > 0 and (currentOrigin == nil or currentOrigin.resolved) then
+		data.wavePhase = "Intermission"
+		local earlyTime = serverTime + data.difficulty.timing.earlyClearIntermissionSeconds
+		if data.nextWaveServerTime == 0 then
+			data.nextWaveServerTime = earlyTime
+		else
+			data.nextWaveServerTime = math.min(data.nextWaveServerTime, earlyTime)
+		end
+	end
+	if changed then
+		advanceRevision(data)
+	end
+	return changed
 end
 
 local function participantMatches(data: RuntimeData, userId: unknown): boolean
@@ -833,7 +1150,12 @@ function Methods.addParticipant(self: Runtime, loadoutValue: unknown): ActionOut
 			settings = data.configuration.defaultSettings,
 		}
 	end
-	local validated = MatchLoadoutProtocol.validate(loadoutValue, data.configuration)
+	local loadoutUserId = if type(loadoutValue) == "table" then rawget(loadoutValue :: any, "userId") else nil
+	local validated: any = if data.studioDirectUserIds
+			and type(loadoutUserId) == "number"
+			and loadoutUserId < 0
+		then DirectStudioParticipantLoadout.validate(loadoutValue, data.configuration)
+		else MatchLoadoutProtocol.validate(loadoutValue, data.configuration)
 	if not validated.ok then
 		return reject("NotParticipant")
 	end
@@ -903,7 +1225,9 @@ function Methods.removeParticipant(self: Runtime, userIdValue: unknown, serverTi
 	end
 	data.connectedParticipantSet[userId] = nil
 	data.ready[userId] = nil
-	if data.state == "Ready" and allParticipantsReady(data) then
+	if data.modeKind == "Endless" and data.state == "Playing" and connectedParticipantCount(data) == 0 then
+		finishMatch(data, "Defeat", "AllParticipantsGone", serverTimeValue :: number)
+	elseif data.state == "Ready" and allParticipantsReady(data) then
 		startPlaying(data, serverTimeValue :: number)
 	else
 		advanceRevision(data)
@@ -1114,7 +1438,8 @@ function Methods.placeTower(
 		return reject("Unavailable")
 	end
 	data.nextTowerId = nextId
-	data.participantStats[userIdValue :: number].placements += 1
+	local stats = data.participantStats[userIdValue :: number]
+	stats.placements = boundedAdd(stats.placements, 1)
 	advanceRevision(data)
 	finishMutation(data)
 	return ACCEPTED
@@ -1203,7 +1528,8 @@ function Methods.upgradeTower(
 	end
 	-- Cooldown is deliberately unchanged: an upgrade never grants a free shot.
 	tower.revision += 1
-	data.participantStats[userIdValue :: number].upgrades += 1
+	local stats = data.participantStats[userIdValue :: number]
+	stats.upgrades = boundedAdd(stats.upgrades, 1)
 	advanceRevision(data)
 	finishMutation(data)
 	return ACCEPTED
@@ -1234,13 +1560,14 @@ function Methods.sellTower(
 		return reject("Busy")
 	end
 	local refund = floorBasisPoints(tower.totalInvestment, data.configuration.economy.sellRefund.basisPoints)
-	local credited = data.ledger:refund(userIdValue, refund, `refund.sell.{tower.runtimeTowerId}`)
+	local credited = data.ledger:refundAuthoritativeSale(userIdValue, refund)
 	if not credited.ok then
 		finishMutation(data)
 		return reject("Unavailable")
 	end
 	data.towers[tower.runtimeTowerId] = nil
-	data.participantStats[userIdValue :: number].sells += 1
+	local stats = data.participantStats[userIdValue :: number]
+	stats.sells = boundedAdd(stats.sells, 1)
 	advanceRevision(data)
 	finishMutation(data)
 	return ACCEPTED
@@ -1329,7 +1656,11 @@ function Methods.step(self: Runtime, serverTimeValue: unknown): Result.Result<St
 			data.lastSimulationServerTime = serverTime
 			fixedStepCount += 1
 			local tickChanged = false
-			if data.wavePhase == "Intermission" and serverTime >= data.nextWaveServerTime then
+			if
+				data.nextWaveServerTime > 0
+				and serverTime >= data.nextWaveServerTime
+				and data.spawnCursor > #data.spawnQueue
+			then
 				tickChanged = startNextWave(data, serverTime) or tickChanged
 			end
 			if data.state == "Playing" then
@@ -1344,8 +1675,8 @@ function Methods.step(self: Runtime, serverTimeValue: unknown): Result.Result<St
 				end
 			end
 			if data.state == "Playing" then
-				tickChanged = moveEnemies(data, FIXED_STEP_SECONDS) or tickChanged
-				tickChanged = completeWaveIfResolved(data, serverTime) or tickChanged
+				tickChanged = moveEnemies(data, FIXED_STEP_SECONDS, serverTime) or tickChanged
+				tickChanged = completeResolvedWaves(data, serverTime) or tickChanged
 			end
 			if tickChanged then
 				advanceRevision(data)
@@ -1385,6 +1716,29 @@ local function towerSnapshot(data: RuntimeData, tower: TowerRecord): PlayableMat
 	})
 end
 
+local function enemyThreatClass(definition: ConfigTypes.EnemyDefinition): PlayableMatchProtocol.ThreatClass
+	local rawDefinition = definition :: any
+	if
+		rawDefinition.threatClass == "Elite"
+		or rawDefinition.threatClass == "MiniBoss"
+		or rawDefinition.threatClass == "Boss"
+	then
+		return rawDefinition.threatClass
+	end
+	if type(definition.tags) == "table" then
+		for _, tag in definition.tags do
+			if tag == "role.boss" then
+				return "Boss"
+			elseif tag == "role.miniboss" then
+				return "MiniBoss"
+			elseif tag == "role.elite" then
+				return "Elite"
+			end
+		end
+	end
+	return "Standard"
+end
+
 local function buildSnapshot(
 	data: RuntimeData,
 	serverTime: number,
@@ -1396,8 +1750,10 @@ local function buildSnapshot(
 		table.insert(towerEntries, towerSnapshot(data, data.towers[runtimeTowerId]))
 	end
 	local enemyEntries: { PlayableMatchProtocol.EnemySnapshot } = {}
+	local boss: PlayableMatchProtocol.BossSummary? = nil
 	for _, runtimeEnemyId in enemyIds(data) do
 		local enemy = data.enemies[runtimeEnemyId]
+		local threatClass = enemyThreatClass(enemy.definition)
 		table.insert(
 			enemyEntries,
 			table.freeze({
@@ -1408,8 +1764,24 @@ local function buildSnapshot(
 				maximumHealth = enemy.maximumHealth,
 				position = enemy.position,
 				pathProgress = enemy.pathProgress,
+				threatClass = threatClass,
 			})
 		)
+		if threatClass == "Boss" or threatClass == "MiniBoss" then
+			if
+				boss == nil
+				or (threatClass == "Boss" and boss.threatClass ~= "Boss")
+				or (threatClass == boss.threatClass and enemy.maximumHealth > boss.maximumHealth)
+			then
+				boss = table.freeze({
+					runtimeEnemyId = enemy.runtimeEnemyId,
+					displayName = enemy.definition.displayName,
+					currentHealth = enemy.currentHealth,
+					maximumHealth = enemy.maximumHealth,
+					threatClass = threatClass :: "MiniBoss" | "Boss",
+				})
+			end
+		end
 	end
 	local options: { PlayableMatchProtocol.TowerOption } = {}
 	local loadoutRevision = 0
@@ -1475,7 +1847,14 @@ local function buildSnapshot(
 	local stats: PlayableMatchProtocol.ResultStats = table.freeze({
 		durationSeconds = if data.startedServerTime == 0
 			then 0
-			else math.max(0, math.min(serverTime, data.lastSimulationServerTime) - data.startedServerTime),
+			else math.max(
+				0,
+				(
+					if data.endedServerTime > 0
+						then data.endedServerTime
+						else math.min(serverTime, data.lastSimulationServerTime)
+				) - data.startedServerTime
+			),
 		wavesCompleted = data.wavesCompleted,
 		damageDealt = damageDealt,
 		battleCashEarned = battleCashEarned,
@@ -1497,9 +1876,19 @@ local function buildSnapshot(
 		mapDisplayName = data.mapDefinition.displayName,
 		difficultyId = data.difficulty.id,
 		difficultyDisplayName = data.difficulty.displayName,
+		modeKind = data.modeKind,
+		contentVersion = data.contentVersion,
+		seed = data.seed,
 		serverTime = serverTime,
 		waveNumber = data.waveNumber,
-		totalWaves = #data.schedule.waves,
+		totalWaves = if data.modeKind == "Finite"
+			then (data.difficulty :: ConfigTypes.FiniteDifficultyDefinition).waveCount
+			else nil,
+		bossKind = if (data.wavePhase == "Spawning" or data.wavePhase == "Resolving")
+				and data.currentWave ~= nil
+			then data.currentWave.bossKind
+			else "None",
+		boss = boss,
 		wavePhase = data.wavePhase,
 		nextWaveServerTime = data.nextWaveServerTime,
 		baseHealth = data.baseHealth,
@@ -1572,6 +1961,45 @@ function Methods.canReplay(self: Runtime, userIdValue: unknown, matchIdValue: un
 	return ACCEPTED
 end
 
+function Methods.terminateEndless(self: Runtime, reasonValue: unknown, serverTimeValue: unknown): ActionOutcome
+	local data = requireData(self)
+	if data.cleaned or data.modeKind ~= "Endless" or data.state ~= "Playing" then
+		return reject("WrongState")
+	end
+	if
+		(
+			reasonValue ~= "PlayerEnded"
+			and reasonValue ~= "AllParticipantsGone"
+			and reasonValue ~= "Shutdown"
+			and reasonValue ~= "TechnicalTermination"
+		)
+		or not isFiniteNumber(serverTimeValue)
+		or (serverTimeValue :: number) < data.lastSimulationServerTime
+		or not beginMutation(data)
+	then
+		return reject("Unavailable")
+	end
+	finishMatch(data, "Defeat", reasonValue :: PlayableMatchProtocol.TerminationReason, serverTimeValue :: number)
+	finishMutation(data)
+	return ACCEPTED
+end
+
+-- A server-owned private projection (for example, tutorial guidance) may
+-- change without mutating combat. Advancing the authoritative revision keeps
+-- clients from treating that new projection as a same-revision replay.
+function Methods.refreshPresentation(self: Runtime): ActionOutcome
+	local data = requireData(self)
+	if not beginMutation(data) then
+		return reject("Unavailable")
+	end
+	if not advanceRevision(data) then
+		finishMutation(data)
+		return reject("Unavailable")
+	end
+	finishMutation(data)
+	return ACCEPTED
+end
+
 local function rewardViewsEqual(left: RewardProtocol.RewardView, right: RewardProtocol.RewardView): boolean
 	return left.resultId == right.resultId
 		and left.status == right.status
@@ -1638,7 +2066,11 @@ function Methods.getResultEvidence(self: Runtime): Result.Result<ResultEvidence,
 	if data.cleaned then
 		return errorResult("CLEANED", "resultEvidence")
 	end
-	if data.state ~= "Results" or (data.result ~= "Victory" and data.result ~= "Defeat") then
+	if
+		data.state ~= "Results"
+		or (data.result ~= "Victory" and data.result ~= "Defeat")
+		or data.terminationReason == nil
+	then
 		return errorResult("WRONG_STATE", "resultEvidence")
 	end
 	local entries: { ResultParticipantEvidence } = {}
@@ -1670,6 +2102,12 @@ function Methods.getResultEvidence(self: Runtime): Result.Result<ResultEvidence,
 		mapId = data.mapDefinition.id,
 		difficultyId = data.difficulty.id,
 		outcome = data.result :: "Victory" | "Defeat",
+		modeKind = data.modeKind,
+		highestCompletedWave = data.wavesCompleted,
+		elapsedSeconds = math.max(0, math.floor(data.endedServerTime - data.startedServerTime)),
+		seed = data.seed,
+		contentVersion = data.contentVersion,
+		terminationReason = data.terminationReason :: PlayableMatchProtocol.TerminationReason,
 		rewardingMatch = data.rewarding,
 		entries = table.freeze(entries),
 	}))
@@ -1690,6 +2128,10 @@ function Methods.getMetrics(self: Runtime): Metrics
 		connectedParticipantCount = connectedParticipantCount(data),
 		readyCount = activeReadyCount(data),
 		rewarding = data.rewarding,
+		modeKind = data.modeKind,
+		seed = data.seed,
+		contentVersion = data.contentVersion,
+		activeWaveOriginCount = data.activeWaveOriginCount,
 		cleaned = data.cleaned,
 	})
 end
@@ -1709,6 +2151,8 @@ function Methods.cleanup(self: Runtime): Result.Result<boolean, RuntimeError>
 	table.clear(data.towers)
 	table.clear(data.enemies)
 	table.clear(data.spawnQueue)
+	table.clear(data.waveOrigins)
+	table.clear(data.resolvedWaveNumbers)
 	table.clear(data.ready)
 	table.clear(data.participantSet)
 	table.clear(data.connectedParticipantSet)
@@ -1734,6 +2178,15 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 	elseif type(rewarding) ~= "boolean" then
 		return errorResult("INVALID_DEPENDENCIES", "new")
 	end
+	local studioDirectUserIds = dependencies.studioDirectUserIds
+	if studioDirectUserIds == nil then
+		studioDirectUserIds = false
+	elseif type(studioDirectUserIds) ~= "boolean" then
+		return errorResult("INVALID_DEPENDENCIES", "new")
+	end
+	if studioDirectUserIds and rewarding then
+		return errorResult("INVALID_DEPENDENCIES", "new")
+	end
 	local matchIdResult = Ids.validateMatchId(dependencies.matchId)
 	if not matchIdResult.ok then
 		return errorResult("INVALID_DEPENDENCIES", "new")
@@ -1749,8 +2202,10 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 	then
 		return errorResult("CONTENT_NOT_FOUND", "new")
 	end
-	local requestedMapId = dependencies.mapId or configuration.maps.ordered[1].id
-	local requestedDifficultyId = dependencies.difficultyId or configuration.difficulties.ordered[1].id
+	-- Direct development is intentionally pinned to the legacy non-rewarding
+	-- pair. Travelled matches must supply both authenticated ticket selections.
+	local requestedMapId = dependencies.mapId or DEVELOPMENT_MAP_ID
+	local requestedDifficultyId = dependencies.difficultyId or DEVELOPMENT_DIFFICULTY_ID
 	local mapIdResult = Ids.validateMapId(requestedMapId)
 	local difficultyIdResult = Ids.validateDifficultyId(requestedDifficultyId)
 	if not mapIdResult.ok or not difficultyIdResult.ok then
@@ -1768,12 +2223,33 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 		supported = supported or supportedId == difficulty.id
 	end
 	local economy = configuration.economy.byDifficultyId[difficulty.id]
-	if not supported or difficulty.kind ~= "Finite" or schedule.kind ~= "AuthoredFinite" or economy == nil then
+	local scheduleKindMatches = (difficulty.kind == "Finite" and schedule.kind == "AuthoredFinite")
+		or (difficulty.kind == "Endless" and schedule.kind == "GeneratedEndless")
+	if not supported or not scheduleKindMatches or economy == nil or not supportedAttackContent(configuration) then
 		return errorResult("CONTENT_NOT_FOUND", "new")
 	end
 	local laneId = mapDefinition.lanes[1] and mapDefinition.lanes[1].id
 	if laneId == nil then
 		return errorResult("CONTENT_NOT_FOUND", "new")
+	end
+	if schedule.kind == "AuthoredFinite" then
+		if #schedule.waves ~= (difficulty :: ConfigTypes.FiniteDifficultyDefinition).waveCount then
+			return errorResult("CONTENT_NOT_FOUND", "new")
+		end
+		for _, wave in schedule.waves do
+			if not playableWaveValid(wave, laneId, configuration) then
+				return errorResult("CONTENT_NOT_FOUND", "new")
+			end
+		end
+	else
+		for _, wave in schedule.authoredOpeningWaves do
+			if not playableWaveValid(wave, laneId, configuration) then
+				return errorResult("CONTENT_NOT_FOUND", "new")
+			end
+		end
+		if schedule.generator.key ~= EndlessWaveGenerator.GENERATOR_KEY then
+			return errorResult("CONTENT_NOT_FOUND", "new")
+		end
 	end
 	local path, totalDistance, basePosition, bounds, zones, exclusions =
 		normalizeMap(dependencies.runtimeMap, mapDefinition.id, laneId)
@@ -1811,9 +2287,22 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 		end
 		rawLoadouts = testLoadouts
 	end
-	local participants, loadoutsByUserId = normalizeParticipants(rawLoadouts, configuration)
+	local participants, loadoutsByUserId =
+		normalizeParticipants(rawLoadouts, configuration, studioDirectUserIds :: boolean)
 	if participants == nil or loadoutsByUserId == nil then
 		return errorResult("INVALID_PARTICIPANTS", "new")
+	end
+	local seed = dependencies.seed
+	if seed == nil then
+		seed = EndlessWaveGenerator.deriveSeed(matchIdResult.value, EndlessWaveGenerator.CONTENT_VERSION)
+	end
+	if
+		type(seed) ~= "number"
+		or not Validation.isSafeInteger(seed)
+		or seed < 1
+		or seed > EndlessWaveGenerator.MAX_SEED
+	then
+		return errorResult("INVALID_DEPENDENCIES", "new")
 	end
 	local ledgerResult = BattleCashLedger.new(
 		matchIdResult.value,
@@ -1869,6 +2358,9 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 		mapDefinition = mapDefinition,
 		difficulty = difficulty,
 		schedule = schedule,
+		modeKind = difficulty.kind,
+		seed = seed,
+		contentVersion = EndlessWaveGenerator.CONTENT_VERSION,
 		economy = economy,
 		ledger = ledgerResult.value,
 		state = "Ready",
@@ -1885,7 +2377,9 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 		submittedReady = {},
 		connectedAtResults = {},
 		rewardViewsByUserId = {},
-		rewarding = rewarding :: boolean,
+		rewarding = (rewarding :: boolean)
+			and not (mapDefinition.id == DEVELOPMENT_MAP_ID and difficulty.id == DEVELOPMENT_DIFFICULTY_ID),
+		studioDirectUserIds = studioDirectUserIds :: boolean,
 		path = path,
 		pathTotalDistance = totalDistance,
 		basePosition = basePosition,
@@ -1899,11 +2393,17 @@ function PlayableMatchRuntime.new(dependenciesValue: unknown): Result.Result<Run
 		attackSequence = 0,
 		waveNumber = 0,
 		wavesCompleted = 0,
+		currentWave = nil,
+		waveOrigins = {},
+		resolvedWaveNumbers = {},
+		activeWaveOriginCount = 0,
 		spawnQueue = {},
 		spawnCursor = 1,
 		nextWaveServerTime = 0,
 		startedServerTime = 0,
+		endedServerTime = 0,
 		lastSimulationServerTime = 0,
+		terminationReason = nil,
 		baseHealth = difficulty.base.maxHealth,
 		busy = false,
 		cleaned = false,

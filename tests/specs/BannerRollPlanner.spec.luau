@@ -14,17 +14,19 @@ if not loaded.ok then
 end
 
 local function authenticated(available: boolean): AcquisitionProtocol.AuthenticatedConfiguration
+	local policies = {}
+	for index, policy in AcquisitionConfig.banners do
+		policies[index] = {
+			bannerId = policy.bannerId,
+			bannerVersion = policy.bannerVersion,
+			available = if index == 1 then available else policy.available,
+			currencyPolicy = policy.currencyPolicy,
+			policyDisclosure = policy.policyDisclosure,
+		}
+	end
 	local raw = {
 		version = AcquisitionConfig.version,
-		banners = {
-			{
-				bannerId = AcquisitionConfig.banners[1].bannerId,
-				bannerVersion = AcquisitionConfig.banners[1].bannerVersion,
-				available = available,
-				currencyPolicy = AcquisitionConfig.banners[1].currencyPolicy,
-				policyDisclosure = AcquisitionConfig.banners[1].policyDisclosure,
-			},
-		},
+		banners = policies,
 	}
 	local result = AcquisitionProtocol.validateConfiguration(raw, loaded.value.banners)
 	if not result.ok then

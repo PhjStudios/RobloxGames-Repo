@@ -329,25 +329,48 @@ function Methods.resolve(
 	return found
 end
 
-function Methods.find(self: Service, userIdValue: unknown, nowValue: unknown): Result.Result<Route?, RouteError>
-	local data = requireData(self)
-	local id = userId(userIdValue)
-	if id == nil or type(nowValue) ~= "number" or not Validation.isSafeInteger(nowValue :: number) or nowValue < 0 then
-		return failure("INVALID_ARGUMENT", "find")
-	end
+local function readRoute(
+	data: ServiceData,
+	id: number,
+	nowValue: number,
+	failOpen: boolean
+): Result.Result<Route?, RouteError>
 	local called, stored = pcall(data.adapter.getAsync, data.adapter, routeKey(id))
 	if not called then
-		-- Routing failure deliberately fails open so Lobby remains usable.
-		return Result.ok(nil)
+		return if failOpen then Result.ok(nil) else failure("STORE_UNAVAILABLE", "find")
 	end
 	local route = validate(stored)
-	if route == nil or route.userId ~= id or route.expiresAt <= (nowValue :: number) then
+	if route == nil or route.userId ~= id or route.expiresAt <= nowValue then
 		return Result.ok(nil)
 	end
 	if route.destinationJobId == nil then
 		return Result.ok(nil)
 	end
 	return Result.ok(route)
+end
+
+function Methods.find(self: Service, userIdValue: unknown, nowValue: unknown): Result.Result<Route?, RouteError>
+	local id = userId(userIdValue)
+	if id == nil or type(nowValue) ~= "number" or not Validation.isSafeInteger(nowValue :: number) or nowValue < 0 then
+		return failure("INVALID_ARGUMENT", "find")
+	end
+	-- Ordinary Lobby eligibility deliberately fails open so the experience
+	-- remains usable if routing storage is temporarily unavailable.
+	return readRoute(requireData(self), id, nowValue :: number, true)
+end
+
+-- Tutorial recovery needs stronger evidence than the public fail-open view: a
+-- storage failure is unknown state, not proof that the player's Match vanished.
+function Methods.findConfirmed(
+	self: Service,
+	userIdValue: unknown,
+	nowValue: unknown
+): Result.Result<Route?, RouteError>
+	local id = userId(userIdValue)
+	if id == nil or type(nowValue) ~= "number" or not Validation.isSafeInteger(nowValue :: number) or nowValue < 0 then
+		return failure("INVALID_ARGUMENT", "find")
+	end
+	return readRoute(requireData(self), id, nowValue :: number, false)
 end
 
 -- Atomically removes and returns the exact current route for a rematch. Unlike

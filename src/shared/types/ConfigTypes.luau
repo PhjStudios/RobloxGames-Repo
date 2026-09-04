@@ -21,6 +21,7 @@ export type AssetManifest = {
 
 export type TargetMode = "First" | "Last" | "Strongest" | "Weakest" | "Closest"
 export type DamageIncomeClass = "EligibleHealthRemoved" | "None"
+export type EnemyThreatClass = "Standard" | "Elite" | "MiniBoss" | "Boss"
 
 export type FeatureKind =
 	"AttackBehavior"
@@ -72,6 +73,7 @@ export type TowerAttackDefinition = {
 	behavior: AttackBehaviorReference,
 	damage: number,
 	cooldownSeconds: number,
+	splashRadiusStuds: number?,
 	statusEffects: { StatusEffectReference }?,
 }
 
@@ -107,6 +109,7 @@ export type EnemyDefinition = {
 	moveSpeedStudsPerSecond: number,
 	leakDamage: number,
 	damageIncomeClass: DamageIncomeClass,
+	threatClass: EnemyThreatClass,
 	tags: { FeatureKey }?,
 	resistanceProfile: ResistanceProfileReference?,
 	behaviors: { EnemyBehaviorReference }?,

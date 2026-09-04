@@ -397,6 +397,10 @@ function Methods.claim(
 
 	local clearKey = pairKey(matchResult.mapId, matchResult.difficultyId)
 	local initialPolicy = RewardPolicy.evaluate({
+		resultVersion = matchResult.version,
+		difficultyId = matchResult.difficultyId,
+		modeKind = matchResult.modeKind,
+		highestCompletedWave = matchResult.highestCompletedWave,
 		rewardingMatch = matchResult.rewardingMatch,
 		authenticatedParticipant = entry.authenticatedParticipant,
 		spectator = entry.spectator,
@@ -449,6 +453,10 @@ function Methods.claim(
 				})
 			end
 			local policy = RewardPolicy.evaluate({
+				resultVersion = matchResult.version,
+				difficultyId = matchResult.difficultyId,
+				modeKind = matchResult.modeKind,
+				highestCompletedWave = matchResult.highestCompletedWave,
 				rewardingMatch = matchResult.rewardingMatch,
 				authenticatedParticipant = entry.authenticatedParticipant,
 				spectator = entry.spectator,

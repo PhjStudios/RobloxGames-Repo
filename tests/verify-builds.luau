@@ -567,6 +567,90 @@ local function verifyMatchReturnSchedulerBoundary(): boolean
 	return true
 end
 
+local function verifyMatchDirectStudioSelectionBoundary(): boolean
+	local bootstrap = readSource("src/server/match/bootstrap/Main.server.luau")
+	local resolver = readSource("src/server/match/playable/DirectStudioContentSelection.luau")
+	if bootstrap == nil or resolver == nil then
+		emit("FAIL", "Match", "DIRECT_STUDIO_SELECTION_SOURCE_MISSING")
+		return false
+	end
+	local selectionStart =
+		string.find(bootstrap, "local directSelection: DirectStudioContentSelection.Selection?", 1, true)
+	local studioBranch = if selectionStart == nil
+		then nil
+		else string.find(bootstrap, "if isStudio then", selectionStart, true)
+	local attributeRead = if studioBranch == nil
+		then nil
+		else string.find(bootstrap, "templateRoot:GetAttribute(attributeName)", studioBranch, true)
+	local directHostBranch = string.find(bootstrap, "\n\tif isStudio then\n\t\tlocal studioSelection", 1, true)
+	local publishedHostGuard =
+		string.find(bootstrap, 'if game.PrivateServerId == "" or game.PrivateServerOwnerId ~= 0 then', 1, true)
+	local publishedDirectResolve = string.find(
+		bootstrap,
+		"DirectStudioContentSelection.resolve(configuration.coreConfiguration, false, nil)",
+		1,
+		true
+	)
+	local resolverNonStudioGuard = string.find(resolver, "if not isStudioValue then", 1, true)
+	local resolverNonStudioFailure = string.find(resolver, 'return failure("STUDIO_ONLY")', 1, true)
+	local resolverReaderCall = string.find(resolver, "pcall(reader", 1, true)
+	if
+		countPlainOccurrences(bootstrap, "RunService:IsStudio()") ~= 1
+		or countPlainOccurrences(bootstrap, "DirectStudioContentSelection.resolve(") ~= 1
+		or selectionStart == nil
+		or studioBranch == nil
+		or attributeRead == nil
+		or directHostBranch == nil
+		or publishedHostGuard == nil
+		or publishedDirectResolve ~= nil
+		or not (studioBranch < attributeRead and directHostBranch < publishedHostGuard)
+		or string.find(bootstrap, 'error("[ATD_MATCH_BOOTSTRAP][code=AUTHENTICATED_TICKET_HOST_REQUIRED]", 0)', 1, true) == nil
+		or string.find(bootstrap, "local initialMapId = ContentSelection.DEVELOPMENT_MAP_ID", 1, true) == nil
+		or string.find(
+			bootstrap,
+			"MatchLifecycleService.new(configuration.log, sendMatchSnapshot, initialMapId)",
+			1,
+			true
+		) == nil
+		or string.find(bootstrap, "mapId = ticket.mapId", 1, true) == nil
+		or countPlainOccurrences(resolver, 'local MAP_ATTRIBUTE = "ATDStudioMapId"') ~= 1
+		or countPlainOccurrences(resolver, 'local DIFFICULTY_ATTRIBUTE = "ATDStudioDifficultyId"') ~= 1
+		or resolverNonStudioGuard == nil
+		or resolverNonStudioFailure == nil
+		or resolverReaderCall == nil
+		or not (resolverNonStudioGuard < resolverNonStudioFailure and resolverNonStudioFailure < resolverReaderCall)
+	then
+		emit("FAIL", "Match", "DIRECT_STUDIO_SELECTION_NOT_GUARDED", "src/server/match/bootstrap/Main.server.luau")
+		return false
+	end
+	emit("PASS", "Match", "DIRECT_STUDIO_SELECTION_GUARDED")
+	return true
+end
+
+local function verifyMatchContentRewardBoundary(): boolean
+	local bootstrap = readSource("src/server/match/bootstrap/Main.server.luau")
+	local host = readSource("src/server/match/travel/MatchTravelHost.luau")
+	local selection = readSource("src/shared/config/ContentSelection.luau")
+	if bootstrap == nil or host == nil or selection == nil then
+		emit("FAIL", "Match", "CONTENT_REWARD_POLICY_SOURCE_MISSING")
+		return false
+	end
+	if
+		countPlainOccurrences(bootstrap, "ContentSelection.rewardingForSelection(") ~= 1
+		or countPlainOccurrences(bootstrap, "rewarding = rewarding,") ~= 1
+		or countPlainOccurrences(host, "ContentSelection.rewardingForSelection(") ~= 1
+		or countPlainOccurrences(host, "evidence.rewardingMatch ~= rewardingMatch") ~= 1
+		or countPlainOccurrences(host, "rewardingMatch = rewardingMatch,") ~= 1
+		or countPlainOccurrences(selection, 'hasTag(map, "non-rewarding")') ~= 1
+		or countPlainOccurrences(selection, 'hasTag(difficulty, "non-rewarding")') ~= 1
+	then
+		emit("FAIL", "Match", "CONTENT_REWARD_POLICY_NOT_GUARDED")
+		return false
+	end
+	emit("PASS", "Match", "CONTENT_REWARD_POLICY_GUARDED")
+	return true
+end
+
 local function verifyProjectSourceIsolation(): boolean
 	for _, definition in ALL_BUILDS do
 		local projectSource = readSource(definition.project)
@@ -970,6 +1054,8 @@ local function run(): boolean
 		not verifyNetworkSecurityBoundary()
 		or not verifyLobbyTravelSchedulerBoundary()
 		or not verifyMatchReturnSchedulerBoundary()
+		or not verifyMatchDirectStudioSelectionBoundary()
+		or not verifyMatchContentRewardBoundary()
 		or not verifyProjectSourceIsolation()
 	then
 		return false

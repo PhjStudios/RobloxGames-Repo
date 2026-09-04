@@ -2,6 +2,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local ContentSelection = require(ReplicatedStorage.Shared.config.ContentSelection)
 local TowerSchema = require(ReplicatedStorage.Shared.config.TowerSchema)
 local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
 local Ids = require(ReplicatedStorage.Shared.util.Ids)
@@ -40,9 +41,13 @@ export type BannerPityRecord = {
 }
 
 export type TutorialState = {
+	version: number,
 	firstJoin: boolean,
 	tutorialCompleted: boolean,
 	tutorialStep: number,
+	attempt: number,
+	skipped: boolean,
+	trackedMatchId: string,
 }
 
 export type Statistics = {
@@ -130,9 +135,14 @@ export type ProfileError = {
 	message: string,
 }
 
-local CURRENT_VERSION = 5
+local CURRENT_VERSION = 6
 local SETTINGS_VERSION = 2
+local TUTORIAL_VERSION = 1
 local STARTER_GOLD = 2_000
+local DART_STARTER_TOWER_ID = ContentSelection.DART_STARTER_TOWER_ID
+local BOMBARDIER_STARTER_TOWER_ID = ContentSelection.BOMBARDIER_STARTER_TOWER_ID
+local DART_STARTER_UNIT_ID = ContentSelection.DART_STARTER_UNIT_ID
+local BOMBARDIER_STARTER_UNIT_ID = ContentSelection.BOMBARDIER_STARTER_UNIT_ID
 local MAX_GOLD = 1_000_000_000_000
 -- A full client-safe inventory snapshot must fit the shared 512-node payload
 -- budget without pagination. Sixty-four unique unit records leave bounded room
@@ -142,7 +152,8 @@ local MAX_EQUIPPED_UNITS = 5
 local MAX_BANNER_PITY_RECORDS = 32
 local MAX_PITY_COUNT = 1_000_000
 local MAX_STATISTIC = 1_000_000_000_000
-local MAX_TUTORIAL_STEP = 20
+local MAX_TUTORIAL_STEP = 9
+local MAX_TUTORIAL_ATTEMPT = 1_000_000
 local MAX_RECEIPTS = 64
 local MAX_RECEIPT_OUTCOMES = 10
 local MAX_RECEIPT_KIND_BYTES = 48
@@ -202,9 +213,13 @@ local SETTINGS_FIELDS = table.freeze({
 })
 
 local TUTORIAL_FIELDS = table.freeze({
+	version = true,
 	firstJoin = true,
 	tutorialCompleted = true,
 	tutorialStep = true,
+	attempt = true,
+	skipped = true,
+	trackedMatchId = true,
 })
 
 local STAT_FIELDS = table.freeze({
@@ -261,7 +276,12 @@ local PENDING_RESULT_FIELDS = table.freeze({
 local ProfileSchema = {
 	CURRENT_VERSION = CURRENT_VERSION,
 	SETTINGS_VERSION = SETTINGS_VERSION,
+	TUTORIAL_VERSION = TUTORIAL_VERSION,
 	STARTER_GOLD = STARTER_GOLD,
+	DART_STARTER_TOWER_ID = DART_STARTER_TOWER_ID,
+	BOMBARDIER_STARTER_TOWER_ID = BOMBARDIER_STARTER_TOWER_ID,
+	DART_STARTER_UNIT_ID = DART_STARTER_UNIT_ID,
+	BOMBARDIER_STARTER_UNIT_ID = BOMBARDIER_STARTER_UNIT_ID,
 	MAX_GOLD = MAX_GOLD,
 	MAX_UNITS = MAX_UNITS,
 	MAX_EQUIPPED_UNITS = MAX_EQUIPPED_UNITS,
@@ -269,6 +289,7 @@ local ProfileSchema = {
 	MAX_PITY_COUNT = MAX_PITY_COUNT,
 	MAX_STATISTIC = MAX_STATISTIC,
 	MAX_TUTORIAL_STEP = MAX_TUTORIAL_STEP,
+	MAX_TUTORIAL_ATTEMPT = MAX_TUTORIAL_ATTEMPT,
 	MAX_RECEIPTS = MAX_RECEIPTS,
 	MAX_RECEIPT_OUTCOMES = MAX_RECEIPT_OUTCOMES,
 	MAX_FIRST_CLEARS = MAX_FIRST_CLEARS,
@@ -672,18 +693,36 @@ function ProfileSchema.validate(value: unknown, towers: ConfigTypes.TowerCatalog
 	local tutorialStep = if tutorialRecord == nil
 		then nil
 		else integerIn(tutorialRecord.tutorialStep, 0, MAX_TUTORIAL_STEP)
+	local tutorialAttempt = if tutorialRecord == nil
+		then nil
+		else integerIn(tutorialRecord.attempt, 1, MAX_TUTORIAL_ATTEMPT)
+	local trackedMatchId = if tutorialRecord == nil then nil else tutorialRecord.trackedMatchId
+	local validTrackedMatchId = trackedMatchId == ""
+		or (type(trackedMatchId) == "string" and Ids.validateMatchId(trackedMatchId).ok)
 	if
 		tutorialRecord == nil
+		or tutorialRecord.version ~= TUTORIAL_VERSION
 		or type(tutorialRecord.firstJoin) ~= "boolean"
 		or type(tutorialRecord.tutorialCompleted) ~= "boolean"
 		or tutorialStep == nil
+		or tutorialAttempt == nil
+		or type(tutorialRecord.skipped) ~= "boolean"
+		or not validTrackedMatchId
+		or tutorialRecord.firstJoin ~= (tutorialStep == 0)
+		or tutorialRecord.tutorialCompleted ~= (tutorialStep == MAX_TUTORIAL_STEP)
+		or (tutorialRecord.skipped == true and tutorialStep ~= MAX_TUTORIAL_STEP)
+		or ((tutorialStep >= 5 and tutorialStep <= 8) ~= (trackedMatchId ~= ""))
 	then
 		return failure("INVALID_FIELD", "profile.tutorial", "Tutorial state is malformed")
 	end
 	local tutorial: TutorialState = {
+		version = TUTORIAL_VERSION,
 		firstJoin = tutorialRecord.firstJoin :: boolean,
 		tutorialCompleted = tutorialRecord.tutorialCompleted :: boolean,
 		tutorialStep = tutorialStep,
+		attempt = tutorialAttempt,
+		skipped = tutorialRecord.skipped :: boolean,
+		trackedMatchId = trackedMatchId :: string,
 	}
 
 	local statsRecord = exactRecord(record.stats, STAT_FIELDS)
@@ -897,44 +936,70 @@ function ProfileSchema.createStarter(
 	if createdAt == nil then
 		return failure("INVALID_FIELD", "createdAt", "Starter timestamp must be a nonnegative safe integer")
 	end
-	local starterTower: ConfigTypes.TowerDefinition? = nil
-	for _, definition in towers.ordered do
-		if attacks(definition) then
-			starterTower = definition
-			break
+	local dartTower = towers.byId[DART_STARTER_TOWER_ID]
+	if dartTower == nil or not attacks(dartTower) then
+		-- Small authenticated fixture catalogs and legacy development catalogs may
+		-- predate the named release starter. Production configuration contains the
+		-- stable Dart identity; the fallback preserves generic schema testability.
+		dartTower = nil
+		for _, definition in towers.ordered do
+			if attacks(definition) then
+				dartTower = definition
+				break
+			end
 		end
 	end
-	if starterTower == nil then
+	if dartTower == nil then
 		return failure("NO_STARTER_TOWER", "towers", "Tower catalog has no usable attacking starter")
 	end
-	local unitIdResult = Ids.makeUnitId("starter-1")
-	if not unitIdResult.ok then
+	local dartUnitId = Ids.validateUnitId(DART_STARTER_UNIT_ID)
+	local bombardierUnitId = Ids.validateUnitId(BOMBARDIER_STARTER_UNIT_ID)
+	if not dartUnitId.ok or not bombardierUnitId.ok then
 		return failure("INVALID_REFERENCE", "profile.units", "Starter UnitId construction failed")
 	end
-	local unitId = unitIdResult.value
+	local units = {
+		[dartUnitId.value] = {
+			unitId = dartUnitId.value,
+			towerId = dartTower.id,
+			favorite = false,
+			locked = false,
+			acquiredAt = createdAt,
+			acquisitionSequence = 1,
+		},
+	}
+	local equippedUnitIds = { dartUnitId.value }
+	local starterCount = 1
+	local bombardierTower = towers.byId[BOMBARDIER_STARTER_TOWER_ID]
+	if bombardierTower ~= nil and bombardierTower.id ~= dartTower.id and attacks(bombardierTower) then
+		units[bombardierUnitId.value] = {
+			unitId = bombardierUnitId.value,
+			towerId = bombardierTower.id,
+			favorite = false,
+			locked = false,
+			acquiredAt = createdAt,
+			acquisitionSequence = 2,
+		}
+		table.insert(equippedUnitIds, bombardierUnitId.value)
+		starterCount = 2
+	end
 	local rawProfile = {
 		schemaVersion = CURRENT_VERSION,
 		revision = 1,
 		gold = STARTER_GOLD,
-		units = {
-			[unitId] = {
-				unitId = unitId,
-				towerId = starterTower.id,
-				favorite = false,
-				locked = false,
-				acquiredAt = createdAt,
-				acquisitionSequence = 1,
-			},
-		},
-		equippedUnitIds = { unitId },
+		units = units,
+		equippedUnitIds = equippedUnitIds,
 		bannerPity = {},
 		settings = ProfileSchema.defaultSettings(),
 		tutorial = {
+			version = TUTORIAL_VERSION,
 			firstJoin = true,
 			tutorialCompleted = false,
 			tutorialStep = 0,
+			attempt = 1,
+			skipped = false,
+			trackedMatchId = "",
 		},
-		stats = ProfileSchema.defaultStatistics(1),
+		stats = ProfileSchema.defaultStatistics(starterCount),
 		migration = {
 			createdAt = createdAt,
 			lastMigratedAt = createdAt,

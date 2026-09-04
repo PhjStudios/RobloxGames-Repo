@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local ConfigurationValidator = require(ReplicatedStorage.Shared.config.ConfigurationValidator)
+local ContentSelection = require(ReplicatedStorage.Shared.config.ContentSelection)
 local MatchLoadoutProtocol = require(ReplicatedStorage.Shared.match.MatchLoadoutProtocol)
 local MatchTravelProtocol = require(ReplicatedStorage.Shared.match.MatchTravelProtocol)
 local Result = require(ReplicatedStorage.Shared.util.Result)
@@ -44,7 +45,8 @@ end
 local function makeRig(
 	assertions: TestHarness.Assertions,
 	userIdsValue: { number }?,
-	returnSchedulerModeValue: string?
+	returnSchedulerModeValue: string?,
+	durableResultObserverValue: ((number, unknown) -> unknown)?
 ): any
 	local configured = ConfigurationValidator.validateLoaded()
 	local configuration = success(assertions, configured)
@@ -62,8 +64,8 @@ local function makeRig(
 		routing[player] = success(assertions, TravelProtocol.match("ticket:host-test", "attempt:host-join"))
 	end
 	local nowValue = 1_700_000_000
-	local mapId = configuration.maps.ordered[1].id
-	local difficultyId = configuration.maps.ordered[1].supportedDifficultyIds[1]
+	local mapId = ContentSelection.RELEASE_MAP_ID
+	local difficultyId = ContentSelection.EASY_DIFFICULTY_ID
 	local members = {}
 	for _, userId in userIds do
 		table.insert(members, {
@@ -294,10 +296,13 @@ local function makeRig(
 		return connection()
 	end
 	local evidence: any? = nil
+	local terminationEvidence: any? = nil
+	local terminationReasons = {}
 	local playable: any = {
 		admissions = {},
 		disconnections = {},
 		rewardViews = {},
+		tutorialRefreshes = {},
 	}
 	function playable:admitAuthorized(player, participant)
 		table.insert(self.admissions, { player = player, participant = participant })
@@ -314,6 +319,14 @@ local function makeRig(
 	function playable:getResultEvidence()
 		return if evidence == nil then Result.err("UNAVAILABLE") else Result.ok(evidence)
 	end
+	function playable:terminateEndless(reason)
+		table.insert(terminationReasons, reason)
+		if terminationEvidence == nil then
+			return { accepted = false, reason = "WrongState" }
+		end
+		evidence = terminationEvidence
+		return { accepted = true, reason = "Accepted" }
+	end
 	function playable:getSnapshot(player)
 		local userId = ids[player]
 		local spectator = admissionKinds[userId] == "LateSpectator"
@@ -328,6 +341,10 @@ local function makeRig(
 	function playable:setRewardView(userId, view)
 		self.rewardViews[userId] = view
 		return { accepted = true, reason = "Accepted" }
+	end
+	function playable:refreshTutorial(userId)
+		table.insert(self.tutorialRefreshes, userId)
+		return true
 	end
 	local factoryCalls = {}
 	local stopped = 0
@@ -430,6 +447,7 @@ local function makeRig(
 		teleport = teleport,
 		resultLedger = resultLedger,
 		rewardClaims = rewardClaims,
+		observeDurableResult = durableResultObserverValue,
 		snapshotSender = function(player, snapshot)
 			if yieldNextSnapshot then
 				yieldNextSnapshot = false
@@ -671,6 +689,10 @@ local function makeRig(
 		setEvidence = function(value)
 			evidence = value
 		end,
+		setTerminationEvidence = function(value)
+			terminationEvidence = value
+		end,
+		terminationReasons = terminationReasons,
 		yieldNextResultWorkAt = function(target)
 			resultWorkYieldTarget = target
 		end,
@@ -754,9 +776,28 @@ local function resultEvidence(rig: any): any
 		mapId = rig.ticket.mapId,
 		difficultyId = rig.ticket.difficultyId,
 		outcome = "Victory",
-		rewardingMatch = true,
+		rewardingMatch = ContentSelection.rewardingForSelection(
+			rig.configuration,
+			rig.ticket.mapId,
+			rig.ticket.difficultyId
+		),
 		entries = entries,
 	}
+end
+
+local function endlessResultEvidence(rig: any): any
+	local value = resultEvidence(rig)
+	value.outcome = "Defeat"
+	value.modeKind = "Endless"
+	value.highestCompletedWave = 27
+	value.elapsedSeconds = 1_234
+	value.seed = 90_001
+	value.contentVersion = 1
+	value.terminationReason = "PlayerEnded"
+	for _, entry in value.entries do
+		entry.wavesCompleted = 27
+	end
+	return value
 end
 
 local function delayedRematch(assertions: TestHarness.Assertions, workTarget: string): any
@@ -786,6 +827,21 @@ local function delayedRematch(assertions: TestHarness.Assertions, workTarget: st
 end
 
 return TestHarness.suite("ticketed Match travel host composition", {
+	TestHarness.case("persists a retained local ticket through the non-rewarding result path", function(assertions)
+		local rig = makeRig(assertions, { 101 })
+		rig.ticket.mapId = ContentSelection.DEVELOPMENT_MAP_ID
+		rig.ticket.difficultyId = ContentSelection.DEVELOPMENT_DIFFICULTY_ID
+		rig.fireHeartbeat()
+		local evidence = resultEvidence(rig)
+		assertions.isFalse(evidence.rewardingMatch)
+		rig.setEvidence(evidence)
+		rig.fireHeartbeat()
+		assertions.equal(#rig.ledgerCreates, 1)
+		assertions.isFalse(rig.ledgerCreates[1].rewardingMatch)
+		assertions.isFalse(rig.host:getMetrics().resultFailed)
+		rig.lifecycle.shutdown()
+	end),
+
 	TestHarness.case("serializes a yielding arrival across overlapping heartbeats", function(assertions)
 		local rig = makeRig(assertions, { 101 })
 		rig.setReenterHeartbeatOnAdmission(true)
@@ -915,6 +971,95 @@ return TestHarness.suite("ticketed Match travel host composition", {
 		assertions.equal(#rig.ledgerCreates, 1)
 		assertions.equal(rig.claimCounts[101], 1)
 		assertions.equal(rig.claimCounts[202], 1)
+		rig.lifecycle.shutdown()
+	end),
+
+	TestHarness.case(
+		"retries tutorial completion after durability and suppresses the solo tutorial rematch",
+		function(assertions)
+			local attempts = {}
+			local failuresRemaining = 2
+			local rig: any
+			rig = makeRig(assertions, { 101 }, nil, function(userId, evidence)
+				table.insert(attempts, {
+					userId = userId,
+					evidence = evidence,
+					durableRecordCount = #rig.ledgerCreates,
+				})
+				if failuresRemaining > 0 then
+					failuresRemaining -= 1
+					return Result.err({ code = "NOT_READY" })
+				end
+				return Result.ok({
+					advanced = true,
+					tutorial = { tutorialStep = 8, trackedMatchId = rig.ticket.matchId },
+				})
+			end)
+			rig.fireHeartbeat()
+			rig.setEvidence(resultEvidence(rig))
+			rig.fireHeartbeat()
+			assertions.equal(#rig.ledgerCreates, 1)
+			assertions.equal(#attempts, 1)
+			assertions.equal(attempts[1].durableRecordCount, 1)
+			assertions.isTrue(attempts[1].evidence.durable)
+			assertions.isFalse(rig.host:getMetrics().resultReady)
+
+			rig.fireHeartbeat()
+			assertions.equal(#attempts, 2)
+			assertions.isFalse(rig.host:getMetrics().resultReady)
+			rig.fireHeartbeat()
+			assertions.equal(#attempts, 3)
+			assertions.isTrue(rig.host:getMetrics().resultReady)
+			assertions.equal(#rig.playable.tutorialRefreshes, 1)
+			rig.fireHeartbeat()
+			assertions.equal(#attempts, 3)
+			assertions.equal(attempts[3].userId, 101)
+			assertions.equal(attempts[3].evidence.matchId, rig.ticket.matchId)
+			assertions.equal(attempts[3].evidence.mapId, rig.ticket.mapId)
+			assertions.equal(attempts[3].evidence.difficultyId, rig.ticket.difficultyId)
+			assertions.isTrue(attempts[3].evidence.authenticatedParticipant)
+			assertions.isFalse(attempts[3].evidence.spectator)
+			local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+			assertions.isNil(snapshot.rematch)
+			local rematch = rig.host:voteRematch(rig.players[1], {
+				transactionId = "transaction:tutorial-rematch-blocked",
+				matchId = snapshot.matchId,
+				observedRevision = snapshot.revision,
+				observedRematchRevision = 1,
+				approve = true,
+			})
+			assertions.isFalse(rematch.ok)
+			assertions.equal(rematch.error.code, "REMATCH_UNAVAILABLE")
+			assertions.equal(#rig.rematchCalls, 0)
+			rig.lifecycle.shutdown()
+		end
+	),
+	TestHarness.case("ends a solo Endless return through one durable v2 result", function(assertions)
+		local rig = makeRig(assertions, { 101 })
+		rig.ticket.mapId = "map:backyard-garden-v1"
+		rig.ticket.difficultyId = "difficulty:endless-v1"
+		rig.setTerminationEvidence(endlessResultEvidence(rig))
+		rig.fireHeartbeat()
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		local requested = rig.host:requestReturn(rig.players[1], {
+			transactionId = "transaction:endless-return",
+			matchId = snapshot.matchId,
+			observedRevision = snapshot.revision,
+		})
+		assertions.isTrue(requested.ok)
+		assertions.equal(#rig.terminationReasons, 1)
+		assertions.equal(rig.terminationReasons[1], "PlayerEnded")
+		assertions.equal(#rig.ledgerCreates, 1)
+		local record = rig.ledgerCreates[1]
+		assertions.equal(record.version, 2)
+		assertions.equal(record.modeKind, "Endless")
+		assertions.equal(record.outcome, "Defeat")
+		assertions.equal(record.highestCompletedWave, 27)
+		assertions.equal(record.elapsedSeconds, 1_234)
+		assertions.equal(record.seed, 90_001)
+		assertions.equal(record.contentVersion, 1)
+		assertions.equal(record.terminationReason, "PlayerEnded")
+		rig.flushReturns()
 		rig.lifecycle.shutdown()
 	end),
 	TestHarness.case("renews an active result intent at a bounded cadence", function(assertions)
@@ -2166,6 +2311,20 @@ return TestHarness.suite("ticketed Match travel host composition", {
 			assertions.equal(rig.dependencyCleanupCount(), 1)
 		end
 	),
+	TestHarness.case("cleanup consumes terminal evidence before writing a failure tombstone", function(assertions)
+		local rig = makeRig(assertions, { 101 })
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+
+		assertions.equal(#rig.ledgerCreates, 0)
+		assertions.equal(#rig.ledgerFailures, 0)
+		assertions.isTrue(rig.host:cleanup().ok)
+		assertions.equal(#rig.ledgerCreates, 1)
+		assertions.equal(#rig.ledgerFailures, 0)
+		assertions.isTrue(rig.host:getMetrics().resultCreated)
+		assertions.isFalse(rig.host:getMetrics().resultFailed)
+		assertions.equal(#rig.terminationReasons, 0)
+	end),
 	TestHarness.case("durably fails an unfinished result intent before terminal cleanup", function(assertions)
 		local rig = makeRig(assertions, { 101 })
 		rig.fireHeartbeat()

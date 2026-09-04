@@ -280,7 +280,7 @@ end
 
 local function banner(rig: Rig, revision: number): any
 	return {
-		bannerId = "banner:starter",
+		bannerId = "banner:garden-v1",
 		bannerVersion = 1,
 		displayName = "Starter Tower Chest",
 		available = true,
@@ -373,7 +373,7 @@ local function pullReceipt(rig: Rig, request: RequestRecord, quantity: number, r
 	local cost = if quantity == 10 then 900 else 100
 	return {
 		transactionId = request.payload.transactionId,
-		bannerId = "banner:starter",
+		bannerId = "banner:garden-v1",
 		bannerVersion = 1,
 		quantity = quantity,
 		cost = cost,
@@ -482,6 +482,10 @@ return TestHarness.suite("LobbyController", {
 			assertions.equal(state.inventory[1].displayName, rig.configuration.single.displayName)
 			assertions.equal(state.inventory[1].copies, 1)
 			assertions.equal((state.banner :: LobbyUiModel.Banner).onePullCost, 100)
+			assertions.equal(
+				(state.banner :: LobbyUiModel.Banner).policyDisclosure,
+				"Earn-only Gold. No Robux or paid currency conversion."
+			)
 			assertions.equal(
 				(state.banner :: LobbyUiModel.Banner).odds[2].displayName,
 				rig.configuration.splash.displayName
@@ -750,4 +754,46 @@ return TestHarness.suite("LobbyController", {
 			assertions.equal(#rig.renders, renderCount)
 		end
 	),
+
+	TestHarness.case("projects and mutates only authoritative tutorial state", function(assertions)
+		local rig = makeRig(assertions)
+		local readyProfile = profile(7)
+		readyProfile.tutorial = {
+			version = 1,
+			firstJoin = false,
+			tutorialCompleted = false,
+			tutorialStep = 1,
+			attempt = 1,
+			skipped = false,
+		}
+		respond(rig, LobbyProtocol.ENDPOINTS.GET_PROFILE, true, readyProfile)
+		respond(rig, LobbyProtocol.ENDPOINTS.GET_INVENTORY, true, inventory(rig, 7))
+		respond(rig, LobbyProtocol.ENDPOINTS.GET_BANNER, true, banner(rig, 7))
+		local guidance = latest(rig).tutorialGuidance
+		assertions.isNotNil(guidance)
+		assertions.equal((guidance :: any).step, 1)
+		assertions.isTrue((guidance :: any).canAdvance)
+
+		dispatch(rig, { kind = "AdvanceTutorial" })
+		local request = findRequest(rig, LobbyProtocol.ENDPOINTS.ADVANCE_TUTORIAL) :: RequestRecord
+		assertions.isNotNil(request)
+		assertions.equal(request.payload.expectedRevision, 7)
+		assertions.isNil(request.payload.tutorialStep)
+		respond(rig, LobbyProtocol.ENDPOINTS.ADVANCE_TUTORIAL, true, {
+			transactionId = request.payload.transactionId,
+			changed = true,
+			revision = 8,
+			tutorial = {
+				version = 1,
+				firstJoin = false,
+				tutorialCompleted = false,
+				tutorialStep = 2,
+				attempt = 1,
+				skipped = false,
+			},
+		})
+		assertions.equal((latest(rig).tutorialGuidance :: any).step, 2)
+		assertions.equal(latest(rig).profileRevision, 8)
+		shutdown(rig)
+	end),
 })

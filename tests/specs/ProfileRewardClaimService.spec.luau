@@ -59,6 +59,20 @@ local function twoMemberResult(resultId: string): any
 	return value
 end
 
+local function endlessResultRecord(resultId: string, waveNumber: number): any
+	local value = resultRecord(resultId, "Defeat", { wavesCompleted = waveNumber })
+	value.version = 2
+	value.mapId = "map:backyard-garden-v1"
+	value.difficultyId = "difficulty:endless-v1"
+	value.modeKind = "Endless"
+	value.highestCompletedWave = waveNumber
+	value.elapsedSeconds = 3_600
+	value.seed = 77_031
+	value.contentVersion = 1
+	value.terminationReason = "PlayerEnded"
+	return value
+end
+
 local function stack(assertions, initialNow: number?)
 	local configuration = success(assertions, ConfigurationValidator.validate(ConfigurationFixtures.validSources()))
 	local profileStore = IsolatedProfileStore.new()
@@ -146,6 +160,25 @@ return TestHarness.suite("durable exactly-once profile reward claims", {
 		assertions.equal(profile.stats.matchesPlayed, 3)
 		assertions.equal(profile.stats.victories, 2)
 		assertions.equal(profile.stats.defeats, 1)
+	end),
+	TestHarness.case("grants the capped Endless award exactly once through the existing receipt", function(assertions)
+		local context = stack(assertions)
+		local resultId = "result:99999999-endless-capped"
+		success(assertions, context.pendingResults:reserve({ USER_ID }, resultId, 1_000))
+		success(assertions, context.ledger:create(endlessResultRecord(resultId, 10_000)))
+		local first = success(assertions, context.claims:claim(USER_ID, resultId))
+		assertions.equal(first.status, "Granted")
+		assertions.equal(first.persistentGoldAwarded, 300)
+		assertions.equal(first.firstClearBonus, 0)
+		assertions.equal(success(assertions, context.profile:read(USER_ID)).gold, 2_300)
+
+		local retry = success(assertions, context.claims:claim(USER_ID, resultId))
+		assertions.equal(retry.status, "Granted")
+		assertions.equal(retry.persistentGoldAwarded, 300)
+		local finalProfile = success(assertions, context.profile:read(USER_ID))
+		assertions.equal(finalProfile.gold, 2_300)
+		assertions.equal(finalProfile.stats.matchesPlayed, 1)
+		assertions.equal(finalProfile.stats.defeats, 1)
 	end),
 	TestHarness.case("keeps a claim pending across a profile-save failure and never grants twice", function(assertions)
 		local context = stack(assertions)

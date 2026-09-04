@@ -3,6 +3,8 @@
 -- These are queue identities and defaults, not roster state. Membership,
 -- captaincy, configuration revisions, locks, and travel status remain owned by
 -- the Lobby server.
+local ContentSelection = require(script.Parent.ContentSelection)
+
 local LobbyQueues = table.freeze({
 	version = 1,
 	ordered = table.freeze({
@@ -11,8 +13,8 @@ local LobbyQueues = table.freeze({
 			worldPartName = "ATDSquadQueueZone",
 			worldDisplayName = "ATDSquadQueueDisplay",
 			configuration = table.freeze({
-				mapId = "map:phase07-graybox",
-				difficultyId = "difficulty:local",
+				mapId = ContentSelection.RELEASE_MAP_ID,
+				difficultyId = ContentSelection.EASY_DIFFICULTY_ID,
 				privacy = "Public",
 				maxPlayers = 4,
 			}),
