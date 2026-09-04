@@ -64,6 +64,7 @@ type Rig = {
 	terminalFailuresRemaining: number,
 	terminalAttemptCount: number,
 	reacquireFailuresRemaining: number,
+	reacquireYieldsRemaining: number,
 	pendingReleaseFailuresRemaining: number,
 	routeClearFailuresRemaining: number,
 	tickets: { any },
@@ -80,7 +81,10 @@ type Rig = {
 	teleportCount: number,
 	terminalReasons: { string },
 	finishCount: number,
+	finishFailuresRemaining: number,
 	mutatePreparedLoadout: boolean,
+	yieldPrepare: boolean,
+	yieldComplete: boolean,
 	clock: { now: number },
 	present: { [number]: boolean },
 	departDuringReacquireUserId: number?,
@@ -98,6 +102,7 @@ local function makeRig(assertions: Assertions, developmentSimulation: boolean?):
 		terminalFailuresRemaining = 0,
 		terminalAttemptCount = 0,
 		reacquireFailuresRemaining = 0,
+		reacquireYieldsRemaining = 0,
 		pendingReleaseFailuresRemaining = 0,
 		routeClearFailuresRemaining = 0,
 		tickets = {},
@@ -114,7 +119,10 @@ local function makeRig(assertions: Assertions, developmentSimulation: boolean?):
 		teleportCount = 0,
 		terminalReasons = {},
 		finishCount = 0,
+		finishFailuresRemaining = 0,
 		mutatePreparedLoadout = false,
+		yieldPrepare = false,
+		yieldComplete = false,
 		clock = { now = 1_000 },
 		present = { [10] = true, [20] = true },
 		departDuringReacquireUserId = nil,
@@ -169,6 +177,9 @@ local function makeRig(assertions: Assertions, developmentSimulation: boolean?):
 	local transfer: any = {}
 	function transfer:prepare(_users: { number }): any
 		table.insert(rig.events, "profile-freeze")
+		if rig.yieldPrepare then
+			coroutine.yield()
+		end
 		rig.transferState = "Released"
 		local first = loadout(10, 6)
 		if rig.mutatePreparedLoadout then
@@ -181,6 +192,10 @@ local function makeRig(assertions: Assertions, developmentSimulation: boolean?):
 		return Result.ok(true)
 	end
 	function transfer:recoverCommitted(userId: number): any
+		if rig.reacquireYieldsRemaining > 0 then
+			rig.reacquireYieldsRemaining -= 1
+			coroutine.yield()
+		end
 		table.insert(rig.reacquired, userId)
 		if rig.reacquireFailuresRemaining > 0 then
 			rig.reacquireFailuresRemaining -= 1
@@ -210,6 +225,9 @@ local function makeRig(assertions: Assertions, developmentSimulation: boolean?):
 	end
 	function queue:completeStart(_queueId: string): any
 		rig.completeCount += 1
+		if rig.yieldComplete then
+			coroutine.yield()
+		end
 		return if rig.failComplete then Result.err({ code = "INJECTED" }) else Result.ok(true)
 	end
 	local routes: any = {}
@@ -264,6 +282,10 @@ local function makeRig(assertions: Assertions, developmentSimulation: boolean?):
 	end
 	function teleport:finish(_ticketId: string): any
 		rig.finishCount += 1
+		if rig.finishFailuresRemaining > 0 then
+			rig.finishFailuresRemaining -= 1
+			return Result.err({ code = "INJECTED" })
+		end
 		return Result.ok(true)
 	end
 	local created = LobbyTravelCoordinator.new({
@@ -332,6 +354,74 @@ return TestHarness.suite("Lobby squad travel coordinator", {
 		assertions.equal((summary :: any).phase, "Initialized")
 	end),
 
+	TestHarness.case("joins a yielding start worker before shutdown recovery and cleanup", function(assertions)
+		local rig = makeRig(assertions)
+		rig.yieldPrepare = true
+		assertions.isTrue(rig.coordinator:beginStart(locked()))
+		assertions.equal(#rig.scheduled, 1)
+		local callback = table.remove(rig.scheduled, 1)
+		local worker = coroutine.create(callback)
+		local resumed, resumeError = coroutine.resume(worker)
+		if not resumed then
+			error(resumeError, 0)
+		end
+		assertions.equal(coroutine.status(worker), "suspended")
+		assertions.equal(rig.pendingReserved, 1)
+		assertions.equal(rig.transferState, "Owned")
+
+		local blocked = rig.coordinator:cleanup()
+		assertions.isFalse(blocked.ok)
+		assertions.equal(blocked.error.code, "BUSY")
+		assertions.equal(rig.cancelledIntents, 0)
+		assertions.equal(rig.pendingReleased, 0)
+		assertions.equal(rig.recoverCount, 0)
+		assertions.isFalse(rig.coordinator:beginStart(locked()))
+
+		resumed, resumeError = coroutine.resume(worker)
+		if not resumed then
+			error(resumeError, 0)
+		end
+		assertions.equal(coroutine.status(worker), "dead")
+		assertions.equal(rig.transferState, "RolledBack")
+		assertions.equal(rig.cancelledIntents, 1)
+		assertions.equal(rig.pendingReleased, 2)
+		assertions.equal(rig.recoverCount, 1)
+		assertions.equal(#rig.tickets, 0)
+		assertions.equal(rig.teleportCount, 0)
+		assertions.isTrue(rig.coordinator:cleanup().ok)
+		assertions.isTrue(rig.coordinator:getMetrics().cleaned)
+	end),
+
+	TestHarness.case("joins a yielding maintenance step before clearing its context", function(assertions)
+		local rig = makeRig(assertions)
+		rig.failComplete = true
+		assertions.isTrue(rig.coordinator:beginStart(locked()))
+		runScheduled(assertions, rig)
+		assertions.equal(
+			(rig.coordinator:getContextSummary("queue:backyard-squad") :: any).phase,
+			"QueueCompletionPending"
+		)
+
+		rig.failComplete = false
+		rig.yieldComplete = true
+		local progressed = nil
+		local worker = coroutine.create(function()
+			progressed = rig.coordinator:step()
+		end)
+		assertions.isTrue(coroutine.resume(worker))
+		assertions.equal(coroutine.status(worker), "suspended")
+		local blocked = rig.coordinator:cleanup()
+		assertions.isFalse(blocked.ok)
+		assertions.equal(blocked.error.code, "BUSY")
+		assertions.isNotNil(rig.coordinator:getContextSummary("queue:backyard-squad"))
+
+		assertions.isTrue(coroutine.resume(worker))
+		assertions.equal(coroutine.status(worker), "dead")
+		assertions.equal(progressed, 1)
+		assertions.equal((rig.coordinator:getContextSummary("queue:backyard-squad") :: any).phase, "Initialized")
+		assertions.isTrue(rig.coordinator:cleanup().ok)
+	end),
+
 	TestHarness.case(
 		"retries queue finalization and removes an all-departed enrollment only after success",
 		function(assertions)
@@ -351,6 +441,37 @@ return TestHarness.suite("Lobby squad travel coordinator", {
 			assertions.equal(rig.coordinator:step(), 2)
 			assertions.equal(rig.completeCount, 2)
 			assertions.isNil(rig.coordinator:getContextSummary("queue:backyard-squad"))
+		end
+	),
+
+	TestHarness.case(
+		"finishes an initialized original roster after a transient failure even when a member rejoins",
+		function(assertions)
+			local rig = makeRig(assertions)
+			assertions.isTrue(rig.coordinator:beginStart(locked()))
+			runScheduled(assertions, rig)
+			assertions.equal((rig.coordinator:getContextSummary("queue:backyard-squad") :: any).phase, "Initialized")
+
+			rig.present[10] = false
+			assertions.isTrue(rig.coordinator:removePlayer(10))
+			rig.present[10] = true
+			assertions.equal(rig.coordinator:step(), 0)
+			assertions.equal(rig.finishCount, 0)
+			assertions.isNotNil(rig.coordinator:getContextSummary("queue:backyard-squad"))
+
+			rig.present[20] = false
+			assertions.isTrue(rig.coordinator:removePlayer(20))
+			rig.finishFailuresRemaining = 1
+			assertions.equal(rig.coordinator:step(), 0)
+			assertions.equal(rig.finishCount, 1)
+			assertions.isNotNil(rig.coordinator:getContextSummary("queue:backyard-squad"))
+			assertions.isTrue(rig.coordinator:isUserTravelPending(10))
+
+			assertions.equal(rig.coordinator:step(), 1)
+			assertions.equal(rig.finishCount, 2)
+			assertions.isNil(rig.coordinator:getContextSummary("queue:backyard-squad"))
+			assertions.isFalse(rig.coordinator:isUserTravelPending(10))
+			assertions.isFalse(rig.coordinator:isUserTravelPending(20))
 		end
 	),
 
@@ -426,6 +547,40 @@ return TestHarness.suite("Lobby squad travel coordinator", {
 			assertions.equal(rig.terminalReasons[#rig.terminalReasons], "TELEPORT_ROLLBACK")
 		end
 	),
+	TestHarness.case("joins a yielding rollback callback before shutdown cleanup", function(assertions)
+		local rig = makeRig(assertions)
+		assertions.isTrue(rig.coordinator:beginStart(locked()))
+		runScheduled(assertions, rig)
+		assertions.equal(rig.transferState, "Committed")
+		rig.reacquireYieldsRemaining = 1
+
+		local callback = coroutine.create(function()
+			rig.coordinator:onRollback({
+				ticketId = rig.tickets[1].ticketId,
+				failedUserIds = { 10, 20 },
+				presentUserIds = { 10, 20 },
+				departedUserIds = {},
+				partial = false,
+			})
+		end)
+		assertions.isTrue(coroutine.resume(callback))
+		assertions.equal(coroutine.status(callback), "suspended")
+		assertions.equal(#rig.reacquired, 0)
+
+		local blocked = rig.coordinator:cleanup()
+		assertions.isFalse(blocked.ok)
+		assertions.equal(blocked.error.code, "BUSY")
+		assertions.equal(rig.recoverCount, 0)
+		assertions.equal(rig.pendingReleased, 0)
+
+		assertions.isTrue(coroutine.resume(callback))
+		assertions.equal(coroutine.status(callback), "dead")
+		assertions.equal(#rig.reacquired, 2)
+		assertions.equal(rig.pendingReleased, 2)
+		assertions.equal(rig.recoverCount, 1)
+		assertions.isTrue(rig.coordinator:cleanup().ok)
+		assertions.isTrue(rig.coordinator:getMetrics().cleaned)
+	end),
 	TestHarness.case("retries committed profile reacquisition before exposing a recovered queue", function(assertions)
 		local rig = makeRig(assertions)
 		assertions.isTrue(rig.coordinator:beginStart(locked()))
@@ -616,6 +771,29 @@ return TestHarness.suite("Lobby squad travel coordinator", {
 		assertions.equal(#rig.tickets, 1)
 		assertions.isTrue(rig.coordinator:resolveTicket(rig.tickets[1].ticketId))
 		assertions.isFalse(rig.coordinator:isUserTravelPending(10))
+	end),
+
+	TestHarness.case("retains partial ticket resolution until teleport cleanup succeeds", function(assertions)
+		local rig = makeRig(assertions)
+		rig.mode = "PartialFailure"
+		assertions.isTrue(rig.coordinator:beginStart(locked()))
+		runScheduled(assertions, rig)
+		local ticketId = rig.tickets[1].ticketId
+		rig.finishFailuresRemaining = 1
+
+		assertions.isFalse(rig.coordinator:resolveTicket(ticketId))
+		assertions.equal(rig.finishCount, 1)
+		assertions.isNotNil(rig.coordinator:getContextSummary("queue:backyard-squad"))
+		assertions.isTrue(rig.coordinator:isUserTravelPending(10))
+		assertions.equal(rig.pendingReleased, 0)
+		assertions.equal(rig.cancelledIntents, 0)
+
+		assertions.isTrue(rig.coordinator:resolveTicket(ticketId))
+		assertions.equal(rig.finishCount, 2)
+		assertions.isNil(rig.coordinator:getContextSummary("queue:backyard-squad"))
+		assertions.isFalse(rig.coordinator:isUserTravelPending(10))
+		assertions.equal(rig.pendingReleased, 0)
+		assertions.equal(rig.cancelledIntents, 0)
 	end),
 
 	TestHarness.case(

@@ -118,16 +118,26 @@ return TestHarness.suite("playable Match semantic input map", {
 				"Ready"
 			)
 			inputMap:setContext("Placement")
-			assertions.equal(
-				inputMap:handleRaw({ keyCode = "KeypadEnter", inputType = "Keyboard" }, false).value.kind,
-				"Confirm"
-			)
+			local keypadConfirm = inputMap:handleRaw({
+				keyCode = "KeypadEnter",
+				inputType = "Keyboard",
+				position = Vector2.zero,
+			}, false).value
+			assertions.equal(keypadConfirm.kind, "Confirm")
+			assertions.isNil(keypadConfirm.screenPosition)
+			local returnConfirm = inputMap:handleRaw({
+				keyCode = "Return",
+				inputType = "Keyboard",
+				position = Vector2.zero,
+			}, false).value
+			assertions.equal(returnConfirm.kind, "Confirm")
+			assertions.isNil(returnConfirm.screenPosition)
 			inputMap:setContext("Results")
 			assertions.equal(
 				inputMap:handleRaw({ keyCode = "KeypadEnter", inputType = "Keyboard" }, false).value.kind,
 				"Replay"
 			)
-			assertions.equal(#actions, 3)
+			assertions.equal(#actions, 4)
 		end)
 	end),
 
@@ -158,10 +168,13 @@ return TestHarness.suite("playable Match semantic input map", {
 				inputMap:handleRaw({ keyCode = "ButtonR2", inputType = "Gamepad1" }, false).value.kind,
 				"Rotate"
 			)
-			assertions.equal(
-				inputMap:handleRaw({ keyCode = "ButtonA", inputType = "Gamepad1" }, false).value.kind,
-				"Confirm"
-			)
+			local gamepadConfirm = inputMap:handleRaw({
+				keyCode = "ButtonA",
+				inputType = "Gamepad1",
+				position = Vector2.zero,
+			}, false).value
+			assertions.equal(gamepadConfirm.kind, "Confirm")
+			assertions.isNil(gamepadConfirm.screenPosition)
 			assertions.equal(
 				inputMap:handleRaw({ keyCode = "ButtonB", inputType = "Gamepad1" }, false).value.kind,
 				"Cancel"

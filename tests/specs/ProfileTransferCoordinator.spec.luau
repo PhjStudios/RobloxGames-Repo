@@ -217,6 +217,40 @@ return TestHarness.suite("atomic profile ownership transfer", {
 		assertions.isTrue(state.owned[101])
 		assertions.isTrue(state.owned[202])
 	end),
+	TestHarness.case("rejects commit while an interleaved rollback still owns recovery", function(assertions)
+		local adapter, state = owner()
+		local serviceValue = service(assertions, adapter)
+		local handle = serviceValue:prepare({ 101, 202 }).value.handle
+		local originalLoad = adapter.load
+		local shouldYield = true
+		function adapter:load(userId)
+			if userId == 202 and shouldYield then
+				shouldYield = false
+				coroutine.yield()
+			end
+			return originalLoad(self, userId)
+		end
+		local rollbackResult: any = nil
+		local worker = coroutine.create(function()
+			rollbackResult = serviceValue:rollback(handle)
+		end)
+		local resumed, resumeError = coroutine.resume(worker)
+		assertions.isTrue(resumed)
+		assertions.isNil(resumeError)
+		assertions.equal(coroutine.status(worker), "suspended")
+
+		local commit = serviceValue:commit(handle)
+		assertions.isFalse(commit.ok)
+		assertions.equal(commit.error.code, "BUSY")
+
+		resumed, resumeError = coroutine.resume(worker)
+		assertions.isTrue(resumed)
+		assertions.isNil(resumeError)
+		assertions.equal(coroutine.status(worker), "dead")
+		assertions.isTrue(rollbackResult.ok)
+		assertions.isTrue(state.owned[101])
+		assertions.isTrue(state.owned[202])
+	end),
 	TestHarness.case("keeps rollback idempotent after background recovery completes", function(assertions)
 		local adapter, state = owner()
 		local serviceValue = service(assertions, adapter)

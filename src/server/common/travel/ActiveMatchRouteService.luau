@@ -36,6 +36,10 @@ type ServiceData = { adapter: Adapter }
 local VERSION = 1
 local MAX_ROUTE_SECONDS = 2_700
 local MAX_TOKEN_BYTES = 200
+-- MemoryStoreHashMap UpdateAsync treats a nil transform result as an aborted
+-- write, not a deletion. A deliberately invalid value is therefore the atomic
+-- cleared state: readers ignore it and a later create may replace it.
+local CLEARED_ROUTE_TOMBSTONE = table.freeze({ cleared = true })
 local ROUTE_FIELDS = table.freeze({
 	version = true,
 	revision = true,
@@ -206,28 +210,31 @@ function Methods.bindDestination(
 		routeKey(id),
 		MAX_ROUTE_SECONDS,
 		function(current)
+			transformError = nil
+			applied = false
 			local route = validate(current)
 			if route == nil or route.userId ~= id then
 				transformError = "NOT_FOUND"
-				return current
+				return nil
 			end
 			if route.expiresAt <= (currentTime :: number) then
 				transformError = "EXPIRED"
-				return current
+				return nil
 			end
 			if route.matchId ~= expectedMatchId then
 				transformError = "CONFLICT"
-				return current
+				return nil
 			end
 			if route.destinationJobId ~= nil then
 				if route.destinationJobId ~= destinationJobId then
 					transformError = "CONFLICT"
+					return nil
 				end
 				return route
 			end
 			if route.revision >= Validation.MAX_SAFE_INTEGER then
 				transformError = "CONFLICT"
-				return route
+				return nil
 			end
 			local replacement = clone(route)
 			replacement.revision += 1
@@ -269,13 +276,17 @@ function Methods.create(self: Service, routeValue: unknown, nowValue: unknown): 
 		routeKey(route.userId),
 		route.expiresAt - (nowValue :: number),
 		function(current)
+			-- UpdateAsync may retry this transform. These outcomes describe only
+			-- the final invocation whose value was accepted by the store.
+			applied = false
+			conflict = false
 			local existing = validate(current)
 			if existing ~= nil and existing.expiresAt > (nowValue :: number) then
 				if existing.routeId == route.routeId and existing.matchId == route.matchId then
 					return existing
 				end
 				conflict = true
-				return existing
+				return nil
 			end
 			applied = true
 			return route
@@ -331,7 +342,6 @@ function Methods.find(self: Service, userIdValue: unknown, nowValue: unknown): R
 	end
 	local route = validate(stored)
 	if route == nil or route.userId ~= id or route.expiresAt <= (nowValue :: number) then
-		pcall(data.adapter.removeAsync, data.adapter, routeKey(id))
 		return Result.ok(nil)
 	end
 	if route.destinationJobId == nil then
@@ -342,8 +352,9 @@ end
 
 -- Atomically removes and returns the exact current route for a rematch. Unlike
 -- find followed by clear, a transient read cannot erase an unknown prior route.
--- If UpdateAsync loses its response after running the transform, the captured
--- route is still safe to restore idempotently during rematch recovery.
+-- An unproven UpdateAsync response always fails closed. The transform may have
+-- committed before the response was lost, so returning the captured route would
+-- let a caller reuse a route that may already have been consumed.
 function Methods.takeForMatch(
 	self: Service,
 	userIdValue: unknown,
@@ -365,24 +376,28 @@ function Methods.takeForMatch(
 	local previous: Route? = nil
 	local transformError: ErrorCode? = nil
 	local called = pcall(data.adapter.updateAsync, data.adapter, routeKey(id), MAX_ROUTE_SECONDS, function(current)
+		-- UpdateAsync may invoke the transform more than once. Only the final
+		-- invocation describes the value whose write was accepted.
+		previous = nil
+		transformError = nil
 		local route = validate(current)
 		if route == nil or route.userId ~= id or route.destinationJobId == nil then
 			transformError = "NOT_FOUND"
-			return current
+			return nil
 		elseif route.expiresAt <= (nowValue :: number) then
 			transformError = "EXPIRED"
-			return current
+			return nil
 		elseif route.matchId ~= expectedMatchId then
 			transformError = "CONFLICT"
-			return current
+			return nil
 		end
 		previous = route
-		return nil
+		return CLEARED_ROUTE_TOMBSTONE
 	end)
-	if previous ~= nil then
-		return Result.ok(previous :: Route)
-	elseif not called then
+	if not called then
 		return failure("STORE_UNAVAILABLE", "takeForMatch")
+	elseif previous ~= nil then
+		return Result.ok(previous :: Route)
 	elseif transformError ~= nil then
 		return failure(transformError :: ErrorCode, "takeForMatch")
 	end
@@ -398,12 +413,14 @@ function Methods.clear(self: Service, userIdValue: unknown, matchIdValue: unknow
 	end
 	local removed = false
 	local called = pcall(data.adapter.updateAsync, data.adapter, routeKey(id), MAX_ROUTE_SECONDS, function(current)
+		-- Only the final retry attempt determines whether this call removed it.
+		removed = false
 		local route = validate(current)
 		if route == nil or route.matchId ~= expectedMatchId then
-			return current
+			return nil
 		end
 		removed = true
-		return nil
+		return CLEARED_ROUTE_TOMBSTONE
 	end)
 	if not called then
 		return failure("STORE_UNAVAILABLE", "clear")

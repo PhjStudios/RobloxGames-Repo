@@ -96,6 +96,7 @@ type PlayerSession = {
 	importantSaveWorkerRunning: boolean,
 	autosaveQueued: boolean,
 	releaseRequested: boolean,
+	transferPending: boolean,
 	departed: boolean,
 	consecutiveSaveFailures: number,
 	nextSaveAttemptAt: number,
@@ -438,6 +439,7 @@ function Methods.beginTransfer(self: Service, userIdValue: unknown): Result.Resu
 	end
 	session.state = "Releasing"
 	session.releaseRequested = true
+	session.transferPending = true
 	return Result.ok(session.profile)
 end
 
@@ -459,6 +461,7 @@ function Methods.cancelTransfer(self: Service, userIdValue: unknown): Result.Res
 		return errorResult("INVALID_STATE", "cancelTransfer", nil)
 	end
 	session.releaseRequested = false
+	session.transferPending = false
 	session.state = "Ready"
 	return Result.ok(true)
 end
@@ -479,6 +482,12 @@ function Methods.load(self: Service, userIdValue: unknown): Result.Result<Profil
 			if not released.ok then
 				return errorResult(released.error.code, "load", released.error.reason)
 			end
+		elseif existing.state == "Releasing" and not existing.hasLock and existing.transferPending then
+			-- A successful travel release deliberately leaves a non-writable local
+			-- sentinel while the Player is still present. Only an explicit recovery
+			-- load may consume it; the automatic Player/heartbeat loader sees the
+			-- existing session and therefore cannot reacquire the lease mid-teleport.
+			data.sessions[userId] = nil
 		else
 			return errorResult("INVALID_STATE", "load", nil)
 		end
@@ -495,6 +504,7 @@ function Methods.load(self: Service, userIdValue: unknown): Result.Result<Profil
 		importantSaveWorkerRunning = false,
 		autosaveQueued = false,
 		releaseRequested = false,
+		transferPending = false,
 		departed = false,
 		consecutiveSaveFailures = 0,
 		nextSaveAttemptAt = 0,
@@ -762,12 +772,16 @@ save = function(
 		return errorResult("SESSION_LOST", if release then "release" else "flush", nil)
 	end
 	if release then
+		local retainTransferSentinel = session.transferPending and not session.departed and not data.closing
 		session.hasLock = false
 		session.dirty = false
 		session.releaseRequested = false
 		session.consecutiveSaveFailures = 0
 		session.nextSaveAttemptAt = 0
-		if data.sessions[userId] == session then
+		if retainTransferSentinel then
+			session.profile = nil
+			session.migrationOutcome = nil
+		elseif data.sessions[userId] == session then
 			data.sessions[userId] = nil
 		end
 	else
@@ -817,6 +831,9 @@ function Methods.release(self: Service, userIdValue: unknown): Result.Result<boo
 		return Result.ok(false)
 	end
 	if session.state == "Releasing" and not session.hasLock then
+		if (session.departed or data.closing) and data.sessions[userId] == session then
+			data.sessions[userId] = nil
+		end
 		return Result.ok(false)
 	end
 	session.state = "Releasing"

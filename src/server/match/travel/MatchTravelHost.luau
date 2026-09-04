@@ -42,6 +42,8 @@ export type Environment = {
 	connectPlayerAdded: ((unknown) -> ()) -> unknown,
 	connectPlayerRemoving: ((unknown) -> ()) -> unknown,
 	connectHeartbeat: (() -> ()) -> unknown,
+	scheduleReturn: (() -> ()) -> unknown,
+	scheduleRematch: (() -> ()) -> unknown,
 	destinationJobId: string,
 	lobbyPlaceId: number,
 	generateReturnId: () -> unknown,
@@ -64,6 +66,7 @@ export type Dependencies = {
 	stopPlayable: (unknown) -> unknown,
 	createRematch: ({ number }, unknown) -> unknown,
 	stepDependencies: () -> unknown,
+	prepareCleanupDependencies: () -> unknown,
 	cleanupDependencies: () -> unknown,
 	environment: Environment,
 }
@@ -89,6 +92,14 @@ type PendingArrival = { player: unknown, routing: TravelProtocol.RoutingData, qu
 type ClaimedArrival = { player: unknown, ticket: any, outcome: any, queuedAt: number }
 type DepartedCleanup = { userId: number, matchId: string }
 type StoredReceipt = { userId: number, operation: "return" | "rematch", receipt: MatchTravelProtocol.MutationReceipt }
+type ReturnWork = {
+	ticket: any,
+	userIds: { number },
+	players: { unknown },
+	handles: { unknown },
+	running: boolean,
+	rollbackPending: boolean,
+}
 type HostData = {
 	dependencies: Dependencies,
 	state: "Constructed" | "Initialized" | "Started" | "Shutdown" | "Failed",
@@ -109,7 +120,13 @@ type HostData = {
 	connections: { any },
 	revision: number,
 	routesBound: boolean,
+	stepRunning: boolean,
+	ingressOperationsRunning: number,
+	publicationsRunning: number,
 	returnBusy: boolean,
+	activeReturnWork: ReturnWork?,
+	shutdownRequested: boolean,
+	dependencyCleanupJoining: boolean,
 	resultCreated: boolean,
 	resultFailed: boolean,
 	resultFailureReason: string?,
@@ -132,6 +149,8 @@ local INTENT_RENEWAL_SECONDS = 60
 local RETURN_INIT_TIMEOUT_SECONDS = 30
 local MAX_RECEIPTS = 32
 local SHUTDOWN_DURABILITY_ATTEMPTS = 3
+local SHUTDOWN_JOIN_SECONDS = 8
+local SHUTDOWN_POLL_SECONDS = 0.05
 
 local Methods = {}
 Methods.__index = Methods
@@ -478,7 +497,7 @@ local function processClaimed(data: HostData, claimed: ClaimedArrival, currentTi
 end
 
 local function enqueue(data: HostData, player: unknown)
-	if data.cleaned or not isLive(data, player) then
+	if data.cleaned or data.shutdownRequested or not isLive(data, player) then
 		return
 	end
 	local readCalled, rawRouting = pcall(data.dependencies.environment.getRoutingData, player)
@@ -526,9 +545,17 @@ local function readyGateOpen(data: HostData, currentTime: number): boolean
 	return true
 end
 
-local function createRematch(data: HostData, currentTime: number)
+local function createRematch(data: HostData)
 	local roster = eligibleRematchRoster(data)
-	if data.rematch ~= nil or data.ticket == nil or roster == nil then
+	if
+		data.rematch ~= nil
+		or data.ticket == nil
+		or roster == nil
+		or data.shutdownRequested
+		or data.returnBusy
+		or data.activeReturnWork ~= nil
+		or next(data.pendingReturnsByUserId) ~= nil
+	then
 		return
 	end
 	local created = RematchCoordinator.new(
@@ -541,14 +568,12 @@ local function createRematch(data: HostData, currentTime: number)
 			return if called then value else nil
 		end,
 		{
-			clock = function()
-				return currentTime
-			end,
+			clock = data.dependencies.environment.now,
+			schedule = data.dependencies.environment.scheduleRematch,
 		}
 	)
-	if created.ok then
+	if created.ok and created.value:begin().ok then
 		data.rematch = created.value
-		data.rematch:begin()
 		bump(data)
 	end
 end
@@ -645,22 +670,22 @@ local function markResultFailed(data: HostData, reason: string, currentTime: num
 	return true
 end
 
-local function processResults(data: HostData, currentTime: number)
+local function processResults(data: HostData, currentTime: number): boolean
 	local playable = data.playable
 	local ticket = data.ticket
 	if playable == nil or ticket == nil then
-		return
+		return false
 	end
 	if data.resultFailureReason ~= nil and not data.resultFailed then
 		markResultFailed(data, data.resultFailureReason, currentTime)
-		return
+		return false
 	elseif data.resultFailed then
 		applyResultFailureViews(data)
-		return
+		return false
 	end
 	local evidenceCalled, evidenceResult = pcall(playable.getResultEvidence, playable)
 	if not evidenceCalled or not resultOk(evidenceResult) then
-		return
+		return false
 	end
 	local evidence = (evidenceResult :: any).value
 	if
@@ -670,7 +695,7 @@ local function processResults(data: HostData, currentTime: number)
 		or evidence.rewardingMatch ~= true
 	then
 		markResultFailed(data, "RESULT_EVIDENCE_FAILED", currentTime)
-		return
+		return false
 	end
 	if data.resultRecord == nil then
 		local validated = MatchResultContract.validate({
@@ -687,7 +712,7 @@ local function processResults(data: HostData, currentTime: number)
 		})
 		if not validated.ok then
 			markResultFailed(data, "RESULT_VALIDATION_FAILED", currentTime)
-			return
+			return false
 		end
 		-- Retries must reuse this exact immutable record. In particular, changing
 		-- createdAt after an ambiguous durable write would turn an idempotent
@@ -695,6 +720,7 @@ local function processResults(data: HostData, currentTime: number)
 		data.resultRecord = validated.value
 	end
 	local resultRecord = data.resultRecord
+	local newlyCreated = false
 	if not data.resultCreated then
 		local created, code = persistCachedResult(data)
 		if not created then
@@ -705,12 +731,12 @@ local function processResults(data: HostData, currentTime: number)
 					applyPipelineView(data, userId, "Pending", "RESULT_LEDGER_PENDING")
 				end
 			end
-			return
+			return false
 		end
-		createRematch(data, currentTime)
+		newlyCreated = true
 	end
 	if currentTime < data.lastRewardAttemptAt + REWARD_RETRY_SECONDS then
-		return
+		return newlyCreated
 	end
 	data.lastRewardAttemptAt = currentTime
 	for _, entry in resultRecord.entries do
@@ -736,17 +762,18 @@ local function processResults(data: HostData, currentTime: number)
 			end
 		end
 	end
+	return newlyCreated
 end
 
 local function rematchView(data: HostData): MatchTravelProtocol.RematchView?
 	if data.rematch == nil then
 		return nil
 	end
-	local stepped = data.rematch:step(now(data) or 0)
-	if not stepped.ok then
+	local resolved = data.rematch:getSnapshot()
+	if not resolved.ok then
 		return nil
 	end
-	local snapshot = stepped.value
+	local snapshot = resolved.value
 	return table.freeze({
 		revision = snapshot.revision,
 		state = snapshot.state,
@@ -776,21 +803,41 @@ local function snapshotFor(data: HostData, userId: number): MatchTravelProtocol.
 end
 
 local function publishSnapshots(data: HostData)
-	for userId, binding in data.bindingsByUserId do
-		if isLive(data, binding.player) then
-			local snapshot = snapshotFor(data, userId)
-			if snapshot ~= nil then
-				local rematchRevision = if snapshot.rematch == nil then 0 else snapshot.rematch.revision
-				local fingerprint = `{snapshot.revision}:{rematchRevision}`
-				if data.publishedFingerprintByUserId[userId] ~= fingerprint then
-					local called, sent = pcall(data.dependencies.snapshotSender, binding.player, snapshot)
-					if called and sent ~= false then
-						data.publishedFingerprintByUserId[userId] = fingerprint
+	if data.shutdownRequested then
+		return
+	end
+	data.publicationsRunning += 1
+	local called, publicationError = pcall(function()
+		for userId, binding in data.bindingsByUserId do
+			if isLive(data, binding.player) then
+				local snapshot = snapshotFor(data, userId)
+				if snapshot ~= nil then
+					local rematchRevision = if snapshot.rematch == nil then 0 else snapshot.rematch.revision
+					local fingerprint = `{snapshot.revision}:{rematchRevision}`
+					if data.publishedFingerprintByUserId[userId] ~= fingerprint then
+						local sentCalled, sent = pcall(data.dependencies.snapshotSender, binding.player, snapshot)
+						if sentCalled and sent ~= false then
+							data.publishedFingerprintByUserId[userId] = fingerprint
+						end
 					end
 				end
 			end
 		end
+	end)
+	data.publicationsRunning -= 1
+	if not called then
+		error(publicationError, 0)
 	end
+end
+
+local function runIngressOperation(data: HostData, callback: () -> unknown): unknown
+	data.ingressOperationsRunning += 1
+	local called, resultValue = pcall(callback)
+	data.ingressOperationsRunning -= 1
+	if not called then
+		error(resultValue, 0)
+	end
+	return resultValue
 end
 
 local function rememberReceipt(data: HostData, transactionId: string, stored: StoredReceipt)
@@ -982,24 +1029,39 @@ local function retryDepartedCleanup(data: HostData)
 	end
 end
 
-local function rollbackHandles(data: HostData, handles: { unknown })
-	for index = #handles, 1, -1 do
-		pcall(data.dependencies.profileTransfer.rollback, data.dependencies.profileTransfer, handles[index])
+local function rollbackWorkHandles(data: HostData, work: ReturnWork): boolean
+	for index = #work.handles, 1, -1 do
+		local called, rolledBack =
+			pcall(data.dependencies.profileTransfer.rollback, data.dependencies.profileTransfer, work.handles[index])
+		if called and (resultOk(rolledBack) or resultErrorCode(rolledBack) == "INVALID_HANDLE") then
+			table.remove(work.handles, index)
+		end
 	end
+	work.rollbackPending = #work.handles > 0
+	return not work.rollbackPending
 end
 
-local function performReturn(data: HostData, requesterUserId: number): (boolean, ErrorCode?)
-	if data.returnBusy or data.ticket == nil then
-		return false, "RETURN_UNAVAILABLE"
+local function beginReturn(data: HostData, requesterUserId: number): (ReturnWork?, ErrorCode?)
+	if data.shutdownRequested or data.returnBusy or data.ticket == nil then
+		return nil, "RETURN_UNAVAILABLE"
+	end
+	if data.rematch ~= nil then
+		local rematchSnapshot = data.rematch:getSnapshot()
+		if
+			not rematchSnapshot.ok
+			or rematchSnapshot.value.state == "Starting"
+			or rematchSnapshot.value.state == "Approved"
+		then
+			return nil, "RETURN_UNAVAILABLE"
+		end
 	end
 	local requester = data.bindingsByUserId[requesterUserId]
 	if requester == nil then
-		return false, "RETURN_UNAVAILABLE"
+		return nil, "RETURN_UNAVAILABLE"
 	end
 	if requester.role == "Participant" and not data.resultCreated and not data.resultFailed then
-		return false, "RETURN_UNAVAILABLE"
+		return nil, "RETURN_UNAVAILABLE"
 	end
-	data.returnBusy = true
 	local ticket = data.ticket
 	local spectatorOnly = requester.role == "Spectator"
 	local userIds: { number } = {}
@@ -1008,39 +1070,86 @@ local function performReturn(data: HostData, requesterUserId: number): (boolean,
 		local binding = data.bindingsByUserId[userId]
 		if (not spectatorOnly or userId == requesterUserId) and binding ~= nil and isLive(data, binding.player) then
 			if data.pendingReturnsByUserId[userId] ~= nil then
-				data.returnBusy = false
-				return false, "RETURN_UNAVAILABLE"
+				return nil, "RETURN_UNAVAILABLE"
 			end
 			table.insert(userIds, userId)
 			table.insert(players, binding.player)
-			data.returnStatuses[userId] = "Pending"
-			data.publicFailures[userId] = nil
 		end
 	end
 	if #userIds < 1 then
-		data.returnBusy = false
-		return false, "RETURN_UNAVAILABLE"
+		return nil, "RETURN_UNAVAILABLE"
+	end
+	data.returnBusy = true
+	for _, userId in userIds do
+		data.returnStatuses[userId] = "Pending"
+		data.publicFailures[userId] = nil
 	end
 	bump(data)
-	local handles: { unknown } = {}
-	for index, userId in userIds do
+	return {
+		ticket = ticket,
+		userIds = userIds,
+		players = players,
+		handles = {},
+		running = false,
+		rollbackPending = false,
+	},
+		nil
+end
+
+local function returnWorkIsCurrent(data: HostData, work: ReturnWork): boolean
+	if data.cleaned or data.shutdownRequested or data.activeReturnWork ~= work or data.ticket ~= work.ticket then
+		return false
+	end
+	for index, userId in work.userIds do
+		local binding = data.bindingsByUserId[userId]
+		if
+			binding == nil
+			or binding.player ~= work.players[index]
+			or not isLive(data, binding.player)
+			or data.pendingReturnsByUserId[userId] ~= nil
+		then
+			return false
+		end
+	end
+	return true
+end
+
+local function performReturn(data: HostData, work: ReturnWork): (boolean, ErrorCode?)
+	local ticket = work.ticket
+	local userIds = work.userIds
+	local players = work.players
+	local handles = work.handles
+	if not returnWorkIsCurrent(data, work) then
+		if not data.shutdownRequested and not data.cleaned and data.activeReturnWork == work then
+			failReturn(data, userIds, "RETURN_UNAVAILABLE")
+		end
+		return false, "RETURN_UNAVAILABLE"
+	end
+	for _, userId in userIds do
 		local preparedCalled, prepared =
 			pcall(data.dependencies.profileTransfer.prepare, data.dependencies.profileTransfer, { userId })
+		if preparedCalled and resultOk(prepared) then
+			table.insert(handles, (prepared :: any).value.handle)
+		end
+		if not returnWorkIsCurrent(data, work) then
+			rollbackWorkHandles(data, work)
+			if not data.shutdownRequested and not data.cleaned and data.activeReturnWork == work then
+				failReturn(data, userIds, "RETURN_UNAVAILABLE")
+			end
+			return false, "RETURN_UNAVAILABLE"
+		end
 		if not preparedCalled or not resultOk(prepared) then
-			rollbackHandles(data, handles)
+			rollbackWorkHandles(data, work)
 			failReturn(data, userIds, "PROFILE_RELEASE_FAILED")
-			data.returnBusy = false
 			return false, "PROFILE_RELEASE_FAILED"
 		end
-		handles[index] = (prepared :: any).value.handle
 	end
 	local generatedCalled, returnIdValue = pcall(data.dependencies.environment.generateReturnId)
 	local returnId = if generatedCalled then TravelProtocol.validateOpaqueId(returnIdValue, "return") else nil
 	local currentTime = now(data)
 	if returnId == nil or not returnId.ok or currentTime == nil then
-		rollbackHandles(data, handles)
+		rollbackWorkHandles(data, work)
 		failReturn(data, userIds, "RETURN_UNAVAILABLE")
-		data.returnBusy = false
 		return false, "RETURN_UNAVAILABLE"
 	end
 	local record = {
@@ -1060,10 +1169,25 @@ local function performReturn(data: HostData, requesterUserId: number): (boolean,
 	end
 	local recordCalled, recordResult =
 		pcall(data.dependencies.returnRecords.create, data.dependencies.returnRecords, record, currentTime)
+	if not returnWorkIsCurrent(data, work) then
+		if recordCalled and resultOk(recordResult) then
+			pcall(
+				data.dependencies.returnRecords.markTerminal,
+				data.dependencies.returnRecords,
+				returnId.value,
+				"TELEPORT_INIT_FAILED",
+				currentTime
+			)
+		end
+		rollbackWorkHandles(data, work)
+		if not data.shutdownRequested and not data.cleaned and data.activeReturnWork == work then
+			failReturn(data, userIds, "RETURN_UNAVAILABLE")
+		end
+		return false, "RETURN_UNAVAILABLE"
+	end
 	if not recordCalled or not resultOk(recordResult) then
-		rollbackHandles(data, handles)
+		rollbackWorkHandles(data, work)
 		failReturn(data, userIds, "RETURN_UNAVAILABLE")
-		data.returnBusy = false
 		return false, "RETURN_UNAVAILABLE"
 	end
 	local session: ReturnSession = {
@@ -1085,6 +1209,8 @@ local function performReturn(data: HostData, requesterUserId: number): (boolean,
 		data.pendingReturnsByUserId[userId] = pending
 		data.pendingReturnsByPlayer[players[index] :: any] = pending
 	end
+	table.clear(handles)
+	work.rollbackPending = false
 	local routing = TravelProtocol.returnToLobby(returnId.value)
 	local teleportedCalled = false
 	local teleported: unknown = nil
@@ -1097,11 +1223,13 @@ local function performReturn(data: HostData, requesterUserId: number): (boolean,
 			routing.value
 		)
 	end
+	if data.cleaned or data.shutdownRequested or data.activeReturnWork ~= work then
+		return false, "RETURN_UNAVAILABLE"
+	end
 	if not teleportedCalled or not resultOk(teleported) then
 		for _, player in players do
 			failPendingReturn(data, player, "TELEPORT_FAILED")
 		end
-		data.returnBusy = false
 		return false, "TELEPORT_FAILED"
 	end
 	local initialized = false
@@ -1112,8 +1240,85 @@ local function performReturn(data: HostData, requesterUserId: number): (boolean,
 		end
 	end
 	bump(data)
-	data.returnBusy = false
 	return initialized, if initialized then nil else "TELEPORT_FAILED"
+end
+
+local function abortReturnWork(data: HostData, work: ReturnWork, publicFailure: string)
+	local pendingFound = false
+	for _, player in work.players do
+		if data.pendingReturnsByPlayer[player :: any] ~= nil then
+			pendingFound = true
+			failPendingReturn(data, player, publicFailure)
+		end
+	end
+	if not pendingFound then
+		rollbackWorkHandles(data, work)
+		failReturn(data, work.userIds, publicFailure)
+	end
+end
+
+local function finishReturnWork(data: HostData, work: ReturnWork)
+	if data.cleaned or data.activeReturnWork ~= work then
+		return
+	end
+	work.running = true
+	local called, callbackError = pcall(function()
+		local performed = pcall(performReturn, data, work)
+		if not performed and not data.cleaned and data.activeReturnWork == work then
+			abortReturnWork(data, work, "RETURN_UNAVAILABLE")
+		end
+		if data.activeReturnWork == work and not data.shutdownRequested and not data.cleaned then
+			publishSnapshots(data)
+		end
+	end)
+	work.running = false
+	if data.activeReturnWork == work then
+		if not work.rollbackPending then
+			data.activeReturnWork = nil
+			data.returnBusy = false
+		end
+	end
+	if not called then
+		error(callbackError, 0)
+	end
+end
+
+local function retryReturnWorkRollback(data: HostData)
+	local work = data.activeReturnWork
+	if work == nil or work.running or not work.rollbackPending then
+		return
+	end
+	if rollbackWorkHandles(data, work) and data.activeReturnWork == work then
+		data.activeReturnWork = nil
+		data.returnBusy = false
+	end
+end
+
+local function scheduleReturn(data: HostData, requesterUserId: number): (boolean, ErrorCode?)
+	local work, errorCode = beginReturn(data, requesterUserId)
+	if work == nil then
+		return false, errorCode
+	end
+	data.activeReturnWork = work
+	local scheduling = true
+	local ranInline = false
+	local scheduledCalled, scheduled = pcall(data.dependencies.environment.scheduleReturn, function()
+		if scheduling then
+			ranInline = true
+			return
+		end
+		finishReturnWork(data, work)
+	end)
+	scheduling = false
+	if not scheduledCalled or scheduled == false or ranInline then
+		if data.activeReturnWork == work then
+			data.activeReturnWork = nil
+			data.returnBusy = false
+			failReturn(data, work.userIds, "RETURN_UNAVAILABLE")
+		end
+		return false, "RETURN_UNAVAILABLE"
+	end
+	return true, nil
 end
 
 local function disconnectPlayer(data: HostData, player: unknown)
@@ -1139,7 +1344,7 @@ local function disconnectPlayer(data: HostData, player: unknown)
 end
 
 local function step(data: HostData): Result.Result<boolean, HostError>
-	if data.cleaned then
+	if data.cleaned or data.shutdownRequested then
 		return failure("CLEANED", "step")
 	end
 	local currentTime = now(data)
@@ -1149,6 +1354,10 @@ local function step(data: HostData): Result.Result<boolean, HostError>
 	-- Retained transfer recovery must progress even when no player, result, or
 	-- routing event fires during this heartbeat.
 	pcall(data.dependencies.stepDependencies)
+	if data.shutdownRequested then
+		return failure("CLEANED", "step")
+	end
+	retryReturnWorkRollback(data)
 	local pending: { PendingArrival } = {}
 	for _, value in data.pendingByPlayer do
 		table.insert(pending, value)
@@ -1187,9 +1396,21 @@ local function step(data: HostData): Result.Result<boolean, HostError>
 			currentTime
 		)
 	end
-	processResults(data, currentTime)
+	local newlyCreatedResult = processResults(data, currentTime)
+	if data.shutdownRequested then
+		return failure("CLEANED", "step")
+	end
+	-- Persistence can yield longer than the voting window. Begin the one-time
+	-- offer only after that work, immediately before its first publication.
+	local rematchTime = now(data)
+	if rematchTime == nil then
+		return failure("UNAVAILABLE", "step")
+	end
+	if newlyCreatedResult then
+		createRematch(data)
+	end
 	if data.rematch ~= nil then
-		local rematchResult = data.rematch:step(currentTime)
+		local rematchResult = data.rematch:step(rematchTime)
 		if rematchResult.ok and rematchResult.value.revision ~= data.rematchRevisionObserved then
 			data.rematchRevisionObserved = rematchResult.value.revision
 			bump(data)
@@ -1197,6 +1418,34 @@ local function step(data: HostData): Result.Result<boolean, HostError>
 	end
 	publishSnapshots(data)
 	return Result.ok(true)
+end
+
+local function runSerializedStep(data: HostData): Result.Result<boolean, HostError>
+	if data.stepRunning then
+		return Result.ok(false)
+	end
+	data.stepRunning = true
+	local called, stepped = pcall(step, data)
+	data.stepRunning = false
+	if not called then
+		error(stepped, 0)
+	end
+	return stepped
+end
+
+local function handleReturnInitFailure(data: HostData, player: unknown, context: unknown)
+	if data.cleaned or data.shutdownRequested then
+		return
+	end
+	runIngressOperation(data, function()
+		local pending = data.pendingReturnsByPlayer[player :: any]
+		local changed = pending ~= nil
+			and matchesReturnInitFailure(data, pending, context)
+			and failPendingReturn(data, player, "TELEPORT_FAILED")
+		if changed then
+			publishSnapshots(data)
+		end
+	end)
 end
 
 local function initialize(data: HostData)
@@ -1214,36 +1463,39 @@ local function start(data: HostData)
 	table.insert(
 		data.connections,
 		data.dependencies.environment.connectPlayerAdded(function(player)
-			enqueue(data, player)
-		end)
-	)
-	table.insert(
-		data.connections,
-		data.dependencies.environment.connectPlayerRemoving(function(player)
-			disconnectPlayer(data, player)
-		end)
-	)
-	table.insert(
-		data.connections,
-		data.dependencies.teleport:connectInitFailed(function(player, _failureClass, context)
-			local pending = data.pendingReturnsByPlayer[player :: any]
-			if
-				pending ~= nil
-				and matchesReturnInitFailure(data, pending, context)
-				and failPendingReturn(data, player, "TELEPORT_FAILED")
-			then
-				publishSnapshots(data)
+			if not data.cleaned and not data.shutdownRequested then
+				runIngressOperation(data, function()
+					enqueue(data, player)
+				end)
 			end
 		end)
 	)
 	table.insert(
 		data.connections,
+		data.dependencies.environment.connectPlayerRemoving(function(player)
+			if not data.cleaned and not data.shutdownRequested then
+				runIngressOperation(data, function()
+					disconnectPlayer(data, player)
+				end)
+			end
+		end)
+	)
+	table.insert(
+		data.connections,
+		data.dependencies.teleport:connectInitFailed(function(player, _failureClass, context)
+			handleReturnInitFailure(data, player, context)
+		end)
+	)
+	table.insert(
+		data.connections,
 		data.dependencies.environment.connectHeartbeat(function()
-			step(data)
+			runSerializedStep(data)
 		end)
 	)
 	for _, player in exactPlayerList(data) do
-		enqueue(data, player)
+		runIngressOperation(data, function()
+			enqueue(data, player)
+		end)
 	end
 end
 
@@ -1259,10 +1511,23 @@ function Methods.getServiceDefinition(self: Service): any
 			start(data)
 		end,
 		shutdown = function()
-			for _attempt = 1, SHUTDOWN_DURABILITY_ATTEMPTS do
+			local durabilityAttempts = 0
+			local joinDeadline = os.clock() + SHUTDOWN_JOIN_SECONDS
+			while durabilityAttempts < SHUTDOWN_DURABILITY_ATTEMPTS do
 				local cleaned = self:cleanup()
 				if cleaned.ok then
 					return
+				end
+				local asyncBusy = data.stepRunning
+					or data.ingressOperationsRunning > 0
+					or data.publicationsRunning > 0
+					or data.activeReturnWork ~= nil
+					or data.dependencyCleanupJoining
+					or (data.rematch ~= nil and data.rematch:isFactoryBusy())
+				if asyncBusy and os.clock() < joinDeadline then
+					task.wait(SHUTDOWN_POLL_SECONDS)
+				else
+					durabilityAttempts += 1
 				end
 			end
 			-- ServiceLifecycle observes thrown failures. A fixed attempt count keeps
@@ -1273,12 +1538,12 @@ function Methods.getServiceDefinition(self: Service): any
 end
 
 function Methods.step(self: Service): Result.Result<boolean, HostError>
-	return step(requireData(self))
+	return runSerializedStep(requireData(self))
 end
 
 function Methods.getPlayable(self: Service, player: unknown): any?
 	local data = requireData(self)
-	if data.cleaned or data.bindingsByPlayer[player :: any] == nil then
+	if data.cleaned or data.shutdownRequested or data.bindingsByPlayer[player :: any] == nil then
 		return nil
 	end
 	local resolvedCalled, resolved = pcall(data.dependencies.admission.resolve, data.dependencies.admission, player)
@@ -1291,6 +1556,7 @@ function Methods.canSubmitReady(self: Service, player: unknown): boolean
 	local binding = if userId == nil then nil else data.bindingsByUserId[userId]
 	local currentTime = now(data)
 	return not data.cleaned
+		and not data.shutdownRequested
 		and binding ~= nil
 		and binding.player == player
 		and binding.role == "Participant"
@@ -1300,7 +1566,7 @@ end
 
 function Methods.getSnapshot(self: Service, player: unknown): Result.Result<MatchTravelProtocol.Snapshot, HostError>
 	local data = requireData(self)
-	if data.cleaned then
+	if data.cleaned or data.shutdownRequested then
 		return failure("CLEANED", "snapshot")
 	end
 	local userId = readUserId(data, player)
@@ -1314,29 +1580,31 @@ function Methods.requestReturn(
 	intentValue: unknown
 ): Result.Result<MatchTravelProtocol.MutationReceipt, HostError>
 	local data = requireData(self)
-	if data.cleaned then
+	if data.cleaned or data.shutdownRequested then
 		return failure("CLEANED", "return")
 	end
-	local parsed = MatchTravelProtocol.ReturnIntentSchema:validate(intentValue)
-	local userId = readUserId(data, player)
-	if not parsed.ok or userId == nil or data.bindingsByPlayer[player :: any] ~= userId then
-		return failure("INVALID_ARGUMENT", "return")
-	end
-	local intent = parsed.value
-	local replay = existingReceipt(data, userId, "return", intent.transactionId)
-	if replay ~= nil then
-		return replay
-	end
-	if data.ticket == nil or intent.matchId ~= data.ticket.matchId then
-		return failure("NOT_AUTHORIZED", "return")
-	end
-	if intent.observedRevision ~= data.revision then
-		return failure("STALE_REVISION", "return")
-	end
-	local changed, errorCode = performReturn(data, userId)
-	local receipt = receiptFor(data, userId, "return", intent.transactionId, changed)
-	publishSnapshots(data)
-	return if errorCode == nil or receipt.ok then receipt else failure(errorCode, "return")
+	return runIngressOperation(data, function()
+		local parsed = MatchTravelProtocol.ReturnIntentSchema:validate(intentValue)
+		local userId = readUserId(data, player)
+		if not parsed.ok or userId == nil or data.bindingsByPlayer[player :: any] ~= userId then
+			return failure("INVALID_ARGUMENT", "return")
+		end
+		local intent = parsed.value
+		local replay = existingReceipt(data, userId, "return", intent.transactionId)
+		if replay ~= nil then
+			return replay
+		end
+		if data.ticket == nil or intent.matchId ~= data.ticket.matchId then
+			return failure("NOT_AUTHORIZED", "return")
+		end
+		if intent.observedRevision ~= data.revision then
+			return failure("STALE_REVISION", "return")
+		end
+		local changed, errorCode = scheduleReturn(data, userId)
+		local receipt = receiptFor(data, userId, "return", intent.transactionId, changed)
+		publishSnapshots(data)
+		return if errorCode == nil or receipt.ok then receipt else failure(errorCode, "return")
+	end) :: any
 end
 
 function Methods.voteRematch(
@@ -1345,43 +1613,64 @@ function Methods.voteRematch(
 	intentValue: unknown
 ): Result.Result<MatchTravelProtocol.MutationReceipt, HostError>
 	local data = requireData(self)
-	if data.cleaned then
+	if data.cleaned or data.shutdownRequested then
 		return failure("CLEANED", "rematch")
 	end
-	local parsed = MatchTravelProtocol.RematchVoteIntentSchema:validate(intentValue)
-	local userId = readUserId(data, player)
-	local binding = if userId == nil then nil else data.bindingsByUserId[userId]
-	if
-		not parsed.ok
-		or userId == nil
-		or binding == nil
-		or binding.player ~= player
-		or binding.role ~= "Participant"
-	then
-		return failure("NOT_AUTHORIZED", "rematch")
-	end
-	local intent = parsed.value
-	local replay = existingReceipt(data, userId, "rematch", intent.transactionId)
-	if replay ~= nil then
-		return replay
-	end
-	if data.ticket == nil or intent.matchId ~= data.ticket.matchId or data.rematch == nil then
-		return failure("REMATCH_UNAVAILABLE", "rematch")
-	end
-	if intent.observedRevision ~= data.revision then
-		return failure("STALE_REVISION", "rematch")
-	end
-	local voted = data.rematch:vote(userId, intent.approve, intent.observedRematchRevision)
-	if not voted.ok then
-		return failure(
-			if voted.error.code == "STALE_REVISION" then "STALE_REVISION" else "REMATCH_UNAVAILABLE",
-			"rematch"
-		)
-	end
-	bump(data)
-	local receipt = receiptFor(data, userId, "rematch", intent.transactionId, true)
-	publishSnapshots(data)
-	return receipt
+	return runIngressOperation(data, function()
+		local parsed = MatchTravelProtocol.RematchVoteIntentSchema:validate(intentValue)
+		local userId = readUserId(data, player)
+		local binding = if userId == nil then nil else data.bindingsByUserId[userId]
+		if
+			not parsed.ok
+			or userId == nil
+			or binding == nil
+			or binding.player ~= player
+			or binding.role ~= "Participant"
+		then
+			return failure("NOT_AUTHORIZED", "rematch")
+		end
+		local intent = parsed.value
+		local replay = existingReceipt(data, userId, "rematch", intent.transactionId)
+		if replay ~= nil then
+			return replay
+		end
+		if data.ticket == nil or intent.matchId ~= data.ticket.matchId or data.rematch == nil then
+			return failure("REMATCH_UNAVAILABLE", "rematch")
+		end
+		if data.returnBusy or data.activeReturnWork ~= nil or next(data.pendingReturnsByUserId) ~= nil then
+			return failure("REMATCH_UNAVAILABLE", "rematch")
+		end
+		local voteTime = now(data)
+		if voteTime == nil then
+			return failure("UNAVAILABLE", "rematch")
+		end
+		local currentRematch = data.rematch:step(voteTime)
+		if not currentRematch.ok then
+			return failure("REMATCH_UNAVAILABLE", "rematch")
+		end
+		if currentRematch.value.state ~= "Pending" then
+			if currentRematch.value.revision ~= data.rematchRevisionObserved then
+				data.rematchRevisionObserved = currentRematch.value.revision
+				bump(data)
+			end
+			publishSnapshots(data)
+			return failure("REMATCH_UNAVAILABLE", "rematch")
+		end
+		if intent.observedRevision ~= data.revision then
+			return failure("STALE_REVISION", "rematch")
+		end
+		local voted = data.rematch:vote(userId, intent.approve, intent.observedRematchRevision)
+		if not voted.ok then
+			return failure(
+				if voted.error.code == "STALE_REVISION" then "STALE_REVISION" else "REMATCH_UNAVAILABLE",
+				"rematch"
+			)
+		end
+		bump(data)
+		local receipt = receiptFor(data, userId, "rematch", intent.transactionId, true)
+		publishSnapshots(data)
+		return receipt
+	end) :: any
 end
 
 function Methods.getMetrics(self: Service): any
@@ -1417,8 +1706,37 @@ function Methods.cleanup(self: Service): Result.Result<boolean, HostError>
 	if data.cleaned then
 		return Result.ok(false)
 	end
+	data.shutdownRequested = true
+	if data.stepRunning or data.ingressOperationsRunning > 0 or data.publicationsRunning > 0 then
+		return failure("UNAVAILABLE", "cleanup")
+	end
+	local activeReturnWork = data.activeReturnWork
+	if activeReturnWork ~= nil then
+		if activeReturnWork.running then
+			return failure("UNAVAILABLE", "cleanup")
+		end
+		if #activeReturnWork.handles > 0 and not rollbackWorkHandles(data, activeReturnWork) then
+			return failure("UNAVAILABLE", "cleanup")
+		end
+		data.activeReturnWork = nil
+		data.returnBusy = false
+	end
+	if data.rematch ~= nil and data.rematch:isFactoryBusy() then
+		local cancelled = data.rematch:cancelFactory()
+		if not cancelled.ok or data.rematch:isFactoryBusy() then
+			return failure("UNAVAILABLE", "cleanup")
+		end
+	end
+	local prepareCalled, cleanupPrepared = pcall(data.dependencies.prepareCleanupDependencies)
+	data.dependencyCleanupJoining = not prepareCalled or cleanupPrepared ~= true
+	if data.dependencyCleanupJoining then
+		return failure("UNAVAILABLE", "cleanup")
+	end
 	local terminalTicket = data.ticket
 	local terminalTime = now(data)
+	if terminalTicket ~= nil and terminalTime == nil then
+		return failure("UNAVAILABLE", "cleanup")
+	end
 	if terminalTicket ~= nil and terminalTime ~= nil and not data.resultCreated and not data.resultFailed then
 		if data.resultRecord ~= nil then
 			-- A validated result record is stronger evidence than a zero-award
@@ -1434,8 +1752,6 @@ function Methods.cleanup(self: Service): Result.Result<boolean, HostError>
 			return failure("UNAVAILABLE", "cleanup")
 		end
 	end
-	data.cleaned = true
-	data.state = "Shutdown"
 	if terminalTicket ~= nil and terminalTime ~= nil then
 		pcall(
 			data.dependencies.ticketStore.markTerminal,
@@ -1459,18 +1775,36 @@ function Methods.cleanup(self: Service): Result.Result<boolean, HostError>
 		pcall(data.dependencies.stopPlayable, data.playable)
 	end
 	if data.rematch ~= nil then
-		data.rematch:cleanup()
+		local rematchCleaned = data.rematch:cleanup()
+		if not rematchCleaned.ok then
+			return failure("UNAVAILABLE", "cleanup")
+		end
 	end
 	for player, pending in data.pendingReturnsByPlayer do
+		local settledCalled: boolean
+		local settled: unknown
 		if isLive(data, player) then
-			pcall(data.dependencies.profileTransfer.rollback, data.dependencies.profileTransfer, pending.handle)
+			settledCalled, settled =
+				pcall(data.dependencies.profileTransfer.rollback, data.dependencies.profileTransfer, pending.handle)
 		else
-			pcall(data.dependencies.profileTransfer.commit, data.dependencies.profileTransfer, pending.handle)
+			settledCalled, settled =
+				pcall(data.dependencies.profileTransfer.commit, data.dependencies.profileTransfer, pending.handle)
 		end
+		if not settledCalled or not resultOk(settled) then
+			return failure("UNAVAILABLE", "cleanup")
+		end
+		data.pendingReturnsByPlayer[player :: any] = nil
+		data.pendingReturnsByUserId[pending.userId] = nil
 	end
 	retryDepartedCleanup(data)
 	pcall(data.dependencies.admission.cleanup, data.dependencies.admission)
-	pcall(data.dependencies.cleanupDependencies)
+	local dependenciesCalled, dependenciesCleaned = pcall(data.dependencies.cleanupDependencies)
+	if not dependenciesCalled or dependenciesCleaned ~= true then
+		return failure("UNAVAILABLE", "cleanup")
+	end
+	data.cleaned = true
+	data.returnBusy = false
+	data.state = "Shutdown"
 	table.clear(data.pendingByPlayer)
 	table.clear(data.claimedByPlayer)
 	table.clear(data.bindingsByPlayer)
@@ -1528,6 +1862,7 @@ function MatchTravelHost.new(dependenciesValue: unknown): Result.Result<Service,
 		or type(dependencies.stopPlayable) ~= "function"
 		or type(dependencies.createRematch) ~= "function"
 		or type(dependencies.stepDependencies) ~= "function"
+		or type(dependencies.prepareCleanupDependencies) ~= "function"
 		or type(dependencies.cleanupDependencies) ~= "function"
 		or type(environment) ~= "table"
 		or type(environment.now) ~= "function"
@@ -1538,6 +1873,8 @@ function MatchTravelHost.new(dependenciesValue: unknown): Result.Result<Service,
 		or type(environment.connectPlayerAdded) ~= "function"
 		or type(environment.connectPlayerRemoving) ~= "function"
 		or type(environment.connectHeartbeat) ~= "function"
+		or type(environment.scheduleReturn) ~= "function"
+		or type(environment.scheduleRematch) ~= "function"
 		or type(environment.destinationJobId) ~= "string"
 		or #environment.destinationJobId < 1
 		or type(environment.lobbyPlaceId) ~= "number"
@@ -1570,7 +1907,13 @@ function MatchTravelHost.new(dependenciesValue: unknown): Result.Result<Service,
 		connections = {},
 		revision = 1,
 		routesBound = false,
+		stepRunning = false,
+		ingressOperationsRunning = 0,
+		publicationsRunning = 0,
 		returnBusy = false,
+		activeReturnWork = nil,
+		shutdownRequested = false,
+		dependencyCleanupJoining = false,
 		resultCreated = false,
 		resultFailed = false,
 		resultFailureReason = nil,

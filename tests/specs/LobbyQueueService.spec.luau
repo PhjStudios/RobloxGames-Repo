@@ -117,6 +117,27 @@ local function join(
 end
 
 return TestHarness.suite("server-owned lobby queue", {
+	TestHarness.case("keeps an accepted StartQueue handoff locked instead of reopening", function(assertions)
+		local rig = makeRig(assertions)
+		local joined = join(assertions, rig, "queue:one", 10, "deferred-handoff")
+		local started = success(
+			assertions,
+			rig.service:start(10, {
+				transactionId = "transaction:start-deferred-handoff",
+				expectedRevision = joined.revision,
+				queueId = "queue:one",
+			})
+		)
+		assertions.equal(started.kind, "Start")
+		assertions.isTrue(started.changed)
+		assertions.equal(started.revision, joined.revision + 1)
+		assertions.equal(started.snapshot.revision, started.revision)
+		assertions.equal(started.snapshot.state, "Starting")
+		assertions.equal(started.snapshot.publicStatus, "TicketPending")
+		assertions.equal(#rig.starts, 1)
+		assertions.equal(rig.starts[1].queueId, "queue:one")
+	end),
+
 	TestHarness.case("enrolls parties atomically and transfers captain by enrollment order", function(assertions)
 		local rig = makeRig(assertions)
 		setParty(rig, "party:squad", 3, { 10, 20 })

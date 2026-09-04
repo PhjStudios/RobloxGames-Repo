@@ -55,6 +55,7 @@ export type CoordinatorError = { code: ErrorCode, operation: string }
 type Context = {
 	locked: LockedStart,
 	phase: string,
+	workerState: "Queued" | "Running" | "Finished",
 	ticketId: string?,
 	matchId: string?,
 	resultId: string?,
@@ -92,6 +93,9 @@ type ServiceData = {
 	routeLifetimeSeconds: number,
 	contextsByQueueId: { [string]: Context },
 	contextsByTicketId: { [string]: Context },
+	shutdownRequested: boolean,
+	stepRunning: boolean,
+	callbackOperationsRunning: number,
 	cleaned: boolean,
 	scheduleViolationCount: number,
 	completedCount: number,
@@ -109,6 +113,8 @@ local DEFAULT_TICKET_LIFETIME_SECONDS = 600
 local DEFAULT_ROUTE_LIFETIME_SECONDS = 2_700
 local MAX_CONTEXTS = 32
 local SHUTDOWN_DURABILITY_ATTEMPTS = 3
+local SHUTDOWN_JOIN_SECONDS = 5
+local SHUTDOWN_POLL_SECONDS = 0.05
 
 local LobbyTravelCoordinator = {
 	SHUTDOWN_DURABILITY_ATTEMPTS = SHUTDOWN_DURABILITY_ATTEMPTS,
@@ -573,6 +579,16 @@ local function failFull(data: ServiceData, context: Context, status: PublicFailu
 	attemptRecovery(data, context, currentTime(data) or 0)
 end
 
+local function stopForShutdown(data: ServiceData, context: Context): boolean
+	if not data.shutdownRequested then
+		return false
+	end
+	if not context.settled and not context.initialized then
+		failFull(data, context, "TeleportFailed", "LOBBY_SHUTDOWN")
+	end
+	return true
+end
+
 local function contextCount(data: ServiceData): number
 	local count = 0
 	for _ in data.contextsByQueueId do
@@ -687,7 +703,7 @@ local function preparedMatchesLock(context: Context, prepared: any): boolean
 end
 
 local function process(data: ServiceData, context: Context)
-	if data.cleaned or context.settled or context.phase ~= "Scheduled" then
+	if data.cleaned or data.shutdownRequested or context.settled or context.phase ~= "Scheduled" then
 		return
 	end
 	context.phase = "Preparing"
@@ -719,6 +735,9 @@ local function process(data: ServiceData, context: Context)
 		return
 	end
 	context.resultIntentCreated = true
+	if stopForShutdown(data, context) then
+		return
+	end
 	local reserved = callResult(
 		data.dependencies.pendingResults.reserve,
 		data.dependencies.pendingResults,
@@ -731,6 +750,9 @@ local function process(data: ServiceData, context: Context)
 		return
 	end
 	context.pendingReserved = true
+	if stopForShutdown(data, context) then
+		return
+	end
 
 	local prepared = callResult(
 		data.dependencies.profileTransfer.prepare,
@@ -743,6 +765,9 @@ local function process(data: ServiceData, context: Context)
 	end
 	local preparedValue = (prepared :: any).value
 	context.transferHandle = preparedValue.handle
+	if stopForShutdown(data, context) then
+		return
+	end
 	if not preparedMatchesLock(context, preparedValue) then
 		failFull(data, context, "TicketFailed", "LOADOUT_CHANGED_AFTER_LOCK")
 		return
@@ -759,6 +784,9 @@ local function process(data: ServiceData, context: Context)
 		return
 	end
 	context.ticketCreated = true
+	if stopForShutdown(data, context) then
+		return
+	end
 	context.phase = "Teleporting"
 	local players: { unknown } = table.create(#context.locked.orderedUserIds)
 	for index, userId in context.locked.orderedUserIds do
@@ -768,6 +796,9 @@ local function process(data: ServiceData, context: Context)
 			return
 		end
 		players[index] = player
+	end
+	if stopForShutdown(data, context) then
+		return
 	end
 	local started = callResult(
 		data.dependencies.safeTeleport.start,
@@ -781,7 +812,12 @@ local function process(data: ServiceData, context: Context)
 	end
 	if not resultOk(started) then
 		if not context.settled and not context.partial and context.phase ~= "RecoveryPending" then
-			failFull(data, context, "TeleportFailed", "TELEPORT_INITIALIZATION_FAILED")
+			failFull(
+				data,
+				context,
+				"TeleportFailed",
+				if data.shutdownRequested then "LOBBY_SHUTDOWN" else "TELEPORT_INITIALIZATION_FAILED"
+			)
 		end
 		return
 	end
@@ -813,7 +849,7 @@ end
 
 function Methods.beginStart(self: Service, lockedValue: unknown): boolean
 	local data = requireData(self)
-	if data.cleaned then
+	if data.cleaned or data.shutdownRequested then
 		return false
 	end
 	local locked = lockedStart(lockedValue)
@@ -823,6 +859,7 @@ function Methods.beginStart(self: Service, lockedValue: unknown): boolean
 	local context: Context = {
 		locked = locked,
 		phase = "Scheduled",
+		workerState = "Queued",
 		ticketId = nil,
 		matchId = nil,
 		resultId = nil,
@@ -862,10 +899,25 @@ function Methods.beginStart(self: Service, lockedValue: unknown): boolean
 			data.scheduleViolationCount += 1
 			return
 		end
-		process(data, context)
+		if
+			data.cleaned
+			or data.shutdownRequested
+			or context.workerState ~= "Queued"
+			or data.contextsByQueueId[context.locked.queueId] ~= context
+		then
+			context.workerState = "Finished"
+			return
+		end
+		context.workerState = "Running"
+		local processed = pcall(process, data, context)
+		if not processed and not data.cleaned and not context.settled and not context.initialized then
+			pcall(failFull, data, context, "TicketFailed", "LOBBY_PROCESS_FAILED")
+		end
+		context.workerState = "Finished"
 	end)
 	scheduling = false
 	if not scheduled or scheduleResult == false or ranInline then
+		context.workerState = "Finished"
 		data.contextsByQueueId[locked.queueId] = nil
 		return false
 	end
@@ -934,9 +986,8 @@ function Methods.onReserved(self: Service, reservedValue: unknown): boolean
 	return queueStatus(data, context, "TeleportInitializing")
 end
 
-function Methods.onRollback(self: Service, rollbackValue: unknown)
-	local data = requireData(self)
-	if data.cleaned or type(rollbackValue) ~= "table" then
+local function onRollback(data: ServiceData, rollbackValue: unknown)
+	if data.cleaned or data.shutdownRequested or type(rollbackValue) ~= "table" then
 		return
 	end
 	local rollback = rollbackValue :: any
@@ -968,6 +1019,19 @@ function Methods.onRollback(self: Service, rollbackValue: unknown)
 	failFull(data, context, "TeleportFailed", "TELEPORT_ROLLBACK")
 end
 
+function Methods.onRollback(self: Service, rollbackValue: unknown)
+	local data = requireData(self)
+	if data.cleaned or data.shutdownRequested or type(rollbackValue) ~= "table" then
+		return
+	end
+	data.callbackOperationsRunning += 1
+	local called, callbackError = pcall(onRollback, data, rollbackValue)
+	data.callbackOperationsRunning -= 1
+	if not called then
+		error(callbackError, 0)
+	end
+end
+
 function Methods.isUserTravelPending(self: Service, userIdValue: unknown): boolean
 	local data = requireData(self)
 	local userId = safeInteger(userIdValue)
@@ -986,9 +1050,17 @@ function Methods.isUserTravelPending(self: Service, userIdValue: unknown): boole
 	return false
 end
 
-function Methods.step(self: Service): number
-	local data = requireData(self)
-	if data.cleaned then
+local function originalRosterDeparted(context: Context): boolean
+	for _, userId in context.locked.orderedUserIds do
+		if context.departedUserIds[userId] ~= true then
+			return false
+		end
+	end
+	return true
+end
+
+local function step(data: ServiceData): number
+	if data.cleaned or data.shutdownRequested then
 		return 0
 	end
 	local nowValue = currentTime(data)
@@ -1026,11 +1098,7 @@ function Methods.step(self: Service): number
 				progressed += 1
 			end
 		elseif context.initialized and context.phase == "Initialized" then
-			local allAbsent = true
-			for _, userId in context.locked.orderedUserIds do
-				allAbsent = not currentPresence(data, userId) and allAbsent
-			end
-			if allAbsent and finishTeleportSession(data, context) then
+			if originalRosterDeparted(context) and finishTeleportSession(data, context) then
 				table.insert(removable, context)
 				progressed += 1
 			end
@@ -1047,6 +1115,20 @@ function Methods.step(self: Service): number
 	return progressed
 end
 
+function Methods.step(self: Service): number
+	local data = requireData(self)
+	if data.cleaned or data.shutdownRequested or data.stepRunning then
+		return 0
+	end
+	data.stepRunning = true
+	local called, progressed = pcall(step, data)
+	data.stepRunning = false
+	if not called then
+		error(progressed, 0)
+	end
+	return progressed :: number
+end
+
 function Methods.resolveTicket(self: Service, ticketIdValue: unknown): boolean
 	local data = requireData(self)
 	local ticketId = TravelProtocol.validateOpaqueId(ticketIdValue, "ticket")
@@ -1054,12 +1136,12 @@ function Methods.resolveTicket(self: Service, ticketIdValue: unknown): boolean
 	if context == nil then
 		return false
 	end
-	clearRoutes(data, context, nil)
-	pcall(data.dependencies.safeTeleport.finish, data.dependencies.safeTeleport, ticketId.value)
-	data.contextsByTicketId[ticketId.value] = nil
-	if data.contextsByQueueId[context.locked.queueId] == context then
-		data.contextsByQueueId[context.locked.queueId] = nil
+	local routesSafe = clearRoutes(data, context, nil)
+	local teleportSafe = finishTeleportSession(data, context)
+	if not routesSafe or not teleportSafe then
+		return false
 	end
+	detachContext(data, context)
 	return true
 end
 
@@ -1107,10 +1189,24 @@ function Methods.cleanup(self: Service): Result.Result<boolean, CoordinatorError
 	if data.cleaned then
 		return Result.ok(false)
 	end
+	data.shutdownRequested = true
+	if data.stepRunning or data.callbackOperationsRunning > 0 then
+		return failure("BUSY", "cleanup")
+	end
 	local recoveryComplete = true
 	local contexts = table.create(contextCount(data))
 	for _, context in data.contextsByQueueId do
 		table.insert(contexts, context)
+	end
+	for _, context in contexts do
+		if context.workerState == "Running" then
+			return failure("BUSY", "cleanup")
+		end
+	end
+	for _, context in contexts do
+		if context.workerState == "Queued" then
+			context.workerState = "Finished"
+		end
 	end
 	for _, context in contexts do
 		if not context.settled and context.phase == "RecoveryPending" then
@@ -1158,10 +1254,27 @@ function Methods.getServiceDefinition(self: Service): ServiceLifecycle.ServiceDe
 		initialize = function() end,
 		start = function() end,
 		shutdown = function()
-			for _attempt = 1, SHUTDOWN_DURABILITY_ATTEMPTS do
+			local durabilityAttempts = 0
+			local joinDeadline = os.clock() + SHUTDOWN_JOIN_SECONDS
+			while durabilityAttempts < SHUTDOWN_DURABILITY_ATTEMPTS do
 				local cleaned = self:cleanup()
 				if cleaned.ok then
 					return
+				end
+				local data = requireData(self)
+				local workerBusy = data.stepRunning or data.callbackOperationsRunning > 0
+				if not workerBusy then
+					for _, context in data.contextsByQueueId do
+						workerBusy = context.workerState == "Running"
+						if workerBusy then
+							break
+						end
+					end
+				end
+				if workerBusy and os.clock() < joinDeadline then
+					task.wait(SHUTDOWN_POLL_SECONDS)
+				else
+					durabilityAttempts += 1
 				end
 			end
 			-- TravelRecordStore and the other production boundaries already own their
@@ -1238,6 +1351,9 @@ function LobbyTravelCoordinator.new(dependenciesValue: unknown): Result.Result<S
 		routeLifetimeSeconds = routeLifetime,
 		contextsByQueueId = {},
 		contextsByTicketId = {},
+		shutdownRequested = false,
+		stepRunning = false,
+		callbackOperationsRunning = 0,
 		cleaned = false,
 		scheduleViolationCount = 0,
 		completedCount = 0,

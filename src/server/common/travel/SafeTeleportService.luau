@@ -100,6 +100,9 @@ type ServiceData = {
 	sessions: { [string]: Session },
 	ticketByUserId: { [number]: string },
 	connection: any,
+	activeWorkerCount: number,
+	cleanupRunning: boolean,
+	closing: boolean,
 	cleaned: boolean,
 }
 
@@ -130,6 +133,22 @@ local function requireData(value: unknown): ServiceData
 		error("[ATD_SAFE_TELEPORT][code=INVALID_CONTEXT]", 0)
 	end
 	return data :: ServiceData
+end
+
+local function beginWorker(data: ServiceData): boolean
+	if data.closing or data.cleaned then
+		return false
+	end
+	data.activeWorkerCount += 1
+	return true
+end
+
+local function runOwnedWorker(data: ServiceData, callback: () -> ())
+	local called, callbackError = pcall(callback)
+	data.activeWorkerCount -= 1
+	if not called then
+		error(callbackError, 0)
+	end
 end
 
 local function currentTime(data: ServiceData): number?
@@ -229,7 +248,7 @@ local function notifyStableRollback(data: ServiceData, session: Session, termina
 end
 
 local function runReconciliation(data: ServiceData, session: Session, terminalReason: string?)
-	if data.cleaned or data.sessions[session.ticketId] ~= session or session.reconciled then
+	if data.closing or data.cleaned or data.sessions[session.ticketId] ~= session or session.reconciled then
 		session.reconciling = false
 		return
 	end
@@ -260,7 +279,7 @@ local function runReconciliation(data: ServiceData, session: Session, terminalRe
 			break
 		end
 		pcall(data.wait, RECONCILIATION_POLL_SECONDS)
-		if data.cleaned or data.sessions[session.ticketId] ~= session then
+		if data.closing or data.cleaned or data.sessions[session.ticketId] ~= session then
 			session.reconciling = false
 			return
 		end
@@ -294,16 +313,38 @@ local function runReconciliation(data: ServiceData, session: Session, terminalRe
 end
 
 local function reconcileSession(data: ServiceData, session: Session, terminalReason: string?)
-	if data.cleaned or data.sessions[session.ticketId] ~= session or session.reconciled or session.reconciling then
+	if
+		data.closing
+		or data.cleaned
+		or data.sessions[session.ticketId] ~= session
+		or session.reconciled
+		or session.reconciling
+	then
 		return
 	end
 	session.reconciling = true
-	local called, scheduled = pcall(data.schedule, function()
-		runReconciliation(data, session, terminalReason)
-	end)
+	if not beginWorker(data) then
+		session.reconciling = false
+		return
+	end
+	local pending = true
+	local function callback()
+		if not pending then
+			return
+		end
+		pending = false
+		runOwnedWorker(data, function()
+			if data.closing or data.cleaned then
+				session.reconciling = false
+				return
+			end
+			runReconciliation(data, session, terminalReason)
+		end)
+	end
+	local called, scheduled = pcall(data.schedule, callback)
 	if not called or scheduled == false then
 		-- Scheduling is an optimization and must not erase the only rollback path.
-		runReconciliation(data, session, terminalReason)
+		callback()
 	end
 end
 
@@ -343,13 +384,19 @@ local function retryInitFailure(
 	player: unknown,
 	failureClass: FailureClass
 )
-	if data.cleaned or data.sessions[session.ticketId] ~= session or session.playersByUserId[userId] ~= player then
+	if
+		data.closing
+		or data.cleaned
+		or data.sessions[session.ticketId] ~= session
+		or session.playersByUserId[userId] ~= player
+	then
 		return
 	end
 	if session.reconciled or session.memberStates[userId] ~= "Pending" or session.retryingUserIds[userId] then
 		return
 	end
-	if not playerIsPresent(data, player) then
+	local present = playerIsPresent(data, player)
+	if data.closing or data.cleaned or not present then
 		return
 	end
 	session.retryingUserIds[userId] = true
@@ -360,13 +407,28 @@ local function retryInitFailure(
 	local currentClass = failureClass
 	while currentClass == "Retryable" and attempts < data.maxAttempts do
 		recordRetry(data, session.ticketId)
+		if data.closing or data.cleaned or data.sessions[session.ticketId] ~= session then
+			finishRetry()
+			return
+		end
 		local delay = math.min(data.baseBackoffSeconds * (2 ^ (attempts - 1)), MAX_BACKOFF_SECONDS)
 		pcall(data.wait, delay)
 		if
-			data.cleaned
+			data.closing
+			or data.cleaned
 			or data.sessions[session.ticketId] ~= session
 			or session.playersByUserId[userId] ~= player
-			or not playerIsPresent(data, player)
+		then
+			finishRetry()
+			return
+		end
+		present = playerIsPresent(data, player)
+		if
+			data.closing
+			or data.cleaned
+			or data.sessions[session.ticketId] ~= session
+			or session.playersByUserId[userId] ~= player
+			or not present
 		then
 			finishRetry()
 			return
@@ -375,6 +437,15 @@ local function retryInitFailure(
 		session.attemptsByUserId[userId] = attempts
 		session.attemptCount += 1
 		local succeeded, nextClass = teleportCall(data, session, { player })
+		if
+			data.closing
+			or data.cleaned
+			or data.sessions[session.ticketId] ~= session
+			or session.playersByUserId[userId] ~= player
+		then
+			finishRetry()
+			return
+		end
 		if succeeded then
 			session.initializationSucceeded = true
 			finishRetry()
@@ -389,6 +460,9 @@ local function retryInitFailure(
 end
 
 local function handleInitFailure(data: ServiceData, player: unknown, failureClassValue: unknown, contextValue: unknown)
+	if data.closing or data.cleaned then
+		return
+	end
 	local userId = readUserId(data, player)
 	if userId == nil then
 		return
@@ -423,7 +497,7 @@ function Methods.start(
 	playersValue: unknown
 ): Result.Result<StartOutcome, TeleportError>
 	local data = requireData(self)
-	if data.cleaned then
+	if data.closing or data.cleaned then
 		return failure("CLEANED", "start", "Terminal")
 	end
 	local ticketId = TravelProtocol.validateOpaqueId(ticketIdValue, "ticket")
@@ -565,7 +639,7 @@ end
 
 function Methods.finish(self: Service, ticketIdValue: unknown): Result.Result<boolean, TeleportError>
 	local data = requireData(self)
-	if data.cleaned then
+	if data.closing or data.cleaned then
 		return failure("CLEANED", "finish", "Terminal")
 	end
 	local ticketId = TravelProtocol.validateOpaqueId(ticketIdValue, "ticket")
@@ -596,13 +670,23 @@ function Methods.cleanup(self: Service): Result.Result<boolean, TeleportError>
 	if data.cleaned then
 		return Result.ok(false)
 	end
-	data.cleaned = true
-	if data.connection ~= nil then
+	if data.cleanupRunning then
+		return failure("BUSY", "cleanup", "Retryable")
+	end
+	data.closing = true
+	data.cleanupRunning = true
+	local connection = data.connection
+	data.connection = nil
+	if connection ~= nil then
 		pcall(function()
-			data.connection:Disconnect()
+			connection:Disconnect()
 		end)
 	end
-	data.connection = nil
+	data.cleanupRunning = false
+	if data.activeWorkerCount > 0 then
+		return failure("BUSY", "cleanup", "Retryable")
+	end
+	data.cleaned = true
 	for _, session in data.sessions do
 		session.accessCode = ""
 		table.clear(session.playersByUserId)
@@ -693,13 +777,21 @@ function SafeTeleportService.new(
 		sessions = {},
 		ticketByUserId = {},
 		connection = nil,
+		activeWorkerCount = 0,
+		cleanupRunning = false,
+		closing = false,
 		cleaned = false,
 	}
 	local connected, connection = pcall(
 		(adapterValue :: any).connectInitFailed,
 		adapterValue,
 		function(player, failureClass, context)
-			handleInitFailure(data, player, failureClass, context)
+			if not beginWorker(data) then
+				return
+			end
+			runOwnedWorker(data, function()
+				handleInitFailure(data, player, failureClass, context)
+			end)
 		end
 	)
 	if not connected or connection == nil or type((connection :: any).Disconnect) ~= "function" then

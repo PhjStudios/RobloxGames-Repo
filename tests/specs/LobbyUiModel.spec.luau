@@ -1,7 +1,12 @@
 --!strict
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Validation = require(ReplicatedStorage.Shared.util.Validation)
 local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local LobbyUiModel = require(script.Parent.Parent.ProductionClientLobbyUi.LobbyUiModel)
+
+local LARGE_ROBLOX_USER_ID = 11_604_687_814
 
 local function settings()
 	return {
@@ -133,6 +138,31 @@ local function loadingState()
 end
 
 return TestHarness.suite("Lobby UI canonical render model", {
+	TestHarness.case("accepts safe Roblox UserIds above the signed 32-bit range", function(assertions)
+		local large = readyState()
+		large.localUserId = LARGE_ROBLOX_USER_ID
+		local canonical = LobbyUiModel.canonicalize(large)
+		assertions.isNotNil(canonical)
+		assertions.equal((canonical :: LobbyUiModel.RenderState).localUserId, LARGE_ROBLOX_USER_ID)
+
+		local loading = loadingState()
+		loading.localUserId = LARGE_ROBLOX_USER_ID
+		local loadingCanonical = LobbyUiModel.canonicalize(loading)
+		assertions.isNotNil(loadingCanonical)
+		assertions.equal((loadingCanonical :: LobbyUiModel.RenderState).localUserId, LARGE_ROBLOX_USER_ID)
+
+		for _, invalidUserId in { 0, -1, 1.5, math.huge, -math.huge, 0 / 0, Validation.MAX_SAFE_INTEGER + 1 } do
+			local invalid = readyState()
+			invalid.localUserId = invalidUserId
+			assertions.isNil(LobbyUiModel.canonicalize(invalid))
+		end
+
+		local overflowGold = readyState()
+		overflowGold.localUserId = LARGE_ROBLOX_USER_ID
+		overflowGold.gold = 2 ^ 31
+		assertions.isNil(LobbyUiModel.canonicalize(overflowGold))
+	end),
+
 	TestHarness.case("accepts and deeply detaches a bounded Ready profile view", function(assertions)
 		local raw = readyState()
 		local canonical = LobbyUiModel.canonicalize(raw)

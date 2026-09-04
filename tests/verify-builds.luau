@@ -269,6 +269,304 @@ local function verifyNetworkSecurityBoundary(): boolean
 	return true
 end
 
+local function verifyLobbyTravelSchedulerBoundary(): boolean
+	local source = readSource("src/server/lobby/bootstrap/Main.server.luau")
+	if source == nil then
+		emit("FAIL", "Lobby", "LOBBY_BOOTSTRAP_SOURCE_MISSING", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	local constructorStart = string.find(source, "LobbyTravelCoordinator.new({", 1, true)
+	local constructorEnd = if constructorStart == nil
+		then nil
+		else string.find(source, '"LOBBY_TRAVEL_COORDINATOR_UNAVAILABLE"', constructorStart, true)
+	if constructorStart == nil or constructorEnd == nil then
+		emit("FAIL", "Lobby", "TRAVEL_COORDINATOR_WIRING_MISSING", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	local wiring = string.sub(source, constructorStart, constructorEnd)
+	if
+		countPlainOccurrences(wiring, "schedule = task.defer,") ~= 1
+		or countPlainOccurrences(wiring, "schedule = task.spawn,") ~= 0
+	then
+		emit("FAIL", "Lobby", "TRAVEL_SCHEDULER_NOT_DEFERRED", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	emit("PASS", "Lobby", "TRAVEL_SCHEDULER_DEFERRED")
+
+	local reconnectConstructorStart = string.find(source, "LobbyReconnectService.new({", 1, true)
+	local reconnectConstructorEnd = if reconnectConstructorStart == nil
+		then nil
+		else string.find(source, '"LOBBY_RECONNECT_UNAVAILABLE"', reconnectConstructorStart, true)
+	if reconnectConstructorStart == nil or reconnectConstructorEnd == nil then
+		emit("FAIL", "Lobby", "RECONNECT_SERVICE_WIRING_MISSING", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	local reconnectWiring = string.sub(source, reconnectConstructorStart, reconnectConstructorEnd)
+	if
+		countPlainOccurrences(reconnectWiring, "schedule = task.defer,") ~= 1
+		or countPlainOccurrences(reconnectWiring, "schedule = task.spawn,") ~= 0
+	then
+		emit("FAIL", "Lobby", "RECONNECT_SCHEDULER_NOT_DEFERRED", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+
+	local retryProfileHandlerStart = string.find(source, "LobbyProtocol.ENDPOINTS.RETRY_PROFILE,", 1, true)
+	local inventoryHandlerStart = if retryProfileHandlerStart == nil
+		then nil
+		else string.find(source, "LobbyProtocol.ENDPOINTS.GET_INVENTORY,", retryProfileHandlerStart, true)
+	if retryProfileHandlerStart == nil or inventoryHandlerStart == nil then
+		emit("FAIL", "Lobby", "PROFILE_RETRY_WIRING_MISSING", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	local retryProfileHandler = string.sub(source, retryProfileHandlerStart, inventoryHandlerStart - 1)
+	if
+		countPlainOccurrences(retryProfileHandler, "profile:retryLoad(") ~= 1
+		or countPlainOccurrences(retryProfileHandler, "scheduleRuntimeWorker(function()") ~= 1
+		or countPlainOccurrences(retryProfileHandler, "task.spawn(") ~= 0
+		or countPlainOccurrences(retryProfileHandler, "if runtimeCleaned then") ~= 1
+		or countPlainOccurrences(retryProfileHandler, "if not scheduled then") ~= 1
+	then
+		emit("FAIL", "Lobby", "PROFILE_RETRY_NOT_RUNTIME_OWNED", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	emit("PASS", "Lobby", "PROFILE_RETRY_RUNTIME_OWNED")
+
+	local publicationStart = string.find(source, "publishViews = function", 1, true)
+	local publicationEnd = if publicationStart == nil
+		then nil
+		else string.find(source, "local processingReadyByUserId", publicationStart, true)
+	if publicationStart == nil or publicationEnd == nil then
+		emit("FAIL", "Lobby", "PUBLICATION_WIRING_MISSING", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	local publicationWiring = string.sub(source, publicationStart, publicationEnd - 1)
+	if
+		countPlainOccurrences(publicationWiring, "runRuntimeWorker(function()") ~= 4
+		or countPlainOccurrences(source, "sendProfile(") ~= 1
+		or countPlainOccurrences(source, "sendInventory(") ~= 1
+		or countPlainOccurrences(source, "sendParty(") ~= 2
+		or countPlainOccurrences(source, "sendQueues(") ~= 1
+		or countPlainOccurrences(source, "sendActiveRoute(") ~= 3
+	then
+		emit("FAIL", "Lobby", "PUBLICATION_NOT_RUNTIME_OWNED", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	emit("PASS", "Lobby", "PUBLICATION_RUNTIME_OWNED")
+
+	local mutationStart = string.find(source, "LobbyProtocol.ENDPOINTS.EQUIP_TOWER,", 1, true)
+	local mutationEnd = if mutationStart == nil
+		then nil
+		else string.find(source, "LobbyProtocol.ENDPOINTS.GET_PARTY,", mutationStart, true)
+	if mutationStart == nil or mutationEnd == nil then
+		emit("FAIL", "Lobby", "PROFILE_MUTATION_WIRING_MISSING", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	local mutationWiring = string.sub(source, mutationStart, mutationEnd - 1)
+	if
+		countPlainOccurrences(mutationWiring, "ready(context.player)") ~= 6
+		or countPlainOccurrences(mutationWiring, "then finishMutation(") ~= 6
+	then
+		emit("FAIL", "Lobby", "PROFILE_MUTATION_NOT_RUNTIME_GATED", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	emit("PASS", "Lobby", "PROFILE_MUTATION_RUNTIME_GATED")
+
+	local activeRouteHandlerStart = string.find(source, "LobbyProtocol.ENDPOINTS.GET_ACTIVE_ROUTE,", 1, true)
+	local reconnectHandlerStart = if activeRouteHandlerStart == nil
+		then nil
+		else string.find(source, "LobbyProtocol.ENDPOINTS.RECONNECT_ACTIVE_MATCH,", activeRouteHandlerStart, true)
+	local runtimeStart = if reconnectHandlerStart == nil
+		then nil
+		else string.find(source, "local runtimeConnections:", reconnectHandlerStart, true)
+	if activeRouteHandlerStart == nil or reconnectHandlerStart == nil or runtimeStart == nil then
+		emit("FAIL", "Lobby", "RECONNECT_REQUEST_WIRING_MISSING", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	local activeRouteHandler = string.sub(source, activeRouteHandlerStart, reconnectHandlerStart - 1)
+	if
+		countPlainOccurrences(activeRouteHandler, "activeRouteViewByUserId[context.player.UserId]") ~= 1
+		or countPlainOccurrences(activeRouteHandler, "or noActiveRouteView") ~= 0
+		or countPlainOccurrences(activeRouteHandler, "ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)") ~= 1
+		or countPlainOccurrences(activeRouteHandler, "reconnect:getView(") ~= 0
+	then
+		emit(
+			"FAIL",
+			"Lobby",
+			"ACTIVE_ROUTE_REQUEST_NOT_CONFIRMED_CACHE_ONLY",
+			"src/server/lobby/bootstrap/Main.server.luau"
+		)
+		return false
+	end
+
+	local readyPipelineStart = string.find(source, "local function processPlayerReady", 1, true)
+	local readyPipelineEnd = if readyPipelineStart == nil
+		then nil
+		else string.find(source, "local function finishMutation", readyPipelineStart, true)
+	if readyPipelineStart == nil or readyPipelineEnd == nil then
+		emit("FAIL", "Lobby", "PLAYER_READY_PIPELINE_MISSING", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	local readyPipeline = string.sub(source, readyPipelineStart, readyPipelineEnd - 1)
+	local returnAdmission = string.find(readyPipeline, "returns:admitJoinData", 1, true)
+	local returnedRouteRetirement = if returnAdmission == nil
+		then nil
+		else string.find(readyPipeline, "retireReturnedRoute(player)", returnAdmission, true)
+	local initialRoute = if returnedRouteRetirement == nil
+		then nil
+		else string.find(readyPipeline, "refreshRoute(player)", returnedRouteRetirement, true)
+	local initialPublication = if initialRoute == nil
+		then nil
+		else string.find(readyPipeline, "publishQueueViews()", initialRoute, true)
+	local initialClaims = if initialPublication == nil
+		then nil
+		else string.find(readyPipeline, "pendingClaims:processReady(userId)", initialPublication, true)
+	local postClaimPublication = if initialClaims == nil
+		then nil
+		else string.find(readyPipeline, "publishQueueViews()", initialClaims, true)
+	if
+		returnAdmission == nil
+		or returnedRouteRetirement == nil
+		or initialRoute == nil
+		or initialPublication == nil
+		or initialClaims == nil
+		or postClaimPublication == nil
+		or not (
+			returnAdmission < returnedRouteRetirement
+			and returnedRouteRetirement < initialRoute
+			and initialRoute < initialPublication
+			and initialPublication < initialClaims
+			and initialClaims < postClaimPublication
+		)
+	then
+		emit(
+			"FAIL",
+			"Lobby",
+			"PLAYER_READY_RETURN_ROUTE_NOT_RETIRED_BEFORE_REFRESH",
+			"src/server/lobby/bootstrap/Main.server.luau"
+		)
+		return false
+	end
+
+	local maintenanceStart = string.find(source, "local readyPlayers: { Player } = {}", runtimeStart, true)
+	local maintenanceEnd = if maintenanceStart == nil
+		then nil
+		else string.find(source, "travelStepRunning = false", maintenanceStart, true)
+	if maintenanceStart == nil or maintenanceEnd == nil then
+		emit("FAIL", "Lobby", "ROUTE_FIRST_MAINTENANCE_MISSING", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	local maintenance = string.sub(source, maintenanceStart, maintenanceEnd - 1)
+	local maintenanceRoute = string.find(maintenance, "refreshRoute(player)", 1, true)
+	local maintenancePublication = if maintenanceRoute == nil
+		then nil
+		else string.find(maintenance, "publishQueueViews()", maintenanceRoute, true)
+	local maintenanceClaims = if maintenancePublication == nil
+		then nil
+		else string.find(maintenance, "pendingClaims:processReady(player.UserId)", maintenancePublication, true)
+	local maintenancePostClaims = if maintenanceClaims == nil
+		then nil
+		else string.find(maintenance, "publishQueueViews()", maintenanceClaims, true)
+	if
+		maintenanceRoute == nil
+		or maintenancePublication == nil
+		or maintenanceClaims == nil
+		or maintenancePostClaims == nil
+		or not (
+			maintenanceRoute < maintenancePublication
+			and maintenancePublication < maintenanceClaims
+			and maintenanceClaims < maintenancePostClaims
+		)
+	then
+		emit(
+			"FAIL",
+			"Lobby",
+			"MAINTENANCE_ROUTE_NOT_PUBLISHED_BEFORE_CLAIMS",
+			"src/server/lobby/bootstrap/Main.server.luau"
+		)
+		return false
+	end
+	local reconnectHandler = string.sub(source, reconnectHandlerStart, runtimeStart - 1)
+	if
+		countPlainOccurrences(reconnectHandler, "reconnect:beginReconnect(") ~= 1
+		or countPlainOccurrences(reconnectHandler, "reconnect:reconnect(") ~= 0
+	then
+		emit("FAIL", "Lobby", "RECONNECT_REQUEST_NOT_DEFERRED", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	emit("PASS", "Lobby", "ACTIVE_ROUTE_REQUEST_CONFIRMED_CACHE_ONLY")
+	emit("PASS", "Lobby", "PLAYER_READY_ROUTE_PUBLISHED_BEFORE_CLAIMS")
+	emit("PASS", "Lobby", "MAINTENANCE_ROUTE_PUBLISHED_BEFORE_CLAIMS")
+	emit("PASS", "Lobby", "RECONNECT_SCHEDULER_DEFERRED")
+
+	local cleanupRegistration =
+		string.find(source, "configuration.lifecycleRunner:register(runtimeCleanupDefinition)", runtimeStart, true)
+	local travelRegistration = if cleanupRegistration == nil
+		then nil
+		else string.find(
+			source,
+			"configuration.lifecycleRunner:register(travel:getServiceDefinition())",
+			cleanupRegistration,
+			true
+		)
+	local runtimeRegistration = if travelRegistration == nil
+		then nil
+		else string.find(
+			source,
+			"configuration.lifecycleRunner:register(runtimeDefinition)",
+			travelRegistration,
+			true
+		)
+	if
+		cleanupRegistration == nil
+		or travelRegistration == nil
+		or runtimeRegistration == nil
+		or not (cleanupRegistration < travelRegistration and travelRegistration < runtimeRegistration)
+		or countPlainOccurrences(source, "while (travelStepRunning or runtimeWorkerCount > 0)") ~= 1
+		or countPlainOccurrences(source, 'cleanupUntilSettled("RECONNECT"') ~= 2
+		or countPlainOccurrences(source, 'cleanupUntilSettled("PROFILE_TRANSFER"') ~= 1
+		or countPlainOccurrences(source, 'error("[ATD_LOBBY_BOOTSTRAP][code=RUNTIME_NOT_QUIESCED]"') ~= 1
+	then
+		emit("FAIL", "Lobby", "RUNTIME_SHUTDOWN_NOT_JOINED", "src/server/lobby/bootstrap/Main.server.luau")
+		return false
+	end
+	emit("PASS", "Lobby", "RUNTIME_SHUTDOWN_JOINED")
+	return true
+end
+
+local function verifyMatchReturnSchedulerBoundary(): boolean
+	local source = readSource("src/server/match/bootstrap/Main.server.luau")
+	if source == nil then
+		emit("FAIL", "Match", "MATCH_BOOTSTRAP_SOURCE_MISSING", "src/server/match/bootstrap/Main.server.luau")
+		return false
+	end
+	local constructorStart = string.find(source, "MatchTravelHost.new({", 1, true)
+	local constructorEnd = if constructorStart == nil
+		then nil
+		else string.find(source, '"MATCH_TRAVEL_HOST_UNAVAILABLE"', constructorStart, true)
+	if constructorStart == nil or constructorEnd == nil then
+		emit("FAIL", "Match", "MATCH_TRAVEL_HOST_WIRING_MISSING", "src/server/match/bootstrap/Main.server.luau")
+		return false
+	end
+	local wiring = string.sub(source, constructorStart, constructorEnd)
+	if
+		countPlainOccurrences(wiring, "scheduleReturn = task.defer,") ~= 1
+		or countPlainOccurrences(wiring, "scheduleReturn = task.spawn,") ~= 0
+	then
+		emit("FAIL", "Match", "RETURN_SCHEDULER_NOT_DEFERRED", "src/server/match/bootstrap/Main.server.luau")
+		return false
+	end
+	emit("PASS", "Match", "RETURN_SCHEDULER_DEFERRED")
+	if
+		countPlainOccurrences(wiring, "scheduleRematch = task.defer,") ~= 1
+		or countPlainOccurrences(wiring, "scheduleRematch = task.spawn,") ~= 0
+	then
+		emit("FAIL", "Match", "REMATCH_SCHEDULER_NOT_DEFERRED", "src/server/match/bootstrap/Main.server.luau")
+		return false
+	end
+	emit("PASS", "Match", "REMATCH_SCHEDULER_DEFERRED")
+	return true
+end
+
 local function verifyProjectSourceIsolation(): boolean
 	for _, definition in ALL_BUILDS do
 		local projectSource = readSource(definition.project)
@@ -668,7 +966,12 @@ local function run(): boolean
 		return false
 	end
 	currentStage = "security"
-	if not verifyNetworkSecurityBoundary() or not verifyProjectSourceIsolation() then
+	if
+		not verifyNetworkSecurityBoundary()
+		or not verifyLobbyTravelSchedulerBoundary()
+		or not verifyMatchReturnSchedulerBoundary()
+		or not verifyProjectSourceIsolation()
+	then
 		return false
 	end
 	currentStage = "build_directory"

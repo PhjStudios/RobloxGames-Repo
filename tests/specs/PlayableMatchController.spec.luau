@@ -561,6 +561,24 @@ return TestHarness.suite("playable Match production client controller", {
 		cleanupRig(rig)
 	end),
 
+	TestHarness.case("uses the current desktop pointer for a positionless keyboard confirm", function(assertions)
+		local rig = makeRig()
+		deliverInitial(rig, snapshot(7))
+		rig.pointer = Vector2.new(420, 360)
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "SelectHotbar",
+			source = "Desktop",
+			slot = 1,
+		}))
+		assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
+			kind = "Confirm",
+			source = "Desktop",
+		}))
+		assertions.equal(rig.raycastScreenPosition, rig.pointer)
+		assertions.equal(#rig.fires[PlayableMatchProtocol.ENDPOINTS.SUBMIT_PLACEMENT], 1)
+		cleanupRig(rig)
+	end),
+
 	TestHarness.case("stages touch placement locally until one explicit confirm", function(assertions)
 		local rig = makeRig()
 		deliverInitial(rig, snapshot(7))
@@ -817,6 +835,48 @@ return TestHarness.suite("playable Match production client controller", {
 			cleanupRig(rig)
 		end
 	),
+
+	TestHarness.case("keeps a starting rematch non-actionable while the server creates it", function(assertions)
+		local rig = makeRig()
+		local results = snapshot(7, "Results")
+		results.rewarding = true
+		results.reward = {
+			resultId = "result:controller-rematch-starting",
+			status = "Granted",
+			persistentGoldAwarded = 250,
+			firstClearBonus = 0,
+			battleCashEarned = 76,
+			battleCashSpent = 230,
+			reason = "Claimed",
+		}
+		deliverInitial(rig, results)
+		local starting = travelSnapshot(2)
+		starting.rematch.state = "Starting"
+		starting.rematch.votes[1].choice = "Approve"
+		deliverTravel(rig, starting)
+
+		local rendered = rig.renders[#rig.renders]
+		assertions.equal(rendered.travel.rematchState, "Starting")
+		assertions.isFalse(rendered.travel.canReturn)
+		assertions.isFalse(rendered.travel.canApprove)
+		assertions.isFalse(rendered.travel.canDecline)
+		assertions.isFalse((invokeActionForTests :: any)(rig.controller, { kind = "Return", source = "Touch" }))
+		assertions.isFalse((invokeActionForTests :: any)(rig.controller, {
+			kind = "RematchApprove",
+			source = "Gamepad",
+		}))
+
+		local approved = travelSnapshot(3)
+		approved.rematch.state = "Approved"
+		approved.rematch.votes[1].choice = "Approve"
+		deliverTravel(rig, approved)
+		rendered = rig.renders[#rig.renders]
+		assertions.isFalse(rendered.travel.canReturn)
+		assertions.isFalse((invokeActionForTests :: any)(rig.controller, { kind = "Return", source = "Keyboard" }))
+		assertions.equal(#rig.fires[MatchTravelProtocol.ENDPOINTS.REQUEST_RETURN], 0)
+		assertions.equal(#rig.fires[MatchTravelProtocol.ENDPOINTS.VOTE_REMATCH], 0)
+		cleanupRig(rig)
+	end),
 
 	TestHarness.case("keeps spectators read-only while cycling bounded live camera targets", function(assertions)
 		local rig = makeRig()

@@ -448,7 +448,43 @@ return TestHarness.suite("ProfileService", {
 		local secondFrozen = success(assertions, profileService:beginTransfer(USER_ID))
 		assertions.equal(secondFrozen.revision, initial.revision + 1)
 		assertions.isTrue(success(assertions, profileService:release(USER_ID)))
+		assertions.equal(profileService:getState(USER_ID), "Releasing")
+
+		local destination = service(assertions, store, "session-transfer-destination", function()
+			return 8_500
+		end)
+		assertions.equal(success(assertions, destination:load(USER_ID)).revision, initial.revision + 1)
+		assertions.equal(profileService:getState(USER_ID), "Releasing")
+		assertions.isTrue(success(assertions, destination:release(USER_ID)))
+
+		local recovered = success(assertions, profileService:load(USER_ID))
+		assertions.equal(recovered.revision, initial.revision + 1)
+		assertions.equal(profileService:getState(USER_ID), "Ready")
+		assertions.isTrue(success(assertions, profileService:release(USER_ID)))
 		assertions.isNil(profileService:getState(USER_ID))
+	end),
+
+	TestHarness.case("clears a released travel sentinel when the source player departs", function(assertions)
+		local store = IsolatedProfileStore.new()
+		local profileService = service(assertions, store, "session-transfer-departure", function()
+			return 8_750
+		end)
+		success(assertions, profileService:load(USER_ID))
+		success(assertions, profileService:beginTransfer(USER_ID))
+		assertions.isTrue(success(assertions, profileService:release(USER_ID)))
+		assertions.equal(profileService:getState(USER_ID), "Releasing")
+
+		local depart = ProfileService.departPlayerForTests
+		assertions.isTrue(depart ~= nil and depart(profileService, USER_ID))
+		for _ = 1, 20 do
+			if profileService:getState(USER_ID) == nil then
+				break
+			end
+			task.wait()
+		end
+		assertions.isNil(profileService:getState(USER_ID))
+		local envelope = store:read(PROFILE_KEY) :: any
+		assertions.isNil(envelope.session)
 	end),
 
 	TestHarness.case(

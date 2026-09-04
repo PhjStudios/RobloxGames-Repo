@@ -6,7 +6,7 @@ local Validation = require(script.Parent.Parent.util.Validation)
 
 export type ViewerRole = "Participant" | "Spectator"
 export type ReturnStatus = "Idle" | "Pending" | "Teleporting" | "Failed"
-export type RematchState = "Pending" | "Approved" | "Declined" | "Failed"
+export type RematchState = "Pending" | "Starting" | "Approved" | "Declined" | "Failed"
 export type VoteChoice = "Pending" | "Approve" | "Decline"
 
 export type VoteView = {
@@ -58,7 +58,7 @@ local VOTE = PayloadValidation.record({
 })
 local REMATCH = PayloadValidation.record({
 	revision = POSITIVE_SAFE_INTEGER,
-	state = PayloadValidation.enum({ "Pending", "Approved", "Declined", "Failed" }),
+	state = PayloadValidation.enum({ "Pending", "Starting", "Approved", "Declined", "Failed" }),
 	deadline = SAFE_INTEGER,
 	votes = PayloadValidation.array(VOTE, MAX_VOTERS, 1),
 })
@@ -134,10 +134,13 @@ function MatchTravelProtocol.validateSnapshot(value: unknown): Result.Result<Sna
 			end
 			seen[vote.userId] = true
 		end
-		if rematch.state == "Approved" then
+		if rematch.state == "Approved" or rematch.state == "Starting" then
 			for index, vote in rematch.votes do
 				if vote.choice ~= "Approve" then
-					return issue({ "payload", "rematch", "votes", index }, "Approved rematches require unanimous votes")
+					return issue(
+						{ "payload", "rematch", "votes", index },
+						"Starting and approved rematches require unanimous votes"
+					)
 				end
 			end
 		elseif rematch.state == "Pending" then

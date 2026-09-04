@@ -436,6 +436,7 @@ end
 local setupSucceeded = pcall(function()
 	local roleResult = PlaceRoles.resolve(
 		ReplicatedStorage:GetAttribute(PlaceRoles.ATTRIBUTE_NAME),
+		game.GameId,
 		game.PlaceId,
 		RunService:IsStudio()
 	)

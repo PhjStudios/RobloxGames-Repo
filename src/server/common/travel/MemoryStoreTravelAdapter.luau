@@ -2,6 +2,7 @@
 
 local RunService = game:GetService("RunService")
 
+local PlaceRoles = require(game:GetService("ReplicatedStorage").Shared.config.PlaceRoles)
 local Result = require(game:GetService("ReplicatedStorage").Shared.util.Result)
 local Validation = require(game:GetService("ReplicatedStorage").Shared.util.Validation)
 
@@ -13,19 +14,43 @@ export type Adapter = {
 	getKind: (self: Adapter) -> string,
 }
 
-export type ErrorCode = "STUDIO_FORBIDDEN" | "STUDIO_REQUIRED" | "MEMORY_STORE_UNAVAILABLE" | "INVALID_CLOCK"
+export type ErrorCode =
+	"INVALID_DEPLOYMENT"
+	| "STUDIO_FORBIDDEN"
+	| "STUDIO_REQUIRED"
+	| "MEMORY_STORE_UNAVAILABLE"
+	| "INVALID_CLOCK"
 export type AdapterError = { code: ErrorCode }
+
+export type PublishedNamespace = {
+	deployment: PlaceRoles.Deployment,
+	mapName: string,
+}
 
 type StudioEntry = { value: unknown, expiresAt: number }
 
 local PRODUCTION_MAP_NAME = "ATD_Travel_Prod_v1"
+local STAGING_MAP_NAME = "ATD_Travel_Staging_v1"
 local MAX_KEY_BYTES = 128
 local MAX_EXPIRATION_SECONDS = 2_700
 local MAX_STUDIO_KEYS = 512
 local MAX_PRODUCTION_ATTEMPTS = 3
 local MAX_PRODUCTION_BACKOFF_SECONDS = 0.5
 
+local PUBLISHED_NAMESPACES: { [string]: PublishedNamespace } = table.freeze({
+	[PlaceRoles.PRODUCTION_DEPLOYMENT] = table.freeze({
+		deployment = PlaceRoles.PRODUCTION_DEPLOYMENT,
+		mapName = PRODUCTION_MAP_NAME,
+	}),
+	[PlaceRoles.STAGING_DEPLOYMENT] = table.freeze({
+		deployment = PlaceRoles.STAGING_DEPLOYMENT,
+		mapName = STAGING_MAP_NAME,
+	}),
+})
+
 local MemoryStoreTravelAdapter = {
+	PRODUCTION_MAP_NAME = PRODUCTION_MAP_NAME,
+	STAGING_MAP_NAME = STAGING_MAP_NAME,
 	MAX_EXPIRATION_SECONDS = MAX_EXPIRATION_SECONDS,
 }
 
@@ -81,10 +106,28 @@ local function productionCall(callback: () -> unknown): unknown
 	error("[ATD_MEMORY_TRAVEL_ADAPTER][code=MEMORY_STORE_UNAVAILABLE]", 0)
 end
 
-function MemoryStoreTravelAdapter.newProduction(): Result.Result<Adapter, AdapterError>
+function MemoryStoreTravelAdapter.resolvePublishedNamespace(
+	deploymentValue: unknown
+): Result.Result<PublishedNamespace, AdapterError>
+	if type(deploymentValue) ~= "string" then
+		return failure("INVALID_DEPLOYMENT")
+	end
+	local namespace = PUBLISHED_NAMESPACES[deploymentValue]
+	if namespace == nil then
+		return failure("INVALID_DEPLOYMENT")
+	end
+	return Result.ok(namespace)
+end
+
+function MemoryStoreTravelAdapter.newPublished(deploymentValue: unknown): Result.Result<Adapter, AdapterError>
+	local namespaceResult = MemoryStoreTravelAdapter.resolvePublishedNamespace(deploymentValue)
+	if not namespaceResult.ok then
+		return failure(namespaceResult.error.code)
+	end
 	if RunService:IsStudio() then
 		return failure("STUDIO_FORBIDDEN")
 	end
+	local namespace = namespaceResult.value
 	local loaded, memoryStoreService = pcall(function()
 		return game:GetService("MemoryStoreService")
 	end)
@@ -92,7 +135,7 @@ function MemoryStoreTravelAdapter.newProduction(): Result.Result<Adapter, Adapte
 		return failure("MEMORY_STORE_UNAVAILABLE")
 	end
 	local mapped, hashMap = pcall(function()
-		return (memoryStoreService :: MemoryStoreService):GetHashMap(PRODUCTION_MAP_NAME)
+		return (memoryStoreService :: MemoryStoreService):GetHashMap(namespace.mapName)
 	end)
 	if not mapped then
 		return failure("MEMORY_STORE_UNAVAILABLE")
@@ -121,7 +164,9 @@ function MemoryStoreTravelAdapter.newProduction(): Result.Result<Adapter, Adapte
 		end)
 	end
 	function adapter:getKind(): string
-		return "ProductionMemoryStore"
+		return if namespace.deployment == PlaceRoles.PRODUCTION_DEPLOYMENT
+			then "ProductionMemoryStore"
+			else "StagingMemoryStore"
 	end
 	return Result.ok(table.freeze(adapter) :: Adapter)
 end
@@ -168,11 +213,9 @@ function MemoryStoreTravelAdapter.newStudioDevelopment(
 		local entry = currentEntry(key)
 		local replacement = transform(if entry == nil then nil else clone(entry.value))
 		if replacement == nil then
-			if entry ~= nil then
-				entries[key] = nil
-				keyCount -= 1
-			end
-			return nil
+			-- Match MemoryStoreHashMap.UpdateAsync: nil aborts the write and
+			-- preserves the current value. Removal is an explicit RemoveAsync.
+			return if entry == nil then nil else clone(entry.value)
 		end
 		if entry == nil then
 			if keyCount >= MAX_STUDIO_KEYS then

@@ -23,6 +23,7 @@ local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifec
 local SettingsProtocol = require(ReplicatedStorage.Shared.settings.SettingsProtocol)
 local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
 local Result = require(ReplicatedStorage.Shared.util.Result)
+local Validation = require(ReplicatedStorage.Shared.util.Validation)
 
 local function findClientModules(): (Instance, Instance)
 	local clientRoot = script.Parent.Parent
@@ -567,6 +568,15 @@ local function applyProfile(data: ControllerData, value: unknown): boolean
 		pcall((data.dependencies :: Dependencies).applySettings, snapshot.settings :: ProfileProtocol.SettingsView)
 		issueInventory(data)
 		issueBanner(data)
+		if data.partyState ~= "Ready" then
+			issueParty(data)
+		end
+		if data.queuesState ~= "Ready" then
+			issueQueues(data)
+		end
+		if data.activeRouteState ~= "Ready" then
+			issueActiveRoute(data)
+		end
 	else
 		data.profile = snapshot
 		data.inventory = nil
@@ -1420,7 +1430,12 @@ local function initialize(data: ControllerData)
 	end
 	data.dependencies = dependencies :: Dependencies
 	local userOk, userId = pcall((dependencies :: Dependencies).getLocalUserId)
-	if not userOk or type(userId) ~= "number" or userId % 1 ~= 0 or userId < 1 or userId > 2 ^ 31 - 1 then
+	if
+		not userOk
+		or type(userId) ~= "number"
+		or not Validation.isSafeInteger(userId :: number)
+		or (userId :: number) < 1
+	then
 		data.state = "Failed"
 		error("[ATD_LOBBY_CONTROLLER][code=LOCAL_USER_INVALID]", 0)
 	end
@@ -1570,9 +1585,6 @@ local function start(data: ControllerData)
 	data.lastProfilePoll = dependencies.now()
 	render(data)
 	issueProfile(data)
-	issueParty(data)
-	issueQueues(data)
-	issueActiveRoute(data)
 end
 
 local function cleanup(data: ControllerData): boolean

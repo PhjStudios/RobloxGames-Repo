@@ -115,7 +115,7 @@ export type TravelState = {
 	returnStatus: "Idle" | "Pending" | "Teleporting" | "Failed",
 	failure: string?,
 	canReturn: boolean,
-	rematchState: "Pending" | "Approved" | "Declined" | "Failed"?,
+	rematchState: "Pending" | "Starting" | "Approved" | "Declined" | "Failed"?,
 	rematchStatus: string?,
 	canApprove: boolean,
 	canDecline: boolean,
@@ -727,7 +727,7 @@ local function canonicalTravel(value: unknown): TravelState?
 		)
 		or (failureValue ~= nil and not safeText(failureValue, 64))
 		or type(canReturn) ~= "boolean"
-		or (rematchState ~= nil and rematchState ~= "Pending" and rematchState ~= "Approved" and rematchState ~= "Declined" and rematchState ~= "Failed")
+		or (rematchState ~= nil and rematchState ~= "Pending" and rematchState ~= "Starting" and rematchState ~= "Approved" and rematchState ~= "Declined" and rematchState ~= "Failed")
 		or (rematchStatus ~= nil and not safeText(rematchStatus, 120, true))
 		or type(canApprove) ~= "boolean"
 		or type(canDecline) ~= "boolean"

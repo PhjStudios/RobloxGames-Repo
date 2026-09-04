@@ -6,6 +6,7 @@ local EnvironmentContext = require(ReplicatedStorage.Shared.logging.EnvironmentC
 local LobbyProtocol = require(ReplicatedStorage.Shared.lobby.LobbyProtocol)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
 local Result = require(ReplicatedStorage.Shared.util.Result)
+local Validation = require(ReplicatedStorage.Shared.util.Validation)
 
 local RobloxAdapter = require(script.Parent.Parent.Support.RobloxAdapter)
 local TestHarness = require(script.Parent.Parent.Support.TestHarness)
@@ -47,6 +48,8 @@ if newForTests == nil or invokeAction == nil then
 	error("[ATD_TEST_FIXTURE][code=LOBBY_CONTROLLER_TEST_SEAM_MISSING]", 0)
 end
 
+local LARGE_ROBLOX_USER_ID = 11_604_687_814
+
 local function success<T>(assertions: Assertions, value: any): T
 	assertions.isTrue(value.ok)
 	if not value.ok then
@@ -65,8 +68,9 @@ local function makeConnection(rig: Rig): RBXScriptConnection
 	end) :: RBXScriptConnection
 end
 
-local function makeRig(assertions: Assertions): Rig
+local function makeRig(assertions: Assertions, localUserIdValue: number?): Rig
 	local fixture = TowerFixtures.createAuthenticatedFixture()
+	local localUserId = localUserIdValue or 101
 	local rig = {
 		controller = nil :: any,
 		definition = nil,
@@ -144,7 +148,7 @@ local function makeRig(assertions: Assertions): Rig
 			return "Desktop"
 		end,
 		getLocalUserId = function()
-			return 101
+			return localUserId
 		end,
 		newTransactionId = function()
 			rig.transactionSequence += 1
@@ -383,6 +387,44 @@ local function pullReceipt(rig: Rig, request: RequestRecord, quantity: number, r
 end
 
 return TestHarness.suite("LobbyController", {
+	TestHarness.case("waits for profile readiness before requesting dependent Lobby authority", function(assertions)
+		local rig = makeRig(assertions)
+		assertions.isNotNil(findRequest(rig, LobbyProtocol.ENDPOINTS.GET_PROFILE))
+		assertions.isNil(findRequest(rig, LobbyProtocol.ENDPOINTS.GET_PARTY))
+		assertions.isNil(findRequest(rig, LobbyProtocol.ENDPOINTS.GET_QUEUES))
+		assertions.isNil(findRequest(rig, LobbyProtocol.ENDPOINTS.GET_ACTIVE_ROUTE))
+		assertions.equal(#latest(rig).toasts, 0)
+
+		respond(rig, LobbyProtocol.ENDPOINTS.GET_PROFILE, true, { state = "Loading", retryable = false })
+		assertions.isNil(findRequest(rig, LobbyProtocol.ENDPOINTS.GET_PARTY))
+		assertions.isNil(findRequest(rig, LobbyProtocol.ENDPOINTS.GET_QUEUES))
+		assertions.isNil(findRequest(rig, LobbyProtocol.ENDPOINTS.GET_ACTIVE_ROUTE))
+		assertions.equal(#latest(rig).toasts, 0)
+
+		rig.now = LobbyController.PROFILE_POLL_SECONDS + 0.1
+		(rig.step :: () -> ())()
+		respond(rig, LobbyProtocol.ENDPOINTS.GET_PROFILE, true, profile(7))
+		assertions.isNotNil(findRequest(rig, LobbyProtocol.ENDPOINTS.GET_PARTY))
+		assertions.isNotNil(findRequest(rig, LobbyProtocol.ENDPOINTS.GET_QUEUES))
+		assertions.isNotNil(findRequest(rig, LobbyProtocol.ENDPOINTS.GET_ACTIVE_ROUTE))
+		assertions.equal(#latest(rig).toasts, 0)
+		shutdown(rig)
+	end),
+
+	TestHarness.case("accepts Roblox UserIds above the signed 32-bit range", function(assertions)
+		local rig = makeRig(assertions, LARGE_ROBLOX_USER_ID)
+		assertions.equal(latest(rig).localUserId, LARGE_ROBLOX_USER_ID)
+		shutdown(rig)
+	end),
+
+	TestHarness.case("rejects non-positive non-finite fractional and unsafe local UserIds", function(assertions)
+		for _, invalidUserId in { 0, -1, 1.5, math.huge, -math.huge, 0 / 0, Validation.MAX_SAFE_INTEGER + 1 } do
+			assertions.isFalse(pcall(function()
+				makeRig(assertions, invalidUserId)
+			end))
+		end
+	end),
+
 	TestHarness.case(
 		"never renders authoritative defaults before Ready and blocks non-ready mutations",
 		function(assertions)

@@ -3,29 +3,55 @@
 local DataStoreService = game:GetService("DataStoreService")
 local RunService = game:GetService("RunService")
 
+local PlaceRoles = require(game:GetService("ReplicatedStorage").Shared.config.PlaceRoles)
 local Result = require(game:GetService("ReplicatedStorage").Shared.util.Result)
 
 export type Transform = (currentValue: unknown) -> unknown
 
+export type AdapterKind = "ProductionDataStore" | "StagingDataStore" | "StudioDevelopmentMemory"
+
 export type Adapter = {
 	updateAsync: (self: Adapter, key: string, transform: Transform) -> unknown,
-	getKind: (self: Adapter) -> "ProductionDataStore" | "StudioDevelopmentMemory",
+	getKind: (self: Adapter) -> AdapterKind,
 }
 
-export type ErrorCode = "STUDIO_FORBIDDEN" | "STUDIO_REQUIRED" | "DATASTORE_UNAVAILABLE"
+export type ErrorCode = "INVALID_DEPLOYMENT" | "STUDIO_FORBIDDEN" | "STUDIO_REQUIRED" | "DATASTORE_UNAVAILABLE"
 export type AdapterError = {
 	code: ErrorCode,
 	message: string,
 }
 
+export type PublishedNamespace = {
+	deployment: PlaceRoles.Deployment,
+	storeName: string,
+	scope: string,
+}
+
 local PRODUCTION_STORE_NAME = "ATD_Profile_Prod_v1"
 local PRODUCTION_SCOPE = "profiles"
+local STAGING_STORE_NAME = "ATD_Profile_Staging_v1"
+local STAGING_SCOPE = "profiles_staging"
 local STUDIO_SCOPE_NAME = "ATD_Profile_Studio_Development_Ephemeral"
 local MAX_STUDIO_KEYS = 100
+
+local PUBLISHED_NAMESPACES: { [string]: PublishedNamespace } = table.freeze({
+	[PlaceRoles.PRODUCTION_DEPLOYMENT] = table.freeze({
+		deployment = PlaceRoles.PRODUCTION_DEPLOYMENT,
+		storeName = PRODUCTION_STORE_NAME,
+		scope = PRODUCTION_SCOPE,
+	}),
+	[PlaceRoles.STAGING_DEPLOYMENT] = table.freeze({
+		deployment = PlaceRoles.STAGING_DEPLOYMENT,
+		storeName = STAGING_STORE_NAME,
+		scope = STAGING_SCOPE,
+	}),
+})
 
 local ProfileStoreAdapter = {
 	PRODUCTION_STORE_NAME = PRODUCTION_STORE_NAME,
 	PRODUCTION_SCOPE = PRODUCTION_SCOPE,
+	STAGING_STORE_NAME = STAGING_STORE_NAME,
+	STAGING_SCOPE = STAGING_SCOPE,
 	STUDIO_SCOPE_NAME = STUDIO_SCOPE_NAME,
 	MAX_STUDIO_KEYS = MAX_STUDIO_KEYS,
 }
@@ -54,23 +80,44 @@ local function clone(value: any, seen: { [any]: any }?): any
 	return output
 end
 
-function ProfileStoreAdapter.newProduction(): Result.Result<Adapter, AdapterError>
-	if RunService:IsStudio() then
-		return errorResult("STUDIO_FORBIDDEN", "Production profile DataStore access is disabled in Studio")
+function ProfileStoreAdapter.resolvePublishedNamespace(
+	deploymentValue: unknown
+): Result.Result<PublishedNamespace, AdapterError>
+	if type(deploymentValue) ~= "string" then
+		return errorResult("INVALID_DEPLOYMENT", "Published profile storage requires an explicit deployment")
 	end
+	local namespace = PUBLISHED_NAMESPACES[deploymentValue]
+	if namespace == nil then
+		return errorResult("INVALID_DEPLOYMENT", "Published profile storage requires Production or Staging")
+	end
+	return Result.ok(namespace)
+end
+
+function ProfileStoreAdapter.newPublished(deploymentValue: unknown): Result.Result<Adapter, AdapterError>
+	local namespaceResult = ProfileStoreAdapter.resolvePublishedNamespace(deploymentValue)
+	if not namespaceResult.ok then
+		return errorResult(namespaceResult.error.code, namespaceResult.error.message)
+	end
+	if RunService:IsStudio() then
+		return errorResult("STUDIO_FORBIDDEN", "Published profile DataStore access is disabled in Studio")
+	end
+	local namespace = namespaceResult.value
 	local opened, storeValue = pcall(function()
-		return DataStoreService:GetDataStore(PRODUCTION_STORE_NAME, PRODUCTION_SCOPE)
+		return DataStoreService:GetDataStore(namespace.storeName, namespace.scope)
 	end)
 	if not opened or storeValue == nil then
-		return errorResult("DATASTORE_UNAVAILABLE", "Production profile DataStore could not be opened")
+		return errorResult("DATASTORE_UNAVAILABLE", "Published profile DataStore could not be opened")
 	end
 	local store = storeValue :: GlobalDataStore
+	local kind: AdapterKind = if namespace.deployment == PlaceRoles.PRODUCTION_DEPLOYMENT
+		then "ProductionDataStore"
+		else "StagingDataStore"
 	local adapter = {} :: any
 	function adapter:updateAsync(key: string, transform: Transform): unknown
 		return store:UpdateAsync(key, transform)
 	end
-	function adapter:getKind(): "ProductionDataStore"
-		return "ProductionDataStore"
+	function adapter:getKind(): AdapterKind
+		return kind
 	end
 	return Result.ok(table.freeze(adapter) :: Adapter)
 end
@@ -99,7 +146,7 @@ function ProfileStoreAdapter.newStudioDevelopment(): Result.Result<Adapter, Adap
 		end
 		return clone(rawget(values, key))
 	end
-	function adapter:getKind(): "StudioDevelopmentMemory"
+	function adapter:getKind(): AdapterKind
 		return "StudioDevelopmentMemory"
 	end
 	return Result.ok(table.freeze(adapter) :: Adapter)

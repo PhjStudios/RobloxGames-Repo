@@ -28,6 +28,8 @@ return TestHarness.suite("client-safe Match return and rematch protocol", {
 			assertions.isTrue(table.isfrozen(result.value))
 			assertions.equal(result.value.rematch.votes[2].userId, 22)
 		end
+		snapshot.rematch.state = "Starting"
+		assertions.isTrue(MatchTravelProtocol.validateSnapshot(snapshot).ok)
 		assertions.isNil((snapshot :: any).ticketId)
 		assertions.isNil((snapshot :: any).accessCode)
 		assertions.isNil((snapshot :: any).resultId)
@@ -50,6 +52,8 @@ return TestHarness.suite("client-safe Match return and rematch protocol", {
 				},
 			},
 		}
+		assertions.isFalse(MatchTravelProtocol.validateSnapshot(base).ok)
+		base.rematch.state = "Starting"
 		assertions.isFalse(MatchTravelProtocol.validateSnapshot(base).ok)
 		base.rematch.state = "Pending"
 		base.rematch.votes[2].userId = 11

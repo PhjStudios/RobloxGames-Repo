@@ -218,6 +218,68 @@ return TestHarness.suite("ticket-authorized match admission and rejoin", {
 		assertions.equal(member(state, 202).admissionState, "LateSpectator")
 		assertions.equal(serviceValue:getMetrics().spectatorCount, 1)
 	end),
+	TestHarness.case("classifies initial Match arrivals at the exact 30-second grace boundary", function(assertions)
+		assertions.equal(MatchAdmissionService.DEFAULT_GRACE_SECONDS, 30)
+		for _, elapsed in { 29, 30 } do
+			local storeAdapter, state = store()
+			local serviceValue = service(assertions, storeAdapter, state, nil)
+			assertions.isTrue(
+				serviceValue:admit(
+					player(101),
+					TravelProtocol.match(state.ticketId, "attempt:grace-first").value,
+					"match-job",
+					NOW
+				).ok
+			)
+			local arrival = serviceValue:admit(
+				player(202),
+				TravelProtocol.match(state.ticketId, "attempt:grace-arrival").value,
+				"match-job",
+				NOW + elapsed
+			)
+			assertions.isTrue(arrival.ok)
+			assertions.equal(arrival.value.kind, if elapsed < 30 then "Participant" else "LateSpectator")
+			assertions.equal(member(state, 202).admissionState, if elapsed < 30 then "Admitted" else "LateSpectator")
+			assertions.equal(state.claimedDestinationAt, NOW)
+			assertions.equal(state.claimedDestinationJobId, "match-job")
+			assertions.equal(serviceValue:getMetrics().participantCount, if elapsed < 30 then 2 else 1)
+			assertions.equal(serviceValue:getMetrics().spectatorCount, if elapsed < 30 then 0 else 1)
+			assertions.isTrue(serviceValue:cleanup().ok)
+		end
+	end),
+	TestHarness.case(
+		"classifies never-admitted Rejoin arrivals at the exact 30-second grace boundary",
+		function(assertions)
+			for _, elapsed in { 29, 30 } do
+				local storeAdapter, state = store()
+				local serviceValue = service(assertions, storeAdapter, state, nil)
+				assertions.isTrue(
+					serviceValue:admit(
+						player(101),
+						TravelProtocol.match(state.ticketId, "attempt:grace-first").value,
+						"match-job",
+						NOW
+					).ok
+				)
+				local arrival = serviceValue:admit(
+					player(202),
+					TravelProtocol.rejoin("route:admission", "attempt:grace-route").value,
+					"match-job",
+					NOW + elapsed
+				)
+				assertions.isTrue(arrival.ok)
+				assertions.equal(arrival.value.kind, if elapsed < 30 then "Participant" else "LateSpectator")
+				assertions.equal(
+					member(state, 202).admissionState,
+					if elapsed < 30 then "Admitted" else "LateSpectator"
+				)
+				assertions.equal(state.claimedDestinationAt, NOW)
+				assertions.equal(serviceValue:getMetrics().participantCount, if elapsed < 30 then 2 else 1)
+				assertions.equal(serviceValue:getMetrics().spectatorCount, if elapsed < 30 then 0 else 1)
+				assertions.isTrue(serviceValue:cleanup().ok)
+			end
+		end
+	),
 	TestHarness.case(
 		"retains an admitted participant beyond ticket TTL but never promotes a late route",
 		function(assertions)

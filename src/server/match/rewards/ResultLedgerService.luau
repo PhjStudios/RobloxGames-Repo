@@ -68,6 +68,8 @@ export type Service = typeof(setmetatable({} :: {}, Methods))
 local DATA = setmetatable({}, { __mode = "k" }) :: { [any]: ServiceData }
 local INTENT_TIMEOUT_SECONDS = 2_700
 local MAX_ROSTER = 4
+local MAX_RESULT_ID_LENGTH = 43
+local DATASTORE_KEY_PREFIX = "mr1/"
 local ResultLedgerService = { INTENT_TIMEOUT_SECONDS = INTENT_TIMEOUT_SECONDS }
 
 local function failure<T>(code: string, operation: string): Result.Failure<LedgerError>
@@ -89,7 +91,7 @@ local function validAdapter(value: unknown): boolean
 end
 
 local function key(resultId: string): string
-	return `match-result-v1/{resultId}`
+	return `{DATASTORE_KEY_PREFIX}{resultId}`
 end
 
 local function validTime(value: unknown): number?
@@ -211,7 +213,7 @@ local function validateStored(value: unknown): (StoredRecord?, MatchResultContra
 	if
 		stored.version ~= 1
 		or (stored.phase ~= "Intent" and stored.phase ~= "Final" and stored.phase ~= "Failed" and stored.phase ~= "Compacted")
-		or validToken(stored.resultId, "result", 43) == nil
+		or validToken(stored.resultId, "result", MAX_RESULT_ID_LENGTH) == nil
 		or validToken(stored.matchId, "match", 100) == nil
 		or validToken(stored.ticketId, "ticket", 100) == nil
 		or expected == nil
@@ -330,7 +332,7 @@ local function validateIntent(value: unknown): ResultIntent?
 		return nil
 	end
 	local raw = value :: any
-	local resultId = validToken(raw.resultId, "result", 43)
+	local resultId = validToken(raw.resultId, "result", MAX_RESULT_ID_LENGTH)
 	local matchId = validToken(raw.matchId, "match", 100)
 	local ticketId = validToken(raw.ticketId, "ticket", 100)
 	local expected = validRoster(raw.expectedUserIds)
@@ -515,7 +517,7 @@ function Methods.renewIntent(
 	nowValue: unknown
 ): Result.Result<boolean, LedgerError>
 	local data = requireData(self)
-	local resultId = validToken(resultIdValue, "result", 43)
+	local resultId = validToken(resultIdValue, "result", MAX_RESULT_ID_LENGTH)
 	local matchId = validToken(matchIdValue, "match", 100)
 	local ticketId = validToken(ticketIdValue, "ticket", 100)
 	local currentTime = validTime(nowValue)
@@ -576,7 +578,7 @@ function Methods.cancelIntent(
 	nowValue: unknown
 ): Result.Result<boolean, LedgerError>
 	local data = requireData(self)
-	local resultId = validToken(resultIdValue, "result", 43)
+	local resultId = validToken(resultIdValue, "result", MAX_RESULT_ID_LENGTH)
 	local matchId = validToken(matchIdValue, "match", 100)
 	local ticketId = validToken(ticketIdValue, "ticket", 100)
 	local currentTime = validTime(nowValue)
@@ -721,7 +723,7 @@ function Methods.markFailed(
 	reasonValue: unknown,
 	nowValue: unknown
 ): Result.Result<boolean, LedgerError>
-	local resultId = validToken(resultIdValue, "result", 43)
+	local resultId = validToken(resultIdValue, "result", MAX_RESULT_ID_LENGTH)
 	local matchId = validToken(matchIdValue, "match", 100)
 	local ticketId = validToken(ticketIdValue, "ticket", 100)
 	local now = validTime(nowValue)
@@ -745,7 +747,7 @@ function Methods.expireIntent(
 	userIdValue: unknown,
 	nowValue: unknown
 ): Result.Result<boolean, LedgerError>
-	local resultId = validToken(resultIdValue, "result", 43)
+	local resultId = validToken(resultIdValue, "result", MAX_RESULT_ID_LENGTH)
 	local now = validTime(nowValue)
 	if
 		resultId == nil
@@ -765,15 +767,16 @@ function Methods.getForUser(
 	userIdValue: unknown
 ): Result.Result<ClaimRecord, LedgerError>
 	local data = requireData(self)
+	local resultId = validToken(resultIdValue, "result", MAX_RESULT_ID_LENGTH)
 	if
-		type(resultIdValue) ~= "string"
+		resultId == nil
 		or type(userIdValue) ~= "number"
 		or not Validation.isSafeInteger(userIdValue)
 		or userIdValue < 1
 	then
 		return failure("INVALID_ARGUMENT", "getForUser")
 	end
-	local called, value = callRead(data, resultIdValue :: string)
+	local called, value = callRead(data, resultId)
 	if not called then
 		return failure("STORE_UNAVAILABLE", "getForUser")
 	end
@@ -818,8 +821,9 @@ function Methods.acknowledge(
 	awardValue: unknown?
 ): Result.Result<boolean, LedgerError>
 	local data = requireData(self)
+	local resultId = validToken(resultIdValue, "result", MAX_RESULT_ID_LENGTH)
 	if
-		type(resultIdValue) ~= "string"
+		resultId == nil
 		or type(userIdValue) ~= "number"
 		or not Validation.isSafeInteger(userIdValue)
 		or userIdValue < 1
@@ -860,7 +864,7 @@ function Methods.acknowledge(
 	local missing = false
 	local conflict = false
 	local userKey = tostring(userIdValue)
-	local called, updated = callUpdate(data, resultIdValue :: string, function(existing)
+	local called, updated = callUpdate(data, resultId, function(existing)
 		local stored = validateStored(existing)
 		if stored == nil or stored.phase == "Compacted" or stored.phase == "Intent" then
 			missing = true
@@ -901,12 +905,13 @@ end
 
 function Methods.compact(self: Service, resultIdValue: unknown): Result.Result<boolean, LedgerError>
 	local data = requireData(self)
-	if type(resultIdValue) ~= "string" then
+	local resultId = validToken(resultIdValue, "result", MAX_RESULT_ID_LENGTH)
+	if resultId == nil then
 		return failure("INVALID_ARGUMENT", "compact")
 	end
 	local changed = false
 	local incomplete = false
-	local called, updated = callUpdate(data, resultIdValue :: string, function(existing)
+	local called, updated = callUpdate(data, resultId, function(existing)
 		local stored = validateStored(existing)
 		if stored == nil then
 			return existing

@@ -4,10 +4,12 @@ local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local IsolatedResultLedgerStore = require(script.Parent.Parent.Fixtures.IsolatedResultLedgerStore)
 local ResultLedgerService = require(script.Parent.Parent.ProductionServerMatchRewards.ResultLedgerService)
 
+local MAXIMUM_RESULT_ID = "result:22222222-2222-2222-2222-222222222222"
+
 local function matchResult(resultId: string?): any
 	return {
 		version = 1,
-		resultId = resultId or "result:22222222-2222-2222-2222-222222222222",
+		resultId = resultId or MAXIMUM_RESULT_ID,
 		matchId = "match:ledger-one",
 		ticketId = "ticket:ledger-one",
 		mapId = "map:phase07-graybox",
@@ -41,6 +43,50 @@ local function service(assertions): (any, any)
 end
 
 return TestHarness.suite("durable idempotent result ledger", {
+	TestHarness.case("uses Roblox-valid keys for a maximum-length generated result ID", function(assertions)
+		assertions.equal(#MAXIMUM_RESULT_ID, 43)
+		local ledger, store = service(assertions)
+		local result = matchResult(MAXIMUM_RESULT_ID)
+		assertions.isTrue(ledger:createIntent({
+			version = 1,
+			resultId = result.resultId,
+			matchId = result.matchId,
+			ticketId = result.ticketId,
+			expectedUserIds = { 10 },
+			createdAt = result.createdAt,
+		}).value)
+		assertions.isTrue(ledger:create(result).value)
+		assertions.isTrue(
+			ledger:acknowledge(result.resultId, 10, "Claimed", { persistentGoldAwarded = 50, firstClearBonus = 0 }).value
+		)
+		assertions.equal(ledger:getForUser(result.resultId, 10).value.state, "Claimed")
+		assertions.isTrue(ledger:compact(result.resultId).value)
+		assertions.equal(store:getMetrics().keys, 1)
+	end),
+	TestHarness.case("enforces the Roblox 50-character DataStore key boundary", function(assertions)
+		local store = IsolatedResultLedgerStore.new()
+		local accepted = pcall(function()
+			store:update(string.rep("a", 50), function()
+				return { valid = true }
+			end)
+		end)
+		local rejected = pcall(function()
+			store:read(string.rep("a", 51))
+		end)
+		assertions.isTrue(accepted)
+		assertions.isFalse(rejected)
+	end),
+	TestHarness.case("rejects overlong result IDs before accessing the store", function(assertions)
+		local ledger, store = service(assertions)
+		local overlongResultId = `result:{string.rep("a", 37)}`
+		assertions.equal(#overlongResultId, 44)
+		assertions.equal(ledger:getForUser(overlongResultId, 10).error.code, "INVALID_ARGUMENT")
+		assertions.equal(ledger:acknowledge(overlongResultId, 10, "Ineligible", nil).error.code, "INVALID_ARGUMENT")
+		assertions.equal(ledger:compact(overlongResultId).error.code, "INVALID_ARGUMENT")
+		local metrics = store:getMetrics()
+		assertions.equal(metrics.reads, 0)
+		assertions.equal(metrics.updates, 0)
+	end),
 	TestHarness.case("creates once and exposes only the roster-specific pending entry", function(assertions)
 		local ledger = service(assertions)
 		assertions.isTrue(ledger:create(matchResult()).value)

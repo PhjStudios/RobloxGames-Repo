@@ -103,8 +103,9 @@ function Methods:updateAsync(keyValue: string, expirationValue: number, transfor
 	end
 	data.updateCount += 1
 	if replacement == nil then
-		data.entries[key] = nil
-		return nil
+		-- Production MemoryStoreHashMap.UpdateAsync aborts a nil transform;
+		-- it does not remove the current entry.
+		return if entry == nil then nil else clone(entry.value)
 	end
 	data.entries[key] = { value = clone(replacement), expiresAt = data.now + expirationValue }
 	return clone(replacement)

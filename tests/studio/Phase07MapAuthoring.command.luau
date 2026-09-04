@@ -834,6 +834,7 @@ local function runAuthoringTransaction()
 	local Modules = modules :: any
 	local roleResult = Modules.PlaceRoles.resolve(
 		ReplicatedStorage:GetAttribute(Modules.PlaceRoles.ATTRIBUTE_NAME),
+		game.GameId,
 		game.PlaceId,
 		true
 	)

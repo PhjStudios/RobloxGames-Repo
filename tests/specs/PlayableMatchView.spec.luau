@@ -466,6 +466,41 @@ return TestHarness.suite("playable local Match presentation", {
 		end)
 	end),
 
+	TestHarness.case("renders a starting rematch as accepted but not actionable", function(assertions)
+		withView(function(view, fixture)
+			local starting = snapshot()
+			starting.state = "Results"
+			starting.result = {
+				kind = "Victory",
+				summary = "Rematch preparation is in progress.",
+				canReplay = false,
+				rewardStatus = "Granted",
+				persistentGoldAwarded = 250,
+				firstClearBonus = 0,
+				battleCashEarned = 125,
+				battleCashSpent = 100,
+				rewardReason = "CLAIMED",
+			}
+			starting.travel = {
+				returnStatus = "Idle",
+				canReturn = false,
+				rematchState = "Starting",
+				rematchStatus = "Starting • 1 connected participant votes",
+				canApprove = false,
+				canDecline = false,
+			}
+
+			assertions.isTrue(view:render(starting).ok)
+			assertions.contains(view:getMetrics().travelText, "Starting")
+			local _, root = guiTree(fixture)
+			local results = child(root, "ResultsOverlay", "Frame") :: Frame
+			local travel = child(root, "SpectatorTravelPanel", "Frame") :: Frame
+			assertions.isFalse((child(results, "ApproveRematch", "TextButton") :: TextButton).Active)
+			assertions.isFalse((child(results, "DeclineRematch", "TextButton") :: TextButton).Active)
+			assertions.isFalse((child(travel, "ReturnToLobby", "TextButton") :: TextButton).Active)
+		end)
+	end),
+
 	TestHarness.case("resolves compact phone standard and ten-foot layouts with touch targets", function(assertions)
 		withView(function(_view)
 			local phone = (resolveResponsiveLayoutForTests :: any)(375, 667)

@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LobbyProtocol = require(ReplicatedStorage.Shared.lobby.LobbyProtocol)
 local PartyProtocol = require(ReplicatedStorage.Shared.party.PartyProtocol)
 local QueueProtocol = require(ReplicatedStorage.Shared.queue.QueueProtocol)
+local Validation = require(ReplicatedStorage.Shared.util.Validation)
 
 export type ProfileState = "Loading" | "Ready" | "Failed" | "Releasing"
 export type SquadState = "Loading" | "Ready" | "Failed"
@@ -124,6 +125,7 @@ local MAX_ODDS = 32
 local MAX_TEXT_BYTES = 240
 local MAX_MODAL_MESSAGE_BYTES = 1_024
 local MAX_GOLD = 2 ^ 31 - 1
+local MAX_USER_ID = Validation.MAX_SAFE_INTEGER
 local MAX_COPIES = 10_000
 local MAX_PITY = 1_000_000
 
@@ -653,7 +655,7 @@ function LobbyUiModel.canonicalize(value: unknown): RenderState?
 	local activeRouteValue = rawget(record, "activeRoute")
 	local squadMutationPending = rawget(record, "squadMutationPending")
 	if
-		not integer(localUserId, 1, MAX_GOLD)
+		not integer(localUserId, 1, MAX_USER_ID)
 		or (partyState ~= "Loading" and partyState ~= "Ready" and partyState ~= "Failed")
 		or (queuesState ~= "Loading" and queuesState ~= "Ready" and queuesState ~= "Failed")
 		or (activeRouteState ~= "Loading" and activeRouteState ~= "Ready" and activeRouteState ~= "Failed")

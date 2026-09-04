@@ -434,6 +434,120 @@ return TestHarness.suite("playable match service integration", {
 		end
 	),
 
+	TestHarness.case("rejects every playable mutation from an authorized ticket spectator", function(assertions)
+		local rig = makeRig(false, {
+			expectedUserIds = { 101, 202 },
+			frozenLoadouts = { frozenLoadout(101), frozenLoadout(202) },
+			rewarding = true,
+			managedAdmissions = true,
+			connectedParticipantUserIds = { 101 },
+			matchId = "match:ticket-spectator",
+			mapId = "map:phase07-graybox",
+			difficultyId = "difficulty:local",
+		})
+		startRig(rig)
+		table.insert(rig.active, rig.second)
+		assertions.isTrue(rig.service:admitAuthorized(rig.second, false).accepted)
+		local spectator = currentSnapshot(assertions, rig, rig.second)
+		assertions.equal(spectator.viewerRole, "Spectator")
+		assertions.equal(spectator.state, "Ready")
+		assertions.equal(spectator.loadoutRevision, 0)
+		assertions.equal(spectator.battleCash, 0)
+		assertions.equal(#spectator.towerOptions, 0)
+		local function rejected(receipt, reason)
+			assertions.isNotNil(receipt)
+			assertions.isFalse(receipt.accepted)
+			assertions.equal(receipt.reason, reason)
+		end
+		local beforeReady = currentSnapshot(assertions, rig, rig.first)
+		rejected(rig.service:submitReady(rig.second, { matchId = spectator.matchId }), "ParticipantDisconnected")
+		local afterReady = currentSnapshot(assertions, rig, rig.first)
+		assertions.equal(afterReady.revision, beforeReady.revision)
+		assertions.equal(afterReady.state, "Ready")
+		assertions.equal(afterReady.participants.readyCount, beforeReady.participants.readyCount)
+		ready(assertions, rig, rig.first)
+		assertions.isTrue(rig.service:submitPlacement(rig.first, {
+			matchId = spectator.matchId,
+			loadoutRevision = 7,
+			slot = 1,
+			towerId = "tower:dart-ant",
+			position = Vector3.new(0, 0, 8),
+			rotationDegrees = 0,
+		}).accepted)
+		local before = currentSnapshot(assertions, rig, rig.first)
+		local tower = before.towers[1]
+		local towerPayload = {
+			matchId = before.matchId,
+			runtimeTowerId = tower.runtimeTowerId,
+			towerRevision = tower.revision,
+		}
+		rejected(
+			rig.service:submitPlacement(rig.second, {
+				matchId = before.matchId,
+				loadoutRevision = 7,
+				slot = 1,
+				towerId = "tower:dart-ant",
+				position = Vector3.new(4, 0, 8),
+				rotationDegrees = 0,
+			}),
+			"ParticipantDisconnected"
+		)
+		rejected(rig.service:submitUpgrade(rig.second, towerPayload), "ParticipantDisconnected")
+		rejected(rig.service:submitSell(rig.second, towerPayload), "ParticipantDisconnected")
+		local targetPayload = table.clone(towerPayload)
+		targetPayload.targetMode = "Last"
+		rejected(rig.service:submitTargetMode(rig.second, targetPayload), "ParticipantDisconnected")
+		local after = currentSnapshot(assertions, rig, rig.first)
+		assertions.equal(after.revision, before.revision)
+		assertions.equal(after.battleCash, before.battleCash)
+		assertions.equal(after.stats.placements, before.stats.placements)
+		assertions.equal(after.stats.upgrades, before.stats.upgrades)
+		assertions.equal(after.stats.sells, before.stats.sells)
+		assertions.equal(#after.towers, 1)
+		assertions.equal(after.towers[1].ownerUserId, 101)
+		assertions.equal(after.towers[1].revision, tower.revision)
+		assertions.equal(after.towers[1].level, tower.level)
+		assertions.equal(after.towers[1].targetMode, tower.targetMode)
+		local afterSpectator = currentSnapshot(assertions, rig, rig.second)
+		assertions.equal(afterSpectator.viewerRole, "Spectator")
+		assertions.equal(afterSpectator.battleCash, 0)
+		assertions.equal(#afterSpectator.towerOptions, 0)
+		assertions.equal(afterSpectator.stats.placements, 0)
+		assertions.equal(afterSpectator.stats.upgrades, 0)
+		assertions.equal(afterSpectator.stats.sells, 0)
+		runToResults(assertions, rig)
+		local result = currentSnapshot(assertions, rig, rig.first)
+		rejected(rig.service:submitReplay(rig.second, { matchId = result.matchId }), "WrongState")
+		local afterReplay = currentSnapshot(assertions, rig, rig.first)
+		assertions.equal(afterReplay.matchId, result.matchId)
+		assertions.equal(afterReplay.revision, result.revision)
+		assertions.equal(afterReplay.state, "Results")
+		assertions.equal(rig.service:getMetrics().generation, 1)
+		cleanupRig(rig)
+	end),
+
+	TestHarness.case("rejects spectator replay even when local participant replay is enabled", function(assertions)
+		local rig = makeRig()
+		startRig(rig)
+		ready(assertions, rig, rig.first)
+		table.insert(rig.active, rig.second)
+		rig.fireAdded(rig.second)
+		runToResults(assertions, rig)
+		local spectator = currentSnapshot(assertions, rig, rig.second)
+		assertions.equal(spectator.viewerRole, "Spectator")
+		assertions.isFalse(spectator.rewarding)
+		local receipt = rig.service:submitReplay(rig.second, { matchId = spectator.matchId })
+		assertions.isNotNil(receipt)
+		assertions.isFalse(receipt.accepted)
+		assertions.equal(receipt.reason, "NotParticipant")
+		local after = currentSnapshot(assertions, rig, rig.second)
+		assertions.equal(after.matchId, spectator.matchId)
+		assertions.equal(after.revision, spectator.revision)
+		assertions.equal(after.state, "Results")
+		assertions.equal(rig.service:getMetrics().generation, 1)
+		cleanupRig(rig)
+	end),
+
 	TestHarness.case("bounds frozen loadouts across rejected joins and player churn", function(assertions)
 		local rig = makeRig()
 		startRig(rig)

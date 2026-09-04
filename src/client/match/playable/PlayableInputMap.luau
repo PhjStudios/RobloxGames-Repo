@@ -362,7 +362,12 @@ local function resolveRaw(context: Context, preferredInput: InputFamily, rawValu
 	elseif kind == nil and context == "Placement" then
 		if keyCode == "Return" or keyCode == "KeypadEnter" or keyCode == "ButtonA" or inputType == "MouseButton1" then
 			kind = "Confirm"
-			fields.screenPosition = positionValue
+			-- Keyboard and gamepad InputObjects report a synthetic (0, 0)
+			-- position. Preserve a screen coordinate only for a real pointer click
+			-- so the controller can use its desktop/gamepad fallback otherwise.
+			if inputType == "MouseButton1" then
+				fields.screenPosition = positionValue
+			end
 		elseif keyCode == "Escape" or keyCode == "Q" or keyCode == "ButtonB" then
 			kind = "Cancel"
 		elseif keyCode == "R" or keyCode == "ButtonR2" then

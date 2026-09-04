@@ -693,6 +693,7 @@ local function travelView(data: ControllerData, snapshot: PlayableMatchProtocol.
 		failure = travel.publicFailure,
 		canReturn = travel.returnStatus ~= "Pending"
 			and travel.returnStatus ~= "Teleporting"
+			and (rematch == nil or (rematch.state ~= "Starting" and rematch.state ~= "Approved"))
 			and data.travelMutationPending == nil,
 		rematchState = if rematch == nil then nil else rematch.state,
 		rematchStatus = if rematch == nil
@@ -1117,8 +1118,18 @@ local function issueTravelMutation(data: ControllerData, kind: TravelMutationKin
 		matchId = snapshot.matchId,
 		observedRevision = travel.revision,
 	}
-	if kind == "Rematch" then
-		local rematch = travel.rematch
+	local rematch = travel.rematch
+	if kind == "Return" then
+		if
+			travel.returnStatus == "Pending"
+			or travel.returnStatus == "Teleporting"
+			or (rematch ~= nil and (rematch.state == "Starting" or rematch.state == "Approved"))
+		then
+			setFeedback(data, "RETURN_UNAVAILABLE")
+			renderSnapshot(data)
+			return false
+		end
+	else
 		if snapshot.viewerRole ~= "Participant" or rematch == nil or rematch.state ~= "Pending" then
 			setFeedback(data, "REMATCH_UNAVAILABLE")
 			renderSnapshot(data)

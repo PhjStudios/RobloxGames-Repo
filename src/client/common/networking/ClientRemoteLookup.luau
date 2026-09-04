@@ -288,6 +288,7 @@ function ClientRemoteLookup.resolve(endpointName: unknown, timeoutSeconds: unkno
 
 	local roleResult = PlaceRoles.resolve(
 		ReplicatedStorage:GetAttribute(PlaceRoles.ATTRIBUTE_NAME),
+		game.GameId,
 		game.PlaceId,
 		RunService:IsStudio()
 	)

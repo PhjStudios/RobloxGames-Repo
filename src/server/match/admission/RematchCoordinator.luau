@@ -5,7 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Result = require(ReplicatedStorage.Shared.util.Result)
 local Validation = require(ReplicatedStorage.Shared.util.Validation)
 
-export type VoteState = "Pending" | "Approved" | "Declined" | "Failed"
+export type VoteState = "Pending" | "Starting" | "Approved" | "Declined" | "Failed"
 export type VoteChoice = "Pending" | "Approve" | "Decline"
 export type VoteEntry = { userId: number, choice: VoteChoice }
 export type FreshRematch = {
@@ -22,7 +22,11 @@ export type Snapshot = {
 	rematch: FreshRematch?,
 }
 export type PreviousIds = { matchId: string, resultId: string?, ticketId: string? }
-export type Dependencies = { clock: (() -> unknown)?, timeoutSeconds: number? }
+export type Dependencies = {
+	clock: (() -> unknown)?,
+	timeoutSeconds: number?,
+	schedule: (() -> ()) -> unknown,
+}
 export type ErrorCode =
 	"INVALID_ARGUMENT"
 	| "INVALID_STATE"
@@ -41,8 +45,11 @@ type ServiceData = {
 	rosterProvider: RosterProvider,
 	factory: Factory,
 	clock: () -> unknown,
+	schedule: (() -> ()) -> unknown,
 	timeoutSeconds: number,
 	snapshot: Snapshot?,
+	factoryToken: unknown?,
+	factoryRunning: boolean,
 	cleaned: boolean,
 }
 
@@ -198,13 +205,76 @@ end
 
 local function decline(data: ServiceData): Snapshot
 	local snapshot = data.snapshot :: Snapshot
-	if snapshot.state == "Pending" then
+	local cancellable = snapshot.state == "Pending"
+		or (snapshot.state == "Starting" and data.factoryToken ~= nil and not data.factoryRunning)
+	if cancellable then
+		if snapshot.state == "Starting" then
+			data.factoryToken = nil
+		end
 		local replacement = copySnapshot(snapshot)
 		replacement.revision += 1
 		replacement.state = "Declined"
 		data.snapshot = freezeSnapshot(replacement)
 	end
 	return data.snapshot :: Snapshot
+end
+
+local function resolveFactory(data: ServiceData, tokenValue: unknown, accepted: Snapshot, active: { number })
+	if data.cleaned or data.factoryToken ~= tokenValue or data.snapshot ~= accepted then
+		data.factoryRunning = false
+		return
+	end
+	local called, factoryValue = pcall(data.factory, active)
+	data.factoryRunning = false
+	if data.cleaned or data.factoryToken ~= tokenValue or data.snapshot ~= accepted then
+		if data.factoryToken == tokenValue then
+			data.factoryToken = nil
+		end
+		return
+	end
+	local fresh = if called then validateFresh(data, factoryValue, active) else nil
+	local replacement = copySnapshot(accepted)
+	replacement.revision += 1
+	if fresh == nil then
+		replacement.state = "Failed"
+	else
+		replacement.state = "Approved"
+		replacement.rematch = fresh
+	end
+	data.factoryToken = nil
+	data.snapshot = freezeSnapshot(replacement)
+end
+
+local function scheduleFactory(data: ServiceData, accepted: Snapshot, active: { number }): boolean
+	local tokenValue = {}
+	data.factoryToken = tokenValue
+	data.factoryRunning = false
+	local scheduling = true
+	local ranInline = false
+	local scheduledCalled, scheduled = pcall(data.schedule, function()
+		if scheduling then
+			ranInline = true
+			return
+		end
+		if data.cleaned or data.factoryToken ~= tokenValue then
+			return
+		end
+		data.factoryRunning = true
+		resolveFactory(data, tokenValue, accepted, active)
+	end)
+	scheduling = false
+	if not scheduledCalled or scheduled == false or ranInline then
+		if not data.cleaned and data.factoryToken == tokenValue and data.snapshot == accepted then
+			local replacement = copySnapshot(accepted)
+			replacement.revision += 1
+			replacement.state = "Failed"
+			data.factoryToken = nil
+			data.factoryRunning = false
+			data.snapshot = freezeSnapshot(replacement)
+		end
+		return false
+	end
+	return true
 end
 
 function Methods.begin(self: Service): Result.Result<Snapshot, RematchError>
@@ -297,15 +367,13 @@ function Methods.vote(
 		unanimous = unanimous and vote.choice == "Approve"
 	end
 	if unanimous then
-		local called, factoryValue = pcall(data.factory, table.freeze(active))
-		local fresh = if called then validateFresh(data, factoryValue, active) else nil
-		if fresh == nil then
-			replacement.state = "Failed"
-			data.snapshot = freezeSnapshot(replacement)
+		replacement.state = "Starting"
+		local accepted = freezeSnapshot(replacement)
+		data.snapshot = accepted
+		if not scheduleFactory(data, accepted, table.freeze(active)) then
 			return failure("FACTORY_FAILED", "vote")
 		end
-		replacement.state = "Approved"
-		replacement.rematch = fresh
+		return Result.ok(data.snapshot :: Snapshot)
 	end
 	data.snapshot = freezeSnapshot(replacement)
 	return Result.ok(data.snapshot :: Snapshot)
@@ -317,7 +385,7 @@ function Methods.disconnect(self: Service, userIdValue: unknown): Result.Result<
 		return failure("CLEANED", "disconnect")
 	end
 	local snapshot = data.snapshot
-	if snapshot == nil or snapshot.state ~= "Pending" then
+	if snapshot == nil or (snapshot.state ~= "Pending" and snapshot.state ~= "Starting") then
 		return failure("INVALID_STATE", "disconnect")
 	end
 	for _, vote in snapshot.votes do
@@ -340,19 +408,56 @@ function Methods.step(self: Service, nowValue: unknown): Result.Result<Snapshot,
 	if type(nowValue) ~= "number" or not Validation.isFiniteNumber(nowValue :: number) or nowValue < 0 then
 		return failure("INVALID_ARGUMENT", "step")
 	end
-	if snapshot.state == "Pending" then
+	if snapshot.state == "Pending" or snapshot.state == "Starting" then
 		local active = activeRoster(data)
-		if active == nil or not sameRoster(snapshot, active) or nowValue >= snapshot.deadline then
+		if
+			active == nil
+			or not sameRoster(snapshot, active)
+			or (snapshot.state == "Pending" and nowValue >= snapshot.deadline)
+		then
 			return Result.ok(decline(data))
 		end
 	end
 	return Result.ok(data.snapshot :: Snapshot)
 end
 
+function Methods.getSnapshot(self: Service): Result.Result<Snapshot, RematchError>
+	local data = requireData(self)
+	if data.cleaned or data.snapshot == nil then
+		return failure(if data.cleaned then "CLEANED" else "INVALID_STATE", "step")
+	end
+	return Result.ok(data.snapshot :: Snapshot)
+end
+
+function Methods.isFactoryBusy(self: Service): boolean
+	return requireData(self).factoryToken ~= nil
+end
+
+function Methods.cancelFactory(self: Service): Result.Result<boolean, RematchError>
+	local data = requireData(self)
+	if data.cleaned then
+		return failure("CLEANED", "cleanup")
+	end
+	if data.factoryToken == nil then
+		return Result.ok(false)
+	end
+	if data.factoryRunning then
+		return failure("INVALID_STATE", "cleanup")
+	end
+	decline(data)
+	return Result.ok(true)
+end
+
 function Methods.cleanup(self: Service): Result.Result<boolean, RematchError>
 	local data = requireData(self)
 	if data.cleaned then
 		return Result.ok(false)
+	end
+	if data.factoryToken ~= nil then
+		if data.factoryRunning then
+			return failure("INVALID_STATE", "cleanup")
+		end
+		decline(data)
 	end
 	data.cleaned = true
 	data.snapshot = nil
@@ -384,6 +489,7 @@ function RematchCoordinator.new(
 	local timeout = dependencies.timeoutSeconds or DEFAULT_TIMEOUT_SECONDS
 	if
 		(dependencies.clock ~= nil and type(dependencies.clock) ~= "function")
+		or type(dependencies.schedule) ~= "function"
 		or type(timeout) ~= "number"
 		or not Validation.isSafeInteger(timeout)
 		or timeout < 1
@@ -402,8 +508,11 @@ function RematchCoordinator.new(
 		rosterProvider = rosterProviderValue :: RosterProvider,
 		factory = factoryValue :: Factory,
 		clock = dependencies.clock or os.clock,
+		schedule = dependencies.schedule,
 		timeoutSeconds = timeout,
 		snapshot = nil,
+		factoryToken = nil,
+		factoryRunning = false,
 		cleaned = false,
 	}
 	return Result.ok(service)

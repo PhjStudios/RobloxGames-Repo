@@ -11,7 +11,12 @@ local function rig(
 	rollbackFailures: number?,
 	commitFailures: number?,
 	prepareFails: boolean?,
-	scheduleFails: boolean?
+	scheduleFails: boolean?,
+	prepareYields: boolean?,
+	queueSchedule: boolean?,
+	rejectYields: boolean?,
+	commitYields: boolean?,
+	scheduleYields: boolean?
 ): any
 	local nowValue = 10
 	local player = { userId = 101, live = true }
@@ -21,9 +26,16 @@ local function rig(
 	local initFailed: ((any, string, any) -> ())? = nil
 	local playerRemoving: ((any) -> ())? = nil
 	local returnCount = 0
+	local scheduledThreads = {}
+	local yieldNextReject = rejectYields == true
+	local yieldNextCommit = commitYields == true
+	local yieldNextSchedule = scheduleYields == true
 	local transfer = {}
 	function transfer:prepare(userIds)
 		prepared += 1
+		if prepareYields then
+			coroutine.yield()
+		end
 		if prepareFails then
 			return Result.err({ code = "PREPARE_FAILED" })
 		end
@@ -38,6 +50,10 @@ local function rig(
 	end
 	function transfer:commit(_handle)
 		committed += 1
+		if yieldNextCommit then
+			yieldNextCommit = false
+			coroutine.yield()
+		end
 		if committed <= (commitFailures or 0) then
 			return Result.err({ code = "COMMIT_FAILED" })
 		end
@@ -67,6 +83,10 @@ local function rig(
 		end,
 		rejectPlayer = function(candidate, publicReason)
 			assertions.equal(candidate, player)
+			if yieldNextReject then
+				yieldNextReject = false
+				coroutine.yield()
+			end
 			table.insert(rejectedReasons, publicReason)
 			candidate.live = false
 		end,
@@ -75,8 +95,17 @@ local function rig(
 			return `return:unexpected-test-{returnCount}`
 		end,
 		schedule = function(callback)
+			if yieldNextSchedule then
+				yieldNextSchedule = false
+				coroutine.yield()
+			end
 			if scheduleFails then
 				return false
+			end
+			if queueSchedule then
+				local thread = coroutine.create(callback)
+				table.insert(scheduledThreads, thread)
+				return thread
 			end
 			callback()
 			return true
@@ -115,6 +144,15 @@ local function rig(
 		end,
 		advance = function(seconds)
 			nowValue += seconds
+		end,
+		resumeScheduled = function(index)
+			local thread = scheduledThreads[index]
+			assert(thread ~= nil, "expected scheduled thread")
+			local resumed, resumeError = coroutine.resume(thread)
+			if not resumed then
+				error(resumeError, 0)
+			end
+			return coroutine.status(thread)
 		end,
 	}
 end
@@ -238,5 +276,132 @@ return TestHarness.suite("safe unexpected Match return", {
 		assertions.equal(rolledBack, 0)
 		assertions.equal(committed, 0)
 		assertions.equal(#context.rejectedReasons, 1)
+	end),
+	TestHarness.case("joins a yielding init-failure rejection before cleanup", function(assertions)
+		local context = rig(assertions, false, false, 0, 0, false, false, false, false, true)
+		assertions.isTrue(context.service:returnPlayer(context.player).ok)
+		local callbackThread = coroutine.create(context.emitInitFailure)
+		assertions.isTrue(coroutine.resume(callbackThread))
+		assertions.equal(coroutine.status(callbackThread), "suspended")
+		local prepared, rolledBack, committed = context.counts()
+		assertions.equal(prepared, 1)
+		assertions.equal(rolledBack, 1)
+		assertions.equal(committed, 0)
+		assertions.equal(#context.rejectedReasons, 0)
+		assertions.isTrue(context.service:isBusy())
+		local blocked = context.service:cleanup()
+		assertions.isFalse(blocked.ok)
+		assertions.equal(blocked.error.code, "BUSY")
+		context.emitInitFailure()
+		_, rolledBack = context.counts()
+		assertions.equal(rolledBack, 1)
+
+		assertions.isTrue(coroutine.resume(callbackThread))
+		assertions.equal(coroutine.status(callbackThread), "dead")
+		assertions.equal(#context.rejectedReasons, 1)
+		assertions.isFalse(context.service:isBusy())
+		assertions.isTrue(context.service:cleanup().ok)
+	end),
+	TestHarness.case("joins a yielding removal commit before cleanup", function(assertions)
+		local context = rig(assertions, false, false, 0, 0, false, false, false, false, false, true)
+		assertions.isTrue(context.service:returnPlayer(context.player).ok)
+		local callbackThread = coroutine.create(context.fireRemoving)
+		assertions.isTrue(coroutine.resume(callbackThread))
+		assertions.equal(coroutine.status(callbackThread), "suspended")
+		local prepared, rolledBack, committed = context.counts()
+		assertions.equal(prepared, 1)
+		assertions.equal(rolledBack, 0)
+		assertions.equal(committed, 1)
+		assertions.isTrue(context.service:isBusy())
+		local blocked = context.service:cleanup()
+		assertions.isFalse(blocked.ok)
+		assertions.equal(blocked.error.code, "BUSY")
+
+		assertions.isTrue(coroutine.resume(callbackThread))
+		assertions.equal(coroutine.status(callbackThread), "dead")
+		assertions.isFalse(context.service:isBusy())
+		assertions.isTrue(context.service:cleanup().ok)
+		_, _, committed = context.counts()
+		assertions.equal(committed, 1)
+	end),
+	TestHarness.case("joins yielding scheduler failure and rejection tails before cleanup", function(assertions)
+		local context = rig(assertions, false, false, 0, 0, false, true, false, false, true, false, true)
+		local returnResult = nil
+		local requestThread = coroutine.create(function()
+			returnResult = context.service:returnPlayer(context.player)
+		end)
+		assertions.isTrue(coroutine.resume(requestThread))
+		assertions.equal(coroutine.status(requestThread), "suspended")
+		assertions.isTrue(context.service:isBusy())
+		assertions.equal(context.service:cleanup().error.code, "BUSY")
+		assertions.equal(#context.rejectedReasons, 0)
+
+		assertions.isTrue(coroutine.resume(requestThread))
+		assertions.equal(coroutine.status(requestThread), "suspended")
+		assertions.isTrue(context.service:isBusy())
+		assertions.equal(context.service:cleanup().error.code, "BUSY")
+		assertions.equal(#context.rejectedReasons, 0)
+
+		assertions.isTrue(coroutine.resume(requestThread))
+		assertions.equal(coroutine.status(requestThread), "dead")
+		assertions.equal(returnResult.error.code, "BUSY")
+		assertions.equal(#context.rejectedReasons, 1)
+		assertions.isFalse(context.service:isBusy())
+		assertions.isTrue(context.service:cleanup().ok)
+	end),
+	TestHarness.case(
+		"joins a worker yielding in ownership prepare before cleanup settles dependencies",
+		function(assertions)
+			local context = rig(assertions, false, false, 0, 0, false, false, true, true)
+			assertions.isTrue(context.service:returnPlayer(context.player).ok)
+			assertions.isTrue(context.service:isBusy())
+			assertions.equal(context.resumeScheduled(1), "suspended")
+			local prepared, rolledBack, committed = context.counts()
+			assertions.equal(prepared, 1)
+			assertions.equal(rolledBack, 0)
+			assertions.equal(committed, 0)
+
+			local blocked = context.service:cleanup()
+			assertions.isFalse(blocked.ok)
+			assertions.equal(blocked.error.code, "BUSY")
+			assertions.equal(#context.teleportCalls, 0)
+			assertions.equal(context.resumeScheduled(1), "dead")
+			assertions.isFalse(context.service:isBusy())
+			assertions.isTrue(context.service:cleanup().ok)
+			prepared, rolledBack, committed = context.counts()
+			assertions.equal(prepared, 1)
+			assertions.equal(rolledBack, 1)
+			assertions.equal(committed, 0)
+			assertions.equal(#context.teleportCalls, 0)
+		end
+	),
+	TestHarness.case("cancels queued return work before it can release ownership", function(assertions)
+		local context = rig(assertions, false, false, 0, 0, false, false, false, true)
+		assertions.isTrue(context.service:returnPlayer(context.player).ok)
+		assertions.isTrue(context.service:isBusy())
+		assertions.isTrue(context.service:cleanup().ok)
+		assertions.equal(context.resumeScheduled(1), "dead")
+		local prepared, rolledBack, committed = context.counts()
+		assertions.equal(prepared, 0)
+		assertions.equal(rolledBack, 0)
+		assertions.equal(committed, 0)
+		assertions.equal(#context.teleportCalls, 0)
+	end),
+	TestHarness.case("retains cleanup ownership until a pending transfer settles", function(assertions)
+		local context = rig(assertions, false, false, 1)
+		assertions.isTrue(context.service:returnPlayer(context.player).ok)
+		local first = context.service:cleanup()
+		assertions.isFalse(first.ok)
+		assertions.equal(first.error.code, "BUSY")
+		local prepared, rolledBack, committed = context.counts()
+		assertions.equal(prepared, 1)
+		assertions.equal(rolledBack, 1)
+		assertions.equal(committed, 0)
+
+		assertions.isTrue(context.service:cleanup().ok)
+		prepared, rolledBack, committed = context.counts()
+		assertions.equal(prepared, 1)
+		assertions.equal(rolledBack, 2)
+		assertions.equal(committed, 0)
 	end),
 })

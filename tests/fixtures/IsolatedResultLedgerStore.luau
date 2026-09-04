@@ -24,6 +24,7 @@ local Methods = {}
 Methods.__index = Methods
 
 local DATA = setmetatable({}, { __mode = "k" }) :: { [any]: StoreData }
+local MAX_DATASTORE_KEY_LENGTH = 50
 
 local IsolatedResultLedgerStore = {}
 
@@ -61,7 +62,7 @@ local function clone(value: any, seen: { [any]: boolean }?): any
 end
 
 local function validateKey(value: unknown): string
-	if type(value) ~= "string" or #value < 1 or #value > 128 then
+	if type(value) ~= "string" or #value < 1 or #value > MAX_DATASTORE_KEY_LENGTH then
 		error("[ATD_TEST_RESULT_STORE][code=INVALID_KEY]", 0)
 	end
 	return value

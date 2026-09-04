@@ -17,6 +17,7 @@ local Shutdown = require(script.Parent.Shutdown)
 
 export type Configuration = {
 	role: PlaceRoles.PlaceRole,
+	deployment: PlaceRoles.Deployment,
 	log: Log.Logger,
 	coreConfiguration: ConfigTypes.CoreConfiguration,
 	lifecycleRunner: ServiceLifecycle.Runner,
@@ -27,6 +28,7 @@ export type Configure = (configuration: Configuration) -> ()
 
 export type Handle = {
 	role: PlaceRoles.PlaceRole,
+	deployment: PlaceRoles.Deployment,
 	log: Log.Logger,
 	coreConfiguration: ConfigTypes.CoreConfiguration,
 	lifecycleRunner: ServiceLifecycle.Runner,
@@ -90,6 +92,7 @@ function ServerBootstrap.run(expectedRole: PlaceRoles.PlaceRole?, configure: Con
 		error("[ATD_SERVER_BOOTSTRAP][code=INVALID_CONFIGURE]", 0)
 	end
 
+	local gameId = game.GameId
 	local placeId = game.PlaceId
 	local isStudio = RunService:IsStudio()
 	local unresolvedContext = EnvironmentContext.new("server", "Unresolved", placeId, isStudio)
@@ -103,7 +106,8 @@ function ServerBootstrap.run(expectedRole: PlaceRoles.PlaceRole?, configure: Con
 		return nil
 	end
 
-	local roleResult = PlaceRoles.resolve(ReplicatedStorage:GetAttribute(PlaceRoles.ATTRIBUTE_NAME), placeId, isStudio)
+	local roleResult =
+		PlaceRoles.resolve(ReplicatedStorage:GetAttribute(PlaceRoles.ATTRIBUTE_NAME), gameId, placeId, isStudio)
 	if not roleResult.ok then
 		unresolvedLog:error("place-role", "boot_rejected", roleResult.message, {
 			code = roleResult.code,
@@ -149,6 +153,7 @@ function ServerBootstrap.run(expectedRole: PlaceRoles.PlaceRole?, configure: Con
 	if configure ~= nil then
 		configure({
 			role = roleResult.role,
+			deployment = roleResult.deployment,
 			log = log,
 			coreConfiguration = coreConfiguration,
 			lifecycleRunner = lifecycleRunner,
@@ -179,6 +184,7 @@ function ServerBootstrap.run(expectedRole: PlaceRoles.PlaceRole?, configure: Con
 
 	return table.freeze({
 		role = roleResult.role,
+		deployment = roleResult.deployment,
 		log = log,
 		coreConfiguration = coreConfiguration,
 		lifecycleRunner = lifecycleRunner,

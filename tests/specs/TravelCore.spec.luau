@@ -217,6 +217,80 @@ return TestHarness.suite("bounded server-only travel records", {
 		assertions.isNil(unavailable.value)
 		assertions.isNil(service:resolve(101, "route:travel-core", NOW + 2_700).value)
 	end),
+	TestHarness.case("uses only the final create retry outcome across a cleared-route race", function(assertions)
+		local state: any = route()
+		local replacement = route()
+		replacement.routeId = "route:travel-replacement"
+		replacement.ticketId = "ticket:travel-replacement"
+		replacement.matchId = "match:travel-replacement"
+		local updateCount = 0
+		local adapter = {} :: any
+		function adapter:getAsync(_key: string): unknown
+			return state
+		end
+		function adapter:updateAsync(_key: string, _expiration: number, transform: (unknown) -> unknown): unknown
+			updateCount += 1
+			local firstAttempt = transform(state)
+			assertions.isNil(firstAttempt)
+			state = { cleared = true }
+			local clearedAttempt = transform(state)
+			assertions.equal((clearedAttempt :: any).routeId, replacement.routeId)
+			state = clearedAttempt
+			local finalAttempt = transform(state)
+			if finalAttempt ~= nil then
+				state = finalAttempt
+			end
+			return state
+		end
+		function adapter:removeAsync(_key: string): unknown
+			state = nil
+			return nil
+		end
+
+		local service = ActiveMatchRouteService.new(adapter).value
+		local created = service:create(replacement, NOW)
+		assertions.isTrue(created.ok)
+		assertions.isFalse(created.value.applied)
+		assertions.equal(updateCount, 1)
+		assertions.equal(state.routeId, replacement.routeId)
+	end),
+	TestHarness.case(
+		"uses only the final bind retry outcome across conflict and idempotent races",
+		function(assertions)
+			local state: any = route()
+			state.matchId = "match:other"
+			local updateCount = 0
+			local adapter = {} :: any
+			function adapter:getAsync(_key: string): unknown
+				return state
+			end
+			function adapter:updateAsync(_key: string, _expiration: number, transform: (unknown) -> unknown): unknown
+				updateCount += 1
+				local firstAttempt = transform(state)
+				assertions.isNil(firstAttempt)
+				state = route()
+				local unboundAttempt = transform(state)
+				assertions.equal((unboundAttempt :: any).destinationJobId, "match-job")
+				state = unboundAttempt
+				local finalAttempt = transform(state)
+				if finalAttempt ~= nil then
+					state = finalAttempt
+				end
+				return state
+			end
+			function adapter:removeAsync(_key: string): unknown
+				state = nil
+				return nil
+			end
+
+			local service = ActiveMatchRouteService.new(adapter).value
+			local bound = service:bindDestination(101, "match:travel-core", "match-job", NOW + 1)
+			assertions.isTrue(bound.ok)
+			assertions.isFalse(bound.value.applied)
+			assertions.equal(updateCount, 1)
+			assertions.equal(state.destinationJobId, "match-job")
+		end
+	),
 	TestHarness.case("atomically takes a known rematch route without erasing it on store failure", function(assertions)
 		local adapter = IsolatedTravelRecordStore.new(NOW)
 		local service = ActiveMatchRouteService.new(adapter).value
@@ -234,6 +308,126 @@ return TestHarness.suite("bounded server-only travel records", {
 		assertions.equal(taken.value.reservedServerAccessCode, "server-secret-access-code")
 		assertions.isNil(service:find(101, NOW + 2).value)
 		assertions.equal(service:takeForMatch(101, "match:travel-core", NOW + 2).error.code, "NOT_FOUND")
+	end),
+	TestHarness.case("uses only the final callback attempt when a route is replaced during take", function(assertions)
+		local previous = route()
+		previous.destinationJobId = "match-job"
+		local replacement = route()
+		replacement.routeId = "route:travel-replacement"
+		replacement.ticketId = "ticket:travel-replacement"
+		replacement.matchId = "match:travel-replacement"
+		replacement.destinationJobId = "replacement-job"
+		local state: any = previous
+		local updateCount = 0
+		local adapter = {} :: any
+		function adapter:getAsync(_key: string): unknown
+			return state
+		end
+		function adapter:updateAsync(_key: string, _expiration: number, transform: (unknown) -> unknown): unknown
+			updateCount += 1
+			local firstAttempt = transform(state)
+			assertions.isTrue((firstAttempt :: any).cleared)
+			state = replacement
+			local finalAttempt = transform(state)
+			if finalAttempt ~= nil then
+				state = finalAttempt
+			end
+			return state
+		end
+		function adapter:removeAsync(_key: string): unknown
+			state = nil
+			return nil
+		end
+
+		local service = ActiveMatchRouteService.new(adapter).value
+		local taken = service:takeForMatch(101, previous.matchId, NOW + 2)
+		assertions.equal(taken.error.code, "CONFLICT")
+		assertions.equal(updateCount, 1)
+		assertions.equal(state.routeId, replacement.routeId)
+		assertions.equal(service:find(101, NOW + 2).value.matchId, replacement.matchId)
+	end),
+	TestHarness.case("fails a take closed after the store loses its post-transform response", function(assertions)
+		local previous = route()
+		previous.destinationJobId = "match-job"
+		local state: any = previous
+		local updateCount = 0
+		local adapter = {} :: any
+		function adapter:getAsync(_key: string): unknown
+			return state
+		end
+		function adapter:updateAsync(_key: string, _expiration: number, transform: (unknown) -> unknown): unknown
+			updateCount += 1
+			state = transform(state)
+			if updateCount == 1 then
+				error("lost response after transform", 0)
+			end
+			return state
+		end
+		function adapter:removeAsync(_key: string): unknown
+			state = nil
+			return nil
+		end
+
+		local service = ActiveMatchRouteService.new(adapter).value
+		local taken = service:takeForMatch(101, previous.matchId, NOW + 2)
+		assertions.equal(taken.error.code, "STORE_UNAVAILABLE")
+		assertions.equal(updateCount, 1)
+		assertions.isTrue(state.cleared)
+		assertions.isNil(service:find(101, NOW + 2).value)
+	end),
+	TestHarness.case("uses only the final clear retry outcome after a terminal-clear race", function(assertions)
+		local state: any = route()
+		local updateCount = 0
+		local adapter = {} :: any
+		function adapter:getAsync(_key: string): unknown
+			return state
+		end
+		function adapter:updateAsync(_key: string, _expiration: number, transform: (unknown) -> unknown): unknown
+			updateCount += 1
+			local firstAttempt = transform(state)
+			assertions.isTrue((firstAttempt :: any).cleared)
+			state = firstAttempt
+			local finalAttempt = transform(state)
+			if finalAttempt ~= nil then
+				state = finalAttempt
+			end
+			return state
+		end
+		function adapter:removeAsync(_key: string): unknown
+			state = nil
+			return nil
+		end
+
+		local service = ActiveMatchRouteService.new(adapter).value
+		local cleared = service:clear(101, "match:travel-core")
+		assertions.isTrue(cleared.ok)
+		assertions.isFalse(cleared.value)
+		assertions.equal(updateCount, 1)
+		assertions.isTrue(state.cleared)
+	end),
+	TestHarness.case("atomically tombstones cleared routes under published MemoryStore semantics", function(assertions)
+		local adapter = IsolatedTravelRecordStore.new(NOW)
+		adapter:seed("nil-aborts", { retained = true })
+		adapter:updateAsync("nil-aborts", 60, function()
+			return nil
+		end)
+		assertions.isTrue(adapter:read("nil-aborts").retained)
+
+		local service = ActiveMatchRouteService.new(adapter).value
+		assertions.isTrue(service:create(route(), NOW).ok)
+		assertions.isTrue(service:bindDestination(101, "match:travel-core", "match-job", NOW + 1).ok)
+		assertions.isFalse(service:clear(101, "match:other").value)
+		assertions.equal(service:find(101, NOW + 2).value.matchId, "match:travel-core")
+		assertions.isTrue(service:clear(101, "match:travel-core").value)
+		assertions.isNil(service:find(101, NOW + 2).value)
+
+		local replacement = route()
+		replacement.routeId = "route:travel-replacement"
+		replacement.ticketId = "ticket:travel-replacement"
+		replacement.matchId = "match:travel-replacement"
+		assertions.isTrue(service:create(replacement, NOW + 2).value.applied)
+		assertions.isTrue(service:bindDestination(101, replacement.matchId, "replacement-job", NOW + 3).ok)
+		assertions.equal(service:find(101, NOW + 3).value.routeId, replacement.routeId)
 	end),
 	TestHarness.case("tracks bounded idempotent return admissions", function(assertions)
 		local adapter = IsolatedTravelRecordStore.new(NOW)

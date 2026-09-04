@@ -44,11 +44,16 @@ local QueueWorldDisplayService = require(script.Parent.Parent.Parent.lobby.queue
 local QueueZoneService = require(script.Parent.Parent.Parent.lobby.queue.QueueZoneService)
 local SettingsService = require(script.Parent.Parent.Parent.lobby.settings.SettingsService)
 local LobbyReconnectService = require(script.Parent.Parent.Parent.lobby.travel.LobbyReconnectService)
+local PlayerReadyOwnership = require(script.Parent.Parent.Parent.lobby.travel.PlayerReadyOwnership)
 local LobbyReturnCoordinator = require(script.Parent.Parent.Parent.lobby.travel.LobbyReturnCoordinator)
 local LobbyTravelCoordinator = require(script.Parent.Parent.Parent.lobby.travel.LobbyTravelCoordinator)
 local PendingClaimCoordinator = require(script.Parent.Parent.Parent.lobby.travel.PendingClaimCoordinator)
 
 type BannerRequest = { bannerId: string }
+
+local RUNTIME_SHUTDOWN_JOIN_SECONDS = 5
+local RUNTIME_SHUTDOWN_POLL_SECONDS = 0.05
+local RUNTIME_SHUTDOWN_DURABILITY_ATTEMPTS = 3
 
 local function publicError(code: RequestProtocol.PublicErrorCode): RequestProtocol.PublicError
 	local result = RequestProtocol.createPublicError(code, nil)
@@ -76,6 +81,31 @@ local function required<T>(resultValue: any, code: string): T
 		error(`[ATD_LOBBY_BOOTSTRAP][code={code}]`, 0)
 	end
 	return resultValue.value :: T
+end
+
+local function cleanupUntilSettled(name: string, callback: () -> unknown)
+	local deadline = os.clock() + RUNTIME_SHUTDOWN_JOIN_SECONDS
+	local durabilityAttempts = 0
+	while durabilityAttempts < RUNTIME_SHUTDOWN_DURABILITY_ATTEMPTS do
+		local called, resultValue = pcall(callback)
+		if called and type(resultValue) == "table" and (resultValue :: any).ok == true then
+			return
+		end
+		local errorCode = if called
+				and type(resultValue) == "table"
+				and type((resultValue :: any).error) == "table"
+			then (resultValue :: any).error.code
+			else nil
+		if errorCode == "BUSY" and os.clock() < deadline then
+			task.wait(RUNTIME_SHUTDOWN_POLL_SECONDS)
+		else
+			durabilityAttempts += 1
+			if durabilityAttempts < RUNTIME_SHUTDOWN_DURABILITY_ATTEMPTS then
+				task.wait(RUNTIME_SHUTDOWN_POLL_SECONDS)
+			end
+		end
+	end
+	error(`[ATD_LOBBY_BOOTSTRAP][code={name}_CLEANUP_FAILED]`, 0)
 end
 
 local function opaqueId(kind: string): string
@@ -126,7 +156,7 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 
 	local storeResult = if RunService:IsStudio()
 		then ProfileStoreAdapter.newStudioDevelopment()
-		else ProfileStoreAdapter.newProduction()
+		else ProfileStoreAdapter.newPublished(configuration.deployment)
 	if not storeResult.ok then
 		error("[ATD_LOBBY_BOOTSTRAP][code=PROFILE_STORE_UNAVAILABLE]", 0)
 	end
@@ -162,13 +192,39 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 	local publishPartyViews: () -> () = function() end
 	local publishQueueViews: () -> () = function() end
 	local runtimeCleaned = false
+	local runtimeWorkerCount = 0
+	local runtimeWorkersJoined = true
+	local function runRuntimeWorker(callback: () -> ()): boolean
+		if runtimeCleaned then
+			return false
+		end
+		runtimeWorkerCount += 1
+		local called = pcall(callback)
+		runtimeWorkerCount -= 1
+		return called
+	end
+	local function scheduleRuntimeWorker(callback: () -> ()): boolean
+		if runtimeCleaned then
+			return false
+		end
+		runtimeWorkerCount += 1
+		local scheduled = pcall(task.spawn, function()
+			pcall(callback)
+			runtimeWorkerCount -= 1
+		end)
+		if not scheduled then
+			runtimeWorkerCount -= 1
+		end
+		return scheduled
+	end
 	local routeBlockedByUserId: { [number]: boolean } = {}
 	local activeRouteViewByUserId: { [number]: LobbyProtocol.ActiveRouteView } = {}
+	local returnedRouteCleanupByUserId: { [number]: string } = {}
 
 	local memoryAdapter = required(
 		if RunService:IsStudio()
 			then MemoryStoreTravelAdapter.newStudioDevelopment(os.time)
-			else MemoryStoreTravelAdapter.newProduction(),
+			else MemoryStoreTravelAdapter.newPublished(configuration.deployment),
 		"TRAVEL_ADAPTER_UNAVAILABLE"
 	)
 	local ticketStore = required(TravelRecordStore.new(memoryAdapter, { clock = os.time }), "TICKET_STORE_UNAVAILABLE")
@@ -178,7 +234,7 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 	local ledgerAdapter = required(
 		if RunService:IsStudio()
 			then ResultLedgerStoreAdapter.newStudioDevelopment()
-			else ResultLedgerStoreAdapter.newProduction(),
+			else ResultLedgerStoreAdapter.newPublished(configuration.deployment),
 		"RESULT_LEDGER_ADAPTER_UNAVAILABLE"
 	)
 	local resultLedger = required(ResultLedgerService.new(ledgerAdapter, os.time), "RESULT_LEDGER_UNAVAILABLE")
@@ -334,12 +390,12 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		}),
 		"SAFE_TELEPORT_UNAVAILABLE"
 	)
-	local lobbyPlaceId = PlaceRoles.getConfiguredPlaceId(PlaceRoles.LOBBY_ROLE) :: number
-	local matchPlaceId = PlaceRoles.getConfiguredPlaceId(PlaceRoles.MATCH_ROLE) :: number
+	local lobbyPlaceId = PlaceRoles.getConfiguredPlaceId(configuration.deployment, PlaceRoles.LOBBY_ROLE) :: number
+	local matchPlaceId = PlaceRoles.getConfiguredPlaceId(configuration.deployment, PlaceRoles.MATCH_ROLE) :: number
 	travel = required(
 		LobbyTravelCoordinator.new({
 			clock = os.time,
-			schedule = task.spawn,
+			schedule = task.defer,
 			makeId = function(kind: LobbyTravelCoordinator.IdKind): string
 				return opaqueId(kind)
 			end,
@@ -401,6 +457,7 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 	local reconnect = required(
 		LobbyReconnectService.new({
 			clock = os.time,
+			schedule = task.defer,
 			activeRoutes = activeRoutes,
 			teleportAdapter = teleportAdapter,
 			profileTransfer = profileTransfer,
@@ -457,31 +514,35 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 	end
 
 	publishViews = function(player: Player)
-		local profileView = profile:getClientSnapshot(player.UserId)
-		if profileView.ok then
-			sendProfile(player, profileView.value)
-		end
-		local inventoryView = inventory:getSnapshot(player.UserId)
-		if inventoryView.ok then
-			sendInventory(player, inventoryView.value)
-		end
-		local partyView = party:getSnapshot(player.UserId)
-		if partyView.ok then
-			sendParty(player, partyView.value)
-		end
-		local routeView = activeRouteViewByUserId[player.UserId]
-		if routeView ~= nil then
-			sendActiveRoute(player, routeView)
-		end
+		runRuntimeWorker(function()
+			local profileView = profile:getClientSnapshot(player.UserId)
+			if profileView.ok then
+				sendProfile(player, profileView.value)
+			end
+			local inventoryView = inventory:getSnapshot(player.UserId)
+			if inventoryView.ok then
+				sendInventory(player, inventoryView.value)
+			end
+			local partyView = party:getSnapshot(player.UserId)
+			if partyView.ok then
+				sendParty(player, partyView.value)
+			end
+			local routeView = activeRouteViewByUserId[player.UserId]
+			if routeView ~= nil then
+				sendActiveRoute(player, routeView)
+			end
+		end)
 	end
 
 	publishPartyViews = function()
-		for _, player in Players:GetPlayers() do
-			local result = party:getSnapshot(player.UserId)
-			if result.ok then
-				sendParty(player, result.value)
+		runRuntimeWorker(function()
+			for _, player in Players:GetPlayers() do
+				local result = party:getSnapshot(player.UserId)
+				if result.ok then
+					sendParty(player, result.value)
+				end
 			end
-		end
+		end)
 	end
 
 	local function queueList(): LobbyProtocol.QueueList
@@ -496,34 +557,66 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 	end
 
 	publishQueueViews = function()
-		local value = queueList()
-		for _, player in Players:GetPlayers() do
-			sendQueues(player, value)
-		end
-		if worldDisplay ~= nil then
-			for _, snapshot in value.queues do
-				worldDisplay:update(snapshot.queueId, snapshot)
+		runRuntimeWorker(function()
+			local value = queueList()
+			for _, player in Players:GetPlayers() do
+				sendQueues(player, value)
 			end
+			if worldDisplay ~= nil then
+				for _, snapshot in value.queues do
+					worldDisplay:update(snapshot.queueId, snapshot)
+				end
+			end
+		end)
+	end
+
+	local function retireReturnedRoute(player: Player): boolean
+		local userId = player.UserId
+		local matchId = returnedRouteCleanupByUserId[userId]
+		if matchId == nil then
+			return true
 		end
+		local called, cleared = pcall(activeRoutes.clear, activeRoutes, userId, matchId)
+		if not called or type(cleared) ~= "table" or (cleared :: any).ok ~= true then
+			local none = LobbyProtocol.validateActiveRoute({ version = LobbyProtocol.VERSION, status = "None" })
+			if none.ok and player.Parent == Players and not runtimeCleaned then
+				activeRouteViewByUserId[userId] = none.value
+				routeBlockedByUserId[userId] = true
+				sendActiveRoute(player, none.value)
+			end
+			return false
+		end
+		if returnedRouteCleanupByUserId[userId] == matchId then
+			returnedRouteCleanupByUserId[userId] = nil
+		end
+		return true
 	end
 
 	local function refreshRoute(player: Player)
-		local result = reconnect:getView(player.UserId)
-		if not result.ok or player.Parent ~= Players or runtimeCleaned then
-			return
-		end
-		activeRouteViewByUserId[player.UserId] = result.value
-		routeBlockedByUserId[player.UserId] = result.value.status == "Available"
-		sendActiveRoute(player, result.value)
+		runRuntimeWorker(function()
+			if not retireReturnedRoute(player) then
+				return
+			end
+			local result = reconnect:getView(player.UserId)
+			if not result.ok or player.Parent ~= Players or runtimeCleaned then
+				return
+			end
+			activeRouteViewByUserId[player.UserId] = result.value
+			routeBlockedByUserId[player.UserId] = result.value.status == "Available"
+			sendActiveRoute(player, result.value)
+		end)
 	end
 
-	local processingReadyByUserId: { [number]: boolean } = {}
+	local processingReadyByUserId: PlayerReadyOwnership.OwnershipByUserId = {}
 	local function processPlayerReady(player: Player)
 		local userId = player.UserId
-		if processingReadyByUserId[userId] or runtimeCleaned then
+		if runtimeCleaned then
 			return
 		end
-		processingReadyByUserId[userId] = true
+		local readyToken = PlayerReadyOwnership.acquire(processingReadyByUserId, userId, player)
+		if readyToken == nil then
+			return
+		end
 		local succeeded = pcall(function()
 			for _attempt = 1, 300 do
 				if runtimeCleaned or player.Parent ~= Players then
@@ -550,25 +643,32 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 				end
 				local admitted = returns:admitJoinData(userId, (joinData :: any).TeleportData)
 				if admitted.ok then
+					returnedRouteCleanupByUserId[userId] = admitted.value.matchId
+					retireReturnedRoute(player)
 					if admitted.value.arrivedCount >= admitted.value.expectedCount then
 						returns:reconstruct(admitted.value.returnId)
 					else
 						task.delay(10, function()
-							if not runtimeCleaned then
+							runRuntimeWorker(function()
 								returns:reconstruct(admitted.value.returnId)
 								publishPartyViews()
-							end
+							end)
 						end)
 					end
 				end
 			end
 
-			pendingClaims:processReady(userId)
 			refreshRoute(player)
 			publishViews(player)
 			publishQueueViews()
+			-- Route eligibility must be initialized before any reward claim can
+			-- yield. Until refreshRoute completes, the queue deliberately fails
+			-- closed; publishing that confirmed route state first prevents a slow
+			-- historical claim from stranding a ready player as NotEligible.
+			pendingClaims:processReady(userId)
+			publishQueueViews()
 		end)
-		processingReadyByUserId[userId] = nil
+		PlayerReadyOwnership.release(processingReadyByUserId, userId, player, readyToken)
 		if not succeeded then
 			return
 		end
@@ -587,7 +687,7 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 	end
 
 	local function ready(player: Player): boolean
-		return profile:getState(player.UserId) == "Ready"
+		return not runtimeCleaned and profile:getState(player.UserId) == "Ready"
 	end
 
 	local function finishParty(result: any): ServerRequestDispatcher.HandlerOutcome
@@ -650,16 +750,22 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		ProfileProtocol.SnapshotSchema,
 		authorizeLiveContext,
 		function(context, _payload)
+			if runtimeCleaned then
+				return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+			end
 			if profile:getState(context.player.UserId) ~= "Failed" then
 				local current = profile:getClientSnapshot(context.player.UserId)
 				return if current.ok
 					then ServerRequestDispatcher.success(current.value)
 					else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 			end
-			task.spawn(function()
+			local scheduled = scheduleRuntimeWorker(function()
 				profile:retryLoad(context.player.UserId)
 				processPlayerReady(context.player)
 			end)
+			if not scheduled then
+				return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+			end
 			return ServerRequestDispatcher.success(ProfileProtocol.status("Loading"))
 		end
 	)
@@ -681,7 +787,9 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		InventoryProtocol.MutationReceiptSchema,
 		authorizeLiveContext,
 		function(context, payload)
-			return finishMutation(context.player, inventory:equip(context.player.UserId, payload))
+			return if ready(context.player)
+				then finishMutation(context.player, inventory:equip(context.player.UserId, payload))
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 		end
 	)
 	network:registerRequest(
@@ -690,7 +798,9 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		InventoryProtocol.MutationReceiptSchema,
 		authorizeLiveContext,
 		function(context, payload)
-			return finishMutation(context.player, inventory:unequip(context.player.UserId, payload))
+			return if ready(context.player)
+				then finishMutation(context.player, inventory:unequip(context.player.UserId, payload))
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 		end
 	)
 	network:registerRequest(
@@ -699,7 +809,9 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		InventoryProtocol.MutationReceiptSchema,
 		authorizeLiveContext,
 		function(context, payload)
-			return finishMutation(context.player, inventory:favorite(context.player.UserId, payload))
+			return if ready(context.player)
+				then finishMutation(context.player, inventory:favorite(context.player.UserId, payload))
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 		end
 	)
 	network:registerRequest(
@@ -708,7 +820,9 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		InventoryProtocol.MutationReceiptSchema,
 		authorizeLiveContext,
 		function(context, payload)
-			return finishMutation(context.player, inventory:lock(context.player.UserId, payload))
+			return if ready(context.player)
+				then finishMutation(context.player, inventory:lock(context.player.UserId, payload))
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 		end
 	)
 	network:registerRequest(
@@ -730,7 +844,9 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		AcquisitionProtocol.PullReceiptSchema,
 		authorizeLiveContext,
 		function(context, payload)
-			return finishMutation(context.player, acquisition:pull(context.player.UserId, payload))
+			return if ready(context.player)
+				then finishMutation(context.player, acquisition:pull(context.player.UserId, payload))
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 		end
 	)
 	network:registerRequest(
@@ -739,7 +855,9 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		SettingsProtocol.UpdateReceiptSchema,
 		authorizeLiveContext,
 		function(context, payload)
-			return finishMutation(context.player, settings:update(context.player.UserId, payload))
+			return if ready(context.player)
+				then finishMutation(context.player, settings:update(context.player.UserId, payload))
+				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 		end
 	)
 
@@ -954,13 +1072,10 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		LobbyProtocol.ActiveRouteViewSchema,
 		authorizeLiveContext,
 		function(context, _payload)
-			local result = reconnect:getView(context.player.UserId)
-			if not result.ok then
-				return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
-			end
-			activeRouteViewByUserId[context.player.UserId] = result.value
-			routeBlockedByUserId[context.player.UserId] = result.value.status == "Available"
-			return ServerRequestDispatcher.success(result.value)
+			local view = activeRouteViewByUserId[context.player.UserId]
+			return if view == nil
+				then ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
+				else ServerRequestDispatcher.success(view)
 		end
 	)
 	network:registerRequest(
@@ -972,7 +1087,7 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 			if not ready(context.player) then
 				return ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
 			end
-			local result = reconnect:reconnect(context.player.UserId, (payload :: any).transactionId)
+			local result = reconnect:beginReconnect(context.player.UserId, (payload :: any).transactionId)
 			return if result.ok
 				then ServerRequestDispatcher.success(result.value)
 				else ServerRequestDispatcher.reject(PUBLIC_ERRORS.UNAVAILABLE)
@@ -990,63 +1105,85 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		dependencies = table.freeze({}),
 		initialize = function() end,
 		start = function()
+			runtimeWorkersJoined = false
 			table.insert(
 				runtimeConnections,
 				Players.PlayerAdded:Connect(function(player)
-					task.spawn(processPlayerReady, player)
+					scheduleRuntimeWorker(function()
+						processPlayerReady(player)
+					end)
 				end)
 			)
 			table.insert(
 				runtimeConnections,
 				Players.PlayerRemoving:Connect(function(player)
-					travel:removePlayer(player.UserId)
-					party:removePlayer(player.UserId, "ServerLeave")
-					queue:removePlayer(player.UserId)
-					reconnect:removePlayer(player.UserId)
-					permissionCache:removePlayer(player.UserId)
-					processingReadyByUserId[player.UserId] = nil
-					routeBlockedByUserId[player.UserId] = nil
-					activeRouteViewByUserId[player.UserId] = nil
+					runRuntimeWorker(function()
+						travel:removePlayer(player.UserId)
+						party:removePlayer(player.UserId, "ServerLeave")
+						queue:removePlayer(player.UserId)
+						reconnect:removePlayer(player.UserId)
+						permissionCache:removePlayer(player.UserId)
+						PlayerReadyOwnership.removePlayer(processingReadyByUserId, player.UserId, player)
+						routeBlockedByUserId[player.UserId] = nil
+						activeRouteViewByUserId[player.UserId] = nil
+						returnedRouteCleanupByUserId[player.UserId] = nil
+					end)
 				end)
 			)
 			table.insert(
 				runtimeConnections,
 				RunService.Heartbeat:Connect(function()
-					if not travelStepRunning then
+					if not runtimeCleaned and not travelStepRunning then
 						travelStepRunning = true
-						task.spawn(function()
-							pcall(function()
-								profileTransfer:step()
-								travel:step()
-								returns:step()
-								reconnect:step()
-								local currentTime = os.time()
-								if currentTime >= nextMaintenanceAt then
-									nextMaintenanceAt = currentTime + MAINTENANCE_INTERVAL_SECONDS
-									local retryClaims = currentTime >= nextClaimRetryAt
-									if retryClaims then
-										nextClaimRetryAt = currentTime + CLAIM_RETRY_INTERVAL_SECONDS
-									end
-									for _, player in Players:GetPlayers() do
-										if profile:getState(player.UserId) == "Ready" then
-											if retryClaims then
-												pendingClaims:processReady(player.UserId)
+						if
+							not scheduleRuntimeWorker(function()
+								pcall(function()
+									profileTransfer:step()
+									travel:step()
+									returns:step()
+									reconnect:step()
+									local currentTime = os.time()
+									if currentTime >= nextMaintenanceAt then
+										nextMaintenanceAt = currentTime + MAINTENANCE_INTERVAL_SECONDS
+										local retryClaims = currentTime >= nextClaimRetryAt
+										if retryClaims then
+											nextClaimRetryAt = currentTime + CLAIM_RETRY_INTERVAL_SECONDS
+										end
+										local readyPlayers: { Player } = {}
+										for _, player in Players:GetPlayers() do
+											if profile:getState(player.UserId) == "Ready" then
+												table.insert(readyPlayers, player)
+												refreshRoute(player)
 											end
-											refreshRoute(player)
+										end
+										publishQueueViews()
+										if retryClaims then
+											-- Keep claims in a second pass so one yielding ledger or
+											-- profile operation cannot starve another player's initial
+											-- route eligibility check.
+											for _, player in readyPlayers do
+												if player.Parent == Players then
+													pendingClaims:processReady(player.UserId)
+												end
+											end
+											publishQueueViews()
 										end
 									end
-									publishQueueViews()
-								end
+								end)
+								travelStepRunning = false
 							end)
+						then
 							travelStepRunning = false
-						end)
+						end
 					end
 				end)
 			)
 			for _, player in Players:GetPlayers() do
-				task.spawn(processPlayerReady, player)
+				scheduleRuntimeWorker(function()
+					processPlayerReady(player)
+				end)
 			end
-			task.defer(publishQueueViews)
+			scheduleRuntimeWorker(publishQueueViews)
 		end,
 		shutdown = function()
 			runtimeCleaned = true
@@ -1054,21 +1191,56 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 				runtimeConnections[index]:Disconnect()
 			end
 			table.clear(runtimeConnections)
-			reconnect:cleanup()
-			safeTeleport:cleanup()
-			profileTransfer:cleanup()
-			party:cleanup()
-			queue:cleanup()
-			pendingResults:cleanup()
+			local joinDeadline = os.clock() + RUNTIME_SHUTDOWN_JOIN_SECONDS
+			while (travelStepRunning or runtimeWorkerCount > 0) and os.clock() < joinDeadline do
+				task.wait(RUNTIME_SHUTDOWN_POLL_SECONDS)
+			end
+			if travelStepRunning or runtimeWorkerCount > 0 then
+				error("[ATD_LOBBY_BOOTSTRAP][code=RUNTIME_WORKER_JOIN_FAILED]", 0)
+			end
+			runtimeWorkersJoined = true
+			cleanupUntilSettled("RECONNECT", function(): unknown
+				return reconnect:cleanup()
+			end)
+		end,
+	})
+	local runtimeCleanupDefinition = table.freeze({
+		name = "LobbySquadTravelDependencies",
+		dependencies = table.freeze({}),
+		initialize = function() end,
+		start = function() end,
+		shutdown = function()
+			if not runtimeWorkersJoined then
+				error("[ATD_LOBBY_BOOTSTRAP][code=RUNTIME_NOT_QUIESCED]", 0)
+			end
+			cleanupUntilSettled("RECONNECT", function(): unknown
+				return reconnect:cleanup()
+			end)
+			cleanupUntilSettled("SAFE_TELEPORT", function(): unknown
+				return safeTeleport:cleanup()
+			end)
+			cleanupUntilSettled("PROFILE_TRANSFER", function(): unknown
+				return profileTransfer:cleanup()
+			end)
+			cleanupUntilSettled("PARTY", function(): unknown
+				return party:cleanup()
+			end)
+			cleanupUntilSettled("QUEUE", function(): unknown
+				return queue:cleanup()
+			end)
+			cleanupUntilSettled("PENDING_RESULTS", function(): unknown
+				return pendingResults:cleanup()
+			end)
 			table.clear(processingReadyByUserId)
 			table.clear(routeBlockedByUserId)
 			table.clear(activeRouteViewByUserId)
+			table.clear(returnedRouteCleanupByUserId)
 		end,
 	})
 
 	configuration.lifecycleRunner:register(profile:getServiceDefinition())
 	configuration.lifecycleRunner:register(permissionCache:getServiceDefinition())
-	configuration.lifecycleRunner:register(runtimeDefinition)
+	configuration.lifecycleRunner:register(runtimeCleanupDefinition)
 	configuration.lifecycleRunner:register(travel:getServiceDefinition())
 	configuration.lifecycleRunner:register(returns:getServiceDefinition())
 	configuration.lifecycleRunner:register(pendingClaims:getServiceDefinition())
@@ -1078,4 +1250,7 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 	if zoneService ~= nil then
 		configuration.lifecycleRunner:register(zoneService:getServiceDefinition())
 	end
+	-- Start runtime workers only after every dependency is initialized, and stop
+	-- and join them before reverse-order dependency cleanup begins.
+	configuration.lifecycleRunner:register(runtimeDefinition)
 end)

@@ -5,16 +5,20 @@ export type Cancel = (handle: unknown) -> ()
 
 export type Metrics = {
 	cleaned: boolean,
+	closing: boolean,
 	contextCount: number,
 	scheduledCount: number,
+	runningCount: number,
 }
 
 export type Scope = {
 	register: (self: Scope, key: string, context: unknown) -> boolean,
 	get: (self: Scope, key: string) -> unknown?,
 	remove: (self: Scope, key: string) -> unknown?,
+	run: (self: Scope, key: string, callback: (unknown) -> ()) -> boolean,
 	schedule: (self: Scope, key: string, delaySeconds: number, callback: (unknown) -> ()) -> boolean,
 	cleanup: (self: Scope, settle: ((unknown) -> ())?) -> boolean,
+	isBusy: (self: Scope) -> boolean,
 	getMetrics: (self: Scope) -> Metrics,
 }
 
@@ -25,12 +29,15 @@ type Scheduled = {
 type Entry = {
 	context: unknown,
 	scheduled: Scheduled?,
+	running: boolean,
 }
 
 type ScopeData = {
 	schedule: Schedule,
 	cancel: Cancel,
 	entries: { [string]: Entry },
+	runningCount: number,
+	closing: boolean,
 	cleaned: boolean,
 }
 
@@ -66,23 +73,51 @@ end
 
 function Methods.register(self: Scope, keyValue: string, context: unknown): boolean
 	local data = dataFor(self)
-	if data.cleaned or not validKey(keyValue) or context == nil or data.entries[keyValue] ~= nil then
+	if data.cleaned or data.closing or not validKey(keyValue) or context == nil or data.entries[keyValue] ~= nil then
 		return false
 	end
 	data.entries[keyValue] = {
 		context = context,
 		scheduled = nil,
+		running = false,
 	}
 	return true
 end
 
 function Methods.get(self: Scope, keyValue: string): unknown?
 	local data = dataFor(self)
-	if data.cleaned or not validKey(keyValue) then
+	if data.cleaned or data.closing or not validKey(keyValue) then
 		return nil
 	end
 	local entry = data.entries[keyValue]
 	return if entry == nil then nil else entry.context
+end
+
+local function runOwned(data: ScopeData, keyValue: string, entry: Entry, callback: (unknown) -> ()): boolean
+	if
+		data.cleaned
+		or data.closing
+		or data.entries[keyValue] ~= entry
+		or entry.running
+		or type(callback) ~= "function"
+	then
+		return false
+	end
+	entry.running = true
+	data.runningCount += 1
+	local called, callbackError = pcall(callback, entry.context)
+	entry.running = false
+	data.runningCount -= 1
+	if not called then
+		error(callbackError, 0)
+	end
+	return true
+end
+
+function Methods.run(self: Scope, keyValue: string, callback: (unknown) -> ()): boolean
+	local data = dataFor(self)
+	local entry = if validKey(keyValue) then data.entries[keyValue] else nil
+	return if entry == nil then false else runOwned(data, keyValue, entry, callback)
 end
 
 function Methods.remove(self: Scope, keyValue: string): unknown?
@@ -104,6 +139,7 @@ function Methods.schedule(self: Scope, keyValue: string, delaySeconds: number, c
 	local entry = if validKey(keyValue) then data.entries[keyValue] else nil
 	if
 		data.cleaned
+		or data.closing
 		or entry == nil
 		or entry.scheduled ~= nil
 		or not validDelay(delaySeconds)
@@ -119,7 +155,7 @@ function Methods.schedule(self: Scope, keyValue: string, delaySeconds: number, c
 			return
 		end
 		current.scheduled = nil
-		callback(current.context)
+		runOwned(data, keyValue, current, callback)
 	end)
 	if not called or handle == nil then
 		if data.entries[keyValue] == entry and entry.scheduled == scheduled then
@@ -136,15 +172,25 @@ function Methods.cleanup(self: Scope, settle: ((unknown) -> ())?): boolean
 	if data.cleaned then
 		return false
 	end
-	data.cleaned = true
+	data.closing = true
+	for _, entry in data.entries do
+		cancelScheduled(data, entry)
+	end
+	if data.runningCount > 0 then
+		return false
+	end
 	for _, entry in data.entries do
 		if settle ~= nil then
 			pcall(settle, entry.context)
 		end
-		cancelScheduled(data, entry)
 	end
 	table.clear(data.entries)
+	data.cleaned = true
 	return true
+end
+
+function Methods.isBusy(self: Scope): boolean
+	return dataFor(self).runningCount > 0
 end
 
 function Methods.getMetrics(self: Scope): Metrics
@@ -159,8 +205,10 @@ function Methods.getMetrics(self: Scope): Metrics
 	end
 	return table.freeze({
 		cleaned = data.cleaned,
+		closing = data.closing,
 		contextCount = contextCount,
 		scheduledCount = scheduledCount,
+		runningCount = data.runningCount,
 	})
 end
 
@@ -175,6 +223,8 @@ function RematchRecoveryScope.new(scheduleValue: unknown, cancelValue: unknown):
 		schedule = scheduleValue :: Schedule,
 		cancel = cancelValue :: Cancel,
 		entries = {},
+		runningCount = 0,
+		closing = false,
 		cleaned = false,
 	}
 	table.freeze(scope)

@@ -359,6 +359,9 @@ function Methods.commit(self: Service, handleValue: unknown): Result.Result<bool
 	if data.cleaned then
 		return failure("CLEANED", "commit")
 	end
+	if data.busy then
+		return failure("BUSY", "commit")
+	end
 	local handleData = handleFor(data, handleValue)
 	if handleData ~= nil and handleData.state == "Committed" then
 		return Result.ok(false)

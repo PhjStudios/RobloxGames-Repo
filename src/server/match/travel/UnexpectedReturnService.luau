@@ -27,6 +27,13 @@ export type Dependencies = {
 type ServiceData = {
 	dependencies: Dependencies,
 	activeUserIds: { [number]: boolean },
+	workersByUserId: {
+		[number]: {
+			userId: number,
+			player: unknown,
+			state: "Queued" | "Running",
+		},
+	},
 	pendingByPlayer: {
 		[any]: {
 			userId: number,
@@ -53,6 +60,8 @@ type ServiceData = {
 	},
 	rejectedPlayers: { [any]: boolean },
 	connections: { any },
+	ingressOperationsRunning: number,
+	closing: boolean,
 	cleaned: boolean,
 }
 
@@ -107,6 +116,16 @@ local function activeCount(data: ServiceData): number
 		count += 1
 	end
 	return count
+end
+
+local function runIngressOperation(data: ServiceData, callback: () -> unknown): unknown
+	data.ingressOperationsRunning += 1
+	local called, resultValue = pcall(callback)
+	data.ingressOperationsRunning -= 1
+	if not called then
+		error(resultValue, 0)
+	end
+	return resultValue
 end
 
 local function rejectLivePlayer(data: ServiceData, player: unknown): boolean
@@ -187,7 +206,7 @@ end
 
 function Methods.step(self: Service): number
 	local data = requireData(self)
-	if data.cleaned then
+	if data.cleaned or data.closing then
 		return 0
 	end
 	local settled = 0
@@ -236,7 +255,7 @@ local function run(data: ServiceData, player: unknown, id: number)
 		rejectLivePlayer(data, player)
 		return
 	end
-	while not data.cleaned and live(data, player) do
+	while not data.closing and live(data, player) do
 		local stateCalled, state = pcall(data.dependencies.getProfileState, id)
 		if stateCalled and state == "Ready" then
 			break
@@ -253,7 +272,7 @@ local function run(data: ServiceData, player: unknown, id: number)
 		end
 		pcall(data.dependencies.wait, POLL_SECONDS)
 	end
-	if data.cleaned or not live(data, player) then
+	if data.closing or not live(data, player) then
 		data.activeUserIds[id] = nil
 		return
 	end
@@ -284,7 +303,7 @@ local function run(data: ServiceData, player: unknown, id: number)
 	}
 	data.pendingByPlayer[player :: any] = pending
 	data.pendingByUserId[id] = pending
-	if data.cleaned or not live(data, player) then
+	if data.closing or not live(data, player) then
 		failPending(data, player)
 		return
 	end
@@ -302,29 +321,53 @@ end
 
 function Methods.returnPlayer(self: Service, player: unknown): Result.Result<boolean, ReturnError>
 	local data = requireData(self)
-	if data.cleaned then
+	if data.cleaned or data.closing then
 		return failure("CLEANED")
 	end
-	local id = userId(data, player)
-	if id == nil or not live(data, player) then
-		return failure("INVALID_PLAYER")
-	end
-	if data.activeUserIds[id] or activeCount(data) >= MAX_ACTIVE_RETURNS then
-		if not data.activeUserIds[id] then
-			rejectLivePlayer(data, player)
+	return runIngressOperation(data, function()
+		local id = userId(data, player)
+		if id == nil or not live(data, player) then
+			return failure("INVALID_PLAYER")
 		end
-		return failure("BUSY")
-	end
-	data.activeUserIds[id] = true
-	local called, scheduled = pcall(data.dependencies.schedule, function()
-		run(data, player, id)
-	end)
-	if not called or scheduled == false then
-		data.activeUserIds[id] = nil
-		rejectLivePlayer(data, player)
-		return failure("BUSY")
-	end
-	return Result.ok(true)
+		if data.activeUserIds[id] or activeCount(data) >= MAX_ACTIVE_RETURNS then
+			if not data.activeUserIds[id] then
+				rejectLivePlayer(data, player)
+			end
+			return failure("BUSY")
+		end
+		data.activeUserIds[id] = true
+		local worker = {
+			userId = id,
+			player = player,
+			state = "Queued" :: "Queued" | "Running",
+		}
+		data.workersByUserId[id] = worker
+		local called, scheduled = pcall(data.dependencies.schedule, function()
+			if data.closing or data.workersByUserId[id] ~= worker then
+				return
+			end
+			worker.state = "Running"
+			local runCalled = pcall(run, data, player, id)
+			if not runCalled and data.pendingByUserId[id] == nil then
+				data.activeUserIds[id] = nil
+				if not data.closing then
+					rejectLivePlayer(data, player)
+				end
+			end
+			if data.workersByUserId[id] == worker then
+				data.workersByUserId[id] = nil
+			end
+		end)
+		if not called or scheduled == false then
+			if data.workersByUserId[id] == worker then
+				data.workersByUserId[id] = nil
+			end
+			data.activeUserIds[id] = nil
+			rejectLivePlayer(data, player)
+			return failure("BUSY")
+		end
+		return Result.ok(true)
+	end) :: any
 end
 
 function Methods.cleanup(self: Service): Result.Result<boolean, ReturnError>
@@ -332,7 +375,23 @@ function Methods.cleanup(self: Service): Result.Result<boolean, ReturnError>
 	if data.cleaned then
 		return Result.ok(false)
 	end
-	data.cleaned = true
+	data.closing = true
+	if data.ingressOperationsRunning > 0 then
+		return failure("BUSY")
+	end
+	for id, worker in data.workersByUserId do
+		if worker.state == "Queued" then
+			data.workersByUserId[id] = nil
+			if data.pendingByUserId[id] == nil then
+				data.activeUserIds[id] = nil
+			end
+		end
+	end
+	for _, worker in data.workersByUserId do
+		if worker.state == "Running" then
+			return failure("BUSY")
+		end
+	end
 	for index = #data.connections, 1, -1 do
 		pcall(function()
 			data.connections[index]:Disconnect()
@@ -340,24 +399,41 @@ function Methods.cleanup(self: Service): Result.Result<boolean, ReturnError>
 	end
 	table.clear(data.connections)
 	for player, pending in data.pendingByPlayer do
+		local settledCalled: boolean
+		local settled: unknown
 		if live(data, player) then
-			pcall(
+			settledCalled, settled = pcall(
 				(data.dependencies.ownershipTransfer :: any).rollback,
 				data.dependencies.ownershipTransfer,
 				pending.handle
 			)
 		else
-			pcall(
+			settledCalled, settled = pcall(
 				(data.dependencies.ownershipTransfer :: any).commit,
 				data.dependencies.ownershipTransfer,
 				pending.handle
 			)
 		end
+		if settledCalled and successful(settled) then
+			data.pendingByPlayer[player :: any] = nil
+			data.pendingByUserId[pending.userId] = nil
+			data.activeUserIds[pending.userId] = nil
+		end
 	end
+	if next(data.pendingByUserId) ~= nil then
+		return failure("BUSY")
+	end
+	data.cleaned = true
 	table.clear(data.pendingByPlayer)
 	table.clear(data.pendingByUserId)
 	table.clear(data.activeUserIds)
+	table.clear(data.workersByUserId)
 	return Result.ok(true)
+end
+
+function Methods.isBusy(self: Service): boolean
+	local data = requireData(self)
+	return data.ingressOperationsRunning > 0 or next(data.workersByUserId) ~= nil
 end
 
 function UnexpectedReturnService.new(dependenciesValue: unknown): Result.Result<Service, ReturnError>
@@ -398,10 +474,13 @@ function UnexpectedReturnService.new(dependenciesValue: unknown): Result.Result<
 	local data: ServiceData = {
 		dependencies = dependenciesValue :: Dependencies,
 		activeUserIds = {},
+		workersByUserId = {},
 		pendingByPlayer = setmetatable({}, { __mode = "k" }),
 		pendingByUserId = {},
 		rejectedPlayers = setmetatable({}, { __mode = "k" }),
 		connections = {},
+		ingressOperationsRunning = 0,
+		closing = false,
 		cleaned = false,
 	}
 	DATA[service] = data
@@ -409,14 +488,22 @@ function UnexpectedReturnService.new(dependenciesValue: unknown): Result.Result<
 		dependencies.teleport.connectInitFailed,
 		dependencies.teleport,
 		function(player, _failureClass, context)
-			local pending = data.pendingByPlayer[player :: any]
-			if pending ~= nil and matchesInitFailure(pending, context) then
-				failPending(data, player)
+			if not data.cleaned and not data.closing then
+				runIngressOperation(data, function()
+					local pending = data.pendingByPlayer[player :: any]
+					if pending ~= nil and matchesInitFailure(pending, context) then
+						failPending(data, player)
+					end
+				end)
 			end
 		end
 	)
 	local removingCalled, removingConnection = pcall(dependencies.connectPlayerRemoving, function(player)
-		completePending(data, player)
+		if not data.cleaned and not data.closing then
+			runIngressOperation(data, function()
+				completePending(data, player)
+			end)
+		end
 	end)
 	if not initCalled or initConnection == nil or not removingCalled or removingConnection == nil then
 		if initCalled and initConnection ~= nil then

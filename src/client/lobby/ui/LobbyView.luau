@@ -228,7 +228,6 @@ type ViewData = {
 	current: LobbyUiModel.RenderState?,
 	focusStack: { FocusEntry },
 	localSelectedUnitId: string?,
-	partyInviteText: string,
 	inventoryQuery: string,
 	inventorySort: "Name" | "Copies" | "Equipped",
 	inventoryFilter: "All" | "Equipped" | "Favorites" | "Locked",
@@ -251,6 +250,8 @@ export type TestConstructor = (Instance, Callback, Dependencies) -> ViewResult
 
 local GUI_NAME = "ATDLobbyGui"
 local MAX_QUERY_BYTES = 48
+local MAX_PARTY_INVITE_BYTES = 20
+local MAX_SAFE_USER_ID = 9_007_199_254_740_991
 local NAVIGATION_ORDER: { PrimaryScreen } =
 	table.freeze({ "Home", "Party", "Queue", "Inventory", "Chests", "Settings" })
 local SETTING_ORDER: { string } = table.freeze({
@@ -1322,8 +1323,18 @@ local function connectStatic(data: ViewData): boolean
 			emit(data, { kind = "CreateParty" })
 		end)
 		or not connectButton(data, data.instances.partyInviteButton, function()
-			local targetUserId = tonumber(data.partyInviteText)
-			if targetUserId ~= nil and targetUserId % 1 == 0 and targetUserId > 0 then
+			local input = data.instances.partyInviteInput
+			local bounded = string.sub(input.Text, 1, MAX_PARTY_INVITE_BYTES)
+			if input.Text ~= bounded then
+				input.Text = bounded
+			end
+			local targetUserId = tonumber(bounded)
+			if
+				targetUserId ~= nil
+				and targetUserId % 1 == 0
+				and targetUserId > 0
+				and targetUserId <= MAX_SAFE_USER_ID
+			then
 				emit(data, { kind = "InvitePartyMember", targetUserId = targetUserId })
 			end
 		end)
@@ -1534,8 +1545,7 @@ local function connectStatic(data: ViewData): boolean
 			if data.cleaned or type(text) ~= "string" then
 				return
 			end
-			local bounded = string.sub(text, 1, 20)
-			data.partyInviteText = bounded
+			local bounded = string.sub(text, 1, MAX_PARTY_INVITE_BYTES)
 			data.instances.partyInviteInput.Text = bounded
 		end
 	)
@@ -1695,7 +1705,7 @@ end
 local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, layout: ResponsiveLayout.Layout)
 	local instances = data.instances
 	local interactive = snapshot.profileState == "Ready" and #snapshot.modals == 0 and not snapshot.squadMutationPending
-	instances.partyInviteInput.Text = data.partyInviteText
+	-- The TextBox owns its draft; snapshots can arrive before FocusLost.
 	if snapshot.partyState ~= "Ready" or snapshot.partySnapshot == nil then
 		instances.partyStatus.Text = if snapshot.partyState == "Failed"
 			then "PARTY UNAVAILABLE • Refreshing server-owned state."
@@ -2240,7 +2250,6 @@ local function construct(
 		current = nil,
 		focusStack = {},
 		localSelectedUnitId = nil,
-		partyInviteText = "",
 		inventoryQuery = "",
 		inventorySort = "Name",
 		inventoryFilter = "All",

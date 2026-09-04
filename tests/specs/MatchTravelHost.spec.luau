@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local ConfigurationValidator = require(ReplicatedStorage.Shared.config.ConfigurationValidator)
 local MatchLoadoutProtocol = require(ReplicatedStorage.Shared.match.MatchLoadoutProtocol)
+local MatchTravelProtocol = require(ReplicatedStorage.Shared.match.MatchTravelProtocol)
 local Result = require(ReplicatedStorage.Shared.util.Result)
 local TravelProtocol = require(ReplicatedStorage.Shared.travel.TravelProtocol)
 
@@ -40,7 +41,11 @@ local function loadout(configuration: any, userId: number): any
 	return validated.value
 end
 
-local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { number }?): any
+local function makeRig(
+	assertions: TestHarness.Assertions,
+	userIdsValue: { number }?,
+	returnSchedulerModeValue: string?
+): any
 	local configured = ConfigurationValidator.validateLoaded()
 	local configuration = success(assertions, configured)
 	local userIds = userIdsValue or { 101, 202 }
@@ -48,6 +53,7 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 	local ids = {}
 	local routing = {}
 	local live = {}
+	local yieldNextRoutingRead = false
 	for _, userId in userIds do
 		local player = { name = `Player{userId}` }
 		table.insert(players, player)
@@ -125,11 +131,23 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 	local admissionBindings = {}
 	local returnedAdmissions = {}
 	local admissionDisconnectCount = 0
+	local admissionAttemptCount = 0
+	local disconnectYieldTarget: string? = nil
+	local reenterHeartbeatOnAdmission = false
+	local reenteredHeartbeat = false
 	local admission = {}
 	function admission:admit(player, routingData, jobId, currentTime)
 		local userId = ids[player]
 		if userId == nil or jobId ~= "match-job" then
 			return Result.err({ code = "UNEXPECTED_PLAYER" })
+		end
+		admissionAttemptCount += 1
+		if reenterHeartbeatOnAdmission and not reenteredHeartbeat then
+			reenteredHeartbeat = true
+			(heartbeat :: any)()
+		end
+		if admissionBindings[player] then
+			return Result.err({ code = "DUPLICATE_CONNECTION" })
 		end
 		local kind = if routingData.kind == "Rejoin" then "Rejoined" else admissionKinds[userId]
 		admissionBindings[player] = true
@@ -145,6 +163,10 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 	end
 	function admission:disconnect(player)
 		admissionDisconnectCount += 1
+		if disconnectYieldTarget == "Admission" then
+			disconnectYieldTarget = nil
+			coroutine.yield()
+		end
 		admissionBindings[player] = nil
 		return Result.ok(true)
 	end
@@ -200,29 +222,51 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 		return Result.ok(true)
 	end
 	local preparedCount = 0
+	local prepareYieldAt: number? = nil
+	local prepareFailureAt: number? = nil
 	local rollbackCount = 0
+	local rollbackYieldAt: number? = nil
+	local rollbackBusyFailuresRemaining = 0
 	local rollbackFailuresRemaining = 0
 	local commitCount = 0
 	local commitFailuresRemaining = 0
+	local outstandingHandles = {}
 	local profileTransfer = {}
 	function profileTransfer:prepare(returnUserIds)
 		preparedCount += 1
-		return Result.ok({ handle = { roster = table.clone(returnUserIds) } })
+		if prepareYieldAt == preparedCount then
+			coroutine.yield()
+		end
+		if prepareFailureAt == preparedCount then
+			return Result.err({ code = "PREPARE_FAILED" })
+		end
+		local handle = { roster = table.clone(returnUserIds) }
+		outstandingHandles[handle] = true
+		return Result.ok({ handle = handle })
 	end
-	function profileTransfer:rollback(_handle)
+	function profileTransfer:rollback(handle)
 		rollbackCount += 1
+		if rollbackYieldAt == rollbackCount then
+			coroutine.yield()
+		end
+		if rollbackBusyFailuresRemaining > 0 then
+			rollbackBusyFailuresRemaining -= 1
+			return Result.err({ code = "BUSY" })
+		end
 		if rollbackFailuresRemaining > 0 then
 			rollbackFailuresRemaining -= 1
 			return Result.err({ code = "ROLLBACK_FAILED" })
 		end
+		outstandingHandles[handle] = nil
 		return Result.ok(true)
 	end
-	function profileTransfer:commit(_handle)
+	function profileTransfer:commit(handle)
 		commitCount += 1
 		if commitFailuresRemaining > 0 then
 			commitFailuresRemaining -= 1
 			return Result.err({ code = "COMMIT_FAILED" })
 		end
+		outstandingHandles[handle] = nil
 		return Result.ok(true)
 	end
 	local returnRecords = { records = {} }
@@ -261,6 +305,10 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 	end
 	function playable:disconnectAuthorized(player)
 		table.insert(self.disconnections, player)
+		if disconnectYieldTarget == "Playable" then
+			disconnectYieldTarget = nil
+			coroutine.yield()
+		end
 		return { accepted = true, reason = "Accepted" }
 	end
 	function playable:getResultEvidence()
@@ -292,9 +340,14 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 	local ledgerFailures = {}
 	local ledgerRenewals = {}
 	local durableFailure = false
+	local resultWorkYieldTarget: string? = nil
 	local resultLedger = {}
 	function resultLedger:create(record)
 		table.insert(ledgerCreateAttempts, record)
+		if resultWorkYieldTarget == "Ledger" then
+			resultWorkYieldTarget = nil
+			coroutine.yield()
+		end
 		if ledgerCreateFailuresRemaining > 0 then
 			ledgerCreateFailuresRemaining -= 1
 			return Result.err({ code = "STORE_UNAVAILABLE" })
@@ -337,6 +390,10 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 	local rewardClaims = {}
 	function rewardClaims:claim(userId, resultId)
 		claimCounts[userId] = (claimCounts[userId] or 0) + 1
+		if resultWorkYieldTarget == "Claim" then
+			resultWorkYieldTarget = nil
+			coroutine.yield()
+		end
 		local spectator = admissionKinds[userId] == "LateSpectator"
 		return Result.ok({
 			resultId = resultId,
@@ -350,9 +407,18 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 	end
 	local rematchCalls = {}
 	local travelPublications = {}
+	local yieldNextSnapshot = false
 	local dependencyCleanupCount = 0
 	local dependencyStepCount = 0
+	local dependencyStepYieldAt: number? = nil
 	local nextReturnId = 0
+	local returnSchedulerMode = returnSchedulerModeValue or "Queued"
+	local returnScheduleCalls = 0
+	local scheduledReturnThreads = {}
+	local pendingReturnThreads = {}
+	local rematchScheduleCalls = 0
+	local pendingRematchThreads = {}
+	local yieldNextRematchSchedule = false
 	local created = MatchTravelHost.new({
 		configuration = configuration,
 		profile = profile,
@@ -365,7 +431,11 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 		resultLedger = resultLedger,
 		rewardClaims = rewardClaims,
 		snapshotSender = function(player, snapshot)
-			table.insert(travelPublications, { player = player, snapshot = snapshot })
+			if yieldNextSnapshot then
+				yieldNextSnapshot = false
+				coroutine.yield()
+			end
+			table.insert(travelPublications, { player = player, snapshot = snapshot, publishedAt = nowValue })
 			return true
 		end,
 		playableFactory = function(factoryTicket, connectedUserIds)
@@ -390,9 +460,16 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 		end,
 		stepDependencies = function()
 			dependencyStepCount += 1
+			if dependencyStepYieldAt == dependencyStepCount then
+				coroutine.yield()
+			end
+		end,
+		prepareCleanupDependencies = function()
+			return true
 		end,
 		cleanupDependencies = function()
 			dependencyCleanupCount += 1
+			return true
 		end,
 		environment = {
 			now = function()
@@ -408,6 +485,10 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 				return table.clone(players)
 			end,
 			getRoutingData = function(player)
+				if yieldNextRoutingRead then
+					yieldNextRoutingRead = false
+					coroutine.yield()
+				end
 				return routing[player]
 			end,
 			connectPlayerAdded = function(callback)
@@ -424,6 +505,39 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 			end,
 			destinationJobId = "match-job",
 			lobbyPlaceId = 100,
+			scheduleReturn = function(callback)
+				returnScheduleCalls += 1
+				if returnSchedulerMode == "Throw" then
+					error("RETURN_SCHEDULER_FAILED", 0)
+				end
+				if returnSchedulerMode == "False" then
+					return false
+				end
+				if returnSchedulerMode == "Yield" then
+					coroutine.yield()
+				end
+				local thread = coroutine.create(callback)
+				table.insert(scheduledReturnThreads, thread)
+				if returnSchedulerMode == "Inline" then
+					local resumed, resumeError = coroutine.resume(thread)
+					if not resumed then
+						error(resumeError, 0)
+					end
+				else
+					table.insert(pendingReturnThreads, thread)
+				end
+				return thread
+			end,
+			scheduleRematch = function(callback)
+				rematchScheduleCalls += 1
+				if yieldNextRematchSchedule then
+					yieldNextRematchSchedule = false
+					coroutine.yield()
+				end
+				local thread = coroutine.create(callback)
+				table.insert(pendingRematchThreads, thread)
+				return thread
+			end,
 			generateReturnId = function()
 				nextReturnId += 1
 				return `return:host-test-{nextReturnId}`
@@ -465,8 +579,23 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 		publicTeleports = publicTeleports,
 		rematchCalls = rematchCalls,
 		travelPublications = travelPublications,
+		yieldNextSnapshot = function()
+			yieldNextSnapshot = true
+		end,
 		admissionDisconnectCount = function()
 			return admissionDisconnectCount
+		end,
+		admissionAttemptCount = function()
+			return admissionAttemptCount
+		end,
+		setReenterHeartbeatOnAdmission = function(value)
+			reenterHeartbeatOnAdmission = value
+		end,
+		yieldNextRoutingRead = function()
+			yieldNextRoutingRead = true
+		end,
+		yieldNextDisconnectAt = function(target)
+			disconnectYieldTarget = target
 		end,
 		setBindingFailures = function(count)
 			bindingFailuresRemaining = count
@@ -489,11 +618,61 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 		fireHeartbeat = function()
 			(heartbeat :: any)()
 		end,
+		flushReturns = function()
+			local pending = pendingReturnThreads
+			pendingReturnThreads = {}
+			for _, thread in pending do
+				local resumed, resumeError = coroutine.resume(thread)
+				if not resumed then
+					error(resumeError, 0)
+				end
+			end
+		end,
+		resumeReturnThread = function(index)
+			local thread = scheduledReturnThreads[index]
+			assert(thread ~= nil, "expected scheduled return thread")
+			local resumed, resumeError = coroutine.resume(thread)
+			if not resumed then
+				error(resumeError, 0)
+			end
+		end,
+		returnScheduleCalls = function()
+			return returnScheduleCalls
+		end,
+		pendingReturnThreadCount = function()
+			return #pendingReturnThreads
+		end,
+		flushRematches = function()
+			local pending = pendingRematchThreads
+			pendingRematchThreads = {}
+			for _, thread in pending do
+				local resumed, resumeError = coroutine.resume(thread)
+				if not resumed then
+					error(resumeError, 0)
+				end
+			end
+		end,
+		rematchScheduleCalls = function()
+			return rematchScheduleCalls
+		end,
+		yieldNextRematchSchedule = function()
+			yieldNextRematchSchedule = true
+		end,
+		pendingRematchThreadCount = function()
+			return #pendingRematchThreads
+		end,
+		scheduledReturnThreadStatus = function(index)
+			local thread = scheduledReturnThreads[index]
+			return if thread == nil then nil else coroutine.status(thread)
+		end,
 		advance = function(seconds)
 			nowValue += seconds
 		end,
 		setEvidence = function(value)
 			evidence = value
+		end,
+		yieldNextResultWorkAt = function(target)
+			resultWorkYieldTarget = target
 		end,
 		setLedgerFailure = function(code)
 			ledgerFailureCode = code
@@ -513,6 +692,21 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 		setRollbackFailures = function(count)
 			rollbackFailuresRemaining = count
 		end,
+		setRollbackBusyFailures = function(count)
+			rollbackBusyFailuresRemaining = count
+		end,
+		setPrepareYieldAt = function(count)
+			prepareYieldAt = count
+		end,
+		setPrepareFailureAt = function(count)
+			prepareFailureAt = count
+		end,
+		setRollbackYieldAt = function(count)
+			rollbackYieldAt = count
+		end,
+		setDependencyStepYieldAt = function(count)
+			dependencyStepYieldAt = count
+		end,
 		setCommitFailures = function(count)
 			commitFailuresRemaining = count
 		end,
@@ -525,6 +719,13 @@ local function makeRig(assertions: TestHarness.Assertions, userIdsValue: { numbe
 		end,
 		transferCounts = function()
 			return preparedCount, rollbackCount, commitCount
+		end,
+		outstandingTransferCount = function()
+			local count = 0
+			for _ in outstandingHandles do
+				count += 1
+			end
+			return count
 		end,
 		stopped = function()
 			return stopped
@@ -558,7 +759,44 @@ local function resultEvidence(rig: any): any
 	}
 end
 
+local function delayedRematch(assertions: TestHarness.Assertions, workTarget: string): any
+	local rig = makeRig(assertions, { 659984992, 11604687814, 37471216 })
+	rig.fireHeartbeat()
+	rig.setEvidence(resultEvidence(rig))
+	rig.yieldNextResultWorkAt(workTarget)
+	local resultThread = coroutine.create(rig.fireHeartbeat)
+	assertions.isTrue(coroutine.resume(resultThread))
+	assertions.equal(coroutine.status(resultThread), "suspended")
+	for _, publication in rig.travelPublications do
+		assertions.isNil(publication.snapshot.rematch)
+	end
+	rig.advance(25)
+	assertions.isTrue(coroutine.resume(resultThread))
+	assertions.equal(coroutine.status(resultThread), "dead")
+	local pendingPublications = 0
+	for _, publication in rig.travelPublications do
+		if publication.snapshot.rematch ~= nil then
+			assertions.equal(publication.snapshot.rematch.state, "Pending")
+			assertions.equal(publication.snapshot.rematch.deadline, publication.publishedAt + 20)
+			pendingPublications += 1
+		end
+	end
+	assertions.equal(pendingPublications, 3)
+	return rig
+end
+
 return TestHarness.suite("ticketed Match travel host composition", {
+	TestHarness.case("serializes a yielding arrival across overlapping heartbeats", function(assertions)
+		local rig = makeRig(assertions, { 101 })
+		rig.setReenterHeartbeatOnAdmission(true)
+		rig.fireHeartbeat()
+		assertions.equal(rig.admissionAttemptCount(), 1)
+		assertions.equal(#rig.playable.admissions, 1)
+		assertions.equal(#rig.factoryCalls, 1)
+		assertions.equal(#rig.rejected, 0)
+		assertions.isNotNil(rig.host:getPlayable(rig.players[1]))
+		rig.lifecycle.shutdown()
+	end),
 	TestHarness.case(
 		"starts lazily with only the authenticated participant and keeps a late arrival spectating",
 		function(assertions)
@@ -583,6 +821,19 @@ return TestHarness.suite("ticketed Match travel host composition", {
 			assertions.isNil((spectator :: any).ticketId)
 			assertions.isNil((spectator :: any).resultId)
 			assertions.isNil((spectator :: any).reservedServerAccessCode)
+			assertions.isFalse(rig.host:canSubmitReady(rig.players[2]))
+			local spectatorVote = {
+				transactionId = "transaction:spectator-rematch",
+				matchId = spectator.matchId,
+				observedRevision = spectator.revision,
+				observedRematchRevision = 1,
+				approve = true,
+			}
+			assertions.isTrue(MatchTravelProtocol.RematchVoteIntentSchema:validate(spectatorVote).ok)
+			local rejectedVote = rig.host:voteRematch(rig.players[2], spectatorVote)
+			assertions.isFalse(rejectedVote.ok)
+			assertions.equal(rejectedVote.error.code, "NOT_AUTHORIZED")
+			assertions.equal(#rig.rematchCalls, 0)
 			rig.lifecycle.shutdown()
 		end
 	),
@@ -600,7 +851,9 @@ return TestHarness.suite("ticketed Match travel host composition", {
 		grace.profileStates[202] = "Loading"
 		grace.fireHeartbeat()
 		assertions.isFalse(grace.host:canSubmitReady(grace.players[1]))
-		grace.advance(30)
+		grace.advance(29)
+		assertions.isFalse(grace.host:canSubmitReady(grace.players[1]))
+		grace.advance(1)
 		assertions.isTrue(grace.host:canSubmitReady(grace.players[1]))
 		grace.admissionKinds[202] = "LateSpectator"
 		grace.profileStates[202] = "Ready"
@@ -756,6 +1009,97 @@ return TestHarness.suite("ticketed Match travel host composition", {
 		assertions.equal(rig.claimCounts[202], 1)
 		rig.lifecycle.shutdown()
 	end),
+	TestHarness.case("defers an accepted return without yielding its request handler", function(assertions)
+		local rig = makeRig(assertions, { 101 })
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+		rig.fireHeartbeat()
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		local intent = {
+			transactionId = "transaction:deferred-return",
+			matchId = snapshot.matchId,
+			observedRevision = snapshot.revision,
+		}
+		local requestResult = nil
+		local requestThread = coroutine.create(function()
+			requestResult = rig.host:requestReturn(rig.players[1], intent)
+		end)
+		local resumed, resumeError = coroutine.resume(requestThread)
+		if not resumed then
+			error(resumeError, 0)
+		end
+		assertions.equal(coroutine.status(requestThread), "dead")
+
+		local accepted = success(assertions, requestResult)
+		assertions.isTrue(accepted.changed)
+		assertions.equal(accepted.snapshot.returnStatus, "Pending")
+		assertions.equal(rig.returnScheduleCalls(), 1)
+		assertions.equal(rig.pendingReturnThreadCount(), 1)
+		assertions.equal(rig.scheduledReturnThreadStatus(1), "suspended")
+		local prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 0)
+		assertions.equal(rolledBack, 0)
+		assertions.equal(committed, 0)
+		assertions.equal(#rig.returnRecords.records, 0)
+		assertions.equal(#rig.publicTeleports, 0)
+
+		local replay = success(assertions, rig.host:requestReturn(rig.players[1], intent))
+		assertions.isTrue(replay.changed)
+		assertions.equal(replay.snapshot.returnStatus, "Pending")
+		assertions.equal(rig.returnScheduleCalls(), 1)
+		assertions.equal(rig.pendingReturnThreadCount(), 1)
+
+		rig.flushReturns()
+		assertions.equal(rig.scheduledReturnThreadStatus(1), "dead")
+		assertions.equal(rig.pendingReturnThreadCount(), 0)
+		assertions.equal(success(assertions, rig.host:getSnapshot(rig.players[1])).returnStatus, "Teleporting")
+		prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 1)
+		assertions.equal(rolledBack, 0)
+		assertions.equal(committed, 0)
+		assertions.equal(#rig.returnRecords.records, 1)
+		assertions.equal(#rig.publicTeleports, 1)
+
+		rig.flushReturns()
+		assertions.equal(rig.returnScheduleCalls(), 1)
+		assertions.equal(#rig.returnRecords.records, 1)
+		assertions.equal(#rig.publicTeleports, 1)
+		rig.lifecycle.shutdown()
+	end),
+	TestHarness.case("fails unsafe return schedulers without starting external work", function(assertions)
+		for _, schedulerMode in { "Inline", "False", "Throw" } do
+			local rig = makeRig(assertions, { 101 }, schedulerMode)
+			rig.fireHeartbeat()
+			rig.setEvidence(resultEvidence(rig))
+			rig.fireHeartbeat()
+			local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+			local called, requestResult = pcall(function()
+				return rig.host:requestReturn(rig.players[1], {
+					transactionId = `transaction:unsafe-scheduler-{string.lower(schedulerMode)}`,
+					matchId = snapshot.matchId,
+					observedRevision = snapshot.revision,
+				})
+			end)
+			assertions.isTrue(called)
+			local failed = success(assertions, requestResult)
+			assertions.isFalse(failed.changed)
+			assertions.equal(failed.snapshot.returnStatus, "Failed")
+			assertions.equal(failed.snapshot.publicFailure, "RETURN_UNAVAILABLE")
+			assertions.equal(rig.returnScheduleCalls(), 1)
+			assertions.equal(rig.pendingReturnThreadCount(), 0)
+			local prepared, rolledBack, committed = rig.transferCounts()
+			assertions.equal(prepared, 0)
+			assertions.equal(rolledBack, 0)
+			assertions.equal(committed, 0)
+			assertions.equal(#rig.returnRecords.records, 0)
+			assertions.equal(#rig.publicTeleports, 0)
+			assertions.equal(success(assertions, rig.host:getSnapshot(rig.players[1])).returnStatus, "Failed")
+			rig.flushReturns()
+			assertions.equal(#rig.returnRecords.records, 0)
+			assertions.equal(#rig.publicTeleports, 0)
+			rig.lifecycle.shutdown()
+		end
+	end),
 	TestHarness.case("returns a late spectator alone without moving active participants", function(assertions)
 		local rig = makeRig(assertions)
 		rig.profileStates[202] = "Loading"
@@ -774,6 +1118,7 @@ return TestHarness.suite("ticketed Match travel host composition", {
 			})
 		)
 		assertions.isTrue(returned.changed)
+		rig.flushReturns()
 		assertions.equal(#rig.publicTeleports, 1)
 		assertions.equal(#rig.publicTeleports[1].players, 1)
 		assertions.equal(rig.publicTeleports[1].players[1], rig.players[2])
@@ -807,6 +1152,7 @@ return TestHarness.suite("ticketed Match travel host composition", {
 					observedRevision = snapshot.revision,
 				})
 			).changed)
+			rig.flushReturns()
 			rig.setRouteClearFailures(1)
 			-- Admission durability may now be beyond the ten-minute ticket TTL; local
 			-- Returned state remains authoritative while route cleanup is independent.
@@ -835,6 +1181,7 @@ return TestHarness.suite("ticketed Match travel host composition", {
 				observedRevision = snapshot.revision,
 			})
 		).changed)
+		rig.flushReturns()
 		rig.setCommitFailures(1)
 		rig.live[rig.players[1]] = false
 		rig.fireRemoving(rig.players[1])
@@ -878,6 +1225,7 @@ return TestHarness.suite("ticketed Match travel host composition", {
 				})
 			)
 			assertions.isTrue(returned.changed)
+			rig.flushReturns()
 			assertions.equal(#rig.publicTeleports, 1)
 			assertions.equal(#rig.publicTeleports[1].players, 2)
 			assertions.isNil(rig.clearedRoutes[101])
@@ -915,6 +1263,7 @@ return TestHarness.suite("ticketed Match travel host composition", {
 					observedRevision = snapshot.revision,
 				})
 			).changed)
+			rig.flushReturns()
 			rig.emitInitFailure(rig.players[1], "Terminal")
 			local _, rolledBack, committed = rig.transferCounts()
 			assertions.equal(rolledBack, 1)
@@ -941,6 +1290,7 @@ return TestHarness.suite("ticketed Match travel host composition", {
 					observedRevision = snapshot.revision,
 				})
 			).changed)
+			rig.flushReturns()
 			rig.advance(30)
 			rig.fireHeartbeat()
 			local _, rolledBack, committed = rig.transferCounts()
@@ -966,6 +1316,7 @@ return TestHarness.suite("ticketed Match travel host composition", {
 				observedRevision = firstSnapshot.revision,
 			})
 		).changed)
+		rig.flushReturns()
 		local oldRouting = rig.publicTeleports[1].routing
 		rig.advance(30)
 		rig.fireHeartbeat()
@@ -980,6 +1331,7 @@ return TestHarness.suite("ticketed Match travel host composition", {
 				observedRevision = secondSnapshot.revision,
 			})
 		).changed)
+		rig.flushReturns()
 		assertions.isTrue(rig.publicTeleports[2].routing.returnId ~= oldRouting.returnId)
 		rig.emitInitFailure(rig.players[1], "Terminal", oldRouting)
 		local _, rollbackAfterDelayed = rig.transferCounts()
@@ -1057,6 +1409,7 @@ return TestHarness.suite("ticketed Match travel host composition", {
 				})
 			)
 			assertions.isTrue(returned.changed)
+			rig.flushReturns()
 			assertions.equal(#rig.publicTeleports, 1)
 			rig.lifecycle.shutdown()
 		end
@@ -1070,7 +1423,7 @@ return TestHarness.suite("ticketed Match travel host composition", {
 			rig.fireHeartbeat()
 			rig.setTeleportFailure(true)
 			local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
-			local failed = success(
+			local accepted = success(
 				assertions,
 				rig.host:requestReturn(rig.players[1], {
 					transactionId = "transaction:return-failed",
@@ -1078,9 +1431,12 @@ return TestHarness.suite("ticketed Match travel host composition", {
 					observedRevision = snapshot.revision,
 				})
 			)
-			assertions.isFalse(failed.changed)
-			assertions.equal(failed.snapshot.returnStatus, "Failed")
-			assertions.equal(failed.snapshot.publicFailure, "TELEPORT_FAILED")
+			assertions.isTrue(accepted.changed)
+			assertions.equal(accepted.snapshot.returnStatus, "Pending")
+			rig.flushReturns()
+			local failed = success(assertions, rig.host:getSnapshot(rig.players[1]))
+			assertions.equal(failed.returnStatus, "Failed")
+			assertions.equal(failed.publicFailure, "TELEPORT_FAILED")
 			local prepared, rolledBack, committed = rig.transferCounts()
 			assertions.equal(prepared, 1)
 			assertions.equal(rolledBack, 1)
@@ -1101,7 +1457,9 @@ return TestHarness.suite("ticketed Match travel host composition", {
 				error(`expected successful return, got {returned.snapshot.publicFailure or "unknown"}`, 0)
 			end
 			assertions.isTrue(returned.changed)
-			assertions.equal(returned.snapshot.returnStatus, "Teleporting")
+			assertions.equal(returned.snapshot.returnStatus, "Pending")
+			rig.flushReturns()
+			assertions.equal(success(assertions, rig.host:getSnapshot(rig.players[1])).returnStatus, "Teleporting")
 			assertions.equal(#rig.returnRecords.records, 2)
 			assertions.equal(#rig.publicTeleports, 2)
 			assertions.equal(rig.publicTeleports[2].routing.kind, "Return")
@@ -1129,7 +1487,7 @@ return TestHarness.suite("ticketed Match travel host composition", {
 			rig.setTeleportFailure(true)
 			rig.setRollbackFailures(1)
 			local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
-			local failed = success(
+			local accepted = success(
 				assertions,
 				rig.host:requestReturn(rig.players[1], {
 					transactionId = "transaction:return-retained-rollback",
@@ -1137,7 +1495,9 @@ return TestHarness.suite("ticketed Match travel host composition", {
 					observedRevision = snapshot.revision,
 				})
 			)
-			assertions.isFalse(failed.changed)
+			assertions.isTrue(accepted.changed)
+			assertions.equal(accepted.snapshot.returnStatus, "Pending")
+			rig.flushReturns()
 			local _, rollbackAttempts = rig.transferCounts()
 			assertions.equal(rollbackAttempts, 1)
 			rig.fireHeartbeat()
@@ -1154,9 +1514,110 @@ return TestHarness.suite("ticketed Match travel host composition", {
 				})
 			)
 			assertions.isTrue(returned.changed)
+			rig.flushReturns()
 			rig.lifecycle.shutdown()
 		end
 	),
+	TestHarness.case("offers a full rematch window after yielding ledger persistence", function(assertions)
+		local rig = delayedRematch(assertions, "Ledger")
+		rig.advance(19)
+		rig.fireHeartbeat()
+		for index, player in rig.players do
+			local snapshot = success(assertions, rig.host:getSnapshot(player))
+			assertions.equal(snapshot.rematch.state, "Pending")
+			local voted = success(
+				assertions,
+				rig.host:voteRematch(player, {
+					transactionId = `transaction:delayed-rematch-{index}`,
+					matchId = snapshot.matchId,
+					observedRevision = snapshot.revision,
+					observedRematchRevision = snapshot.rematch.revision,
+					approve = true,
+				})
+			)
+			assertions.equal(voted.snapshot.rematch.state, if index == #rig.players then "Starting" else "Pending")
+		end
+		assertions.equal(#rig.rematchCalls, 0)
+		assertions.equal(rig.rematchScheduleCalls(), 1)
+		rig.flushRematches()
+		assertions.equal(#rig.rematchCalls, 1)
+		assertions.equal(success(assertions, rig.host:getSnapshot(rig.players[1])).rematch.state, "Approved")
+		rig.lifecycle.shutdown()
+	end),
+	TestHarness.case("offers a full rematch window after yielding reward claim persistence", function(assertions)
+		local rig = delayedRematch(assertions, "Claim")
+		rig.advance(19)
+		rig.fireHeartbeat()
+		assertions.equal(success(assertions, rig.host:getSnapshot(rig.players[1])).rematch.state, "Pending")
+		rig.advance(1)
+		rig.fireHeartbeat()
+		assertions.equal(success(assertions, rig.host:getSnapshot(rig.players[1])).rematch.state, "Declined")
+		assertions.equal(#rig.rematchCalls, 0)
+		rig.lifecycle.shutdown()
+	end),
+	TestHarness.case("expires rematch from a fresh clock after yielding heartbeat recovery", function(assertions)
+		local rig = delayedRematch(assertions, "Ledger")
+		rig.advance(19)
+		rig.setDependencyStepYieldAt(rig.dependencyStepCount() + 1)
+		local heartbeatThread = coroutine.create(rig.fireHeartbeat)
+		assertions.isTrue(coroutine.resume(heartbeatThread))
+		assertions.equal(coroutine.status(heartbeatThread), "suspended")
+		rig.advance(1)
+		assertions.isTrue(coroutine.resume(heartbeatThread))
+		assertions.equal(coroutine.status(heartbeatThread), "dead")
+		assertions.equal(success(assertions, rig.host:getSnapshot(rig.players[1])).rematch.state, "Declined")
+		assertions.equal(#rig.rematchCalls, 0)
+		rig.lifecycle.shutdown()
+	end),
+	TestHarness.case("rejects a rematch vote at its deadline before the next heartbeat", function(assertions)
+		local rig = delayedRematch(assertions, "Claim")
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		rig.advance(20)
+		local voted = rig.host:voteRematch(rig.players[1], {
+			transactionId = "transaction:expired-rematch",
+			matchId = snapshot.matchId,
+			observedRevision = snapshot.revision,
+			observedRematchRevision = snapshot.rematch.revision,
+			approve = true,
+		})
+		assertions.isFalse(voted.ok)
+		assertions.equal(voted.error.code, "REMATCH_UNAVAILABLE")
+		assertions.equal(success(assertions, rig.host:getSnapshot(rig.players[1])).rematch.state, "Declined")
+		assertions.equal(rig.travelPublications[#rig.travelPublications].snapshot.rematch.state, "Declined")
+		assertions.equal(#rig.rematchCalls, 0)
+		rig.advance(20)
+		rig.fireHeartbeat()
+		assertions.equal(success(assertions, rig.host:getSnapshot(rig.players[1])).rematch.state, "Declined")
+		rig.lifecycle.shutdown()
+	end),
+	TestHarness.case("does not offer rematch after return starts during yielding result work", function(assertions)
+		local rig = makeRig(assertions)
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+		rig.yieldNextResultWorkAt("Claim")
+		local resultThread = coroutine.create(rig.fireHeartbeat)
+		assertions.isTrue(coroutine.resume(resultThread))
+		assertions.equal(coroutine.status(resultThread), "suspended")
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		local returned = success(
+			assertions,
+			rig.host:requestReturn(rig.players[1], {
+				transactionId = "transaction:return-during-result-work",
+				matchId = snapshot.matchId,
+				observedRevision = snapshot.revision,
+			})
+		)
+		assertions.isTrue(returned.changed)
+		rig.advance(25)
+		assertions.isTrue(coroutine.resume(resultThread))
+		assertions.equal(coroutine.status(resultThread), "dead")
+		for _, publication in rig.travelPublications do
+			assertions.isNil(publication.snapshot.rematch)
+		end
+		assertions.equal(#rig.rematchCalls, 0)
+		rig.flushReturns()
+		rig.lifecycle.shutdown()
+	end),
 	TestHarness.case("delegates exactly one fresh rematch only after unanimous active votes", function(assertions)
 		local rig = makeRig(assertions)
 		rig.fireHeartbeat()
@@ -1175,20 +1636,491 @@ return TestHarness.suite("ticketed Match travel host composition", {
 		)
 		assertions.equal(#rig.rematchCalls, 0)
 		local second = success(assertions, rig.host:getSnapshot(rig.players[2]))
-		success(
-			assertions,
-			rig.host:voteRematch(rig.players[2], {
-				transactionId = "transaction:rematch-two",
-				matchId = second.matchId,
-				observedRevision = second.revision,
-				observedRematchRevision = firstVote.snapshot.rematch.revision,
-				approve = true,
-			})
-		)
+		local finalIntent = {
+			transactionId = "transaction:rematch-two",
+			matchId = second.matchId,
+			observedRevision = second.revision,
+			observedRematchRevision = firstVote.snapshot.rematch.revision,
+			approve = true,
+		}
+		local finalVote = nil
+		local requestThread = coroutine.create(function()
+			finalVote = rig.host:voteRematch(rig.players[2], finalIntent)
+		end)
+		assertions.isTrue(coroutine.resume(requestThread))
+		assertions.equal(coroutine.status(requestThread), "dead")
+		local accepted = success(assertions, finalVote)
+		assertions.equal(accepted.snapshot.rematch.state, "Starting")
+		assertions.equal(#rig.rematchCalls, 0)
+		assertions.equal(rig.rematchScheduleCalls(), 1)
+		assertions.equal(rig.pendingRematchThreadCount(), 1)
+		local duplicate = success(assertions, rig.host:voteRematch(rig.players[2], finalIntent))
+		assertions.equal(duplicate.snapshot.rematch.state, "Starting")
+		assertions.equal(rig.rematchScheduleCalls(), 1)
+		rig.flushRematches()
+		assertions.equal(success(assertions, rig.host:getSnapshot(rig.players[1])).rematch.state, "Approved")
 		assertions.equal(#rig.rematchCalls, 1)
 		assertions.equal(rig.rematchCalls[1].userIds[1], 101)
 		assertions.equal(rig.rematchCalls[1].userIds[2], 202)
 		rig.lifecycle.shutdown()
+	end),
+	TestHarness.case("keeps return and rematch startup mutually exclusive", function(assertions)
+		local rematchFirst = makeRig(assertions)
+		rematchFirst.fireHeartbeat()
+		rematchFirst.setEvidence(resultEvidence(rematchFirst))
+		rematchFirst.fireHeartbeat()
+		local firstSnapshot = success(assertions, rematchFirst.host:getSnapshot(rematchFirst.players[1]))
+		local firstVote = success(
+			assertions,
+			rematchFirst.host:voteRematch(rematchFirst.players[1], {
+				transactionId = "transaction:exclusive-rematch-one",
+				matchId = firstSnapshot.matchId,
+				observedRevision = firstSnapshot.revision,
+				observedRematchRevision = firstSnapshot.rematch.revision,
+				approve = true,
+			})
+		)
+		local secondSnapshot = success(assertions, rematchFirst.host:getSnapshot(rematchFirst.players[2]))
+		local starting = success(
+			assertions,
+			rematchFirst.host:voteRematch(rematchFirst.players[2], {
+				transactionId = "transaction:exclusive-rematch-two",
+				matchId = secondSnapshot.matchId,
+				observedRevision = secondSnapshot.revision,
+				observedRematchRevision = firstVote.snapshot.rematch.revision,
+				approve = true,
+			})
+		)
+		assertions.equal(starting.snapshot.rematch.state, "Starting")
+		local blockedReturn = success(
+			assertions,
+			rematchFirst.host:requestReturn(rematchFirst.players[1], {
+				transactionId = "transaction:exclusive-return-blocked",
+				matchId = starting.snapshot.matchId,
+				observedRevision = starting.snapshot.revision,
+			})
+		)
+		assertions.isFalse(blockedReturn.changed)
+		assertions.equal(rematchFirst.returnScheduleCalls(), 0)
+		rematchFirst.lifecycle.shutdown()
+
+		local returnFirst = makeRig(assertions)
+		returnFirst.fireHeartbeat()
+		returnFirst.setEvidence(resultEvidence(returnFirst))
+		returnFirst.fireHeartbeat()
+		returnFirst.setTeleportFailure(true)
+		local beforeReturn = success(assertions, returnFirst.host:getSnapshot(returnFirst.players[1]))
+		assertions.isTrue(success(
+			assertions,
+			returnFirst.host:requestReturn(returnFirst.players[1], {
+				transactionId = "transaction:exclusive-return-first",
+				matchId = beforeReturn.matchId,
+				observedRevision = beforeReturn.revision,
+			})
+		).changed)
+		local blockedVote = returnFirst.host:voteRematch(returnFirst.players[1], {
+			transactionId = "transaction:exclusive-vote-blocked",
+			matchId = beforeReturn.matchId,
+			observedRevision = beforeReturn.revision + 1,
+			observedRematchRevision = beforeReturn.rematch.revision,
+			approve = true,
+		})
+		assertions.isFalse(blockedVote.ok)
+		assertions.equal(blockedVote.error.code, "REMATCH_UNAVAILABLE")
+		returnFirst.flushReturns()
+		returnFirst.lifecycle.shutdown()
+	end),
+	TestHarness.case("joins request-return Pending publication before dependency cleanup", function(assertions)
+		local rig = makeRig(assertions, { 101 })
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+		rig.fireHeartbeat()
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		local publicationCount = #rig.travelPublications
+		rig.yieldNextSnapshot()
+		local requestResult = nil
+		local requestThread = coroutine.create(function()
+			requestResult = rig.host:requestReturn(rig.players[1], {
+				transactionId = "transaction:return-pending-publication-join",
+				matchId = snapshot.matchId,
+				observedRevision = snapshot.revision,
+			})
+		end)
+		assertions.isTrue(coroutine.resume(requestThread))
+		assertions.equal(coroutine.status(requestThread), "suspended")
+		assertions.equal(#rig.travelPublications, publicationCount)
+		assertions.isFalse(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 0)
+
+		assertions.isTrue(coroutine.resume(requestThread))
+		assertions.equal(coroutine.status(requestThread), "dead")
+		local accepted = success(assertions, requestResult)
+		assertions.isTrue(accepted.changed)
+		assertions.equal(accepted.snapshot.returnStatus, "Pending")
+		assertions.isTrue(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 1)
+		rig.flushReturns()
+		local prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 0)
+		assertions.equal(rolledBack, 0)
+		assertions.equal(committed, 0)
+	end),
+	TestHarness.case("joins vote-rematch publication before dependency cleanup", function(assertions)
+		local rig = makeRig(assertions)
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+		rig.fireHeartbeat()
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		local publicationCount = #rig.travelPublications
+		rig.yieldNextSnapshot()
+		local voteResult = nil
+		local voteThread = coroutine.create(function()
+			voteResult = rig.host:voteRematch(rig.players[1], {
+				transactionId = "transaction:rematch-publication-join",
+				matchId = snapshot.matchId,
+				observedRevision = snapshot.revision,
+				observedRematchRevision = snapshot.rematch.revision,
+				approve = true,
+			})
+		end)
+		assertions.isTrue(coroutine.resume(voteThread))
+		assertions.equal(coroutine.status(voteThread), "suspended")
+		assertions.equal(#rig.travelPublications, publicationCount)
+		assertions.isFalse(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 0)
+
+		assertions.isTrue(coroutine.resume(voteThread))
+		assertions.equal(coroutine.status(voteThread), "dead")
+		assertions.isTrue(success(assertions, voteResult).changed)
+		assertions.isTrue(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 1)
+	end),
+	TestHarness.case("joins a yielding return scheduler before dependency cleanup", function(assertions)
+		local rig = makeRig(assertions, { 101 }, "Yield")
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+		rig.fireHeartbeat()
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		local requestResult = nil
+		local requestThread = coroutine.create(function()
+			requestResult = rig.host:requestReturn(rig.players[1], {
+				transactionId = "transaction:return-scheduler-join",
+				matchId = snapshot.matchId,
+				observedRevision = snapshot.revision,
+			})
+		end)
+		assertions.isTrue(coroutine.resume(requestThread))
+		assertions.equal(coroutine.status(requestThread), "suspended")
+		assertions.equal(rig.returnScheduleCalls(), 1)
+		assertions.equal(rig.pendingReturnThreadCount(), 0)
+		assertions.isFalse(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 0)
+
+		assertions.isTrue(coroutine.resume(requestThread))
+		assertions.equal(coroutine.status(requestThread), "dead")
+		local accepted = success(assertions, requestResult)
+		assertions.isTrue(accepted.changed)
+		assertions.equal(accepted.snapshot.returnStatus, "Pending")
+		assertions.equal(rig.pendingReturnThreadCount(), 1)
+		assertions.isTrue(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 1)
+		rig.flushReturns()
+		local prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 0)
+		assertions.equal(rolledBack, 0)
+		assertions.equal(committed, 0)
+	end),
+	TestHarness.case("joins a yielding rematch scheduler before dependency cleanup", function(assertions)
+		local rig = makeRig(assertions)
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+		rig.fireHeartbeat()
+		local firstSnapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		local firstVote = success(
+			assertions,
+			rig.host:voteRematch(rig.players[1], {
+				transactionId = "transaction:rematch-scheduler-one",
+				matchId = firstSnapshot.matchId,
+				observedRevision = firstSnapshot.revision,
+				observedRematchRevision = firstSnapshot.rematch.revision,
+				approve = true,
+			})
+		)
+		local secondSnapshot = success(assertions, rig.host:getSnapshot(rig.players[2]))
+		rig.yieldNextRematchSchedule()
+		local voteResult = nil
+		local voteThread = coroutine.create(function()
+			voteResult = rig.host:voteRematch(rig.players[2], {
+				transactionId = "transaction:rematch-scheduler-two",
+				matchId = secondSnapshot.matchId,
+				observedRevision = secondSnapshot.revision,
+				observedRematchRevision = firstVote.snapshot.rematch.revision,
+				approve = true,
+			})
+		end)
+		assertions.isTrue(coroutine.resume(voteThread))
+		assertions.equal(coroutine.status(voteThread), "suspended")
+		assertions.equal(rig.rematchScheduleCalls(), 1)
+		assertions.equal(rig.pendingRematchThreadCount(), 0)
+		assertions.isFalse(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 0)
+
+		assertions.isTrue(coroutine.resume(voteThread))
+		assertions.equal(coroutine.status(voteThread), "dead")
+		local accepted = success(assertions, voteResult)
+		assertions.isTrue(accepted.changed)
+		assertions.equal(accepted.snapshot.rematch.state, "Starting")
+		assertions.equal(rig.pendingRematchThreadCount(), 1)
+		assertions.isTrue(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 1)
+		rig.flushRematches()
+		assertions.equal(#rig.rematchCalls, 0)
+	end),
+	TestHarness.case("joins a yielding player-added routing read before dependency cleanup", function(assertions)
+		local rig = makeRig(assertions, { 101 })
+		rig.yieldNextRoutingRead()
+		local addedThread = coroutine.create(function()
+			rig.fireAdded(rig.players[1])
+		end)
+		assertions.isTrue(coroutine.resume(addedThread))
+		assertions.equal(coroutine.status(addedThread), "suspended")
+		assertions.isFalse(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 0)
+
+		assertions.isTrue(coroutine.resume(addedThread))
+		assertions.equal(coroutine.status(addedThread), "dead")
+		assertions.isTrue(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 1)
+		local admissionAttempts = rig.admissionAttemptCount()
+		rig.fireAdded(rig.players[1])
+		local metrics = rig.host:getMetrics()
+		assertions.equal(metrics.pendingArrivalCount, 0)
+		assertions.equal(rig.admissionAttemptCount(), admissionAttempts)
+	end),
+	TestHarness.case("joins yielding player-removing dependencies before cleanup", function(assertions)
+		for _, target in { "Playable", "Admission" } do
+			local rig = makeRig(assertions, { 101 })
+			rig.fireHeartbeat()
+			rig.live[rig.players[1]] = false
+			rig.yieldNextDisconnectAt(target)
+			local removingThread = coroutine.create(function()
+				rig.fireRemoving(rig.players[1])
+			end)
+			assertions.isTrue(coroutine.resume(removingThread))
+			assertions.equal(coroutine.status(removingThread), "suspended")
+			assertions.isFalse(rig.host:cleanup().ok)
+			assertions.equal(rig.dependencyCleanupCount(), 0)
+
+			assertions.isTrue(coroutine.resume(removingThread))
+			assertions.equal(coroutine.status(removingThread), "dead")
+			assertions.isTrue(rig.host:cleanup().ok)
+			assertions.equal(rig.dependencyCleanupCount(), 1)
+			local playableDisconnects = #rig.playable.disconnections
+			local admissionDisconnects = rig.admissionDisconnectCount()
+			rig.fireRemoving(rig.players[1])
+			assertions.equal(#rig.playable.disconnections, playableDisconnects)
+			assertions.equal(rig.admissionDisconnectCount(), admissionDisconnects)
+			assertions.equal(rig.host:getMetrics().participantCount, 0)
+		end
+	end),
+	TestHarness.case("joins a yielding heartbeat before dependency cleanup", function(assertions)
+		local rig = makeRig(assertions, { 101 })
+		rig.setDependencyStepYieldAt(1)
+		local heartbeatThread = coroutine.create(rig.fireHeartbeat)
+		assertions.isTrue(coroutine.resume(heartbeatThread))
+		assertions.equal(coroutine.status(heartbeatThread), "suspended")
+		assertions.isFalse(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 0)
+
+		assertions.isTrue(coroutine.resume(heartbeatThread))
+		assertions.equal(coroutine.status(heartbeatThread), "dead")
+		assertions.isTrue(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 1)
+	end),
+	TestHarness.case("retains a return rollback handle while the transfer coordinator is busy", function(assertions)
+		local rig = makeRig(assertions)
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+		rig.fireHeartbeat()
+		rig.setPrepareFailureAt(2)
+		rig.setRollbackBusyFailures(1)
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		assertions.isTrue(success(
+			assertions,
+			rig.host:requestReturn(rig.players[1], {
+				transactionId = "transaction:return-busy-rollback",
+				matchId = snapshot.matchId,
+				observedRevision = snapshot.revision,
+			})
+		).changed)
+		rig.flushReturns()
+		local prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 2)
+		assertions.equal(rolledBack, 1)
+		assertions.equal(committed, 0)
+		assertions.equal(rig.outstandingTransferCount(), 1)
+		assertions.equal(success(assertions, rig.host:getSnapshot(rig.players[1])).returnStatus, "Failed")
+
+		rig.fireHeartbeat()
+		prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 2)
+		assertions.equal(rolledBack, 2)
+		assertions.equal(committed, 0)
+		assertions.equal(rig.outstandingTransferCount(), 0)
+		assertions.isTrue(rig.host:cleanup().ok)
+	end),
+	TestHarness.case("joins a yielding teleport-init failure callback before dependency cleanup", function(assertions)
+		local rig = makeRig(assertions, { 101 })
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+		rig.fireHeartbeat()
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		assertions.isTrue(success(
+			assertions,
+			rig.host:requestReturn(rig.players[1], {
+				transactionId = "transaction:return-init-failure-join",
+				matchId = snapshot.matchId,
+				observedRevision = snapshot.revision,
+			})
+		).changed)
+		rig.flushReturns()
+		rig.setRollbackYieldAt(1)
+		local callbackThread = coroutine.create(function()
+			rig.emitInitFailure(rig.players[1], "Terminal")
+		end)
+		assertions.isTrue(coroutine.resume(callbackThread))
+		assertions.equal(coroutine.status(callbackThread), "suspended")
+		local prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 1)
+		assertions.equal(rolledBack, 1)
+		assertions.equal(committed, 0)
+
+		assertions.isFalse(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 0)
+		-- Shutdown admission is closed while the first callback owns rollback.
+		rig.emitInitFailure(rig.players[1], "Terminal")
+		_, rolledBack = rig.transferCounts()
+		assertions.equal(rolledBack, 1)
+
+		assertions.isTrue(coroutine.resume(callbackThread))
+		assertions.equal(coroutine.status(callbackThread), "dead")
+		assertions.isTrue(rig.host:cleanup().ok)
+		_, rolledBack, committed = rig.transferCounts()
+		assertions.equal(rolledBack, 1)
+		assertions.equal(committed, 0)
+		assertions.equal(rig.dependencyCleanupCount(), 1)
+	end),
+	TestHarness.case("joins teleport-init failure publication before dependency cleanup", function(assertions)
+		local rig = makeRig(assertions, { 101 })
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+		rig.fireHeartbeat()
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		assertions.isTrue(success(
+			assertions,
+			rig.host:requestReturn(rig.players[1], {
+				transactionId = "transaction:return-init-failure-publication-join",
+				matchId = snapshot.matchId,
+				observedRevision = snapshot.revision,
+			})
+		).changed)
+		rig.flushReturns()
+		local publicationCount = #rig.travelPublications
+		rig.yieldNextSnapshot()
+		local callbackThread = coroutine.create(function()
+			rig.emitInitFailure(rig.players[1], "Terminal")
+		end)
+		assertions.isTrue(coroutine.resume(callbackThread))
+		assertions.equal(coroutine.status(callbackThread), "suspended")
+		assertions.equal(#rig.travelPublications, publicationCount)
+		local prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 1)
+		assertions.equal(rolledBack, 1)
+		assertions.equal(committed, 0)
+
+		assertions.isFalse(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 0)
+		assertions.isTrue(coroutine.resume(callbackThread))
+		assertions.equal(coroutine.status(callbackThread), "dead")
+		assertions.equal(#rig.travelPublications, publicationCount + 1)
+		assertions.isTrue(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 1)
+	end),
+	TestHarness.case("joins deferred return terminal publication before dependency cleanup", function(assertions)
+		local rig = makeRig(assertions, { 101 })
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+		rig.fireHeartbeat()
+		rig.setTeleportFailure(true)
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		assertions.isTrue(success(
+			assertions,
+			rig.host:requestReturn(rig.players[1], {
+				transactionId = "transaction:return-terminal-publication-join",
+				matchId = snapshot.matchId,
+				observedRevision = snapshot.revision,
+			})
+		).changed)
+		local publicationCount = #rig.travelPublications
+		rig.yieldNextSnapshot()
+		rig.flushReturns()
+		assertions.equal(rig.scheduledReturnThreadStatus(1), "suspended")
+		assertions.equal(#rig.travelPublications, publicationCount)
+		local prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 1)
+		assertions.equal(rolledBack, 1)
+		assertions.equal(committed, 0)
+
+		assertions.isFalse(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 0)
+		rig.resumeReturnThread(1)
+		assertions.equal(rig.scheduledReturnThreadStatus(1), "dead")
+		assertions.equal(#rig.travelPublications, publicationCount + 1)
+		assertions.isTrue(rig.host:cleanup().ok)
+		assertions.equal(rig.dependencyCleanupCount(), 1)
+	end),
+	TestHarness.case("joins an in-flight return before transfer dependency cleanup", function(assertions)
+		local rig = makeRig(assertions)
+		rig.fireHeartbeat()
+		rig.setEvidence(resultEvidence(rig))
+		rig.fireHeartbeat()
+		rig.setPrepareYieldAt(2)
+		rig.setRollbackYieldAt(1)
+		local snapshot = success(assertions, rig.host:getSnapshot(rig.players[1]))
+		assertions.isTrue(success(
+			assertions,
+			rig.host:requestReturn(rig.players[1], {
+				transactionId = "transaction:return-shutdown-join",
+				matchId = snapshot.matchId,
+				observedRevision = snapshot.revision,
+			})
+		).changed)
+		rig.flushReturns()
+		assertions.equal(rig.scheduledReturnThreadStatus(1), "suspended")
+		local prepareBlocked = rig.host:cleanup()
+		assertions.isFalse(prepareBlocked.ok)
+		local prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 2)
+		assertions.equal(rolledBack, 0)
+		assertions.equal(committed, 0)
+
+		rig.resumeReturnThread(1)
+		assertions.equal(rig.scheduledReturnThreadStatus(1), "suspended")
+		local rollbackBlocked = rig.host:cleanup()
+		assertions.isFalse(rollbackBlocked.ok)
+		prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 2)
+		assertions.equal(rolledBack, 1)
+		assertions.equal(committed, 0)
+
+		rig.resumeReturnThread(1)
+		assertions.equal(rig.scheduledReturnThreadStatus(1), "dead")
+		assertions.isTrue(rig.host:cleanup().ok)
+		prepared, rolledBack, committed = rig.transferCounts()
+		assertions.equal(prepared, 2)
+		assertions.equal(rolledBack, 2)
+		assertions.equal(committed, 0)
+		assertions.equal(rig.dependencyCleanupCount(), 1)
 	end),
 	TestHarness.case(
 		"does not create a reduced-roster rematch after an admitted participant disconnects",

@@ -751,6 +751,73 @@ return TestHarness.suite("persistent Lobby presentation", {
 	end),
 
 	TestHarness.case(
+		"preserves an uncommitted party invite draft through authoritative rerenders",
+		function(assertions)
+			for _, family in { "Desktop", "Touch", "Gamepad" } do
+				withView(function(view, fixture)
+					local state = squadState("Party")
+					state.inputFamily = family
+					assertions.isTrue(view:render(state).ok)
+					local _, root = guiTree(fixture)
+					local content = child(root, "Content", "Frame")
+					local partyScreen = child(content, "PartyScreen", "Frame")
+					local party = child(partyScreen, "PartyContent", "ScrollingFrame")
+					local inviteInput = child(party, "InviteUserId", "TextBox") :: TextBox
+					local userIdText = "11604687814"
+					for index = 1, #userIdText do
+						local draft = string.sub(userIdText, 1, index)
+						inviteInput.Text = draft
+						state.profileRevision += 1
+						assertions.isTrue(view:render(state).ok)
+						assertions.equal(inviteInput.Text, draft)
+					end
+					assertions.equal(#fixture.actions, 0)
+					activate(fixture, child(party, "InviteMember", "TextButton") :: TextButton)
+					assertions.equal(#fixture.actions, 1)
+					assertions.equal(fixture.actions[1].kind, "InvitePartyMember")
+					assertions.equal(fixture.actions[1].targetUserId, 11_604_687_814)
+					assertions.equal(fixture.actions[1].source, family)
+				end)
+			end
+		end
+	),
+
+	TestHarness.case("submits only the current bounded party invite independently of focus loss", function(assertions)
+		withView(function(view, fixture)
+			assertions.isTrue(view:render(squadState("Party")).ok)
+			local _, root = guiTree(fixture)
+			local content = child(root, "Content", "Frame")
+			local partyScreen = child(content, "PartyScreen", "Frame")
+			local party = child(partyScreen, "PartyContent", "ScrollingFrame")
+			local inviteInput = child(party, "InviteUserId", "TextBox") :: TextBox
+			local inviteButton = child(party, "InviteMember", "TextButton") :: TextButton
+			local loseFocus = fixture.searchListeners[inviteInput] :: (string) -> ()
+			loseFocus("202")
+			inviteInput.Text = "11604687814"
+			activate(fixture, inviteButton)
+			assertions.equal(#fixture.actions, 1)
+			assertions.equal(fixture.actions[1].targetUserId, 11_604_687_814)
+			loseFocus(inviteInput.Text)
+			assertions.isTrue(view:render(squadState("Party")).ok)
+			assertions.equal(#fixture.actions, 1)
+			assertions.equal(inviteInput.Text, "11604687814")
+			activate(fixture, inviteButton)
+			assertions.equal(#fixture.actions, 2)
+			assertions.equal(fixture.actions[2].targetUserId, 11_604_687_814)
+
+			for _, invalid in { "", "not-a-user", "0", "-1", "1.5", "9007199254740992", string.rep("9", 30) } do
+				inviteInput.Text = invalid
+				activate(fixture, inviteButton)
+				assertions.equal(#fixture.actions, 2)
+				assertions.isTrue(#inviteInput.Text <= 20)
+			end
+			loseFocus(string.rep("9", 30))
+			assertions.equal(#inviteInput.Text, 20)
+			assertions.equal(#fixture.actions, 2)
+		end)
+	end),
+
+	TestHarness.case(
 		"keeps party queue captain and reconnect controls in the permanent accessible shell",
 		function(assertions)
 			withView(function(view, fixture)
@@ -806,6 +873,10 @@ return TestHarness.suite("persistent Lobby presentation", {
 		local staleActivation = fixture.activations[staleCard]
 		local staleInput = fixture.inputListeners[1]
 		local staleFamily = fixture.familyListeners[1]
+		local party = child(child(content, "PartyScreen", "Frame"), "PartyContent", "ScrollingFrame")
+		local inviteInput = child(party, "InviteUserId", "TextBox") :: TextBox
+		local staleInviteCommit = fixture.searchListeners[inviteInput] :: (string) -> ()
+		local staleInviteActivation = fixture.activations[child(party, "InviteMember", "TextButton")] :: () -> ()
 		fixture.selected = staleCard
 		local firstCleanup = view:cleanup()
 		assertions.isTrue(firstCleanup.ok)
@@ -821,6 +892,8 @@ return TestHarness.suite("persistent Lobby presentation", {
 		activateStale()
 		inputStale("Escape", false)
 		familyStale("Touch")
+		staleInviteCommit("11604687814")
+		staleInviteActivation()
 		assertions.equal(#fixture.actions, beforeStale)
 		assertions.isFalse(view:render(readyState()).ok)
 		local repeatedCleanup = view:cleanup()

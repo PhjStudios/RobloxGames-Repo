@@ -1,13 +1,12 @@
 # Ant Tower Defense Roadmap
 
-This is the current delivery roadmap. Phases 00–23, the Playable Local Match,
-and the Persistent Lobby Loop outcomes are complete. Squad Travel Loop
-implementation, deterministic headless verification, and isolated,
-non-publishing Studio simulation are complete; the outcome remains open pending
-the private published-client reserved-server teleport test, which requires
-separate explicit approval. No publish occurred, and the Content and Onboarding
-outcome has not begun. The detailed historical packet plan remains useful for
-requirements and design context, but delivery now targets playable outcomes.
+This is the current delivery roadmap. Phases 00–28, the Playable Local Match,
+the Persistent Lobby Loop, and the Squad Travel Loop outcomes are complete.
+Squad Travel passed its final local gate, isolated Studio verification, and a
+private published-client validation in the dedicated staging experience.
+Production was neither tested nor modified, and Content and Onboarding has not
+begun. The detailed historical packet plan remains useful for requirements and
+design context, but delivery now targets playable outcomes.
 
 ## Delivery outcomes
 
@@ -19,15 +18,19 @@ requirements and design context, but delivery now targets playable outcomes.
 2. **Complete: Persistent lobby loop — Phases 19–23.** Safe profiles, shared UI
    and settings, persistent inventory/loadouts, earn-only acquisition, and a
    coherent lobby now form one player loop.
-3. **Implementation and simulated verification complete; published travel
-   validation pending: Squad travel loop — Phases 24–28.** Server-owned parties,
-   physical and accessible queues, bounded match tickets, isolated travel,
-   authenticated admission, exactly-once persistent rewards, safe return,
-   reconnect, and read-only spectating form one coherent loop. Deterministic
-   headless adapters and non-publishing Studio simulation cover the ordinary
-   development boundary. The outcome is not fully complete until a private
-   published-client real reserved-server teleport test is approved separately
-   and passes.
+3. **Complete: Squad travel loop — Phases 24–28.** Server-owned parties,
+   physical and accessible queues, bounded match tickets, isolated
+   reserved-server travel, authenticated admission, exactly-once persistent
+   rewards, safe return, reconnect, and read-only spectating form one coherent
+   loop. Private staging clients confirmed real solo and three-player
+   reserved-server travel, expected-roster admission, unanimous rematch into a
+   fresh match, in-match reconnect with retained state and owner control,
+   reward/Gold refresh, and return to Lobby. Timing-, privacy-, and adversarial
+   edge cases—including unexpected arrival, the exact 30-second never-arrived
+   boundary, late-spectator authority restrictions, stale-route fail-open,
+   duplicate reward claims, and canonical ID freshness—were verified by
+   deterministic server-authority tests and are not claimed as published-client
+   observations.
 4. **Not begun: Content and onboarding — remaining Phases 29–33.** Finish the
    production map, tower and enemy rosters, authored waves, Endless mode, and
    onboarding work not already pulled into the playable local match.

@@ -70,6 +70,9 @@ local function service(assertions, teleport, storeAdapter, overrides): any
 				local callback = table.remove(scheduled, 1)
 				callback()
 			end
+		end,
+		function(): (() -> ())?
+			return table.remove(scheduled, 1)
 		end
 end
 
@@ -303,6 +306,92 @@ return TestHarness.suite("isolated safe group teleport boundary", {
 		assertions.equal(teleport:getCalls().teleportCount, 3)
 		assertions.equal(#rollbacks, 1)
 		assertions.equal(serviceValue:getMetrics().activeSessionCount, 0)
+	end),
+	TestHarness.case(
+		"keeps cleanup busy until a queued reconciliation callback reaches its owned boundary",
+		function(assertions)
+			local storeAdapter = store()
+			local teleport = IsolatedTeleportAdapter.new()
+			local serviceValue, flush = service(assertions, teleport, storeAdapter, nil)
+			assertions.isTrue(serviceValue:start("ticket:queued-reconciliation-cleanup", 2002, { player(101) }).ok)
+
+			local blocked = serviceValue:cleanup()
+			assertions.isFalse(blocked.ok)
+			assertions.equal(blocked.error.code, "BUSY")
+			assertions.equal(blocked.error.operation, "cleanup")
+			assertions.equal(blocked.error.failureClass, "Retryable")
+			assertions.equal(serviceValue:finish("ticket:queued-reconciliation-cleanup").error.code, "CLEANED")
+
+			flush()
+			assertions.isTrue(serviceValue:cleanup().value)
+			assertions.isFalse(serviceValue:cleanup().value)
+		end
+	),
+	TestHarness.case("joins a yielding reconciliation worker before clearing its session", function(assertions)
+		local storeAdapter = store()
+		local teleport = IsolatedTeleportAdapter.new()
+		local waitCount = 0
+		local serviceValue, _flush, takeScheduled = service(assertions, teleport, storeAdapter, {
+			wait = function(_seconds)
+				waitCount += 1
+				coroutine.yield()
+			end,
+		})
+		assertions.isTrue(serviceValue:start("ticket:yielding-reconciliation-cleanup", 2002, { player(101) }).ok)
+		local callback = takeScheduled()
+		assertions.isNotNil(callback)
+		local worker = coroutine.create(callback :: () -> ())
+		local resumed, resumeError = coroutine.resume(worker)
+		assertions.isTrue(resumed)
+		assertions.isNil(resumeError)
+		assertions.equal(coroutine.status(worker), "suspended")
+		assertions.equal(waitCount, 1)
+
+		local blocked = serviceValue:cleanup()
+		assertions.isFalse(blocked.ok)
+		assertions.equal(blocked.error.code, "BUSY")
+
+		resumed, resumeError = coroutine.resume(worker)
+		assertions.isTrue(resumed)
+		assertions.isNil(resumeError)
+		assertions.equal(coroutine.status(worker), "dead")
+		assertions.isTrue(serviceValue:cleanup().value)
+	end),
+	TestHarness.case("joins a yielding initialization-failure retry before clearing its session", function(assertions)
+		local storeAdapter = store()
+		local teleport = IsolatedTeleportAdapter.new()
+		local waitCount = 0
+		local serviceValue, flush = service(assertions, teleport, storeAdapter, {
+			wait = function(_seconds)
+				waitCount += 1
+				coroutine.yield()
+			end,
+		})
+		local first = player(101)
+		assertions.isTrue(serviceValue:start("ticket:yielding-init-cleanup", 2002, { first }).ok)
+		local worker = coroutine.create(function()
+			teleport:emitInitFailure(first, "Retryable")
+		end)
+		local resumed, resumeError = coroutine.resume(worker)
+		assertions.isTrue(resumed)
+		assertions.isNil(resumeError)
+		assertions.equal(coroutine.status(worker), "suspended")
+		assertions.equal(waitCount, 1)
+
+		local blocked = serviceValue:cleanup()
+		assertions.isFalse(blocked.ok)
+		assertions.equal(blocked.error.code, "BUSY")
+		flush()
+		blocked = serviceValue:cleanup()
+		assertions.isFalse(blocked.ok)
+		assertions.equal(blocked.error.code, "BUSY")
+
+		resumed, resumeError = coroutine.resume(worker)
+		assertions.isTrue(resumed)
+		assertions.isNil(resumeError)
+		assertions.equal(coroutine.status(worker), "dead")
+		assertions.equal(teleport:getCalls().teleportCount, 1)
+		assertions.isTrue(serviceValue:cleanup().value)
 	end),
 	TestHarness.case("ignores a delayed initialization failure from a settled ticket", function(assertions)
 		local storeAdapter = store()

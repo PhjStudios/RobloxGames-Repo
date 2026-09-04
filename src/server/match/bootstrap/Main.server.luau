@@ -181,7 +181,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 	local matchLifecycle = MatchLifecycleService.new(configuration.log, sendMatchSnapshot)
 	local storeResult = if RunService:IsStudio()
 		then ProfileStoreAdapter.newStudioDevelopment()
-		else ProfileStoreAdapter.newProduction()
+		else ProfileStoreAdapter.newPublished(configuration.deployment)
 	if not storeResult.ok then
 		error("[ATD_MATCH_BOOTSTRAP][code=PROFILE_STORE_UNAVAILABLE]", 0)
 	end
@@ -231,18 +231,21 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			loadoutFor
 		)
 	else
-		local lobbyPlaceId = PlaceRoles.getConfiguredPlaceId(PlaceRoles.LOBBY_ROLE)
-		local matchPlaceId = PlaceRoles.getConfiguredPlaceId(PlaceRoles.MATCH_ROLE)
+		local lobbyPlaceId = PlaceRoles.getConfiguredPlaceId(configuration.deployment, PlaceRoles.LOBBY_ROLE)
+		local matchPlaceId = PlaceRoles.getConfiguredPlaceId(configuration.deployment, PlaceRoles.MATCH_ROLE)
 		if lobbyPlaceId == nil or matchPlaceId == nil or game.JobId == "" then
 			error("[ATD_MATCH_BOOTSTRAP][code=TRAVEL_PLACE_CONFIGURATION_MISSING]", 0)
 		end
-		local travelAdapter =
-			requireResult(MemoryStoreTravelAdapter.newProduction(), "TRAVEL_MEMORY_ADAPTER_UNAVAILABLE")
+		local travelAdapter = requireResult(
+			MemoryStoreTravelAdapter.newPublished(configuration.deployment),
+			"TRAVEL_MEMORY_ADAPTER_UNAVAILABLE"
+		)
 		local ticketStore = requireResult(TravelRecordStore.new(travelAdapter), "TICKET_STORE_UNAVAILABLE")
 		local routes = requireResult(ActiveMatchRouteService.new(travelAdapter), "ROUTE_STORE_UNAVAILABLE")
 		local returnRecords = requireResult(ReturnRecordService.new(travelAdapter), "RETURN_STORE_UNAVAILABLE")
 		local teleport = requireResult(TeleportAdapter.newProduction(), "TELEPORT_ADAPTER_UNAVAILABLE")
-		local resultStore = requireResult(ResultLedgerStoreAdapter.newProduction(), "RESULT_STORE_UNAVAILABLE")
+		local resultStore =
+			requireResult(ResultLedgerStoreAdapter.newPublished(configuration.deployment), "RESULT_STORE_UNAVAILABLE")
 		local resultLedger = requireResult(ResultLedgerService.new(resultStore, os.time), "RESULT_LEDGER_UNAVAILABLE")
 		local rewardClaims = requireResult(
 			ProfileRewardClaimService.new(profile, resultLedger, configuration.coreConfiguration, os.time),
@@ -308,6 +311,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		)
 
 		local rematchDependenciesCleaned = false
+		local dependencyCleanupPrepared = false
 		local rematchRecovery = RematchRecoveryScope.new(function(delaySeconds, callback)
 			return task.delay(delaySeconds, callback)
 		end, function(handle)
@@ -416,8 +420,9 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			local delaySeconds = if context.recoveryPasses < REMATCH_RECOVERY_FAST_PASSES
 				then REMATCH_RECOVERY_FAST_DELAY_SECONDS
 				else REMATCH_RECOVERY_SLOW_DELAY_SECONDS
+			context.rollback = rollback
 			rematchRecovery:schedule(context.ticket.ticketId, delaySeconds, function(scheduledContext)
-				recoverAsynchronousRematch(scheduledContext, rollback)
+				recoverAsynchronousRematch(scheduledContext, scheduledContext.rollback)
 			end)
 		end
 		recoverAsynchronousRematch = function(context, rollback)
@@ -525,6 +530,24 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			pcall(safeTeleport.finish, safeTeleport, context.ticket.ticketId)
 			rematchRecovery:remove(context.ticket.ticketId)
 		end
+		local function runRematchRecovery(context, rollback): boolean
+			if not rematchContextActive(context) then
+				return false
+			end
+			context.rollback = rollback
+			return rematchRecovery:run(context.ticket.ticketId, function(ownedContext)
+				recoverAsynchronousRematch(ownedContext, ownedContext.rollback)
+			end)
+		end
+		local function scheduleImmediateRematchRecovery(context, rollback): boolean
+			if not rematchContextActive(context) then
+				return false
+			end
+			context.rollback = rollback
+			return rematchRecovery:schedule(context.ticket.ticketId, 0, function(ownedContext)
+				recoverAsynchronousRematch(ownedContext, ownedContext.rollback)
+			end)
+		end
 		safeTeleport = requireResult(
 			SafeTeleportService.new(ticketStore, teleport, {
 				now = os.time,
@@ -578,7 +601,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 					if context ~= nil then
 						context.rollback = rollback
 						if context.initialized then
-							task.spawn(recoverAsynchronousRematch, context, rollback)
+							scheduleImmediateRematchRecovery(context, rollback)
 						end
 					end
 				end,
@@ -709,7 +732,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 					departedUserIds = {},
 					partial = false,
 				}
-				recoverAsynchronousRematch(context, rollback)
+				runRematchRecovery(context, rollback)
 				return nil
 			end
 			local players = {}
@@ -717,7 +740,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 				local taken = routes:takeForMatch(userId, previousTicket.matchId, currentTime)
 				if not taken.ok then
 					context.failureReason = "REMATCH_ROUTE_SWAP_FAILED"
-					recoverAsynchronousRematch(context, {
+					runRematchRecovery(context, {
 						ticketId = ticketId,
 						failedUserIds = table.clone(activeUserIds),
 						presentUserIds = table.clone(activeUserIds),
@@ -731,7 +754,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 				local player = Players:GetPlayerByUserId(userId)
 				if player == nil or not livePlayer(player) then
 					context.failureReason = "REMATCH_PLAYER_MISSING"
-					recoverAsynchronousRematch(context, {
+					runRematchRecovery(context, {
 						ticketId = ticketId,
 						failedUserIds = table.clone(activeUserIds),
 						presentUserIds = table.clone(activeUserIds),
@@ -745,7 +768,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			local committed = profileTransfer:commit(prepared.value.handle)
 			if not committed.ok then
 				context.failureReason = "REMATCH_TRANSFER_COMMIT_FAILED"
-				recoverAsynchronousRematch(context, {
+				runRematchRecovery(context, {
 					ticketId = ticketId,
 					failedUserIds = table.clone(activeUserIds),
 					presentUserIds = table.clone(activeUserIds),
@@ -759,7 +782,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			local started = safeTeleport:start(ticketId, matchPlaceId, players)
 			if not started.ok then
 				context.failureReason = "REMATCH_TELEPORT_FAILED"
-				recoverAsynchronousRematch(context, {
+				runRematchRecovery(context, {
 					ticketId = ticketId,
 					failedUserIds = table.clone(activeUserIds),
 					presentUserIds = table.clone(activeUserIds),
@@ -770,7 +793,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			end
 			context.initialized = true
 			if context.rollback ~= nil then
-				task.spawn(recoverAsynchronousRematch, context, context.rollback)
+				scheduleImmediateRematchRecovery(context, context.rollback)
 			end
 			local revisions = {}
 			for index, userId in activeUserIds do
@@ -870,18 +893,40 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 				unexpectedOwnershipTransfer:step()
 				unexpectedReturns:step()
 			end,
-			cleanupDependencies = function()
+			prepareCleanupDependencies = function()
+				if dependencyCleanupPrepared then
+					return true
+				end
 				rematchDependenciesCleaned = true
-				rematchRecovery:cleanup(function(context)
-					if type(context) == "table" then
-						(context :: any).settled = true
-					end
-				end)
+				local rematchMetrics = rematchRecovery:getMetrics()
+				local rematchPrepared = rematchMetrics.cleaned
+					or rematchRecovery:cleanup(function(context)
+						if type(context) == "table" then
+							(context :: any).settled = true
+						end
+					end)
+				local unexpectedCalled, unexpectedPrepared = pcall(unexpectedReturns.cleanup, unexpectedReturns)
+				if rematchPrepared and unexpectedCalled and resultOk(unexpectedPrepared) then
+					dependencyCleanupPrepared = true
+				end
+				return dependencyCleanupPrepared
+			end,
+			cleanupDependencies = function()
+				if not dependencyCleanupPrepared then
+					return false
+				end
+				local profileCalled, profileCleaned = pcall(profileTransfer.cleanup, profileTransfer)
+				if not profileCalled or not resultOk(profileCleaned) then
+					return false
+				end
+				local unexpectedCalled, unexpectedCleaned =
+					pcall(unexpectedOwnershipTransfer.cleanup, unexpectedOwnershipTransfer)
+				if not unexpectedCalled or not resultOk(unexpectedCleaned) then
+					return false
+				end
 				pcall(safeTeleport.cleanup, safeTeleport)
-				pcall(unexpectedReturns.cleanup, unexpectedReturns)
-				pcall(unexpectedOwnershipTransfer.cleanup, unexpectedOwnershipTransfer)
-				pcall(profileTransfer.cleanup, profileTransfer)
 				pcall(pendingResults.cleanup, pendingResults)
+				return true
 			end,
 			environment = {
 				now = os.time,
@@ -910,6 +955,8 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 				connectHeartbeat = function(callback)
 					return RunService.Heartbeat:Connect(callback)
 				end,
+				scheduleReturn = task.defer,
+				scheduleRematch = task.defer,
 				destinationJobId = game.JobId,
 				lobbyPlaceId = lobbyPlaceId,
 				generateReturnId = function()
