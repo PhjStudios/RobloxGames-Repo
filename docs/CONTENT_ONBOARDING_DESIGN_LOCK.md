@@ -1,7 +1,7 @@
 # Content and Onboarding Design Lock
 
-Recorded: 2026-09-04  
-Outcome: historical Phases 29–33, delivered as one milestone  
+Recorded: 2026-09-04
+Outcome: historical Phases 29–33, delivered as one milestone
 Baseline: `fe48b9fe2a9b597d6d169530877465654c8c4e96`
 
 ## Audit boundary
