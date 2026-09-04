@@ -7,49 +7,35 @@ Ant Tower Defense. Packet 05.4 created it on 2026-08-26. It separates checks
 that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
-Phases 00–13 are complete. Gate A passed on 2026-08-26, and the Phase 07 exit
-gate passed on 2026-08-27 after the exact Match Studio authoring, consolidated
-review, 241-case local suite, and all four structural builds. Phase 08's
-Packets 08.1–08.5, exact four-client Match Studio gate, consolidated final
-review, 347-case local suite, and all four then-current structural builds passed
-on 2026-08-27. Phase 09 Packets 09.1–09.5, their exact Match Studio gate,
-consolidated final review, 467-case local gate, and all four structural builds
-  also passed on 2026-08-27. Phase 09 is complete. Phase 10 Packets 10.1–10.4,
-  their focused deterministic and exact unsaved Match Studio checks,
-  consolidated final review, `593`-case/`48`-suite local gate, and all four
-  structural builds passed on 2026-08-28. Phase 11 Packets 11.1–11.6, their
-  deterministic focused checks and exact unsaved Match Studio gate, the one
-  consolidated final review, the `742`-case/`56`-suite local gate, and all four
-  structural builds also passed on 2026-08-28. Exact-final-SHA CI is cited at
-  handoff. Phase 11 is complete. Phase 12's `90` dedicated focused cases, exact
-  unsaved two-client primary/defeat Studio gate, consolidated review,
-  `840`-case/`64`-suite local gate, and all four structural builds pass. Phase 12
-  is complete; exact-final-SHA CI is cited at handoff. Phase 13's `100` focused
-  cases, exact desktop/touch/gamepad two-client Studio acceptance, single
-  consolidated review, `941`-case/`73`-suite complete gate, and all four
-  structural builds pass. Phase 13 is complete; exact-final-SHA CI is cited at
-  handoff, and Phase 14 remains unbegun.
+The Playable Local Match, Persistent Lobby Loop, and Squad Travel Loop outcomes
+through historical Phase 28 are complete. Their clean baseline at commit
+`fe48b9fe2a9b597d6d169530877465654c8c4e96` passed `1,419` headless tests, all
+four structural builds, isolated Studio verification, and the authorized
+private-staging Lobby/Match loop. The staging observations covered real solo
+and three-player reserved travel, admission, rematch, reconnect, reward/Gold
+refresh, and return; deterministic tests—not published clients—covered the
+documented adversarial edges. Production was not tested or changed.
 
-The current repository has a fixed remote-registry/network-ownership foundation,
-strict shared payload validators, a server-authoritative token-bucket limiter,
-and bounded asynchronous request/correlation/error contracts. Production now
-contains thirteen Match-only reliable endpoints and eight exact client-request rate
-policies. It has the Phase 08 lifecycle/roster/Ready system and minimal Ready UI,
-plus the Phase 09 server-owned enemy runtime, fixed-lane simulation, bounded
-  replication, and client-created placeholder renderer, plus the Phase 10
-  server-owned base/leak runtime, bounded base recovery/world bar, and one defeat
-  transition into Results. Phase 11 adds the authenticated finite authored-wave
-  scheduler, bounded skip voting, full-state Wave replication/recovery, and exact
-  Base/Enemy/MatchLifecycle integration. Production content catalogs remain empty,
-  so that scheduler is dormant outside authenticated test/Studio fixtures. The
-  Phase 12 adds a server-only authenticated TowerRuntime, temporary match-local
-  loadouts, and inert runtime-only graybox Models. Phase 13 adds the bounded
-  placement query, preview/input stack, and authoritative atomic transaction.
-  The repository still has no combat, targeting, Battle Cash mutation, results
-  screen, rewards, persistence, matchmaking, teleports, or external-service implementation. A
-  separate private test universe has not been created or configured. Later tests
-  remain `Deferred`, `Unavailable`, or `Prohibited` when their exact systems or
-  environments do not exist; they are never presented as passing evidence.
+Content and Onboarding combines historical Phases 29–33 and is complete on
+`codex/content-onboarding`. Current source contains validated release map and
+difficulty selection, four strategic towers, six enemy roles, exact
+20/30/40-wave finite campaigns, bounded seeded Endless generation in the
+existing runtime, version-2 results/rewards, and the profile-v6 authoritative
+tutorial. Focused and full-gate checks cover content compatibility, authored
+campaigns and balance, Endless determinism/bounds, reward idempotency, tutorial
+transitions, travel continuity, protocols, and client projections. The
+consolidated review is clean, current cumulative headless coverage is
+`1,486/1,486`, all four builds passed, and the Garden solo/mobile and
+four-client Studio gates passed. Reduced-effects behavior is deterministic
+client projection/view evidence, not a claimed live Studio toggle. No newly
+published staging-client validation or uninstructed first-time-player
+observation is claimed.
+
+Rows for earlier packets preserve their original evidence and may describe the
+repository as it existed then. H-16, S-07, and M-11 are the current Content and
+Onboarding overlay; the current status text in M-02 through M-05, P-01 through
+P-03, and D-01 through D-05 distinguishes completed current evidence from later
+published, physical-device, destructive, and post-Phase-33 gates.
 
 ## Status vocabulary
 
@@ -82,14 +68,17 @@ linked historical document for the original Studio evidence.
 - Default, Lobby, and Match never map `tests/` or a test-only dependency.
   `lune run tests/verify-builds.luau` enforces exact source identity, role
   isolation, runnable-entrypoint counts, and test exclusion.
-- All four tracked `tests/studio` tools are mapped by no Rojo project. The two
-  Phase 06 networking harnesses and the Phase 07 map-regression harness are
-  runtime-only and discarded when their local session ends. The fourth is the
-  default-deny Edit-mode Phase 07 authoring command used only under its exact
-  persistence authorization.
+- Repository-owned `tests/studio` tools are mapped by no Rojo project. Runtime
+  harnesses are discarded with their local sessions; guarded Edit-mode
+  authoring/repair commands default deny and may run only under exact identity,
+  inventory, scope, and persistence authorization.
 - Production universe `10757629094` is not a routine persistence-test target.
   Keep Studio API access disabled there. The complete environment policy is in
   [Place and test-environment inventory](PLACE_INVENTORY.md).
+- Content and Onboarding Studio work is restricted to private staging GameId
+  `10764687717`, Lobby PlaceId `140661668701496`, and Match PlaceId
+  `104415140644510`, after confirming `PHJGAMES` group `35420107` ownership and
+  the configured Lobby/Match role. No staging publication is implied.
 - Do not save or publish a Roblox place merely to run a Studio regression.
 - Publishing, external-service enablement, production-sensitive mutation, real
   purchase testing, and test-data reset each require separate explicit approval.
@@ -623,6 +612,57 @@ linked historical document for the original Studio evidence.
   input, engine raycasts/replication, or device layout; M-02 records those exact
   Studio scenarios.
 
+### H-16 — Content selection, campaigns, Endless, rewards, and onboarding
+
+- **System or contract:** additive content identity and compatibility;
+  server-owned map/difficulty selection; four tower and six enemy roles;
+  20/30/40 authored campaigns; legal Garden placement/range balance; generic
+  splash combat; stateless seeded Endless generation and runtime bounds;
+  version-1/result-version-2 reward compatibility and exactly-once claims;
+  profile-v6 tutorial migration/state transitions; authenticated travel
+  continuity; and bounded client projections.
+- **Test category:** deterministic headless unit, schema, simulation,
+  compatibility, hostile-input, idempotency, soak, client reducer/view, and
+  server integration tests.
+- **Current status:** `Passed` on 2026-09-04 after a clean consolidated review.
+  The milestone gate ran once: StyLua check/verify passed, Selene configuration
+  and `src`/`tests` lint passed, and Default, Lobby, Match, and Test all built.
+  The initial complete headless run passed `1,484/1,486`; the two failures were
+  stale expectations in `AuthenticatedTowerFixtures` and
+  `PersistentMatchLoadoutIntegration`. After correcting only those
+  expectations, the affected specs passed `15/15` and the affected Test build
+  passed, giving the resulting tree cumulative `1,486/1,486` coverage.
+  Development checkpoints also included a `383/383` changed-spec bundle and a
+  final `52/52` `MatchTravelHost` run.
+- **Environment:** isolated Rojo Test DataModel under Lune. The balance model is
+  test-only and uses authored legal Garden pockets and two-dimensional path
+  range; it does not replace engine placement, rendering, camera, or device
+  observations.
+- **Command or procedure:** the completed iteration ran the relevant specs
+  together, including `ContentCatalog`, `EndlessWaveGenerator`,
+  `PlayableMatchRuntime`,
+  `PlayableMatchProtocol`, `MatchResultContract`, `RewardPolicy`,
+  `ProfileRewardClaimService`, `TutorialProtocol`, `TutorialService`,
+  `LobbyQueueService`, `LobbyController`, `LobbyUiModel`, `LobbyView`,
+  `PlayableMatchController`, and `PlayableMatchView`, followed by exactly one
+  full milestone gate using the commands in the current execution order.
+- **Required players/devices/external/destructive risk:** zero for headless
+  coverage; no wall-clock campaign wait, Roblox service, DataStore,
+  MemoryStore, teleport, purchase, publication, or production mutation occurs.
+- **Expected evidence:** legacy IDs remain first and unchanged; hidden content
+  cannot be queued; authenticated tickets select only compatible content; all
+  finite wave counts and ten-wave bosses are exact; starter and alternate
+  two-role loadouts complete deterministic Easy; 10,000 generated Endless waves
+  repeat within all bounds; terminal rewards and receipts cannot duplicate;
+  only server-observed tutorial events advance; malformed, stale, replayed,
+  public, squad, spectator, and foreign-match inputs fail closed; clients show
+  display names, boss information, Endless state, and contextual guidance.
+- **Cleanup procedure:** every test releases service/profile/runtime state and
+  the runner removes only its exact generated Test build.
+- **Phase or prerequisite:** historical Phases 29–33 as one Content and
+  Onboarding outcome. S-07 and M-11 retain the engine/device/multi-client
+  boundaries that headless tests cannot satisfy.
+
 ## Local Studio solo tests
 
 ### S-00 — Place-role resolver and incorrect-pairing rejection
@@ -836,6 +876,68 @@ linked historical document for the original Studio evidence.
   complete. Phase 08 subsequently completed without changing the saved
   Phase 07 map catalog.
 
+### S-07 — Content and Onboarding Garden authoring and solo acceptance
+
+- **System or contract:** release Garden map contract, fixed path and ordered
+  waypoints, four spawns, camera bounds/framing, placement/exclusion pockets,
+  playable tower/enemy templates, content selection, boss/Endless presentation,
+  reduced effects, and the singleton Easy onboarding path.
+- **Test category:** guarded private Team Create inventory/authoring audit,
+  followed by one consolidated connected Match Studio solo/device regression.
+- **Current status:** `Passed` on 2026-09-04. Before the first persistent edit,
+  live identity, role, and ownership matched the configured private staging
+  experience. The guarded additive authoring transaction created the Garden,
+  Bombardier, Broodling, and Royal Guard templates in authorized roots. A
+  default-deny placement repair produced four legal build pockets and one
+  visible exclusion; the resulting 212-descendant map passed the live validator
+  and direct legal/blocked placement probes, introduced no script, preserved
+  every legacy template, and left no runtime/preview residue. An iPhone 17 Pro
+  landscape session then verified readable Garden framing, authored camera
+  bounds, touch placement, selection, upgrade, and the safe defeat path.
+  Reduced-effects communication passed deterministic projection/view coverage;
+  no live Studio toggle is claimed.
+- **Environment:** private staging GameId `10764687717`, Match PlaceId
+  `104415140644510`, owner `PHJGAMES` Roblox Group `35420107`, role `Match`,
+  synchronized only from `match.project.json`. Lobby PlaceId
+  `140661668701496` is inspected only for the bounded onboarding/queue boundary.
+- **Command or procedure:** live GameId, PlaceId, group ownership, role, and
+  authorized-root inventory were reverified; one managed background Match Rojo
+  session was connected and reused. The session batched map-contract,
+  legal/blocked placement, camera, solo Easy, and representative phone-layout
+  observations, then stopped Play and Rojo deliberately. Reduced-effects
+  behavior was checked in the deterministic client projection/view gate.
+- **Required players or devices:** one solo desktop client plus representative
+  phone emulation. M-11 covers four-client concurrency.
+- **Authorization requirement:** the milestone authorizes narrow persistent
+  Team Create changes only under `ServerStorage.ATDMapTemplates`,
+  `ReplicatedStorage.ATDPlayableTemplates`, existing ATD-owned Lobby queue/world
+  content, and one bounded `ATDTutorial...` root if needed. Identity mismatch is
+  a hard stop.
+- **External service or publication requirement:** none for this Studio gate.
+  No new private staging version may be published without a separate specific
+  approval.
+- **Destructive-data risk:** moderate if the wrong Team Create identity or root
+  is touched. Guarded commands use exact expected identities/inventories and
+  transactional rollback; Rojo-managed scripts, unrelated instances, and
+  production are out of scope.
+- **Expected evidence:** Garden loads without a content-specific runtime branch;
+  lane, choke points, nest, goal, and build pockets remain readable; intended
+  starter placements are legal while lane/props/spawns/goal are blocked; camera
+  limits and phone HUD remain usable; low-detail/reduced-motion preserves
+  warnings and silhouettes; solo Easy can place and upgrade; no error or owned
+  runtime residue remains.
+- **Cleanup procedure:** exact audit previews/runtime clones were destroyed,
+  Play and the managed Rojo process stopped, simulator settings were restored,
+  and the authorized roots were inventoried. Match ended with two map
+  children/237 descendants, Garden at 212 descendants, ten playable-template
+  children/83 descendants, zero scripts, and no runtime/direct attributes. The
+  Lobby queue root remained one child/one descendant with zero scripts. The
+  persistent Garden/templates remain the authorized Team Create result; no new
+  place version was published.
+- **Phase or prerequisite:** Content and Onboarding Phases 29–33. The identity
+  and initial authoring portion is recorded in
+  [the design lock](CONTENT_ONBOARDING_DESIGN_LOCK.md).
+
 ## Studio Server & Clients and other multi-client tests
 
 ### M-01 — Ready protocol and initial match state
@@ -903,15 +1005,17 @@ linked historical document for the original Studio evidence.
   target/combat correctness, Battle Cash, upgrades, selling, and targeting
   transactions.
 - **Test category:** Studio multi-client correctness and exploit test.
-- **Current status:** `Partially complete`. Phase 13 placement preview,
-  authoritative admission, overlap/non-overlap races, exploit/spam rejection,
-  replication, cross-input behavior, and cleanup passed exact unsaved
-  two-client Match Studio on 2026-08-30. Phase 14 combat and Phase 15 Battle
-  Cash/upgrade/sell/target-mode transaction races remain `Deferred` and do not
-  exist.
-- **Environment:** exact Match place `136401514513678`, two local Studio
-  clients, plus desktop, iPad Pro M5 13-inch, iPhone 17 Pro, and Xbox One
-  emulation.
+- **Current status:** `Passed` for the current Content and Onboarding scope. The
+  historical Phase 13 placement-race evidence remains valid, while combat,
+  Battle Cash, upgrade, sell, target-mode authority, and generic splash have
+  deterministic coverage. M-11 added current private-staging engine evidence:
+  four clients each placed one independently owned Dart, every client received
+  owner controls, and one authoritative level-two upgrade converged without
+  residue. It did not repeat every historical malformed/race case in Studio.
+- **Environment:** historical evidence used Match place `136401514513678` in
+  production GameId `10757629094`. Current content verification must use only
+  private staging Match PlaceId `104415140644510`, GameId `10764687717`, with
+  two to four local Studio clients and representative device emulation.
 - **Command or procedure:** follow
   [Executed Phase 13 Studio evidence](TOWER_PLACEMENT.md#executed-studio-evidence--2026-08-30).
 - **Required players or devices:** at least two clients; include concurrent
@@ -920,13 +1024,14 @@ linked historical document for the original Studio evidence.
 - **External service or publication requirement:** none for the local Studio
   gate.
 - **Destructive-data risk:** none if Battle Cash and loadouts remain match-local.
-- **Expected evidence:** placement portion passed: exactly one overlapping
-  success, both independent successes, no double placeholder commit, safe
-  malformed/forged/stale/replay/rate rejection, identical replicated Models,
-  eight constant client connections, natural recovery from two pre-activation
-  query rejections without a Studio refresh, safe-area phone layout, and zero
-  server/client runtime residue. Balance mutation and combat outcomes are not
-  claimed.
+- **Expected evidence:** the historical placement portion passed exactly one
+  overlapping success, both independent successes, no double placeholder
+  commit, safe malformed/forged/stale/replay/rate rejection, identical
+  replicated Models, eight constant client connections, natural recovery from
+  two pre-activation query rejections without a Studio refresh, safe-area phone
+  layout, and zero residue. The current M-11 addition records independent
+  ownership, one upgrade, and live combat progression; broader economy/splash
+  outcomes remain deterministic evidence rather than new Studio claims.
 - **Cleanup procedure:** every simulated client/server stopped, Xbox/iPad
   emulation reset, final Edit probe found no runtime/evidence residue, and no
   save/publish occurred.
@@ -939,10 +1044,18 @@ linked historical document for the original Studio evidence.
   and multi-lobby-server behavior.
 - **Test category:** Studio multi-client test, followed later by private
   published multi-server testing.
-- **Current status:** `Deferred`; party and queue systems do not exist.
-- **Environment:** future Lobby place with multiple Studio clients; published
-  private environment for cross-server cases.
-- **Command or procedure:** none yet.
+- **Current status:** `Passed` for the completed Squad Travel baseline's
+  server-authority coverage and authorized private-staging same-squad travel.
+  The current branch additionally validates release map/difficulty choices and
+  rejects hidden/development selections. Current Garden Match presentation
+  passed S-07/M-11; Lobby labels and onboarding presentation passed deterministic
+  client coverage, while a newly published newcomer journey is not claimed.
+- **Environment:** Lobby Studio multi-client checks plus the dedicated private
+  staging Lobby/Match experience. Cross-server public matchmaking remains a
+  separate Phase 43 concern.
+- **Command or procedure:** use focused party/queue/ticket specs for authority;
+  use the already configured private staging environment only under the exact
+  authorization for any real travel rerun.
 - **Required players or devices:** two to four clients locally; multiple real
   clients and lobby servers for the final cross-server gate.
 - **Authorization requirement:** local Studio requires none; publication and
@@ -968,11 +1081,19 @@ linked historical document for the original Studio evidence.
   conditions.
 - **Test category:** Studio multi-client/network simulation plus published
   private-client testing.
-- **Current status:** `Deferred`; no match admission, reconnect, spectator, or
-  teleport system exists.
-- **Environment:** future Studio Server & Clients for local cases and a private
-  published test universe for real teleport/reconnect cases.
-- **Command or procedure:** none yet.
+- **Current status:** `Passed` for the completed Squad Travel baseline. Private
+  staging exercised authenticated admission, in-match reconnect with retained
+  ownership/state, and return. Deterministic authority tests cover invalid,
+  replayed, late, spectator, stale-route, and never-arrived boundaries. Content
+  version 1 preserves that graph; the tutorial's matching ticket/result/return
+  transitions have headless coverage, while a newly published newcomer journey
+  is not claimed.
+- **Environment:** local Studio Server & Clients for deterministic engine cases
+  and the dedicated private staging experience for the completed real travel/
+  reconnect baseline.
+- **Command or procedure:** run the focused admission/routing/travel/tutorial
+  specs. Any new real-client run requires the exact staging version and
+  authorization then in force.
 - **Required players or devices:** at least two clients; multiple real sessions
   or accounts for published cases.
 - **Authorization requirement:** explicit approval for publishing and any
@@ -995,11 +1116,19 @@ linked historical document for the original Studio evidence.
   early/overlapping waves, boss plus simultaneous leaks, victory/defeat/result,
   return/retry, repeated matches, and long Endless behavior.
 - **Test category:** Studio multi-client gameplay regression and soak test.
-- **Current status:** `Deferred`; the match loop and content do not exist.
-- **Environment:** future Match Studio Server & Clients plus private published
-  servers for long/end-to-end cases.
-- **Command or procedure:** none yet; the Phase 39 matrix completion packet must
-  bind each scenario to deterministic content versions and acceptance criteria.
+- **Current status:** `Partially complete; current Content and Onboarding gate
+  passed`. Deterministic simulation validates exact authored campaigns,
+  beginner Easy viability, terminal-state exclusivity, and 10,000 generated
+  Endless waves without real-time waits. S-07 and M-11 supplied the bounded
+  solo and four-client Garden engine, presentation, and cleanup evidence. The
+  broader one/two/three/four-player repetition and hosted long-session matrix
+  remains later Phase 39 work rather than a Phase 29–33 blocker.
+- **Environment:** private staging Match Studio Server & Clients for the current
+  local gate. Any later long hosted/end-to-end run requires a separately
+  authorized private publication.
+- **Command or procedure:** use H-16 for deterministic content/soak coverage and
+  M-11 for the bounded current Studio session. Phase 39 will broaden the matrix
+  rather than redefine the Phase 32 generator bounds.
 - **Required players or devices:** repeat with one, two, three, and four players;
   long-duration host for Endless/repeated-session cases.
 - **Authorization requirement:** none for local in-memory Studio; explicit
@@ -1318,6 +1447,55 @@ linked historical document for the original Studio evidence.
   stays Deferred; no placement, combat, Battle Cash mutation, hotbar,
   persistence, production content, or Phase 13 behavior began.
 
+### M-11 — Content and Onboarding Garden four-client integration
+
+- **System or contract:** current Garden loading and camera framing; four-player
+  roster/Ready/runtime convergence; fixed path, legal placement, generic direct
+  and splash combat, enemy/boss presentation, finite and Endless projection;
+  bounded active work/network collections; public/squad isolation from tutorial
+  assistance; and exact cleanup.
+- **Test category:** one consolidated private-staging Match Studio Server &
+  Clients integration and residue gate.
+- **Current status:** `Passed` on 2026-09-04. All four clients reached Ready on
+  the same Garden/Easy snapshot, each placed one independently owned Dart, all
+  received owner controls, and one player upgraded to level two. The clients
+  converged at wave 12 with four towers, 20 enemies, base health `93/100`, and
+  the surviving Garden Queen panel still visible at `573/585` health, covering
+  boss overlap beyond its spawn wave.
+- **Environment:** private staging GameId `10764687717`, Match PlaceId
+  `104415140644510`, role `Match`, owner `PHJGAMES` group `35420107`, one local
+  Studio server and exactly four simulated clients, with the current
+  `match.project.json` synchronized through one managed Rojo process.
+- **Command or procedure:** after S-07's exact identity/inventory check and map
+  repair verification, one four-client session verified shared authoritative
+  state, Ready, four independent legal placements, owner controls, one upgrade,
+  direct combat, wave/base/boss projection, bounds, and cleanup. Generic splash,
+  tutorial public/squad isolation, and Endless display remained deterministic
+  server/client coverage; this Studio session used the direct non-rewarding
+  local fallback.
+- **Required players or devices:** exactly four simulated clients for the
+  acceptance session; representative mobile layout remains in S-07.
+- **Authorization requirement:** local private-staging Studio execution and the
+  already bounded Team Create content edits are authorized. This does not
+  authorize production, publication, a new place version, or persistent player
+  data mutation.
+- **External service or publication requirement:** none. Do not turn this into a
+  published-client test merely to exercise four clients.
+- **Destructive-data risk:** low after exact identity and root checks; all runtime
+  objects and test state are session-owned. Persistent authorized Garden assets
+  must remain untouched by cleanup.
+- **Expected evidence:** every client sees the same selected map/difficulty,
+  wave/boss/base/enemy/tower truth; server-only placement and upgrade authority
+  holds under concurrency; collections remain within bounds; warnings are
+  readable; public/squad behavior is unchanged by onboarding; shutdown leaves
+  no runtime, test, network, or preview residue.
+- **Cleanup procedure:** the multiplayer test ended, all server/client child
+  DataModels closed, the exact Studio instance returned to Edit mode, direct
+  attributes were removed, authorized roots were inventoried, and the managed
+  Rojo process was deliberately stopped. No new place version was published;
+  final inventory found zero scripts or runtime/presentation residue.
+- **Phase or prerequisite:** Content and Onboarding Phases 29–33 after S-07.
+
 ## Published-client and private-version tests
 
 ### P-01 — Real party travel and match admission
@@ -1325,16 +1503,23 @@ linked historical document for the original Studio evidence.
 - **System or contract:** queue launch, reserved-server teleport, signed/opaque
   match ticket, arrival admission, party preservation, and failure recovery.
 - **Test category:** published private-client integration test.
-- **Current status:** `Unavailable`; the systems and separate private test
-  universe do not exist, and nothing is authorized for publication now.
-- **Environment:** future private Test Lobby and Test Match places in a separate
-  PHJGAMES-owned test universe.
-- **Command or procedure:** none yet; Packet 26.6 must define the exact manual
-  gate before execution.
-- **Required players or devices:** up to four designated real clients/accounts;
-  test solo and 2-4-player parties.
-- **Authorization requirement:** explicit approval to create/configure the test
-  universe, publish both places, and run the gate.
+- **Current status:** `Passed` for the Squad Travel baseline at commit
+  `fe48b9fe2a9b597d6d169530877465654c8c4e96`. Authorized private staging
+  clients completed real solo and three-player reserved-server travel,
+  expected-roster admission, unanimous rematch into a fresh Match, reconnect,
+  and return. Content version 1 has not been newly published or rerun through
+  this gate.
+- **Environment:** private staging GameId `10764687717`, Lobby PlaceId
+  `140661668701496`, Match PlaceId `104415140644510`, PHJGAMES group
+  `35420107`. Production GameId `10757629094` is excluded.
+- **Command or procedure:** retain the completed baseline evidence. A content-v1
+  rerun requires a newly published private staging version and one specific
+  approval; the local S-07/M-11 checks do not require publication.
+- **Required players or devices:** the completed gate used designated solo and
+  three-player clients; a future rerun may cover up to four.
+- **Authorization requirement:** authorization applied to the completed staging
+  gate only. Publishing current content or rerunning real clients requires new
+  specific approval.
 - **External service or publication requirement:** publication, TeleportService,
   reserved servers, and reviewed test-only ephemeral storage.
 - **Destructive-data risk:** moderate if environment IDs are misconfigured; all
@@ -1353,13 +1538,18 @@ linked historical document for the original Studio evidence.
   autosave/release, load failure, test-store separation, and safe recovery.
 - **Test category:** Studio-in-test-universe and published private-client
   persistence test.
-- **Current status:** `Unavailable`; persistence is not implemented, the private
-  test universe is absent, and Studio API access must remain disabled in
-  production.
-- **Environment:** future separate test universe with explicit test store names,
-  designated test UserIds, and API access enabled only there.
-- **Command or procedure:** none yet; Packet 19.6 must define commands and exact
-  target guards before execution.
+- **Current status:** `Partially complete`. Profile persistence, migration,
+  session ownership, result receipts, and the private staging environment now
+  exist; prior outcomes exercised ordinary save/reconnect/reward continuity.
+  Profile-v6 tutorial migration and duplicate/replayed transition behavior have
+  deterministic coverage. A fresh destructive migration/reset/failure-injection
+  gate is not authorized or claimed.
+- **Environment:** dedicated private staging experience and deterministic local
+  profile adapters. Studio API access and destructive profile work remain
+  prohibited in production.
+- **Command or procedure:** run profile schema/migration/owner/tutorial/result
+  specs locally. Any real migration/reset test must first identify the exact
+  staging store and designated UserIds and obtain specific destructive approval.
 - **Required players or devices:** designated test account(s), including two
   sessions for lock contention.
 - **Authorization requirement:** explicit approval for test-universe setup, API
@@ -1381,10 +1571,19 @@ linked historical document for the original Studio evidence.
 - **System or contract:** result receipt, idempotent reward claim, retry/rematch,
   return to Lobby, and failure recovery across places.
 - **Test category:** published private-client integration test.
-- **Current status:** `Unavailable`; profile, match result, reward, and teleport
-  systems do not exist.
-- **Environment:** future separate private test universe.
-- **Command or procedure:** none yet.
+- **Current status:** `Passed` for the Squad Travel baseline's version-1
+  exactly-once reward/Gold refresh, rematch, reconnect, and Lobby return path.
+  Content version 1 adds compatible result version 2, per-difficulty finite
+  rewards, bounded Endless terminal rewards, and tutorial result/return
+  continuity with deterministic idempotency coverage. A newly published
+  end-to-end content/onboarding client gate remains `Pending` approval and is
+  not claimed.
+- **Environment:** dedicated private staging Lobby and Match for completed
+  version-1 evidence; isolated headless adapters for current version-2 and
+  tutorial coverage.
+- **Command or procedure:** use H-16 for current result/reward/tutorial authority.
+  Publish and exercise the exact private staging version only after one specific
+  approval identifies what will be published and tested.
 - **Required players or devices:** one to four real clients/accounts.
 - **Authorization requirement:** explicit test-universe publication and
   persistence-test approval.
@@ -1402,8 +1601,9 @@ linked historical document for the original Studio evidence.
 - **System or contract:** complete first-session, Lobby, queue, travel, Match,
   result, persistence, compliance, operations, and rollback readiness.
 - **Test category:** private published closed-alpha and release gate.
-- **Current status:** `Unavailable`; the game and release configuration are not
-  implemented.
+- **Current status:** `Unavailable`; the core through Content and Onboarding is
+  implemented, but the Phase 34–40 platform, presentation, operations, release
+  configuration, and closed-alpha gates have not begun or completed.
 - **Environment:** clean private alpha version, followed only later by a reviewed
   production candidate.
 - **Command or procedure:** none yet; Phase 40 must supply the exact operations
@@ -1481,12 +1681,19 @@ linked historical document for the original Studio evidence.
 - **System or contract:** responsive HUD, camera, desktop input, touch placement,
   gamepad placement/navigation, enemy/base health presentation, and safe areas.
 - **Test category:** device and input smoke test.
-- **Current status:** `Deferred`; no gameplay HUD, camera, placement, or input
-  action map exists.
-- **Environment:** future Studio device emulation plus representative physical
-  desktop, phone, tablet, and controller/console-style hardware.
-- **Command or procedure:** none yet; Packet 16.6 must define the device smoke
-  procedure after Packet 13.3 and Phase 16 implementation.
+- **Current status:** `Partially complete; current Content and Onboarding device
+  gate passed`. The gameplay HUD, bounded camera, desktop/touch/gamepad
+  placement, and input actions retain their earlier evidence. S-07 additionally
+  verified Garden framing and bounds plus touch placement, selection, upgrade,
+  and defeat at an iPhone 17 Pro landscape viewport. Content version 1 finite/
+  Endless labels, boss warning/health, contextual tutorial, and reduced-effects
+  behavior passed deterministic view coverage. A live reduced-effects toggle
+  and the broader Phase 34 physical-device/platform matrix are not claimed.
+- **Environment:** current private staging Match Studio device emulation plus
+  representative physical devices later in the roadmap.
+- **Command or procedure:** run the current client reducer/view/controller specs,
+  then execute S-07's bounded desktop/phone Studio observations. Phase 34 will
+  broaden supported-platform acceptance after this milestone.
 - **Required players or devices:** one player on each supported input family;
   include representative phone/tablet aspect ratios and a gamepad.
 - **Authorization requirement:** none for local Studio/hardware tests; console or
@@ -1506,11 +1713,17 @@ linked historical document for the original Studio evidence.
   model, Roblox accessibility preferences, focus, text scaling, and responsive
   layout.
 - **Test category:** device, controller, touch, accessibility, and layout test.
-- **Current status:** `Deferred`; the shared UI shell and settings UI do not exist.
-- **Environment:** future Lobby and Match Studio device emulation, then physical
-  supported devices.
-- **Command or procedure:** none yet; Packet 20.6 must define exact viewport,
-  input, and accessibility cases.
+- **Current status:** `Partially complete; current Content and Onboarding phone
+  gate passed`. The shared Lobby shell, persistent settings, responsive layouts,
+  and Match presentation exist. Tutorial, content-selection, boss, Endless, and
+  reduced-effects projections have deterministic layout/reducer coverage; S-07
+  verified current Match phone layout and touch gameplay in Studio. That local
+  milestone evidence is not the broader Phase 34 accessibility/platform
+  acceptance, which has not begun.
+- **Environment:** Lobby and Match Studio device emulation now; representative
+  physical supported devices remain later acceptance work.
+- **Command or procedure:** run the focused Lobby/Match UI specs and S-07. Do not
+  treat that milestone check as the broader Phase 34 supported-platform audit.
 - **Required players or devices:** one player per supported input family and
   representative desktop/mobile/tablet viewports.
 - **Authorization requirement:** none locally; private publication may be needed
@@ -1531,11 +1744,19 @@ linked historical document for the original Studio evidence.
   party/queue configuration, respawn recovery, first-join loading, and input
   parity.
 - **Test category:** device, layout, controller, and touch integration test.
-- **Current status:** `Deferred`; these UI and gameplay systems do not exist.
-- **Environment:** future Lobby Studio device emulation and private physical
-  clients.
-- **Command or procedure:** none yet; use packet-specific device gates when
-  implemented.
+- **Current status:** `Partially complete`. Persistent profile, inventory,
+  loadout, earn-only Garden chest disclosure, party/queue configuration, and
+  responsive Lobby UI exist. Content version 1 projects player-facing map and
+  difficulty names plus concise tutorial guidance. Those projections passed the
+  current full headless gate. The private-staging Lobby queue root was verified
+  unchanged and script-free, but no newly published physical-client newcomer
+  journey or uninstructed first-time-player observation is claimed.
+- **Environment:** private staging Lobby Studio device emulation; a newly
+  published private physical-client newcomer gate would require separate
+  approval.
+- **Command or procedure:** use H-16 for projections and S-07 for the authorized
+  local staging boundary. Record a first-time-player test only when another
+  person actually performs it against an approved version.
 - **Required players or devices:** representative desktop, phone, tablet, and
   gamepad/controller; multiple players for party/queue presentation.
 - **Authorization requirement:** local tests require none; real private clients
@@ -1558,8 +1779,9 @@ linked historical document for the original Studio evidence.
   console/gamepad, localization expansion, color/readability, reduced-motion or
   other supported preferences, and final supported-platform claims.
 - **Test category:** accessibility, localization, and cross-platform audit.
-- **Current status:** `Deferred`; complete user flows and localized/accessibility
-  surfaces do not exist.
+- **Current status:** `Deferred`; core user flows now exist, but the Phase 34
+  accessibility/localization audit, expanded surfaces, and supported-platform
+  decision have not begun.
 - **Environment:** representative physical hardware, Studio emulation, and
   private published clients where platform behavior requires it.
 - **Command or procedure:** none yet; Phase 34 must define audited scenarios and
@@ -1586,7 +1808,16 @@ linked historical document for the original Studio evidence.
 - **System or contract:** frame time, memory, network traffic, instance/effect
   density, map/assets, lower-end device behavior, and long-session stability.
 - **Test category:** device performance profile and soak test.
-- **Current status:** `Deferred`; gameplay content and formal budgets do not exist.
+- **Current status:** `Partially complete; current content-density check
+  passed`. Gameplay content and explicit generator/runtime bounds include a
+  deterministic 10,000-wave soak with saturated-growth and distant-wave probes.
+  Private-staging scene analysis measured 76,971 client triangles/79 draws with
+  shadows, or 52,386 creator-adjusted triangles/44 draws; the server contained
+  1,290 instances, with no unparented ATD instance. S-07/M-11 also exercised
+  solo mobile and four-client wave-12 load. Representative frame-time/memory/
+  network profiling, low-end physical hardware, and a hosted long-session trace
+  remain later Phases 35–36 work; deterministic generation and scene counts are
+  not substitutes for those device-performance results.
 - **Environment:** representative supported physical hardware and controlled
   private clients, with Roblox profiling tools.
 - **Command or procedure:** none yet.
@@ -1750,16 +1981,24 @@ linked historical document for the original Studio evidence.
 
 ## Current execution order
 
-For every source/test change, use this local order from the repository root:
+Content and Onboarding completed the risk-based ladder in `AGENTS.md` on
+2026-09-04. During implementation it formatted and linted changed Luau files,
+ran relevant specs together with repeated `--spec` selectors, and built affected
+projects at meaningful checkpoints. After implementation and the consolidated
+review stabilized, it ran this full milestone sequence once:
 
-1. `stylua src tests`
-2. `stylua --check --verify src tests`
-3. `selene validate-config`
-4. `selene src tests`
-5. `lune run tests/run.luau`
-6. `lune run tests/verify-builds.luau`
-7. `git diff --check`
-8. inspect `git status --short --ignored` and remove only exact generated outputs.
+1. `stylua --check --verify src tests`
+2. `selene validate-config`
+3. `selene src tests`
+4. `lune run tests/verify-builds.luau`
+5. `git diff --check`
+6. inspect `git status --short --ignored` and remove only exact generated outputs.
+
+H-16 records the initial `1,484/1,486` full-suite result, the two stale
+expectation corrections, the affected `15/15` rerun and Test build, and the
+resulting cumulative `1,486/1,486` current-tree coverage. Do not rerun a full
+gate unless a later fix can affect it. The verifier runs the complete headless
+suite and builds Default, Lobby, Match, and Test once each.
 
 Run the applicable Studio, multi-client, published-client, device, or destructive
 row only when its prerequisites exist and its authorization line is satisfied.

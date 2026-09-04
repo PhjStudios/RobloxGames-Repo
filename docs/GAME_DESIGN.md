@@ -3,8 +3,9 @@
 ## Purpose
 
 This document records the product and architecture-affecting decisions approved
-for the core Ant Tower Defense project. It is the evidence for Packet 00.2 of
-`docs/DEVELOPMENT_PLAN.md`.
+for the core Ant Tower Defense project. The original Core-001 register is the
+evidence for Packet 00.2 of `docs/DEVELOPMENT_PLAN.md`; dated addenda record
+later decisions without rewriting that historical checkpoint.
 
 The decisions below use the roadmap's recommended defaults. They guide future
 implementation but do not authorize gameplay coding, Roblox publishing,
@@ -16,8 +17,9 @@ production-data changes, or monetization.
 - Recorded: 2026-08-25
 - Packet: 00.2
 - Status: Accepted for core development
-- Current roadmap checkpoint: Phases 00–06 are complete and Gate A passed on
-  2026-08-26. Phase 07 is next and has not begun.
+- Current roadmap checkpoint: the Playable Local Match, Persistent Lobby Loop,
+  Squad Travel Loop, and Content and Onboarding outcomes through historical
+  Phase 33 are complete. Phase 34 has not begun.
 
 ## Product identity and game loop
 
@@ -264,8 +266,9 @@ No temporary merge mechanic should be added during inventory or gacha work.
 Each finite difficulty changes composition, starting resources, base health,
 enemy mechanics, and rewards—not only enemy health.
 
-**Status:** Wave counts are accepted defaults; final balance/content remains
-provisional until content and testing phases.
+**Status:** The counts are implemented exactly in content version 1. Their
+current balance is documented in `CONTENT_BALANCE.md`; the Content and
+Onboarding consolidated gate passed on 2026-09-04.
 
 ### GD-019 — Boss cadence
 
@@ -445,6 +448,146 @@ Production logging is quieter and rate-limited. Logs never include:
 **Reason:** Rich development diagnostics help identify failures early, while
 structured levels and high-frequency limits keep output usable.
 
+## Content and onboarding implementation addendum — 2026-09-04
+
+This addendum locks the product choices implemented for historical Phases
+29–33. The outcome passed its consolidated review, current headless/build gate,
+and bounded solo/mobile/four-client private-staging Studio acceptance on
+2026-09-04.
+
+### GD-032 — Content identity, selection, and compatibility
+
+**Decision:** Release content is additive and uses stable versioned identifiers:
+
+- `map:backyard-garden-v1`;
+- `difficulty:easy-v1`, `difficulty:normal-v1`, `difficulty:hard-v1`, and
+  `difficulty:endless-v1`;
+- `tower:bombardier-ant`;
+- `enemy:broodling-ant` and `enemy:royal-guard-ant`;
+- `banner:garden-v1` version 1; and
+- content version 1 with generator key `wave-generator.garden-v1`.
+
+An authenticated travel ticket is the authority for the travelled Match map
+and difficulty. Lobby configuration accepts only validated, non-hidden,
+non-development map/difficulty pairs and presents their display names to
+players. Direct local development instead uses the explicit server-owned
+`map:phase07-graybox` plus `difficulty:local` fallback, which remains hidden and
+non-rewarding.
+
+The legacy graybox/local IDs, three original tower IDs, four original enemy IDs,
+`banner:starter` version 1, `queue:backyard-squad`, saved unit/pity/first-clear
+keys, old tickets, and result version 1 retain their existing meanings. New
+result fields use compatible record version 2 rather than changing version 1.
+
+### GD-033 — First release map and strategic rosters
+
+**Decision:** Backyard Garden is the first release map. Its bright ant-scale
+vegetable-garden composition uses Studio-built primitives and Roblox materials:
+warm soil and stone communicate the fixed enemy lane, cool grass and bounded
+build pockets communicate placement, and a nest and seed store communicate
+spawn and goal. The unchanged map contract supplies one ordered `main` lane,
+four player spawns, overview framing, placement/exclusion regions, and stable
+queue/travel compatibility. Reduced effects may remove optional motion or
+bursts, never gameplay silhouettes, navigation, or warnings.
+
+The playable tower roster has four configuration-driven jobs and complete
+three-level upgrades: Dart Ant is balanced, Rapid Ant covers fast/numerous
+targets, Guard Ant focuses durable enemies and bosses, and Bombardier Ant adds
+generic area damage. All support First, Last, Strongest, Weakest, and Closest
+targeting; services do not branch on a tower ID or display name.
+
+The six-enemy roster teaches basic (Worker), fast (Scout), durable/elite
+(Soldier), swarm (Broodling), miniboss (Royal Guard), and boss (Garden Queen)
+pressure. Threat class and presentation are configuration-driven. Armor,
+stealth, flying, support aura, economy towers, and status mechanics remain out
+of scope until play evidence demonstrates a need.
+
+### GD-034 — Authored campaigns and acquisition
+
+**Decision:** Backyard Garden has exactly 20 Easy, 30 Normal, and 40 Hard waves,
+with boss waves at every tenth wave and readable miniboss teaching pressure
+between them. Easy introduces roles separately with the most base health,
+starting Battle Cash, recovery, and income. Normal combines roles sooner and
+tightens resources. Hard begins with mixed pressure, layers fast/swarm enemies
+behind durable screens, shortens recovery, and uses the leanest economy. Health
+and speed modifiers reinforce rather than define those distinctions.
+
+A new profile receives Dart Ant and Bombardier Ant once and starts with that
+valid loadout, so neither onboarding nor Easy depends on a random outcome. Every
+tower is also available from the earn-only Garden Tower Chest for 250 Gold per
+pull or 2,250 for ten: 40% Dart, 30% Rapid, 20% Bombardier, and 10% Guard, with
+hard pity at ten for Guard. Exact odds, earn-only policy, pity, and unique-unit
+duplicate handling are disclosed together. `CONTENT_BALANCE.md` is the source
+for the accepted combat, economy, and persistent-reward values.
+
+### GD-035 — Endless is an unbounded mode of the existing Match
+
+**Decision:** Endless reuses the authoritative playable runtime. Ten authored
+opening waves are followed by lazy stateless generation from content version,
+seed, wave number, and draw index. Boss cadence remains every ten waves.
+Generation and runtime cap groups, spawns, active enemies, simultaneous wave
+origins, simulation work, health, speed, Battle Cash, counters, and replicated
+collections; no accumulated infinite schedule exists.
+
+Endless never reports Victory or a fake last wave. Base defeat, deliberate
+departure, all participants leaving, shutdown, or technical termination creates
+one version-2 authoritative result with highest completed wave, elapsed time,
+map, difficulty, seed, content version, and termination reason. The terminal
+Gold award is bounded, receipt-idempotent, and based on each participant's
+completed participation rather than connected time. No global leaderboard is
+introduced.
+
+### GD-036 — Persistent server-observed onboarding
+
+**Decision:** Profile schema v6 owns a resumable tutorial state machine. Its
+steps initialize the deterministic starter inventory/loadout, explain Gold,
+Battle Cash, and disclosed chest odds, validate the loadout, observe a singleton
+PartyOnly Easy Garden queue, authenticate Match arrival, observe an accepted
+placement and upgrade, observe the durable terminal result, and confirm the
+matching return to Lobby before completion.
+
+The persisted numeric graph is:
+
+0. initialize starter inventory and a safe loadout;
+1. explain persistent Gold, match-only Battle Cash, and chest odds;
+2. validate the starter loadout;
+3. observe entry into the singleton PartyOnly Easy Garden queue;
+4. observe authenticated arrival in its Match;
+5. observe an accepted tower placement;
+6. observe an accepted upgrade of an owned tower;
+7. observe the tracked Match's durable terminal result;
+8. observe its matching return to Lobby; and
+9. complete.
+
+Clients may request Continue, Skip, or Replay, but cannot declare gameplay
+steps complete. Rejected, out-of-order, public, squad, spectator, or
+foreign-match activity cannot advance the state. Skip is available only after
+safe initialization; replay increments a bounded attempt without duplicating
+starter units. Any tutorial timing or assistance is derived only for the
+authenticated singleton onboarding ticket and cannot affect public or squad
+matches. Lobby and Match show short contextual guidance rather than a modal
+course.
+
+### Content and staging boundary
+
+The private staging identity was verified as GameId `10764687717`, Lobby PlaceId
+`140661668701496`, Match PlaceId `104415140644510`, owner `PHJGAMES` group
+`35420107` before bounded Team Create authoring. Only the authorized Match map
+and playable-template roots changed; the Lobby needed no tutorial world marker.
+Final inventory found two map templates/237 descendants (Garden: 212) and ten
+playable templates/83 descendants, with zero scripts or runtime residue. A
+local iPhone 17 Pro landscape session verified touch placement, selection,
+upgrade, camera bounds, and defeat. One four-client session verified common
+Garden/Easy state, four independently owned placements, one upgrade, and
+wave-12 boss overlap presentation. Reduced-effects behavior is covered by the
+deterministic client projection/view gate: optional effects are suppressed
+without removing boss warning/health communication.
+
+No production place, production data, experience setting, purchased/uploaded
+asset, or published place version was involved. A newly published
+staging-client gate and an uninstructed first-time-player test were not run and
+remain separate acceptance evidence if later required.
+
 ## Core scope boundary
 
 ### Included before the closed-alpha gate
@@ -481,7 +624,9 @@ Deferred items must not be implemented opportunistically during a core packet.
 
 ## Decisions intentionally left for later packets
 
-The following do not block Packet 00.2:
+The following list is preserved as the historical Core-001 state at Packet
+00.2. Its map, roster, wave, and balance questions are now resolved by the
+2026-09-04 addendum above; the remaining future decisions stay deferred.
 
 - Any additional test-place identifiers or environments beyond the verified
   Lobby and Match places require a later explicit test-strategy decision.

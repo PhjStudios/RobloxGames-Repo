@@ -4,9 +4,14 @@ This is the current delivery roadmap. Phases 00–28, the Playable Local Match,
 the Persistent Lobby Loop, and the Squad Travel Loop outcomes are complete.
 Squad Travel passed its final local gate, isolated Studio verification, and a
 private published-client validation in the dedicated staging experience.
-Production was neither tested nor modified, and Content and Onboarding has not
-begun. The detailed historical packet plan remains useful for requirements and
-design context, but delivery now targets playable outcomes.
+Production was neither tested nor modified. Content and Onboarding combines
+historical Phases 29–33 on `codex/content-onboarding` and is complete: the
+consolidated review is clean, current headless coverage is `1,486/1,486`, all
+four builds pass, and the bounded private-staging solo/mobile and four-client
+Studio gates passed. No new staging version was published and no uninstructed
+first-time-player observation is claimed. The detailed historical packet plan
+remains useful for requirements and design context, but delivery targets
+playable outcomes.
 
 ## Delivery outcomes
 
@@ -31,10 +36,23 @@ design context, but delivery now targets playable outcomes.
    duplicate reward claims, and canonical ID freshness—were verified by
    deterministic server-authority tests and are not claimed as published-client
    observations.
-4. **Not begun: Content and onboarding — remaining Phases 29–33.** Finish the
-   production map, tower and enemy rosters, authored waves, Endless mode, and
-   onboarding work not already pulled into the playable local match.
-5. **Platform, presentation, performance, and analytics — Phases 34–37.** Finish
+4. **Complete: Content and onboarding — Phases 29–33.** The
+   additive content-v1 implementation selects the server-validated `Backyard
+   Garden` map and Easy, Normal, Hard, or Endless difficulty from authenticated
+   tickets while retaining the hidden non-rewarding graybox/local development
+   fallback. It provides four strategic tower roles, six enemy roles, exact
+   20/30/40-wave campaigns with bosses every ten waves, and lazy deterministic
+   Endless generation with bounded runtime work and terminal rewards. Profile
+   schema v6 supplies the resumable server-observed Lobby-to-Match tutorial,
+   deterministic Dart/Bombardier starter loadout, safe skip, and replay/help
+   path. Private staging identity, bounded Team Create authoring, the full
+   milestone gate, and consolidated solo/mobile/four-client Studio acceptance
+   are recorded in [the design lock](docs/CONTENT_ONBOARDING_DESIGN_LOCK.md).
+   Production remained untouched; a new published staging-client run and an
+   uninstructed first-time-player test remain separate optional acceptance gates
+   if later desired or required.
+5. **Not begun; explicit stop boundary: Platform, presentation, performance,
+   and analytics — Phases 34–37.** Finish
    cross-platform/accessibility work, game feel, optimization, observability,
    and safe development tooling.
 6. **Release candidate — Phases 38–40.** Complete security and resilience review,

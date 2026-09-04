@@ -5,20 +5,40 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 
 ## Project status
 
-Phases 00–13 are complete. The project has a server-authoritative graybox match
-foundation through tower placement, with `941` headless cases across `73`
-suites and isolated Default, Lobby, Match, and Test projects. Phase 14 gameplay
-work remains unbegun.
+The Playable Local Match (historical Phases 14–18), Persistent Lobby Loop
+(Phases 19–23), and Squad Travel Loop (Phases 24–28) outcomes are complete. The
+clean Content and Onboarding baseline is commit
+`fe48b9fe2a9b597d6d169530877465654c8c4e96`; it passed `1,419` headless tests,
+all four isolated builds, and the authorized private-staging Lobby/Match travel
+loop. Production was not tested or changed.
 
-Current delivery is organized around playable outcomes rather than one prompt,
-branch, review, audit, and full gate per historical packet. The next outcome is
-a playable local match combining Phases 14–18 with only the minimum real map,
-tower, enemy, and wave content pulled forward from Phases 29–31.
+Content and Onboarding combines historical Phases 29–33 and is complete on
+`codex/content-onboarding`. The implementation adds the `Backyard Garden`
+release map, four distinct three-level towers, six readable enemy roles, exact
+20/30/40-wave Easy/Normal/Hard campaigns, seeded unbounded Endless play in the
+existing authoritative runtime, difficulty-specific exactly-once rewards, and
+a persistent server-observed onboarding journey across Lobby and Match.
+Existing graybox/local, tower, enemy, banner, ticket, inventory, first-clear,
+and result identifiers remain compatible; the graybox/local pair is a hidden,
+non-rewarding direct-development fallback.
+
+The private staging map and playable templates were authored under the bounded
+Team Create roots after an exact identity check. The consolidated review is
+clean, formatting/lint and all four builds passed, and current headless coverage
+is `1,486/1,486`: its one full run found two stale expectations after
+`1,484/1,486`, then only those affected specs passed `15/15` with the affected
+Test build. Consolidated private-staging Studio sessions passed solo mobile
+touch/camera/gameplay and four-client Garden integration; the final authorized
+roots contained no scripts or runtime residue. Production remained untouched.
+No new staging version was published, no uninstructed first-time-player test is
+claimed, and Phase 34 has not begun.
 
 - [Current delivery roadmap](ROADMAP.md)
 - [Current contributor workflow](AGENTS.md)
 - [Historical detailed development plan](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
+- [Content and onboarding design lock](docs/CONTENT_ONBOARDING_DESIGN_LOCK.md)
+- [Current content balance and reward policy](docs/CONTENT_BALANCE.md)
 - [Roblox place and test-environment inventory](docs/PLACE_INVENTORY.md)
 - [Verified toolchain baseline](docs/TOOLCHAIN.md)
 - [Formatting, linting, and generated-output policy](docs/CODE_STYLE.md)
@@ -126,9 +146,9 @@ deliberately.
 `test.project.json` is build-only and has no place binding. Test specs,
 fixtures, support modules, negative controls, and Lune never appear in Default,
 Lobby, or Match builds; the structural verifier enforces this boundary.
-`tests/studio` contains three manual runtime-regression harness sources and one
-default-deny Edit-mode authoring command. None is mapped into any of the four
-projects.
+`tests/studio` contains test-only runtime regression tools and guarded,
+default-deny Edit-mode authoring/repair commands. None is mapped into any of the
+four projects.
 
 The default project intentionally contains all source layers for combined
 development inspection. Use the lobby or match project for role-isolated Studio
