@@ -1,13 +1,28 @@
 local EnvironmentContext = require(script.Parent.EnvironmentContext)
 
 export type Severity = "DEBUG" | "INFO" | "WARN" | "ERROR"
-export type Subsystem = "bootstrap" | "configuration" | "place-role" | "lifecycle" | "cleanup" | "network" | "shutdown"
+export type Subsystem =
+	"bootstrap"
+	| "configuration"
+	| "place-role"
+	| "lifecycle"
+	| "cleanup"
+	| "network"
+	| "shutdown"
+	| "profile"
+	| "ticket"
+	| "teleport"
+	| "match"
+	| "reward"
+	| "analytics"
+	| "security"
 export type FieldValue = string | number | boolean
 export type SafeFieldName =
 	"budgetSeconds"
 	| "cleanupState"
 	| "cleanupTaskCount"
 	| "code"
+	| "correlation"
 	| "closeReason"
 	| "configurationFamilyCount"
 	| "container"
@@ -57,6 +72,13 @@ local VALID_SEVERITIES: { [string]: boolean } = table.freeze({
 })
 
 local VALID_SUBSYSTEMS: { [string]: boolean } = table.freeze({
+	profile = true,
+	ticket = true,
+	teleport = true,
+	match = true,
+	reward = true,
+	analytics = true,
+	security = true,
 	bootstrap = true,
 	cleanup = true,
 	configuration = true,
@@ -80,6 +102,7 @@ local RESERVED_FIELDS: { [string]: boolean } = table.freeze({
 })
 
 local SAFE_FIELDS: { [string]: boolean } = table.freeze({
+	correlation = true,
 	budgetSeconds = true,
 	cleanupState = true,
 	cleanupTaskCount = true,
@@ -110,6 +133,14 @@ local SENSITIVE_FIELD_TOKENS = table.freeze({
 	"receipt",
 	"payment",
 	"product",
+	"password",
+	"secret",
+	"token",
+	"cookie",
+	"chat",
+	"username",
+	"userid",
+	"inventory",
 })
 
 local LOGGER_REGISTRY = setmetatable({}, { __mode = "k" }) :: { [any]: boolean }
@@ -222,6 +253,12 @@ local function validateFieldValue(logger: LoggerData, fieldName: string, fieldVa
 	local valueType = type(fieldValue)
 	if valueType == "string" then
 		local stringValue = fieldValue :: string
+		if #stringValue > (if fieldName == "validationPath" then 512 else 128) then
+			fail(logger, "INVALID_FIELD_VALUE", "Structured field exceeds its byte bound")
+		end
+		if fieldName == "correlation" and (#stringValue > 48 or string.match(stringValue, "^c%-%x+%-%d+$") == nil) then
+			fail(logger, "INVALID_FIELD_VALUE", "Correlation must be an ephemeral token")
+		end
 		local isValidString = if fieldName == "validationPath"
 			then isSafeValidationPath(stringValue)
 			else string.match(stringValue, VALID_STRING_FIELD_PATTERN) ~= nil
@@ -266,17 +303,17 @@ function Logger.formatRecord(
 		fail(self, "INVALID_SUBSYSTEM", "Subsystem is not part of the current logging contract")
 	end
 
-	if type(event) ~= "string" or string.match(event, VALID_LABEL_PATTERN) == nil then
+	if type(event) ~= "string" or #event > 64 or string.match(event, VALID_LABEL_PATTERN) == nil then
 		fail(self, "INVALID_EVENT", `Event must match {VALID_LABEL_PATTERN}`)
 	end
 
-	if type(message) ~= "string" or message == "" or string.find(message, "%c") ~= nil then
+	if type(message) ~= "string" or message == "" or #message > 512 or string.find(message, "%c") ~= nil then
 		fail(self, "INVALID_MESSAGE", "Message must be non-empty and contain no control characters")
 	end
 
 	local record = basePrefix(self.context, severity, subsystem, event)
 	if fields ~= nil then
-		if type(fields) ~= "table" then
+		if type(fields) ~= "table" or getmetatable(fields) ~= nil then
 			fail(self, "INVALID_FIELDS", "Structured fields must be a dictionary or nil")
 		end
 

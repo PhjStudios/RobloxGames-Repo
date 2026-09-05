@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 
 local Result = require(ReplicatedStorage.Shared.util.Result)
 local Validation = require(ReplicatedStorage.Shared.util.Validation)
+local Localization = require(ReplicatedStorage.Shared.localization.Localization)
 
 local BaseViewModel = require(script.Parent.BaseViewModel)
 
@@ -734,11 +735,18 @@ local function applyRenderState(data: ViewData, state: CanonicalRenderState, all
 		if data.applyProductionLayout then
 			currentInstances.fill.Size = UDim2.fromScale(state.fillScale, 1)
 		end
-		currentInstances.healthLabel.Text = state.healthText
-		currentInstances.statusLabel.Text = state.statusText
-		currentInstances.lowLabel.Text = state.lowText
+		local currentHealth, maximumHealth = parseHealthText(state.healthText)
+		currentInstances.healthLabel.Text = if state.healthText == ""
+			then ""
+			else Localization.text("base.health", { current = currentHealth, maximum = maximumHealth })
+		currentInstances.statusLabel.Text = if state.statusText == ""
+			then ""
+			else Localization.text("base." .. string.lower(state.statusText))
+		currentInstances.lowLabel.Text = if state.lowText == "" then "" else Localization.text("base.low")
 		currentInstances.lowLabel.Visible = state.lowVisible
-		currentInstances.damageLabel.Text = state.damageText
+		currentInstances.damageLabel.Text = if state.damageText == ""
+			then ""
+			else Localization.text("base.damage", { damage = tonumber(string.sub(state.damageText, 2)) })
 		currentInstances.damageLabel.Visible = state.damageVisible
 		if data.applyProductionLayout then
 			if state.lowVisible then

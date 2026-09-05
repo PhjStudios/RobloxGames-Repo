@@ -20,6 +20,9 @@ local Result = require(ReplicatedStorage.Shared.util.Result)
 local PlayableInputMap = require(script.Parent.PlayableInputMap)
 local PlayableMatchView = require(script.Parent.PlayableMatchView)
 
+local Localization = require(ReplicatedStorage.Shared.localization.Localization)
+local Accessibility = require(ReplicatedStorage.Shared.settings.Accessibility)
+
 export type LifecycleState =
 	"Constructed"
 	| "Initializing"
@@ -80,6 +83,7 @@ export type ViewAdapter = {
 }
 
 export type Dependencies = {
+	presentation: any?,
 	localUserId: number,
 	tracker: TrackerAdapter,
 	getSnapshot: RequestEndpoint,
@@ -101,6 +105,7 @@ export type Dependencies = {
 	connectRenderStep: ((number) -> ()) -> RBXScriptConnection,
 	now: () -> number,
 	getPointerPosition: () -> Vector2,
+	getPlacementCursorPosition: (() -> Vector2?)?,
 	getViewportSize: () -> Vector2,
 	raycastPlacement: (Vector2) -> Vector3?,
 	pickTower: (Vector2, { PlayableMatchProtocol.TowerSnapshot }, PlayableInputMap.InputFamily) -> number?,
@@ -192,6 +197,8 @@ type ControllerData = {
 	matchGeneration: number,
 	overviewMatchId: string?,
 	lastRenderedViewport: Vector2?,
+	lastPreferencesCheck: number,
+	lastPreferencesKey: string,
 	selectedSlot: number?,
 	selectedTowerId: number?,
 	touchPlacementPosition: Vector3?,
@@ -631,15 +638,32 @@ end
 
 local function resultSummary(snapshot: PlayableMatchProtocol.Snapshot): string
 	local stats = snapshot.stats
-	local context = string.sub(`{snapshot.mapDisplayName} • {snapshot.difficultyDisplayName}`, 1, 72)
 	if snapshot.modeKind == "Endless" then
-		return `{context} • Endless • {stats.wavesCompleted} waves cleared • Base {stats.baseHealthRemaining} HP • Damage {stats.damageDealt}`
+		return Localization.text("match.result.endless", {
+			mapName = snapshot.mapDisplayName,
+			difficultyName = snapshot.difficultyDisplayName,
+			waves = stats.wavesCompleted,
+			health = stats.baseHealthRemaining,
+			damage = stats.damageDealt,
+		})
 	end
 	local totalWaves = snapshot.totalWaves or stats.wavesCompleted
 	if snapshot.result == "Victory" then
-		return `{context} • All {totalWaves} waves cleared • Base {stats.baseHealthRemaining} HP • Damage {stats.damageDealt}`
+		return Localization.text("match.result.victory", {
+			mapName = snapshot.mapDisplayName,
+			difficultyName = snapshot.difficultyDisplayName,
+			waves = totalWaves,
+			health = stats.baseHealthRemaining,
+			damage = stats.damageDealt,
+		})
 	end
-	return `{context} • Base overrun after {stats.wavesCompleted}/{totalWaves} waves • Damage {stats.damageDealt}`
+	return Localization.text("match.result.defeat", {
+		mapName = snapshot.mapDisplayName,
+		difficultyName = snapshot.difficultyDisplayName,
+		waves = stats.wavesCompleted,
+		totalWaves = totalWaves,
+		damage = stats.damageDealt,
+	})
 end
 
 local function compatibleTravelSnapshot(
@@ -661,7 +685,7 @@ local function resultRewardView(snapshot: PlayableMatchProtocol.Snapshot): any
 			firstClearBonus = reward.firstClearBonus,
 			battleCashEarned = reward.battleCashEarned,
 			battleCashSpent = reward.battleCashSpent,
-			reason = reward.reason,
+			reason = Localization.enum("reward", reward.reason),
 		}
 	end
 	if snapshot.viewerRole == "Spectator" then
@@ -671,7 +695,7 @@ local function resultRewardView(snapshot: PlayableMatchProtocol.Snapshot): any
 			firstClearBonus = 0,
 			battleCashEarned = 0,
 			battleCashSpent = 0,
-			reason = "Spectators do not earn participation rewards.",
+			reason = Localization.text("playable_match_controller.spectators_do_not_earn_participation_rewards"),
 		}
 	end
 	if not snapshot.rewarding then
@@ -681,7 +705,7 @@ local function resultRewardView(snapshot: PlayableMatchProtocol.Snapshot): any
 			firstClearBonus = 0,
 			battleCashEarned = snapshot.stats.battleCashEarned,
 			battleCashSpent = snapshot.stats.battleCashSpent,
-			reason = "Direct local matches are non-rewarding.",
+			reason = Localization.text("playable_match_controller.direct_local_matches_are_non_rewarding"),
 		}
 	end
 	return {
@@ -690,7 +714,7 @@ local function resultRewardView(snapshot: PlayableMatchProtocol.Snapshot): any
 		firstClearBonus = 0,
 		battleCashEarned = snapshot.stats.battleCashEarned,
 		battleCashSpent = snapshot.stats.battleCashSpent,
-		reason = "Waiting for the durable profile claim.",
+		reason = Localization.text("playable_match_controller.waiting_for_the_durable_profile_claim"),
 	}
 end
 
@@ -719,7 +743,10 @@ local function travelView(data: ControllerData, snapshot: PlayableMatchProtocol.
 		rematchState = if rematch == nil then nil else rematch.state,
 		rematchStatus = if rematch == nil
 			then nil
-			else `{rematch.state} • {#rematch.votes} connected participant votes`,
+			else Localization.text(
+				"playable_match_controller.connected_participant_votes",
+				{ state = Localization.enum("state", rematch.state), votes = #rematch.votes }
+			),
 		canApprove = snapshot.viewerRole == "Participant"
 			and rematch ~= nil
 			and rematch.state == "Pending"
@@ -759,7 +786,7 @@ local function renderSnapshot(data: ControllerData): boolean
 		for slot = 1, PlayableMatchProtocol.MAX_TOWER_OPTIONS do
 			loadingHotbar[slot] = {
 				slot = slot,
-				displayName = "Loading",
+				displayName = Localization.enum("state", "Loading"),
 				cost = 0,
 				available = false,
 				selected = false,
@@ -784,7 +811,9 @@ local function renderSnapshot(data: ControllerData): boolean
 			battleCash = 0,
 			hotbar = loadingHotbar,
 			feedback = if data.feedbackCode == nil then nil else { code = data.feedbackCode },
-			inputHint = if data.feedbackCode == nil then "Connecting to the authoritative match." else hint,
+			inputHint = if data.feedbackCode == nil
+				then Localization.text("playable_match_controller.connecting_to_the_authoritative_match")
+				else hint,
 			viewport = viewport,
 			uiScale = 1,
 			reducedMotion = false,
@@ -838,7 +867,7 @@ local function renderSnapshot(data: ControllerData): boolean
 		hotbar[slot] = {
 			slot = slot,
 			displayName = option.displayName,
-			description = option.description,
+			description = Localization.contentDescription(option.towerId, option.description),
 			cost = option.placementCost,
 			available = available and data.actionPending == nil,
 			selected = data.selectedSlot == slot,
@@ -859,7 +888,9 @@ local function renderSnapshot(data: ControllerData): boolean
 			towerId = `tower-runtime:{selectedTower.runtimeTowerId}`,
 			revision = selectedTower.revision,
 			displayName = selectedTower.displayName,
-			description = if selectedOption == nil then nil else selectedOption.description,
+			description = if selectedOption == nil
+				then nil
+				else Localization.contentDescription(selectedOption.towerId, selectedOption.description),
 			isOwner = owner,
 			level = selectedTower.level,
 			maxLevel = math.max(3, selectedTower.level),
@@ -886,7 +917,12 @@ local function renderSnapshot(data: ControllerData): boolean
 			enabled = data.actionPending == nil,
 			countdownSeconds = nil,
 			status = string.sub(
-				`{snapshot.mapDisplayName} • {snapshot.difficultyDisplayName}\n{snapshot.participants.readyCount}/{snapshot.participants.participantCount} players ready`,
+				Localization.text("playable_match_controller.players_ready", {
+					mapDisplayName = snapshot.mapDisplayName,
+					difficultyDisplayName = snapshot.difficultyDisplayName,
+					readyCount = snapshot.participants.readyCount,
+					participantCount = snapshot.participants.participantCount,
+				}),
 				1,
 				96
 			),
@@ -899,7 +935,9 @@ local function renderSnapshot(data: ControllerData): boolean
 			kind = snapshot.result,
 			summary = resultSummary(snapshot),
 			canReplay = snapshot.viewerRole == "Participant" and not snapshot.rewarding and data.actionPending == nil,
-			status = if data.actionPending ~= nil then "Waiting for server confirmation." else nil,
+			status = if data.actionPending ~= nil
+				then Localization.text("playable_match_controller.waiting_for_server_confirmation")
+				else nil,
 			rewardStatus = rewardView.status,
 			persistentGoldAwarded = rewardView.persistentGoldAwarded,
 			firstClearBonus = rewardView.firstClearBonus,
@@ -932,11 +970,9 @@ local function renderSnapshot(data: ControllerData): boolean
 		feedback = if data.feedbackCode == nil then nil else { code = data.feedbackCode },
 		result = resultState,
 		travel = travelView(data, snapshot),
-		placement = if family == "Touch"
-				and snapshot.state == "Playing"
-				and data.selectedSlot ~= nil
+		placement = if snapshot.state == "Playing" and data.selectedSlot ~= nil
 			then {
-				positionSelected = data.touchPlacementPosition ~= nil,
+				positionSelected = family ~= "Touch" or data.touchPlacementPosition ~= nil,
 				rotationDegrees = data.rotationDegrees,
 				controlsEnabled = data.actionPending == nil,
 			}
@@ -1057,6 +1093,12 @@ local function applySnapshot(
 		end
 	end
 	pcall((data.dependencies :: Dependencies).applySettings, snapshot.settings)
+	local presentation = (data.dependencies :: Dependencies).presentation
+	if presentation ~= nil then
+		pcall(function()
+			presentation:snapshot(snapshot)
+		end)
+	end
 	data.lastSnapshotAt = (data.dependencies :: Dependencies).now()
 	data.acceptedSnapshotCount += 1
 	data.renderPending = true
@@ -1272,6 +1314,12 @@ local function placementScreenPosition(data: ControllerData, action: PlayableInp
 		return action.screenPosition
 	end
 	local dependencies = data.dependencies :: Dependencies
+	if dependencies.getPlacementCursorPosition ~= nil then
+		local read, position = pcall(dependencies.getPlacementCursorPosition)
+		if read and typeof(position) == "Vector2" then
+			return position :: Vector2
+		end
+	end
 	local viewport: Vector2? = nil
 	local viewportRead, viewportValue = pcall(dependencies.getViewportSize)
 	if viewportRead and typeof(viewportValue) == "Vector2" then
@@ -1691,6 +1739,12 @@ local function onAttack(data: ControllerData, generation: number, value: unknown
 	})
 	if isSuccess(effect) then
 		data.attackEventCount += 1
+		local presentation = (data.dependencies :: Dependencies).presentation
+		if presentation ~= nil then
+			pcall(function()
+				presentation:attack(event)
+			end)
+		end
 	else
 		data.rejectedInputCount += 1
 	end
@@ -1863,6 +1917,12 @@ local function onActionResponse(
 			setFeedback(data, RECEIPT_FEEDBACK[validated.value.reason])
 			if validated.value.accepted then
 				finishAcceptedAction(data, pending.kind)
+				local presentation = (data.dependencies :: Dependencies).presentation
+				if presentation ~= nil then
+					pcall(function()
+						presentation:action(pending.kind)
+					end)
+				end
 			end
 		end
 	else
@@ -1899,6 +1959,11 @@ local function cleanup(data: ControllerData): boolean
 	cancelTravelMutation(data)
 	local dependencies = data.dependencies
 	if dependencies ~= nil then
+		if dependencies.presentation ~= nil then
+			pcall(function()
+				dependencies.presentation:cleanup()
+			end)
+		end
 		if not pcall(function()
 			dependencies.tracker:clear()
 		end) then
@@ -2015,7 +2080,27 @@ local function onRenderStep(data: ControllerData, generation: number)
 	local viewport = readViewport(data.dependencies :: Dependencies)
 	local viewportChanged = viewport ~= nil
 		and (data.lastRenderedViewport == nil or viewport ~= data.lastRenderedViewport)
-	if (type(viewMetrics) == "table" and (viewMetrics :: any).inputFamily ~= family) or viewportChanged then
+	local preferencesChanged = false
+	if now - data.lastPreferencesCheck >= 0.25 then
+		data.lastPreferencesCheck = now
+		local preferences = Accessibility.readPreferences()
+		local key = tostring(preferences.textScale)
+			.. ":"
+			.. preferences.textPreference
+			.. ":"
+			.. tostring(preferences.transparency)
+			.. ":"
+			.. tostring(preferences.reducedMotion)
+			.. ":"
+			.. Localization.getMode()
+		preferencesChanged = key ~= data.lastPreferencesKey
+		data.lastPreferencesKey = key
+	end
+	if
+		(type(viewMetrics) == "table" and (viewMetrics :: any).inputFamily ~= family)
+		or viewportChanged
+		or preferencesChanged
+	then
 		renderSnapshot(data)
 	end
 end
@@ -2115,6 +2200,8 @@ local function construct(logger: Log.Logger, dependencyFactory: DependencyFactor
 		matchGeneration = 0,
 		overviewMatchId = nil,
 		lastRenderedViewport = nil,
+		lastPreferencesCheck = 0,
+		lastPreferencesKey = "",
 		selectedSlot = nil,
 		selectedTowerId = nil,
 		touchPlacementPosition = nil,
@@ -2380,23 +2467,47 @@ local function makeProductionDependencies(
 		baseFocused = false
 		return true
 	end
-	local function applySettings(settings: SettingsProtocol.Settings)
-		for name, volume in
-			{
-				Music = settings.masterVolume * settings.musicVolume,
-				SFX = settings.masterVolume * settings.sfxVolume,
-				UI = settings.masterVolume * settings.uiVolume,
-			}
-		do
-			local group = SoundService:FindFirstChild(name)
-			if group ~= nil and group:IsA("SoundGroup") then
-				group.Volume = volume
-			end
+	local FeedbackDirector = require(script.Parent.Parent.Parent.common.presentation.FeedbackDirector)
+	local presentation = FeedbackDirector.newForSoundService(SoundService)
+	local PlacementCursor = require(ReplicatedStorage.Shared.settings.PlacementCursor)
+	local cursorPosition: Vector2? = nil
+	local virtualCursorActive = false
+	local function updatePlacementCursor(deltaSeconds: number)
+		local camera = Workspace.CurrentCamera
+		local inputType = UserInputService:GetLastInputType()
+		local gamepad = string.sub(inputType.Name, 1, 7) == "Gamepad"
+		virtualCursorActive = inputResult.value:getMetrics().context == "Placement"
+			and (inputType == Enum.UserInputType.Keyboard or gamepad)
+		if not virtualCursorActive or camera == nil then
+			viewResult.value:setPlacementCursor(nil)
+			return
 		end
+		local axis = Vector2.zero
+		if gamepad then
+			for _, state in UserInputService:GetGamepadState(inputType) do
+				if state.KeyCode == Enum.KeyCode.Thumbstick2 then
+					local value = Vector2.new(state.Position.X, -state.Position.Y)
+					axis = if value.Magnitude > 0.15 then value else Vector2.zero
+				end
+			end
+		elseif UserInputService:GetFocusedTextBox() == nil then
+			axis = Vector2.new(
+				(if UserInputService:IsKeyDown(Enum.KeyCode.D) then 1 else 0)
+					- (if UserInputService:IsKeyDown(Enum.KeyCode.A) then 1 else 0),
+				(if UserInputService:IsKeyDown(Enum.KeyCode.S) then 1 else 0)
+					- (if UserInputService:IsKeyDown(Enum.KeyCode.W) then 1 else 0)
+			)
+		end
+		cursorPosition = PlacementCursor.step(cursorPosition, camera.ViewportSize, axis, deltaSeconds)
+		viewResult.value:setPlacementCursor(cursorPosition)
+	end
+	local function applySettings(settings: SettingsProtocol.Settings)
+		presentation:applySettings(settings)
 	end
 
 	return {
 		localUserId = player.UserId,
+		presentation = presentation,
 		tracker = trackerResult.value,
 		getSnapshot = getSnapshotEndpoint,
 		submitReady = submitReadyEndpoint,
@@ -2427,11 +2538,19 @@ local function makeProductionDependencies(
 			end)
 		end,
 		connectRenderStep = function(listener)
-			return RunService.RenderStepped:Connect(listener)
+			return RunService.RenderStepped:Connect(function(deltaSeconds)
+				presentation:step(os.clock())
+				updatePlacementCursor(deltaSeconds)
+				listener(deltaSeconds)
+			end)
 		end,
 		now = os.clock,
 		getPointerPosition = function()
 			return UserInputService:GetMouseLocation()
+		end,
+		getPlacementCursorPosition = function()
+			updatePlacementCursor(0)
+			return if virtualCursorActive then cursorPosition else nil
 		end,
 		getViewportSize = function()
 			local camera = Workspace.CurrentCamera

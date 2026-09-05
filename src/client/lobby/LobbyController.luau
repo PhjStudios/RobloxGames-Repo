@@ -51,6 +51,9 @@ local NavigationStore = require(commonUi.NavigationStore)
 local NotificationStore = require(commonUi.NotificationStore)
 local LobbyView = require(lobbyUi.LobbyView)
 
+local Localization = require(ReplicatedStorage.Shared.localization.Localization)
+local Accessibility = require(ReplicatedStorage.Shared.settings.Accessibility)
+
 export type LifecycleState =
 	"Constructed"
 	| "Initializing"
@@ -68,8 +71,10 @@ export type ViewAdapter = {
 	cleanup: (self: ViewAdapter) -> any,
 }
 
-export type Accessibility = { textScale: number, transparency: number }
+export type Accessibility =
+	{ textScale: number, textPreference: string?, transparency: number, reducedMotion: boolean? }
 export type Dependencies = {
+	presentation: any?,
 	view: ViewAdapter,
 	request: (string, unknown, ResponseCallback) -> boolean,
 	cancel: (string) -> (),
@@ -148,6 +153,7 @@ type ControllerData = {
 	notifications: NotificationStore.Store,
 	lastProfilePoll: number,
 	lastToastTick: number,
+	lastUiSignature: string,
 	requestCount: number,
 	rejectedResponseCount: number,
 	renderCount: number,
@@ -214,13 +220,15 @@ end
 
 local function networkFailure(data: ControllerData, endpoint: string, code: string?)
 	local message = if code == "RATE_LIMITED"
-		then "That action is happening too quickly. Please wait a moment."
-		elseif code == "STALE_REQUEST" then "Your party, queue, or profile changed. Refreshing the authoritative state."
-		else "The Lobby server did not accept that request. Retrying safely."
+		then Localization.text("lobby_controller.that_action_is_happening_too_quickly_please")
+		elseif code == "STALE_REQUEST" then Localization.text(
+			"lobby_controller.your_party_queue_or_profile_changed_refreshing"
+		)
+		else Localization.text("lobby_controller.the_lobby_server_did_not_accept_that")
 	notify(
 		data,
 		if code == "STALE_REQUEST" then "Warning" else "Error",
-		"Request not completed",
+		Localization.text("lobby_controller.request_not_completed"),
 		message,
 		`network:{endpoint}`
 	)
@@ -288,8 +296,11 @@ local function upgradePreview(definition: ConfigTypes.TowerDefinition): string
 	end
 	local attack = nextLevel.attack
 	return if attack == nil
-		then `Next: support range {nextLevel.rangeStuds}`
-		else `Next: {attack.damage} damage • {nextLevel.rangeStuds} range • {attack.cooldownSeconds}s`
+		then Localization.text("lobby_controller.next_support_range", { rangeStuds = nextLevel.rangeStuds })
+		else Localization.text(
+			"lobby_controller.next_damage_range_s",
+			{ damage = attack.damage, rangeStuds = nextLevel.rangeStuds, cooldownSeconds = attack.cooldownSeconds }
+		)
 end
 
 local function towerCards(data: ControllerData): { any }
@@ -316,10 +327,10 @@ local function towerCards(data: ControllerData): { any }
 			unitId = unit.unitId,
 			towerId = unit.towerId,
 			displayName = definition.displayName,
-			description = definition.description or "",
+			description = Localization.contentDescription(definition.id, definition.description),
 			acquisitionSource = if starterUnitIds[unit.unitId] == true
-				then "Starter Profile Grant"
-				else "Earn-only Tower Chest",
+				then Localization.text("lobby_controller.starter_profile_grant")
+				else Localization.text("lobby_controller.earn_only_tower_chest"),
 			copies = counts[unit.towerId] or 1,
 			favorite = unit.favorite,
 			locked = unit.locked,
@@ -329,7 +340,16 @@ local function towerCards(data: ControllerData): { any }
 			damage = damage,
 			rangeStuds = rangeStuds,
 			cooldownSeconds = cooldown,
-			targetModesText = table.concat(definition.supportedTargetModes, ", "),
+			targetModesText = table.concat(
+				(function()
+					local labels = {}
+					for _, mode in definition.supportedTargetModes do
+						table.insert(labels, Localization.enum("target", mode))
+					end
+					return labels
+				end)(),
+				", "
+			),
 			upgradePreview = upgradePreview(definition),
 		}
 	end
@@ -357,7 +377,7 @@ local function bannerForView(data: ControllerData)
 	return {
 		bannerId = banner.bannerId,
 		displayName = banner.displayName,
-		policyDisclosure = banner.policyDisclosure,
+		policyDisclosure = Localization.contentPolicy(banner.bannerId, banner.policyDisclosure),
 		onePullCost = banner.onePullCost,
 		tenPullCost = banner.tenPullCost,
 		pityCount = banner.currentPityCount,
@@ -440,49 +460,45 @@ local function tutorialGuidance(data: ControllerData): any?
 	if tutorial.version == nil then
 		return nil
 	end
-	local title = "Getting started"
-	local message = "Preparing your permanent starter loadout safely."
+	local title = Localization.text("lobby_controller.getting_started")
+	local message = Localization.text("lobby_controller.preparing_your_permanent_starter_loadout_safely")
 	local primaryActionText: string? = nil
 	local canAdvance = false
 	local canReplay = false
 	if step == 1 then
-		title = "Gold and Battle Cash"
-		message =
-			"Gold is permanent and opens earn-only chests; every chest's exact odds and pity are listed in Chests. Battle Cash is earned and spent only inside a match."
-		primaryActionText = "GOT IT"
+		title = Localization.text("lobby_controller.gold_and_battle_cash")
+		message = Localization.text("lobby_controller.gold_is_permanent_and_opens_earn_only")
+		primaryActionText = Localization.text("lobby_controller.got_it")
 		canAdvance = true
 	elseif step == 2 then
-		title = "Starter loadout"
-		message =
-			"Your server-validated attacking loadout is ready. Dart Ant handles steady targets and Bombardier Ant covers groups; open Inventory any time to adjust it."
-		primaryActionText = "LOADOUT READY"
+		title = Localization.text("lobby_controller.starter_loadout")
+		message = Localization.text("lobby_controller.your_server_validated_attacking_loadout_is_ready")
+		primaryActionText = Localization.text("lobby_controller.loadout_ready")
 		canAdvance = true
 	elseif step == 3 then
-		title = "Enter your first defense"
-		message =
-			"Open Queue, choose Backyard Garden on Easy, keep Party Only, and enter alone. Progress advances only when the server sees that exact setup."
+		title = Localization.text("lobby_controller.enter_your_first_defense")
+		message = Localization.text("lobby_controller.open_queue_choose_backyard_garden_on_easy")
 	elseif step == 4 then
-		title = "Start when ready"
-		message =
-			"Your solo Easy queue is ready. Start the trip; the authenticated travel ticket carries the selected map and difficulty."
+		title = Localization.text("lobby_controller.start_when_ready")
+		message = Localization.text("lobby_controller.your_solo_easy_queue_is_ready_start")
 	elseif step == 5 then
-		title = "Place a tower"
-		message = "Choose a starter tower and place it inside a highlighted placement region."
+		title = Localization.text("lobby_controller.place_a_tower")
+		message = Localization.text("lobby_controller.choose_a_starter_tower_and_place_it")
 	elseif step == 6 then
-		title = "Upgrade a tower"
-		message = "Select one of your placed towers and buy an upgrade with match-only Battle Cash."
+		title = Localization.text("lobby_controller.upgrade_a_tower")
+		message = Localization.text("lobby_controller.select_one_of_your_placed_towers_and")
 	elseif step == 7 then
-		title = "Finish the run"
-		message =
-			"Keep defending. A durable server result—not a client claim—records the run even after an ordinary defeat."
+		title = Localization.text("lobby_controller.finish_the_run")
+		message = Localization.text("lobby_controller.keep_defending_a_durable_server_result_not")
 	elseif step == 8 then
-		title = "Return safely"
-		message =
-			"Return to the Lobby. Your onboarding completes only after the matching run and saved profile are observed here."
+		title = Localization.text("lobby_controller.return_safely")
+		message = Localization.text("lobby_controller.return_to_the_lobby_your_onboarding_completes")
 	elseif step == TutorialProtocol.COMPLETE_STEP then
-		title = if tutorial.skipped == true then "Onboarding skipped" else "Onboarding complete"
-		message = "Need a refresher? Replay the concise guide without receiving duplicate starter rewards."
-		primaryActionText = "REPLAY HELP"
+		title = if tutorial.skipped == true
+			then Localization.text("lobby_controller.onboarding_skipped")
+			else Localization.text("lobby_controller.onboarding_complete")
+		message = Localization.text("lobby_controller.need_a_refresher_replay_the_concise_guide")
+		primaryActionText = Localization.text("lobby_controller.replay_help")
 		canReplay = true
 	end
 	return {
@@ -507,20 +523,38 @@ local function render(data: ControllerData): boolean
 		return false
 	end
 	local access = safeAccessibility(dependencies)
+	local viewport = safeViewport(dependencies)
+	data.lastUiSignature = tostring(viewport)
+		.. ":"
+		.. tostring(access.textScale)
+		.. ":"
+		.. tostring(access.textPreference)
+		.. ":"
+		.. tostring(access.transparency)
+		.. ":"
+		.. tostring(access.reducedMotion)
+		.. ":"
+		.. Localization.getMode()
 	local effectiveReady = data.profile.state == "Ready" and data.inventory ~= nil
 	local profileState: ProfileProtocol.ProfileState = if effectiveReady then "Ready" else data.profile.state
 	if data.profile.state == "Ready" and not effectiveReady then
 		profileState = "Loading"
 	end
 	local statusText = if data.profile.state == "Failed"
-		then "Your profile could not be loaded safely. No writable fallback was created."
-		elseif data.profile.state == "Releasing" then "Saving and releasing your protected profile session."
-		elseif not effectiveReady then "Loading your protected profile and inventory…"
-		elseif
-			data.profile.migrationOutcome == "Created"
-		then "Welcome! Your starter towers and earn-only Gold are ready."
-		elseif data.profile.migrationOutcome == "Migrated" then "Welcome back. Your profile was migrated safely."
-		else "Welcome back. Your saved loadout is ready."
+		then Localization.text("lobby_controller.your_profile_could_not_be_loaded_safely")
+		elseif data.profile.state == "Releasing" then Localization.text(
+			"lobby_controller.saving_and_releasing_your_protected_profile_session"
+		)
+		elseif not effectiveReady then Localization.text(
+			"lobby_controller.loading_your_protected_profile_and_inventory"
+		)
+		elseif data.profile.migrationOutcome == "Created" then Localization.text(
+			"lobby_controller.welcome_your_starter_towers_and_earn_only"
+		)
+		elseif data.profile.migrationOutcome == "Migrated" then Localization.text(
+			"lobby_controller.welcome_back_your_profile_was_migrated_safely"
+		)
+		else Localization.text("lobby_controller.welcome_back_your_saved_loadout_is_ready")
 	local toasts = table.create(#toastSnapshot.value)
 	for index, entry in toastSnapshot.value do
 		toasts[index] = {
@@ -538,12 +572,12 @@ local function render(data: ControllerData): boolean
 		canRetry = data.profile.state == "Failed",
 		canLeave = true,
 		inputFamily = data.inputFamily,
-		viewport = safeViewport(dependencies),
+		viewport = viewport,
 		preferredTextScale = access.textScale,
 		preferredTransparency = access.transparency,
 		reducedMotion = if effectiveReady
-			then (data.profile.settings :: ProfileProtocol.SettingsView).reducedMotionEnabled
-			else false,
+			then (data.profile.settings :: ProfileProtocol.SettingsView).reducedMotionEnabled or access.reducedMotion == true
+			else access.reducedMotion == true,
 		isFirstJoin = false,
 		didMigrate = false,
 		localUserId = data.localUserId,
@@ -565,7 +599,7 @@ local function render(data: ControllerData): boolean
 		local readyState = base :: any
 		readyState.profileRevision = data.revision
 		readyState.gold = data.profile.gold
-		readyState.progressionText = "Progression systems are coming later."
+		readyState.progressionText = Localization.text("lobby_controller.progression_systems_are_coming_later")
 		readyState.isFirstJoin = data.profile.migrationOutcome == "Created"
 			and (data.profile.tutorial :: ProfileProtocol.TutorialView).firstJoin
 		readyState.didMigrate = data.profile.migrationOutcome == "Migrated"
@@ -695,7 +729,13 @@ local function issueTutorialMutation(data: ControllerData, endpoint: string): bo
 			})
 			updateProfileRevision(data, validated.value.revision)
 			if validated.value.changed then
-				notify(data, "Success", "Guide updated", "Your onboarding progress was saved.", "tutorial:updated")
+				notify(
+					data,
+					"Success",
+					Localization.text("lobby_controller.guide_updated"),
+					Localization.text("lobby_controller.your_onboarding_progress_was_saved"),
+					"tutorial:updated"
+				)
 			end
 			return true
 		end
@@ -919,7 +959,7 @@ local function applyPartyReceipt(
 	data.partyState = "Ready"
 	data.partySnapshot = validated.value.snapshot
 	if validated.value.changed then
-		notify(data, "Success", "Party updated", successMessage, nil)
+		notify(data, "Success", Localization.text("lobby_controller.party_updated"), successMessage, nil)
 	end
 	return true
 end
@@ -972,7 +1012,7 @@ local function applyQueueReceipt(
 	data.queueSnapshots = list.value.queues
 	data.selectedQueueId = validated.value.snapshot.queueId
 	if validated.value.changed then
-		notify(data, "Success", "Queue updated", successMessage, nil)
+		notify(data, "Success", Localization.text("lobby_controller.queue_updated"), successMessage, nil)
 	end
 	return true
 end
@@ -1011,21 +1051,27 @@ local function issueInvitePrompt(data: ControllerData): boolean
 			end
 			local status = (validated.value :: any).status
 			if status == "Opened" then
-				notify(data, "Info", "Invite friends", "The Roblox invite prompt is open.", "party:prompt-open")
+				notify(
+					data,
+					"Info",
+					Localization.text("lobby_controller.invite_friends"),
+					Localization.text("lobby_controller.the_roblox_invite_prompt_is_open"),
+					"party:prompt-open"
+				)
 			elseif status == "Denied" then
 				notify(
 					data,
 					"Warning",
-					"Invite unavailable",
-					"Invite permission was denied. You can still invite a present player by name.",
+					Localization.text("lobby_controller.invite_unavailable"),
+					Localization.text("lobby_controller.invite_permission_was_denied_you_can_still"),
 					"party:prompt-denied"
 				)
 			else
 				notify(
 					data,
 					"Warning",
-					"Invite unavailable",
-					"The Roblox invite prompt is unavailable here. Use the same-server player-name field instead.",
+					Localization.text("lobby_controller.invite_unavailable"),
+					Localization.text("lobby_controller.the_roblox_invite_prompt_is_unavailable_here"),
 					"party:prompt-unavailable"
 				)
 			end
@@ -1058,23 +1104,23 @@ local function issueReconnect(data: ControllerData): boolean
 					data,
 					"Info",
 					"Reconnecting",
-					"The server is safely reconnecting you to the active Match.",
+					Localization.text("lobby_controller.the_server_is_safely_reconnecting_you_to"),
 					"route:initializing"
 				)
 			elseif validated.value.status == "Stale" then
 				notify(
 					data,
 					"Warning",
-					"Reconnect expired",
-					"That Match route is stale; you remain safely in the Lobby.",
+					Localization.text("lobby_controller.reconnect_expired"),
+					Localization.text("lobby_controller.that_match_route_is_stale_you_remain"),
 					"route:stale"
 				)
 			else
 				notify(
 					data,
 					"Error",
-					"Reconnect failed",
-					"The Match could not be reached. You remain safely in the Lobby.",
+					Localization.text("lobby_controller.reconnect_failed"),
+					Localization.text("lobby_controller.the_match_could_not_be_reached_you"),
 					"route:failed"
 				)
 			end
@@ -1090,7 +1136,13 @@ local function applyInventoryReceipt(data: ControllerData, value: unknown): bool
 	end
 	data.inventory = validated.value.snapshot
 	updateProfileRevision(data, validated.value.revision)
-	notify(data, "Success", "Loadout saved", "Your inventory change was accepted by the server.", nil)
+	notify(
+		data,
+		"Success",
+		Localization.text("lobby_controller.loadout_saved"),
+		Localization.text("lobby_controller.your_inventory_change_was_accepted_by_the"),
+		nil
+	)
 	issueProfile(data)
 	return true
 end
@@ -1144,16 +1196,24 @@ local function openPullConfirmation(data: ControllerData, quantity: number): boo
 	end
 	local cost = pullCost(banner, quantity)
 	if not banner.available or (data.profile.gold :: number) < cost then
-		notify(data, "Warning", "Not enough Gold", `This pull costs {cost} earn-only Gold.`, "chest:insufficient")
+		notify(
+			data,
+			"Warning",
+			Localization.text("lobby_controller.not_enough_gold"),
+			Localization.text("lobby_controller.this_pull_costs_earn_only_gold", { cost = cost }),
+			"chest:insufficient"
+		)
 		return false
 	end
 	data.pendingChestQuantity = quantity
 	return pushModal(data, {
 		id = `modal:chest-confirm:{quantity}`,
-		title = if quantity == 10 then "Confirm 10 pulls" else "Confirm 1 pull",
-		message = `Spend {cost} earn-only Gold? Outcomes use the exact displayed server-owned odds and pity.`,
-		confirmText = "Confirm",
-		cancelText = "Cancel",
+		title = if quantity == 10
+			then Localization.text("lobby_controller.confirm_10_pulls")
+			else Localization.text("lobby_controller.confirm_1_pull"),
+		message = Localization.text("lobby_controller.spend_earn_only_gold_outcomes_use_the", { cost = cost }),
+		confirmText = Localization.text("lobby.chest.confirm"),
+		cancelText = Localization.text("lobby.chest.cancel"),
 		dismissable = true,
 		busy = false,
 	})
@@ -1163,9 +1223,18 @@ local function pullResultsMessage(data: ControllerData, receipt: AcquisitionProt
 	local parts = table.create(#receipt.results)
 	for index, outcome in receipt.results do
 		local definition = data.configuration.towers.byId[outcome.towerId]
-		parts[index] = `{index}. {if outcome.isNew then "NEW" else "DUPLICATE"}: {if definition == nil
-			then "Unknown tower"
-			else definition.displayName}`
+		parts[index] = if definition == nil
+			then Localization.text(
+				if outcome.isNew then "lobby.chest.unknown_new_result" else "lobby.chest.unknown_duplicate_result",
+				{ index = index }
+			)
+			else Localization.text(
+				if outcome.isNew then "lobby.chest.new_result" else "lobby.chest.duplicate_result",
+				{
+					index = index,
+					towerName = definition.displayName,
+				}
+			)
 	end
 	return table.concat(parts, "\n")
 end
@@ -1177,10 +1246,10 @@ local function issuePull(data: ControllerData, quantity: number): boolean
 	end
 	replaceTopModal(data, {
 		id = `modal:chest-confirm:{quantity}`,
-		title = "Opening chest…",
-		message = "The server is committing Gold, outcomes, copies, and pity atomically.",
+		title = Localization.text("lobby_controller.opening_chest"),
+		message = Localization.text("lobby_controller.the_server_is_committing_gold_outcomes_copies"),
 		confirmText = nil,
-		cancelText = "Skip Animation",
+		cancelText = Localization.text("lobby_controller.skip_animation"),
 		dismissable = true,
 		busy = false,
 	})
@@ -1198,6 +1267,12 @@ local function issuePull(data: ControllerData, quantity: number): boolean
 		end
 		local receipt = validated.value
 		updateProfileRevision(data, receipt.profileRevision)
+		local presentation = (data.dependencies :: Dependencies).presentation
+		if presentation ~= nil then
+			pcall(function()
+				presentation:reward()
+			end)
+		end
 		if data.profile.state == "Ready" then
 			local profile = data.profile :: any
 			data.profile = table.freeze({
@@ -1215,14 +1290,25 @@ local function issuePull(data: ControllerData, quantity: number): boolean
 		popModal(data, `modal:chest-confirm:{quantity}`)
 		pushModal(data, {
 			id = CHEST_RESULTS_MODAL_ID,
-			title = if quantity == 10 then "10-pull results" else "Chest result",
+			title = if quantity == 10
+				then Localization.text("lobby_controller.10_pull_results")
+				else Localization.text("lobby_controller.chest_result"),
 			message = pullResultsMessage(data, receipt),
-			confirmText = "Done",
+			confirmText = Localization.text("lobby.chest.done"),
 			cancelText = nil,
 			dismissable = true,
 			busy = false,
 		})
-		notify(data, "Success", "Chest opened", `Spent {receipt.cost} Gold. Pity is now {receipt.pityAfter}.`, nil)
+		notify(
+			data,
+			"Success",
+			Localization.text("lobby_controller.chest_opened"),
+			Localization.text(
+				"lobby_controller.spent_gold_pity_is_now",
+				{ cost = receipt.cost, pityAfter = receipt.pityAfter }
+			),
+			nil
+		)
 		data.pendingChestQuantity = nil
 		issueProfile(data)
 		issueInventory(data)
@@ -1301,7 +1387,13 @@ local function issueSetting(data: ControllerData, action: LobbyView.Action): boo
 				migrationOutcome = currentProfile.migrationOutcome,
 			})
 			pcall((data.dependencies :: Dependencies).applySettings, accepted.settings)
-			notify(data, "Success", "Settings saved", "Your settings were saved to your profile.", "settings:saved")
+			notify(
+				data,
+				"Success",
+				Localization.text("lobby_controller.settings_saved"),
+				Localization.text("lobby_controller.your_settings_were_saved_to_your_profile"),
+				"settings:saved"
+			)
 			return true
 		end
 	)
@@ -1315,6 +1407,14 @@ end
 local function onAction(data: ControllerData, action: LobbyView.Action)
 	if not data.active or data.state ~= "Started" or type(action) ~= "table" then
 		return
+	end
+	if action.kind ~= "InputFamilyChanged" then
+		local presentation = (data.dependencies :: Dependencies).presentation
+		if presentation ~= nil then
+			pcall(function()
+				presentation:selection()
+			end)
+		end
 	end
 	if action.kind == "InputFamilyChanged" and action.inputFamily ~= nil then
 		data.inputFamily = action.inputFamily
@@ -1381,8 +1481,8 @@ local function onAction(data: ControllerData, action: LobbyView.Action)
 			notify(
 				data,
 				"Warning",
-				"Profile not ready",
-				"Reconnect begins only after protected profile acquisition is ready.",
+				Localization.text("lobby_controller.profile_not_ready"),
+				Localization.text("lobby_controller.reconnect_begins_only_after_protected_profile_acquisition"),
 				"route:profile-not-ready"
 			)
 		end
@@ -1406,15 +1506,15 @@ local function onAction(data: ControllerData, action: LobbyView.Action)
 			notify(
 				data,
 				"Warning",
-				"Profile not ready",
-				"Party and queue changes unlock after your authoritative profile and loadout are ready.",
+				Localization.text("lobby_controller.profile_not_ready"),
+				Localization.text("lobby_controller.party_and_queue_changes_unlock_after_your"),
 				"squad:profile-not-ready"
 			)
 		elseif action.kind == "CreateParty" then
 			issuePartyMutation(data, LobbyProtocol.ENDPOINTS.CREATE_PARTY, {
 				expectedRevision = 0,
 				privacy = "InviteOnly",
-			}, "Your same-server party was created.")
+			}, Localization.text("lobby_controller.your_same_server_party_was_created"))
 		elseif action.kind == "AcceptPartyInvite" or action.kind == "DeclinePartyInvite" then
 			local invitation: PartyProtocol.InvitationView? = nil
 			if data.partySnapshot ~= nil and action.invitationId ~= nil then
@@ -1436,8 +1536,8 @@ local function onAction(data: ControllerData, action: LobbyView.Action)
 						invitationId = invitation.invitationId,
 					},
 					if action.kind == "AcceptPartyInvite"
-						then "You joined the party."
-						else "The invitation was declined."
+						then Localization.text("lobby_controller.you_joined_the_party")
+						else Localization.text("lobby_controller.the_invitation_was_declined")
 				)
 			end
 		else
@@ -1447,30 +1547,30 @@ local function onAction(data: ControllerData, action: LobbyView.Action)
 				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.INVITE_PARTY, {
 					expectedRevision = party.revision,
 					targetUserId = action.targetUserId,
-				}, "The bounded invitation was sent.")
+				}, Localization.text("lobby_controller.the_bounded_invitation_was_sent"))
 			elseif action.kind == "LeaveParty" and party ~= nil then
 				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.LEAVE_PARTY, {
 					expectedRevision = party.revision,
-				}, "You left the party.")
+				}, Localization.text("lobby_controller.you_left_the_party"))
 			elseif action.kind == "KickPartyMember" and party ~= nil and action.targetUserId ~= nil then
 				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.KICK_PARTY_MEMBER, {
 					expectedRevision = party.revision,
 					targetUserId = action.targetUserId,
-				}, "The member was removed.")
+				}, Localization.text("lobby_controller.the_member_was_removed"))
 			elseif action.kind == "TransferPartyLeadership" and party ~= nil and action.targetUserId ~= nil then
 				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.TRANSFER_PARTY_LEADERSHIP, {
 					expectedRevision = party.revision,
 					targetUserId = action.targetUserId,
-				}, "Party leadership was transferred.")
+				}, Localization.text("lobby_controller.party_leadership_was_transferred"))
 			elseif action.kind == "TogglePartyPrivacy" and party ~= nil then
 				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.SET_PARTY_PRIVACY, {
 					expectedRevision = party.revision,
 					privacy = if party.privacy == "InviteOnly" then "FriendsOnly" else "InviteOnly",
-				}, "Party privacy was updated.")
+				}, Localization.text("lobby_controller.party_privacy_was_updated"))
 			elseif action.kind == "DisbandParty" and party ~= nil then
 				issuePartyMutation(data, LobbyProtocol.ENDPOINTS.DISBAND_PARTY, {
 					expectedRevision = party.revision,
-				}, "The party was disbanded.")
+				}, Localization.text("lobby_controller.the_party_was_disbanded"))
 			elseif action.kind == "PromptPartyInvite" then
 				issueInvitePrompt(data)
 			elseif action.kind == "JoinQueue" and queue ~= nil then
@@ -1478,23 +1578,23 @@ local function onAction(data: ControllerData, action: LobbyView.Action)
 					expectedRevision = queue.revision,
 					queueId = queue.queueId,
 					source = "UI",
-				}, "You entered the queue through the accessible Lobby UI.")
+				}, Localization.text("lobby_controller.you_entered_the_queue_through_the_accessible"))
 			elseif action.kind == "LeaveQueue" and queue ~= nil then
 				issueQueueMutation(data, LobbyProtocol.ENDPOINTS.LEAVE_QUEUE, {
 					expectedRevision = queue.revision,
 					queueId = queue.queueId,
-				}, "Your enrollment left the queue cleanly.")
+				}, Localization.text("lobby_controller.your_enrollment_left_the_queue_cleanly"))
 			elseif action.kind == "ConfigureQueue" and queue ~= nil and action.configuration ~= nil then
 				issueQueueMutation(data, LobbyProtocol.ENDPOINTS.CONFIGURE_QUEUE, {
 					expectedRevision = queue.revision,
 					queueId = queue.queueId,
 					configuration = action.configuration,
-				}, "The captain configuration was saved.")
+				}, Localization.text("lobby_controller.the_captain_configuration_was_saved"))
 			elseif action.kind == "StartQueue" and queue ~= nil then
 				issueQueueMutation(data, LobbyProtocol.ENDPOINTS.START_QUEUE, {
 					expectedRevision = queue.revision,
 					queueId = queue.queueId,
-				}, "The squad is locked and travel initialization has started.")
+				}, Localization.text("lobby_controller.the_squad_is_locked_and_travel_initialization"))
 			end
 		end
 	elseif action.kind == "SelectTower" then
@@ -1636,7 +1736,19 @@ local function onStep(data: ControllerData)
 	if now - data.lastToastTick >= TOAST_TICK_SECONDS then
 		data.lastToastTick = now
 		local ticked = data.notifications:tick()
-		if ticked.ok and ticked.value > 0 then
+		local access = safeAccessibility(data.dependencies)
+		local signature = tostring(safeViewport(data.dependencies))
+			.. ":"
+			.. tostring(access.textScale)
+			.. ":"
+			.. tostring(access.textPreference)
+			.. ":"
+			.. tostring(access.transparency)
+			.. ":"
+			.. tostring(access.reducedMotion)
+			.. ":"
+			.. Localization.getMode()
+		if (ticked.ok and ticked.value > 0) or signature ~= data.lastUiSignature then
 			render(data)
 		end
 	end
@@ -1843,6 +1955,7 @@ local function construct(
 		notifications = notificationResult.value,
 		lastProfilePoll = 0,
 		lastToastTick = 0,
+		lastUiSignature = "",
 		requestCount = 0,
 		rejectedResponseCount = 0,
 		renderCount = 0,
@@ -1998,10 +2111,10 @@ local REQUEST_SPECS = table.freeze({
 })
 
 local function inputFamily(): LobbyView.InputFamily
-	local inputType = UserInputService:GetLastInputType()
-	if inputType == Enum.UserInputType.Touch then
+	local inputType = UserInputService.PreferredInput
+	if inputType == Enum.PreferredInput.Touch then
 		return "Touch"
-	elseif string.sub(inputType.Name, 1, 7) == "Gamepad" then
+	elseif inputType == Enum.PreferredInput.Gamepad then
 		return "Gamepad"
 	end
 	return "Desktop"
@@ -2091,21 +2204,17 @@ local function makeProductionFactory(): Factory
 			tracker:clear()
 			error("[ATD_LOBBY_CONTROLLER][code=VIEW_CREATION_FAILED]", 0)
 		end
+		local FeedbackDirector = require(script.Parent.Parent.common.presentation.FeedbackDirector)
+		local presentation = FeedbackDirector.newForSoundService(SoundService)
+		local WorldLocalization = require(script.Parent.Parent.common.ui.WorldLocalization)
+		local worldLocalization = WorldLocalization.new(Workspace)
+		presentation:lobby()
 		local function applySettings(settings: ProfileProtocol.SettingsView)
-			for name, volume in
-				{
-					Music = settings.masterVolume * settings.musicVolume,
-					SFX = settings.masterVolume * settings.sfxVolume,
-					UI = settings.masterVolume * settings.uiVolume,
-				}
-			do
-				local group = SoundService:FindFirstChild(name)
-				if group ~= nil and group:IsA("SoundGroup") then
-					group.Volume = volume
-				end
-			end
+			presentation:applySettings(settings)
+			worldLocalization:applySettings(settings)
 		end
 		return {
+			presentation = presentation,
 			view = viewResult.value,
 			request = function(name, payload, callback)
 				local endpoint = endpoints[name]
@@ -2138,32 +2247,18 @@ local function makeProductionFactory(): Factory
 				return (eventEndpoints[name] :: RemoteEvent).OnClientEvent:Connect(callback)
 			end,
 			connectStep = function(callback)
-				return RunService.RenderStepped:Connect(callback)
+				return RunService.RenderStepped:Connect(function(deltaSeconds)
+					presentation:step(os.clock())
+					worldLocalization:step(os.clock())
+					callback(deltaSeconds)
+				end)
 			end,
 			now = os.clock,
 			getViewport = function()
 				local camera = Workspace.CurrentCamera
 				return if camera == nil then DEFAULT_VIEWPORT else camera.ViewportSize
 			end,
-			getAccessibility = function()
-				local textScale = 1
-				local transparency = 0
-				pcall(function()
-					local userGameSettings = UserSettings():GetService("UserGameSettings") :: any
-					local preferred = userGameSettings.PreferredTextSize
-					local name = if typeof(preferred) == "EnumItem" then preferred.Name else "Medium"
-					textScale = if name == "Small"
-						then 0.9
-						elseif name == "Large" then 1.15
-						elseif name == "Larger" then 1.3
-						else 1
-					local preferredTransparency = userGameSettings.PreferredTransparency
-					if type(preferredTransparency) == "number" then
-						transparency = math.clamp(preferredTransparency, 0, 1)
-					end
-				end)
-				return { textScale = textScale, transparency = transparency }
-			end,
+			getAccessibility = Accessibility.readPreferences,
 			getInputFamily = inputFamily,
 			getLocalUserId = function()
 				local player = Players.LocalPlayer
@@ -2176,10 +2271,12 @@ local function makeProductionFactory(): Factory
 			leave = function()
 				local player = Players.LocalPlayer
 				if player ~= nil then
-					player:Kick("Your profile was not changed. Please rejoin when you are ready.")
+					player:Kick(Localization.text("lobby_controller.your_profile_was_not_changed_please_rejoin"))
 				end
 			end,
 			cleanupNetwork = function()
+				worldLocalization:cleanup()
+				presentation:cleanup()
 				for _, connection in responseConnections do
 					connection:Disconnect()
 				end

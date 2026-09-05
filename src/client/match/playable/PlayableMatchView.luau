@@ -6,6 +6,21 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+
+local Localization = require(ReplicatedStorage.Shared.localization.Localization)
+local Accessibility = require(ReplicatedStorage.Shared.settings.Accessibility)
+local function commonUiRoot(): Instance
+	local common = script.Parent.Parent.Parent:FindFirstChild("common")
+	local production = if common == nil then nil else common:FindFirstChild("ui")
+	local mirrored = script.Parent.Parent:FindFirstChild("ProductionClientCommonUi")
+	return production or mirrored or error("[ATD_PLAYABLE_VIEW][code=COMMON_UI_MISSING]", 0)
+end
+local FocusNavigation = require(commonUiRoot().FocusNavigation)
+local TextLayout = require(commonUiRoot().TextLayout)
+local PresentationPolicy = require(ReplicatedStorage.Shared.presentation.PresentationPolicy)
+local TowerAim = require(ReplicatedStorage.Shared.presentation.TowerAim)
+local ProfileScope = require(ReplicatedStorage.Shared.util.ProfileScope)
 
 export type InputFamily = "Desktop" | "Touch" | "Gamepad"
 export type MatchState = "Loading" | "ReadyCheck" | "PreWave" | "WaveActive" | "Results" | "Closing"
@@ -262,6 +277,9 @@ export type Dependencies = {
 	connectStepped: ((number) -> ()) -> RBXScriptConnection,
 	now: () -> number,
 	selectObject: (GuiObject?) -> (),
+	getSelectedObject: (() -> GuiObject?)?,
+	connectInputBegan: (((string, boolean) -> ()) -> RBXScriptConnection)?,
+	cleanupInput: (() -> ())?,
 }
 
 type CanonicalReady = ReadyState
@@ -335,6 +353,8 @@ type EffectRecord = {
 }
 
 type TowerRecord = {
+	aim: TowerAim.State,
+	position: Vector3,
 	model: Model,
 	primaryPart: BasePart,
 	definitionId: string,
@@ -365,9 +385,14 @@ type ViewData = {
 	towerRecords: { [string]: TowerRecord },
 	enemyRecords: { [string]: EnemyRecord },
 	effects: { EffectRecord },
+	effectsAdmittedThisFrame: number,
+	lastPresentationStep: number,
 	current: CanonicalSnapshot?,
 	lastAttackSequence: number,
 	lastFocusMode: string?,
+	keyboardNavigation: boolean,
+	activationCallbacks: { [GuiObject]: () -> () },
+	focusRestore: GuiObject?,
 	inputFamily: InputFamily,
 	reducedMotion: boolean,
 	lowEffects: boolean,
@@ -386,7 +411,7 @@ ViewMethods.__index = ViewMethods
 
 export type View = typeof(setmetatable({} :: {}, ViewMethods))
 export type ViewResult = Outcome<View>
-export type TestConstructor = (Instance, Instance, UiActionCallback, Dependencies) -> ViewResult
+export type TestConstructor = (Instance, Instance, UiActionCallback, Dependencies, boolean?) -> ViewResult
 export type TemplateTestConstructor = (Instance, Instance, Instance, UiActionCallback, Dependencies) -> ViewResult
 export type ResponsiveLayoutResolver = (unknown, unknown) -> ResponsiveLayout?
 
@@ -401,7 +426,7 @@ local HOTBAR_SLOTS = 5
 local BUTTON_CONNECTION_COUNT = 20
 local MAX_TOWERS = 64
 local MAX_ENEMIES = 256
-local MAX_ATTACK_EFFECTS = 32
+local MAX_ATTACK_EFFECTS = PresentationPolicy.MAX_EFFECTS
 local MAX_MUZZLES_PER_TOWER = 8
 local MAX_MUZZLE_OFFSET_STUDS = 16
 local MAX_MODEL_LABEL_OFFSET_STUDS = 64
@@ -574,7 +599,7 @@ local function resolveResponsiveLayout(widthValue: unknown, heightValue: unknown
 		not finiteNumber(widthValue)
 		or not finiteNumber(heightValue)
 		or (widthValue :: number) < 240
-		or (heightValue :: number) < 320
+		or (heightValue :: number) < 240
 		or widthValue > 16_384
 		or heightValue > 16_384
 	then
@@ -590,7 +615,7 @@ local function resolveResponsiveLayout(widthValue: unknown, heightValue: unknown
 	end
 	local margin = if mode == "TenFoot" then 32 else 12
 	local maximumHud = if mode == "TenFoot" then 1_160 else 900
-	local maximumHotbar = if mode == "Compact" then 352 else 420
+	local maximumHotbar = if mode == "Compact" then width elseif mode == "TenFoot" then 1_240 else 1_040
 	return table.freeze({
 		mode = mode,
 		hudWidth = math.min(maximumHud, width - margin * 2),
@@ -615,7 +640,7 @@ local function canonicalReady(value: unknown): CanonicalReady?
 	if countdown ~= nil and not safeInteger(countdown, 0, 300) then
 		return nil
 	end
-	if status ~= nil and not safeText(status, 96, true) then
+	if status ~= nil and not safeText(status, 512, true) then
 		return nil
 	end
 	return table.freeze({
@@ -650,7 +675,7 @@ local function canonicalSelection(value: unknown): CanonicalSelection?
 		not safeId(towerId)
 		or not safeInteger(revision, 0, 2 ^ 31 - 1)
 		or not safeText(displayName, 40)
-		or (description ~= nil and not safeText(description, 160))
+		or (description ~= nil and not safeText(description, 512))
 		or type(isOwner) ~= "boolean"
 		or not safeInteger(level, 1, 100)
 		or not safeInteger(maxLevel, level :: number, 100)
@@ -717,7 +742,7 @@ local function canonicalResult(value: unknown): CanonicalResult?
 	local rewardReason = rawget(result, "rewardReason")
 	if
 		(kind ~= "Victory" and kind ~= "Defeat")
-		or not safeText(summary, 180, true)
+		or not safeText(summary, 1_024, true)
 		or type(canReplay) ~= "boolean"
 		or (status ~= nil and not safeText(status, 96, true))
 		or (rewardStatus ~= "Granted" and rewardStatus ~= "Pending" and rewardStatus ~= "Ineligible" and rewardStatus ~= "Failed")
@@ -932,7 +957,7 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 		if
 			slotIndex ~= index
 			or not safeText(displayName, 32)
-			or (description ~= nil and not safeText(description, 160))
+			or (description ~= nil and not safeText(description, 512))
 			or not safeInteger(cost, 0, 2 ^ 31 - 1)
 			or type(available) ~= "boolean"
 			or type(selected) ~= "boolean"
@@ -1022,10 +1047,7 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	if placementValue ~= nil and placement == nil then
 		return nil
 	end
-	if
-		placement ~= nil
-		and (inputFamily ~= "Touch" or (state ~= "PreWave" and state ~= "WaveActive") or selectedCount ~= 1)
-	then
+	if placement ~= nil and ((state ~= "PreWave" and state ~= "WaveActive") or selectedCount ~= 1) then
 		return nil
 	end
 	if viewerRole == "Spectator" and placement ~= nil then
@@ -1039,12 +1061,12 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 	local lowEffects = rawget(snapshot, "lowEffects")
 	local enemyHealthBars = rawget(snapshot, "enemyHealthBars")
 	local towerRange = rawget(snapshot, "towerRange")
-	if inputHint ~= nil and not safeText(inputHint, 120, true) then
+	if inputHint ~= nil and not safeText(inputHint, 512, true) then
 		return nil
 	end
 	if
 		viewport ~= nil
-		and (not finiteVector2(viewport) or (viewport :: Vector2).X < 240 or (viewport :: Vector2).Y < 320)
+		and (not finiteVector2(viewport) or (viewport :: Vector2).X < 240 or (viewport :: Vector2).Y < 240)
 	then
 		return nil
 	end
@@ -1100,65 +1122,75 @@ local function canonicalSnapshot(value: unknown): CanonicalSnapshot?
 end
 
 local FEEDBACK_TEXT: { [string]: string } = table.freeze({
-	INSUFFICIENT_CASH = "$ Not enough Battle Cash — defeat enemies or wait for the next stipend.",
-	INVALID_POSITION = "▱ Move the tower onto an open placement zone.",
-	TOWER_CAP_REACHED = "! Tower limit reached — sell a tower before placing another.",
-	NOT_OWNER = "⌁ Inspection only — only the owner can change this tower.",
-	STALE_MATCH = "↻ That match ended — wait for the new match to load.",
-	STALE_TOWER = "↻ Tower changed — select it again and retry.",
-	TOWER_NOT_FOUND = "? Tower no longer exists — choose another tower.",
-	MATCH_NOT_ACTIVE = "! Tower actions unlock when the match is active.",
-	RATE_LIMITED = "… Too many requests — wait a moment and try again.",
-	REQUEST_PENDING = "… Waiting for server confirmation.",
-	REQUEST_ACCEPTED = "✓ Server confirmed the action.",
-	REQUEST_REJECTED = "! The server rejected that action — retry or choose another.",
-	SERVER_UNAVAILABLE = "! Server unavailable — wait a moment and retry.",
-	POSITION_SELECTED = "✓ Position selected — Confirm to spend Battle Cash and place the tower.",
-	SPECTATOR_READ_ONLY = "◉ Spectators are read-only and cannot affect gameplay or rewards.",
-	SPECTATOR_TARGET_UNAVAILABLE = "◉ No live spectator camera target is available.",
-	TRAVEL_UNAVAILABLE = "↩ Return or rematch is not available yet.",
-	RETURN_PENDING = "… Requesting a safe return to the Lobby.",
-	RETURN_CONFIRMED = "✓ Return request confirmed by the server.",
-	REMATCH_PENDING = "… Sending your rematch vote.",
-	REMATCH_CONFIRMED = "✓ Rematch vote confirmed by the server.",
-	REMATCH_UNAVAILABLE = "! Rematch voting is unavailable or already resolved.",
+	INSUFFICIENT_CASH = "playable_match_view.not_enough_battle_cash_defeat_enemies_or",
+	INVALID_POSITION = "playable_match_view.move_the_tower_onto_an_open_placement",
+	TOWER_CAP_REACHED = "playable_match_view.tower_limit_reached_sell_a_tower_before",
+	NOT_OWNER = "playable_match_view.inspection_only_only_the_owner_can_change",
+	STALE_MATCH = "playable_match_view.that_match_ended_wait_for_the_new",
+	STALE_TOWER = "playable_match_view.tower_changed_select_it_again_and_retry",
+	TOWER_NOT_FOUND = "playable_match_view.tower_no_longer_exists_choose_another_tower",
+	MATCH_NOT_ACTIVE = "playable_match_view.tower_actions_unlock_when_the_match_is",
+	RATE_LIMITED = "playable_match_view.too_many_requests_wait_a_moment_and",
+	REQUEST_PENDING = "playable_match_view.waiting_for_server_confirmation",
+	REQUEST_ACCEPTED = "playable_match_view.server_confirmed_the_action",
+	REQUEST_REJECTED = "playable_match_view.the_server_rejected_that_action_retry_or",
+	SERVER_UNAVAILABLE = "playable_match_view.server_unavailable_wait_a_moment_and_retry",
+	POSITION_SELECTED = "playable_match_view.position_selected_confirm_to_spend_battle_cash",
+	SPECTATOR_READ_ONLY = "playable_match_view.spectators_are_read_only_and_cannot_affect",
+	SPECTATOR_TARGET_UNAVAILABLE = Localization.text(
+		"playable_match_view.no_live_spectator_camera_target_is_available"
+	),
+	TRAVEL_UNAVAILABLE = "playable_match_view.return_or_rematch_is_not_available_yet",
+	RETURN_PENDING = "playable_match_view.requesting_a_safe_return_to_the_lobby",
+	RETURN_CONFIRMED = "playable_match_view.return_request_confirmed_by_the_server",
+	REMATCH_PENDING = "playable_match_view.sending_your_rematch_vote",
+	REMATCH_CONFIRMED = "playable_match_view.rematch_vote_confirmed_by_the_server",
+	REMATCH_UNAVAILABLE = "playable_match_view.rematch_voting_is_unavailable_or_already_resolved",
 })
 
 local function feedbackText(feedback: FeedbackState?): string
 	if feedback == nil then
 		return ""
 	end
-	return FEEDBACK_TEXT[feedback.code] or "! Action unavailable — review the current match state and retry."
+	return Localization.text(
+		FEEDBACK_TEXT[feedback.code] or "playable_match_view.action_unavailable_review_the_current_match_state"
+	)
 end
 
 local function defaultHint(snapshot: CanonicalSnapshot): string
 	if snapshot.viewerRole == "Spectator" then
 		return if snapshot.inputFamily == "Gamepad"
-			then "LB/RB Camera Target • Return is always safe"
-			elseif snapshot.inputFamily == "Touch" then "Cycle camera targets or Return"
-			else "[ / ] Camera Target • Return"
+			then Localization.text("playable_match_view.lb_rb_camera_target_return_is_always")
+			elseif snapshot.inputFamily == "Touch" then Localization.text(
+				"playable_match_view.cycle_camera_targets_or_return"
+			)
+			else Localization.text("playable_match_view.camera_target_return")
 	elseif snapshot.placement ~= nil then
-		return "Tap the map to choose a position • Confirm • Rotate • Cancel"
+		return Localization.text("playable_match_view.tap_the_map_to_choose_a_position")
 	elseif snapshot.state == "ReadyCheck" then
 		return if snapshot.inputFamily == "Gamepad"
-			then "A Ready"
-			elseif snapshot.inputFamily == "Touch" then "Tap Ready"
-			else "R / Enter Ready"
+			then Localization.text("playable_input_map.a_ready")
+			elseif snapshot.inputFamily == "Touch" then Localization.text("playable_input_map.tap_ready")
+			else Localization.text("playable_input_map.r_enter_ready")
 	elseif snapshot.state == "Results" then
 		return if snapshot.inputFamily == "Gamepad"
-			then "A Play Again"
-			elseif snapshot.inputFamily == "Touch" then "Tap Play Again"
-			else "R / Enter Play Again"
+			then Localization.text("playable_input_map.a_play_again")
+			elseif snapshot.inputFamily == "Touch" then Localization.text("playable_input_map.tap_play_again")
+			else Localization.text("playable_input_map.r_enter_play_again")
 	elseif snapshot.selection ~= nil then
 		return if snapshot.inputFamily == "Gamepad"
-			then "Y Upgrade • RB Target • X Sell • B Close"
-			elseif snapshot.inputFamily == "Touch" then "Use tower controls or Close"
-			else "U Upgrade • T Target • X Sell • Q Close"
+			then Localization.text("playable_match_view.y_upgrade_rb_target_x_sell_b")
+			elseif snapshot.inputFamily == "Touch" then Localization.text(
+				"playable_match_view.use_tower_controls_or_close"
+			)
+			else Localization.text("playable_input_map.u_upgrade_t_target_x_sell_q")
 	end
 	return if snapshot.inputFamily == "Gamepad"
-		then "LB/RB Tower • D-Pad Down Focus Base"
-		elseif snapshot.inputFamily == "Touch" then "Tap tower cards • Tap Base to focus"
-		else "1–3 Select Tower • F Focus Base"
+		then Localization.text("playable_match_view.lb_rb_tower_d_pad_down_focus")
+		elseif snapshot.inputFamily == "Touch" then Localization.text(
+			"playable_match_view.tap_tower_cards_tap_base_to_focus"
+		)
+		else Localization.text("playable_match_view.1_3_select_tower_f_focus_base")
 end
 
 local function makeFrame(name: string, parent: Instance): Frame
@@ -1177,6 +1209,7 @@ local function makeLabel(name: string, parent: Instance, applyProductionStyle: b
 	label.BorderSizePixel = 0
 	label.TextColor3 = COLORS.Text
 	label.RichText = false
+	label.AutoLocalize = false
 	label.TextWrapped = true
 	if applyProductionStyle then
 		label.Font = Enum.Font.GothamBold
@@ -1194,6 +1227,7 @@ local function makeButton(name: string, parent: Instance, applyProductionStyle: 
 	button.BorderColor3 = COLORS.Muted
 	button.TextColor3 = COLORS.Text
 	button.RichText = false
+	button.AutoLocalize = false
 	button.TextWrapped = true
 	if applyProductionStyle then
 		button.Font = Enum.Font.GothamBold
@@ -1402,7 +1436,7 @@ end
 
 local function setTowerLevel(record: TowerRecord, level: number)
 	record.level = level
-	record.levelText.Text = `LEVEL {level}`
+	record.levelText.Text = Localization.text("playable_match_view.level", { level = level })
 	record.levelText.TextColor3 = towerLevelColor(level)
 end
 
@@ -1430,7 +1464,7 @@ local function makeTowerLevelDisplay(
 	label.TextScaled = true
 	label.TextStrokeColor3 = COLORS.Background
 	label.TextStrokeTransparency = 0.15
-	label.Text = "LEVEL 1"
+	Localization.bind(label, "playable_match_view.level_1", "Text")
 	label.TextColor3 = towerLevelColor(1)
 	return display, label
 end
@@ -1553,18 +1587,18 @@ local function createInstances(
 		for slot = 1, HOTBAR_SLOTS do
 			local button = makeButton(`TowerSlot{slot}`, hotbar, applyProductionStyle)
 			button.SelectionOrder = 20 + slot
-			button.Text = `{slot}\n—`
+			button.Text = Localization.text("placement_preview_view.value", { slot = slot })
 			hotbarButtons[slot] = button
 		end
 		local hintLabel = makeLabel("InputHint", hotbar, applyProductionStyle)
 		local touchPlacementPanel = makeFrame("TouchPlacementPanel", root)
 		local touchPlacementStatus = makeLabel("Status", touchPlacementPanel, applyProductionStyle)
 		local touchConfirmButton = makeButton("Confirm", touchPlacementPanel, applyProductionStyle)
-		touchConfirmButton.Text = "✓ CONFIRM"
+		Localization.bind(touchConfirmButton, "placement_preview_view.confirm", "Text")
 		local touchRotateButton = makeButton("Rotate", touchPlacementPanel, applyProductionStyle)
-		touchRotateButton.Text = "↻ ROTATE"
+		Localization.bind(touchRotateButton, "playable_match_view.rotate", "Text")
 		local touchCancelButton = makeButton("Cancel", touchPlacementPanel, applyProductionStyle)
-		touchCancelButton.Text = "✕ CANCEL"
+		Localization.bind(touchCancelButton, "playable_match_view.cancel", "Text")
 
 		local feedback = makeLabel("ActionFeedback", root, applyProductionStyle)
 		feedback.BackgroundTransparency = 0.08
@@ -1573,12 +1607,12 @@ local function createInstances(
 
 		local readyOverlay = makeFrame("ReadyOverlay", root)
 		local readyTitle = makeLabel("Title", readyOverlay, applyProductionStyle)
-		readyTitle.Text = "◆ DEFEND THE COLONY"
+		Localization.bind(readyTitle, "playable_match_view.defend_the_colony", "Text")
 		local readyCountdown = makeLabel("Countdown", readyOverlay, applyProductionStyle)
 		local readyStatus = makeLabel("Status", readyOverlay, applyProductionStyle)
 		local readyHint = makeLabel("InputHint", readyOverlay, applyProductionStyle)
 		local readyButton = makeButton("Ready", readyOverlay, applyProductionStyle)
-		readyButton.Text = "✓ READY"
+		Localization.bind(readyButton, "playable_match_view.ready", "Text")
 		readyButton.SelectionOrder = 1
 
 		local towerPanel = makeFrame("TowerPanel", root)
@@ -1593,7 +1627,7 @@ local function createInstances(
 		local sellButton = makeButton("Sell", towerPanel, applyProductionStyle)
 		sellButton.SelectionOrder = 42
 		local closeButton = makeButton("Close", towerPanel, applyProductionStyle)
-		closeButton.Text = "✕ CLOSE"
+		Localization.bind(closeButton, "playable_match_view.close", "Text")
 		closeButton.SelectionOrder = 43
 
 		local resultsOverlay = makeFrame("ResultsOverlay", root)
@@ -1602,26 +1636,26 @@ local function createInstances(
 		local resultReward = makeLabel("Reward", resultsOverlay, applyProductionStyle)
 		local resultHint = makeLabel("InputHint", resultsOverlay, applyProductionStyle)
 		local replayButton = makeButton("Replay", resultsOverlay, applyProductionStyle)
-		replayButton.Text = "↻ PLAY AGAIN"
+		Localization.bind(replayButton, "playable_match_view.play_again", "Text")
 		replayButton.SelectionOrder = 2
 		local rematchApproveButton = makeButton("ApproveRematch", resultsOverlay, applyProductionStyle)
-		rematchApproveButton.Text = "✓ REMATCH"
+		Localization.bind(rematchApproveButton, "playable_match_view.rematch", "Text")
 		rematchApproveButton.SelectionOrder = 3
 		local rematchDeclineButton = makeButton("DeclineRematch", resultsOverlay, applyProductionStyle)
-		rematchDeclineButton.Text = "✕ DECLINE"
+		Localization.bind(rematchDeclineButton, "playable_match_view.decline", "Text")
 		rematchDeclineButton.SelectionOrder = 4
 
 		local spectatorPanel = makeFrame("SpectatorTravelPanel", root)
 		local spectatorBanner = makeLabel("Banner", spectatorPanel, applyProductionStyle)
 		local spectatorTarget = makeLabel("Target", spectatorPanel, applyProductionStyle)
 		local spectatorPreviousButton = makeButton("PreviousTarget", spectatorPanel, applyProductionStyle)
-		spectatorPreviousButton.Text = "◀ TARGET"
+		Localization.bind(spectatorPreviousButton, "playable_match_view.target", "Text")
 		spectatorPreviousButton.SelectionOrder = 60
 		local spectatorNextButton = makeButton("NextTarget", spectatorPanel, applyProductionStyle)
-		spectatorNextButton.Text = "TARGET ▶"
+		Localization.bind(spectatorNextButton, "playable_match_view.target_2", "Text")
 		spectatorNextButton.SelectionOrder = 61
 		local returnButton = makeButton("ReturnToLobby", spectatorPanel, applyProductionStyle)
-		returnButton.Text = "↩ RETURN TO LOBBY"
+		Localization.bind(returnButton, "playable_match_view.return_to_lobby", "Text")
 		returnButton.SelectionOrder = 62
 
 		local worldFolder = Instance.new("Folder")
@@ -1712,7 +1746,7 @@ local function createInstances(
 end
 
 local function applyLayout(instances: ViewInstances, layout: ResponsiveLayout)
-	local hudHeight = if layout.mode == "TenFoot" then 92 else 72
+	local hudHeight = math.max(if layout.mode == "TenFoot" then 92 else 72, layout.touchTarget + 16)
 	instances.topHud.AnchorPoint = Vector2.new(0.5, 0)
 	instances.topHud.Position = UDim2.new(0.5, 0, 0, 10)
 	instances.topHud.Size = UDim2.fromOffset(layout.hudWidth, hudHeight)
@@ -1786,7 +1820,7 @@ local function applyLayout(instances: ViewInstances, layout: ResponsiveLayout)
 	instances.readyOverlay.Size =
 		UDim2.fromOffset(math.min(440, layout.hudWidth), if layout.mode == "Compact" then 250 else 280)
 	instances.readyOverlay.BackgroundTransparency = 0.04
-	local readyTitle = instances.readyOverlay:FindFirstChild("Title") :: TextLabel
+	local readyTitle = instances.readyOverlay:FindFirstChild("Title", true) :: TextLabel
 	readyTitle.Position = UDim2.fromOffset(16, 14)
 	readyTitle.Size = UDim2.new(1, -32, 0, 42)
 	readyTitle.TextSize = layout.textSize + 5
@@ -1895,6 +1929,8 @@ local function focusMode(snapshot: CanonicalSnapshot): string
 		return "Ready"
 	elseif snapshot.selection ~= nil then
 		return "Tower"
+	elseif snapshot.placement ~= nil then
+		return "Placement"
 	end
 	return "Match"
 end
@@ -1904,12 +1940,14 @@ local function bestFocus(instances: ViewInstances, snapshot: CanonicalSnapshot):
 		return instances.rematchApproveButton
 	elseif snapshot.result ~= nil and snapshot.result.canReplay then
 		return instances.replayButton
-	elseif snapshot.travel ~= nil and snapshot.travel.canReturn then
+	elseif snapshot.result ~= nil and snapshot.travel ~= nil and snapshot.travel.canReturn then
 		return instances.returnButton
 	elseif snapshot.viewerRole == "Spectator" then
 		return instances.spectatorNextButton
 	elseif snapshot.ready ~= nil and snapshot.ready.enabled then
 		return instances.readyButton
+	elseif snapshot.placement ~= nil then
+		return if snapshot.placement.positionSelected then instances.touchConfirmButton else instances.touchCancelButton
 	elseif snapshot.selection ~= nil then
 		if snapshot.selection.canUpgrade then
 			return instances.upgradeButton
@@ -2010,7 +2048,7 @@ local function actionFor(data: ViewData, kind: UiActionKind, slot: number?): UiA
 end
 
 local function connectButton(data: ViewData, button: TextButton, kind: UiActionKind, slot: number?): boolean
-	local connected, connectionOrError = pcall(data.dependencies.connectActivated, button, function()
+	local function activate()
 		if data.cleaned then
 			return
 		end
@@ -2018,7 +2056,9 @@ local function connectButton(data: ViewData, button: TextButton, kind: UiActionK
 		if action ~= nil and pcall(data.callback, action) then
 			data.actionCount += 1
 		end
-	end)
+	end
+	data.activationCallbacks[button] = activate
+	local connected, connectionOrError = pcall(data.dependencies.connectActivated, button, activate)
 	if not connected or typeof(connectionOrError) ~= "RBXScriptConnection" then
 		return false
 	end
@@ -2040,14 +2080,71 @@ local function disconnectAll(connections: { RBXScriptConnection }): boolean
 	return succeeded
 end
 
-local function stepEffects(data: ViewData, now: number)
+local function trimEffects(data: ViewData, now: number)
 	for index = #data.effects, 1, -1 do
 		local effect = data.effects[index]
-		if effect.expiresAt <= now then
+		if data.reducedMotion or effect.expiresAt <= now then
 			table.remove(data.effects, index)
 			effect.part:Destroy()
 		end
 	end
+	local maximum = if data.lowEffects then PresentationPolicy.LOW_DETAIL_EFFECTS else MAX_ATTACK_EFFECTS
+	while #data.effects > maximum do
+		local oldest = table.remove(data.effects, 1)
+		oldest.part:Destroy()
+	end
+end
+
+local function stepEffects(data: ViewData, now: number)
+	ProfileScope.call("ATD.Client.Effects", trimEffects, data, now)
+end
+
+local function stepAiming(data: ViewData, now: number, deltaSeconds: number)
+	for _, record in data.towerRecords do
+		local previousYaw = record.aim.yaw
+		local yaw = TowerAim.step(record.aim, now, deltaSeconds, data.reducedMotion)
+		if math.abs(previousYaw - yaw) > 0.0001 then
+			pcall(
+				pivotVisual,
+				data,
+				record.model,
+				record.primaryPart,
+				CFrame.new(record.position) * CFrame.Angles(0, yaw, 0)
+			)
+		end
+	end
+end
+
+local function updatePresentation(data: ViewData, now: number)
+	local deltaSeconds = math.max(0, now - data.lastPresentationStep)
+	data.lastPresentationStep = now
+	data.effectsAdmittedThisFrame = 0
+	stepEffects(data, now)
+	ProfileScope.call("ATD.Client.Aim", stepAiming, data, now, deltaSeconds)
+end
+
+local function stepPresentation(data: ViewData, now: number)
+	ProfileScope.call("ATD.Client.Presentation", updatePresentation, data, now)
+end
+
+local function currentFocusControls(data: ViewData, snapshot: CanonicalSnapshot?): { GuiObject }
+	local scope: Instance? = nil
+	if snapshot ~= nil and snapshot.ready ~= nil then
+		scope = data.instances.readyOverlay
+	elseif snapshot ~= nil and snapshot.selection ~= nil then
+		scope = data.instances.towerPanel
+	elseif snapshot ~= nil and snapshot.placement ~= nil then
+		scope = data.instances.touchPlacementPanel
+	elseif snapshot ~= nil and snapshot.result ~= nil then
+		scope = data.instances.resultsOverlay
+	end
+	local controls = FocusNavigation.controls(data.instances.gui, scope)
+	if snapshot ~= nil and snapshot.result ~= nil then
+		for _, control in FocusNavigation.controls(data.instances.gui, data.instances.spectatorPanel) do
+			table.insert(controls, control)
+		end
+	end
+	return controls
 end
 
 local function connectAll(data: ViewData): boolean
@@ -2087,7 +2184,7 @@ local function connectAll(data: ViewData): boolean
 	end
 	local connected, connectionOrError = pcall(data.dependencies.connectStepped, function()
 		if not data.cleaned then
-			stepEffects(data, data.dependencies.now())
+			stepPresentation(data, data.dependencies.now())
 		end
 	end)
 	if not connected or typeof(connectionOrError) ~= "RBXScriptConnection" then
@@ -2095,6 +2192,60 @@ local function connectAll(data: ViewData): boolean
 		return false
 	end
 	table.insert(data.connections, connectionOrError :: RBXScriptConnection)
+	if data.dependencies.connectInputBegan ~= nil then
+		local inputConnected, inputConnection = pcall(data.dependencies.connectInputBegan, function(keyCode, processed)
+			if data.cleaned or processed then
+				return
+			end
+			if keyCode == "Tab" then
+				data.keyboardNavigation = true
+				local selected = if data.dependencies.getSelectedObject == nil
+					then nil
+					else data.dependencies.getSelectedObject()
+				local direction = 1
+				pcall(function()
+					if
+						UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+						or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+					then
+						direction = -1
+					end
+				end)
+				local nextControl = FocusNavigation.next(currentFocusControls(data, data.current), selected, direction)
+				data.dependencies.selectObject(nextControl)
+				pcall(FocusNavigation.reveal, nextControl)
+			elseif
+				data.keyboardNavigation and (keyCode == "Return" or keyCode == "KeypadEnter" or keyCode == "Space")
+			then
+				local selected = if data.dependencies.getSelectedObject == nil
+					then nil
+					else data.dependencies.getSelectedObject()
+				if selected ~= nil and table.find(currentFocusControls(data, data.current), selected) ~= nil then
+					local callback = data.activationCallbacks[selected]
+					if callback ~= nil then
+						callback()
+					end
+				end
+			elseif keyCode == "Escape" or keyCode == "ButtonB" then
+				local snapshot = data.current
+				if
+					snapshot ~= nil
+					and (snapshot.result ~= nil or snapshot.ready ~= nil or snapshot.viewerRole == "Spectator")
+					and data.instances.returnButton.Active
+				then
+					local callback = data.activationCallbacks[data.instances.returnButton]
+					if callback ~= nil then
+						callback()
+					end
+				end
+			end
+		end)
+		if not inputConnected or typeof(inputConnection) ~= "RBXScriptConnection" then
+			disconnectAll(data.connections)
+			return false
+		end
+		table.insert(data.connections, inputConnection :: RBXScriptConnection)
+	end
 	return true
 end
 
@@ -2137,9 +2288,14 @@ local function construct(
 		towerRecords = {},
 		enemyRecords = {},
 		effects = {},
+		effectsAdmittedThisFrame = 0,
+		lastPresentationStep = dependencies.now(),
 		current = nil,
 		lastAttackSequence = 0,
 		lastFocusMode = nil,
+		keyboardNavigation = false,
+		activationCallbacks = {},
+		focusRestore = nil,
 		inputFamily = "Desktop",
 		reducedMotion = false,
 		lowEffects = false,
@@ -2154,6 +2310,9 @@ local function construct(
 	}
 	DATA[view] = data
 	if not connectAll(data) then
+		if dependencies.cleanupInput ~= nil then
+			dependencies.cleanupInput()
+		end
 		instances.gui:Destroy()
 		instances.worldFolder:Destroy()
 		DATA[view] = nil
@@ -2169,41 +2328,151 @@ local function construct(
 end
 
 local TUTORIAL_COPY: { [number]: string } = table.freeze({
-	[5] = "1 OF 3 • PLACE A TOWER\nChoose a starter tower, then place it inside a highlighted garden region.",
-	[6] = "2 OF 3 • UPGRADE A TOWER\nSelect one of your placed towers and buy an upgrade with match-only Battle Cash.",
-	[7] = "3 OF 3 • FINISH THE MATCH\nKeep defending. Victory or an ordinary defeat will record this first run.",
-	[8] = "MATCH RECORDED\nUse Return to Lobby; your tutorial and rewards are already saved server-side.",
+	[5] = "playable_match_view.1_of_3_place_a_tower_choose",
+	[6] = "playable_match_view.2_of_3_upgrade_a_tower_select",
+	[7] = "playable_match_view.3_of_3_finish_the_match_keep",
+	[8] = "playable_match_view.match_recorded_use_return_to_lobby_your",
 })
+
+local function fitModal(
+	panel: Frame,
+	labels: { TextLabel },
+	buttons: { TextButton },
+	maximumHeight: number,
+	touchTarget: number
+)
+	local width = panel.Size.X.Offset
+	local body = panel:FindFirstChild("ATDModalBody") :: ScrollingFrame?
+	if body == nil then
+		body = Instance.new("ScrollingFrame")
+		body.Name = "ATDModalBody"
+		body.BackgroundTransparency = 1
+		body.BorderSizePixel = 0
+		body.ScrollBarThickness = 5
+		body.ScrollingDirection = Enum.ScrollingDirection.Y
+		body.Parent = panel
+	end
+	for index, label in labels do
+		label:SetAttribute("ATDFlowOrder", index)
+		label.Parent = body
+	end
+	local visibleButtons = {}
+	for _, button in buttons do
+		button.Parent = panel
+		if button.Visible then
+			table.insert(visibleButtons, button)
+		end
+	end
+	local buttonWidth = (width - 24 - math.max(0, #visibleButtons - 1) * 8) / math.max(1, #visibleButtons)
+	local footerHeight = touchTarget
+	for _, button in visibleButtons do
+		footerHeight = math.max(
+			footerHeight,
+			TextLayout.measure(button.Text, button.TextSize, buttonWidth, button.Font, TextLayout.scale(button))
+		)
+	end
+	body.Position = UDim2.fromOffset(8, 8)
+	body.Size = UDim2.fromOffset(width - 16, math.max(44, maximumHeight - footerHeight - 24))
+	TextLayout.reflow(body, width - 16, math.max(44, maximumHeight - footerHeight - 24), touchTarget)
+	local bodyHeight = body.Size.Y.Offset
+	panel.Size = UDim2.fromOffset(width, bodyHeight + footerHeight + 24)
+	for index, button in visibleButtons do
+		button.AnchorPoint = Vector2.zero
+		button.Position = UDim2.fromOffset(12 + (index - 1) * (buttonWidth + 8), bodyHeight + 16)
+		button.Size = UDim2.fromOffset(buttonWidth, footerHeight)
+	end
+end
 
 local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 	local instances = data.instances
+	Localization.refresh(instances.gui)
 	local viewport = snapshot.viewport or Vector2.new(1280, 720)
-	local uiScale = snapshot.uiScale or 1
-	local layout = resolveResponsiveLayout(viewport.X / uiScale, viewport.Y / uiScale)
+	if data.applyProductionStyle and instances.root.AbsoluteSize.X >= 240 and instances.root.AbsoluteSize.Y >= 240 then
+		viewport = instances.root.AbsoluteSize
+	end
+	if snapshot.result == nil and instances.returnButton.Parent ~= instances.spectatorPanel then
+		instances.returnButton.Parent = instances.spectatorPanel
+		instances.spectatorTarget.Parent = instances.spectatorPanel
+	end
+	local effective = Accessibility.resolve({
+		uiScale = snapshot.uiScale,
+		reducedMotionEnabled = snapshot.reducedMotion,
+		lowDetailEnabled = snapshot.lowEffects,
+	}, Accessibility.readPreferences())
+	local uiScale = effective.uiScale
+	local baseLayout = resolveResponsiveLayout(viewport.X / uiScale, viewport.Y / uiScale)
+	local layout = if baseLayout == nil then nil else table.clone(baseLayout)
 	if layout == nil then
 		error("invalid responsive layout", 0)
 	end
+	layout.textSize = math.max(16, math.floor(layout.textSize * effective.textScale + 0.5))
+	layout.touchTarget = math.max(layout.touchTarget, math.ceil(44 / uiScale))
+	instances.gui:SetAttribute("ATDReducedMotion", effective.reducedMotion)
 	instances.root.Size = UDim2.fromScale(1 / uiScale, 1 / uiScale)
 	if data.applyProductionStyle then
 		applyLayout(instances, layout)
 	end
 	instances.uiScale.Scale = uiScale
+	for _, panel in
+		{
+			instances.topHud,
+			instances.hotbar,
+			instances.readyOverlay,
+			instances.towerPanel,
+			instances.resultsOverlay,
+			instances.spectatorPanel,
+			instances.bossPanel,
+			instances.touchPlacementPanel,
+			instances.tutorialPanel,
+			instances.feedback,
+		}
+	do
+		panel.BackgroundTransparency = effective.transparency
+	end
 
 	if snapshot.state == "Loading" then
-		instances.waveLabel.Text = "◆ MATCH LOADING"
-		instances.enemyLabel.Text = "♟ ENEMIES —"
-		instances.baseButton.Text = "♥ BASE —"
-		instances.cashLabel.Text = "$ BATTLE CASH —"
+		Localization.bind(instances.waveLabel, "playable_match_view.match_loading", "Text")
+		Localization.bind(instances.enemyLabel, "playable_match_view.enemies", "Text")
+		Localization.bind(instances.baseButton, "playable_match_view.base", "Text")
+		Localization.bind(instances.cashLabel, "playable_match_view.battle_cash", "Text")
+	elseif layout.mode == "Compact" then
+		instances.waveLabel.Text = if snapshot.wave.modeKind == "Endless"
+			then Localization.text("match.hud.compact_endless", { current = snapshot.wave.current })
+			else Localization.text(
+				"match.hud.compact_wave",
+				{ current = snapshot.wave.current, total = snapshot.wave.total }
+			)
+		instances.enemyLabel.Text =
+			Localization.text("match.hud.compact_enemies", { count = snapshot.wave.enemiesRemaining })
+		instances.baseButton.Text = Localization.text(
+			"match.hud.compact_base",
+			{ health = snapshot.base.health, maximum = snapshot.base.maxHealth }
+		)
+		instances.cashLabel.Text = Localization.text("match.hud.compact_cash", { amount = snapshot.battleCash })
 	elseif snapshot.wave.modeKind == "Endless" then
-		instances.waveLabel.Text = `◆ WAVE {snapshot.wave.current} • ENDLESS`
-		instances.enemyLabel.Text = `♟ ENEMIES {snapshot.wave.enemiesRemaining}`
-		instances.baseButton.Text = `♥ BASE {snapshot.base.health} / {snapshot.base.maxHealth}`
-		instances.cashLabel.Text = `$ {snapshot.battleCash} BATTLE CASH`
+		instances.waveLabel.Text =
+			Localization.text("playable_match_view.wave_endless", { current = snapshot.wave.current })
+		instances.enemyLabel.Text =
+			Localization.text("playable_match_view.enemies_2", { enemiesRemaining = snapshot.wave.enemiesRemaining })
+		instances.baseButton.Text = Localization.text(
+			"playable_match_view.base_2",
+			{ health = snapshot.base.health, maxHealth = snapshot.base.maxHealth }
+		)
+		instances.cashLabel.Text =
+			Localization.text("playable_match_view.battle_cash_2", { battleCash = snapshot.battleCash })
 	else
-		instances.waveLabel.Text = `◆ WAVE {snapshot.wave.current} / {snapshot.wave.total}`
-		instances.enemyLabel.Text = `♟ ENEMIES {snapshot.wave.enemiesRemaining}`
-		instances.baseButton.Text = `♥ BASE {snapshot.base.health} / {snapshot.base.maxHealth}`
-		instances.cashLabel.Text = `$ {snapshot.battleCash} BATTLE CASH`
+		instances.waveLabel.Text = Localization.text(
+			"playable_match_view.wave",
+			{ current = snapshot.wave.current, total = snapshot.wave.total }
+		)
+		instances.enemyLabel.Text =
+			Localization.text("playable_match_view.enemies_2", { enemiesRemaining = snapshot.wave.enemiesRemaining })
+		instances.baseButton.Text = Localization.text(
+			"playable_match_view.base_2",
+			{ health = snapshot.base.health, maxHealth = snapshot.base.maxHealth }
+		)
+		instances.cashLabel.Text =
+			Localization.text("playable_match_view.battle_cash_2", { battleCash = snapshot.battleCash })
 	end
 	local bossKind = snapshot.wave.bossKind or "None"
 	local boss = snapshot.wave.boss
@@ -2211,26 +2480,32 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 	instances.bossPanel.Visible = presentedBossKind ~= "None"
 		and snapshot.state ~= "Loading"
 		and snapshot.state ~= "Results"
-	instances.bossPanel.BackgroundColor3 = if snapshot.reducedMotion == true or snapshot.lowEffects == true
+	instances.bossPanel.BackgroundColor3 = if effective.reducedMotion or snapshot.lowEffects == true
 		then COLORS.Panel
 		else COLORS.Neutral
 	instances.bossLabel.TextColor3 = if presentedBossKind == "Boss" then COLORS.Bad else COLORS.Warning
 	if boss == nil then
 		instances.bossLabel.Text = if bossKind == "Boss"
-			then "⚠ BOSS WAVE • MAJOR THREAT INCOMING"
-			elseif bossKind == "MiniBoss" then "⚠ MINIBOSS WAVE • DURABLE THREAT INCOMING"
+			then Localization.text("playable_match_view.boss_wave_major_threat_incoming")
+			elseif bossKind == "MiniBoss" then Localization.text(
+				"playable_match_view.miniboss_wave_durable_threat_incoming"
+			)
 			else ""
 		instances.bossHealth.Visible = false
 		instances.bossHealthFill.Size = UDim2.fromScale(0, 1)
 	else
-		instances.bossLabel.Text =
-			`⚠ {string.upper(boss.threatClass)} • {string.upper(boss.displayName)} • {boss.currentHealth} / {boss.maximumHealth} HP`
+		instances.bossLabel.Text = Localization.text("playable_match_view.hp", {
+			threatClass = string.upper(Localization.enum("state", boss.threatClass)),
+			displayName = string.upper(boss.displayName),
+			currentHealth = boss.currentHealth,
+			maximumHealth = boss.maximumHealth,
+		})
 		instances.bossHealth.Visible = true
 		instances.bossHealthFill.Size = UDim2.fromScale(boss.currentHealth / boss.maximumHealth, 1)
 	end
 	local tutorialText = if snapshot.tutorialStep == nil then nil else TUTORIAL_COPY[snapshot.tutorialStep]
 	instances.tutorialPanel.Visible = tutorialText ~= nil
-	instances.tutorialLabel.Text = tutorialText or ""
+	instances.tutorialLabel.Text = if tutorialText == nil then "" else Localization.text(tutorialText)
 	local noticeY = instances.topHud.Position.Y.Offset + instances.topHud.Size.Y.Offset + 8
 	instances.bossPanel.Position = UDim2.new(0.5, 0, 0, noticeY)
 	if instances.bossPanel.Visible then
@@ -2259,20 +2534,41 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 			setButtonEnabled(button, false)
 		end
 	end
-	instances.hotbar.Visible = snapshot.viewerRole == "Participant"
+	instances.hotbar.Visible = snapshot.viewerRole == "Participant" and snapshot.ready == nil and snapshot.result == nil
+	instances.topHud.Visible = snapshot.ready == nil and snapshot.result == nil
 	for slot, metadata in snapshot.hotbar do
 		local button = instances.hotbarButtons[slot]
-		local availabilityText = if metadata.available then "AVAILABLE" else (metadata.reason or "UNAVAILABLE")
-		button.Text = `{slot} • {metadata.displayName}\n${metadata.cost} • {availabilityText}`
+		local availabilityText = Localization.enum(
+			"availability",
+			if metadata.available then "AVAILABLE" else (metadata.reason or "UNAVAILABLE")
+		)
+		button.Text = if metadata.available
+				or metadata.reason == nil
+				or metadata.reason == "WAITING"
+			then Localization.text(
+				if layout.mode == "Compact" then "match.hotbar.compact_card" else "match.hotbar.card",
+				{ slot = slot, displayName = metadata.displayName, cost = metadata.cost }
+			)
+			else Localization.text(
+				if layout.mode == "Compact" then "match.hotbar.compact_unavailable" else "playable_match_view.value",
+				{
+					slot = slot,
+					displayName = metadata.displayName,
+					cost = metadata.cost,
+					availabilityText = availabilityText,
+				}
+			)
 		button.BorderColor3 = if metadata.selected then COLORS.Good else COLORS.Muted
 		button.BackgroundColor3 = if metadata.selected then COLORS.Selected else COLORS.Neutral
 		setButtonEnabled(button, metadata.available and (snapshot.state == "PreWave" or snapshot.state == "WaveActive"))
 	end
 	local hint = snapshot.inputHint or defaultHint(snapshot)
 	local selectedDescription: string? = nil
+	local selectedName = ""
 	for _, metadata in snapshot.hotbar do
 		if metadata.selected and metadata.description ~= nil then
 			selectedDescription = metadata.description
+			selectedName = metadata.displayName
 			break
 		end
 	end
@@ -2280,9 +2576,15 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 	local placement = snapshot.placement
 	instances.touchPlacementPanel.Visible = placement ~= nil
 	if placement ~= nil then
-		instances.touchPlacementStatus.Text = if placement.positionSelected
-			then `✓ POSITION SELECTED • ROTATION {math.floor(placement.rotationDegrees + 0.5)}°`
-			else "1. TAP THE MAP TO CHOOSE A POSITION"
+		instances.touchPlacementStatus.Text = if snapshot.inputFamily == "Touch" and not placement.positionSelected
+			then Localization.text("match.placement.choose", { tower = selectedName })
+			else Localization.text(
+				if snapshot.inputFamily == "Touch"
+					then "match.placement.ready"
+					elseif snapshot.inputFamily == "Gamepad" then "match.placement.gamepad"
+					else "match.placement.keyboard",
+				{ tower = selectedName, rotation = math.floor(placement.rotationDegrees + 0.5) }
+			)
 		setButtonEnabled(instances.touchConfirmButton, placement.controlsEnabled and placement.positionSelected)
 		setButtonEnabled(instances.touchRotateButton, placement.controlsEnabled)
 		setButtonEnabled(instances.touchCancelButton, placement.controlsEnabled)
@@ -2309,9 +2611,13 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 	instances.readyOverlay.Visible = ready ~= nil
 	if ready ~= nil then
 		instances.readyCountdown.Text = if ready.countdownSeconds == nil
-			then "READY CHECK"
-			else `STARTING IN {ready.countdownSeconds}s`
-		instances.readyStatus.Text = ready.status or "Ready up when your defenses are planned."
+			then Localization.text("playable_match_view.ready_check")
+			else Localization.text(
+				"playable_match_view.starting_in_s",
+				{ countdownSeconds = ready.countdownSeconds }
+			)
+		instances.readyStatus.Text = ready.status
+			or Localization.text("playable_match_view.ready_up_when_your_defenses_are_planned")
 		instances.readyHint.Text = hint
 		setButtonEnabled(instances.readyButton, ready.enabled)
 	end
@@ -2319,23 +2625,35 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 	local selection = snapshot.selection
 	instances.towerPanel.Visible = selection ~= nil
 	if selection ~= nil then
-		instances.towerTitle.Text = `▣ {selection.displayName} • LEVEL {selection.level}/{selection.maxLevel}`
+		instances.towerTitle.Text = Localization.text(
+			"playable_match_view.level_2",
+			{ displayName = selection.displayName, level = selection.level, maxLevel = selection.maxLevel }
+		)
 		instances.towerStatus.Text = if selection.isOwner
-			then "✓ YOUR TOWER — CONTROLS AVAILABLE"
-			else "⌁ INSPECTION ONLY — OWNED BY ANOTHER PLAYER"
+			then Localization.text("playable_match_view.your_tower_controls_available")
+			else Localization.text("playable_match_view.inspection_only_owned_by_another_player")
 		instances.towerStatus.TextColor3 = if selection.isOwner then COLORS.Good else COLORS.Warning
-		local roleDescription = if selection.description == nil then "" else `{selection.description}\n`
-		instances.towerStats.Text =
-			`{roleDescription}Damage {selection.damage}  •  Range {selection.range}\nCooldown {string.format(
-				"%.2fs",
-				selection.cooldownSeconds
-			)}`
-		instances.towerTarget.Text = `◎ TARGET: {string.upper(selection.targetMode)}`
+		local roleDescription = selection.description or ""
+		instances.towerStats.Text = Localization.text("match.tower.stats", {
+			description = roleDescription,
+			damage = selection.damage,
+			range = selection.range,
+			cooldown = selection.cooldownSeconds,
+		})
+		instances.towerTarget.Text = Localization.text(
+			"playable_match_view.target_3",
+			{ targetMode = string.upper(Localization.enum("target", selection.targetMode)) }
+		)
 		instances.upgradeButton.Text = if selection.upgradeCost == nil
-			then "▲ MAX LEVEL"
-			else `▲ UPGRADE\n${selection.upgradeCost}`
-		instances.targetButton.Text = `◎ TARGET\n{nextTargetMode(selection.targetMode)}`
-		instances.sellButton.Text = if selection.sellValue == nil then "$ SELL" else `$ SELL\n+${selection.sellValue}`
+			then Localization.text("playable_match_view.max_level")
+			else Localization.text("playable_match_view.upgrade", { upgradeCost = selection.upgradeCost })
+		instances.targetButton.Text = Localization.text(
+			"playable_match_view.target_4",
+			{ targetMode = Localization.enum("target", nextTargetMode(selection.targetMode)) }
+		)
+		instances.sellButton.Text = if selection.sellValue == nil
+			then Localization.text("playable_match_view.sell")
+			else Localization.text("playable_match_view.sell_2", { sellValue = selection.sellValue })
 		setButtonEnabled(instances.upgradeButton, selection.canUpgrade)
 		setButtonEnabled(instances.targetButton, selection.canRetarget)
 		setButtonEnabled(instances.sellButton, selection.canSell)
@@ -2345,19 +2663,25 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 	local result = snapshot.result
 	instances.resultsOverlay.Visible = result ~= nil
 	if result ~= nil then
-		instances.resultTitle.Text = if result.kind == "Victory" then "✓ VICTORY" else "✕ DEFEAT"
+		instances.resultTitle.Text = if result.kind == "Victory"
+			then Localization.text("playable_match_view.victory")
+			else Localization.text("playable_match_view.defeat")
 		instances.resultTitle.TextColor3 = if result.kind == "Victory" then COLORS.Good else COLORS.Bad
 		instances.resultSummary.Text = result.summary
 		local rewardPrefix = if result.rewardStatus == "Granted"
-			then "✓ REWARD GRANTED"
-			elseif result.rewardStatus == "Pending" then "… REWARD PENDING"
-			elseif result.rewardStatus == "Failed" then "! REWARD FAILED"
-			else "○ REWARD INELIGIBLE"
+			then Localization.text("playable_match_view.reward_granted")
+			elseif result.rewardStatus == "Pending" then Localization.text("playable_match_view.reward_pending")
+			elseif result.rewardStatus == "Failed" then Localization.text("playable_match_view.reward_failed")
+			else Localization.text("playable_match_view.reward_ineligible")
 		instances.resultReward.Text =
-			`{rewardPrefix}\nPERSISTENT GOLD +{result.persistentGoldAwarded} • FIRST-CLEAR +{result.firstClearBonus}\nMATCH-LOCAL BATTLE CASH EARNED {result.battleCashEarned} • SPENT {result.battleCashSpent}{if result.rewardReason
-					== nil
-				then ""
-				else `\n{result.rewardReason}`}`
+			Localization.text("playable_match_view.persistent_gold_first_clear_match_local_battle", {
+				rewardPrefix = rewardPrefix,
+				persistentGoldAwarded = result.persistentGoldAwarded,
+				firstClearBonus = result.firstClearBonus,
+				battleCashEarned = result.battleCashEarned,
+				battleCashSpent = result.battleCashSpent,
+				rewardReason = if result.rewardReason == nil then "" else `\n{result.rewardReason}`,
+			})
 		instances.resultReward.TextColor3 = if result.rewardStatus == "Granted"
 			then COLORS.Good
 			elseif result.rewardStatus == "Pending" then COLORS.Warning
@@ -2376,16 +2700,20 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 	local travel = snapshot.travel
 	instances.spectatorPanel.Visible = snapshot.viewerRole == "Spectator" or (result ~= nil and travel ~= nil)
 	instances.spectatorBanner.Text = if snapshot.viewerRole == "Spectator"
-		then "◉ SPECTATOR • READ ONLY • ZERO PARTICIPATION CREDIT"
-		else "↩ RETURN & REMATCH"
+		then Localization.text("playable_match_view.spectator_read_only_zero_participation_credit")
+		else Localization.text("playable_match_view.return_rematch")
 	instances.spectatorBanner.TextColor3 = if snapshot.viewerRole == "Spectator" then COLORS.Warning else COLORS.Text
 	instances.spectatorTarget.Text = if travel == nil
-		then "Waiting for the server-owned travel state."
-		elseif travel.failure ~= nil then `TRAVEL FAILED • {travel.failure}`
-		elseif snapshot.viewerRole == "Spectator" then `CAMERA TARGETS • RETURN {string.upper(
-			travel.returnStatus
-		)}`
-		else `RETURN {string.upper(travel.returnStatus)} • {travel.rematchStatus or "REMATCH UNAVAILABLE"}`
+		then Localization.text("playable_match_view.waiting_for_the_server_owned_travel_state")
+		elseif travel.failure ~= nil then Localization.text("match.travel.failure")
+		elseif snapshot.viewerRole == "Spectator" then Localization.text(
+			"playable_match_view.camera_targets_return",
+			{ returnStatus = string.upper(Localization.enum("state", travel.returnStatus)) }
+		)
+		else Localization.text("playable_match_view.return", {
+			returnStatus = Localization.enum("state", travel.returnStatus),
+			uNAVAILABLE = travel.rematchStatus or Localization.text("common.unavailable"),
+		})
 	instances.spectatorPreviousButton.Visible = snapshot.viewerRole == "Spectator"
 	instances.spectatorNextButton.Visible = snapshot.viewerRole == "Spectator"
 	instances.returnButton.Visible = travel ~= nil
@@ -2403,16 +2731,343 @@ local function renderSnapshot(data: ViewData, snapshot: CanonicalSnapshot)
 		end
 	end
 
+	if data.applyProductionStyle then
+		local maximumHeight = viewport.Y / uiScale - 32
+		for _, object in instances.gui:GetDescendants() do
+			if object:IsA("TextLabel") or object:IsA("TextButton") then
+				object.TextSize = math.max(16, object.TextSize)
+			end
+		end
+		local hudRowHeight = layout.touchTarget
+		local hudColumnWidth = layout.hudWidth * 0.25 - 12
+		for _, label in { instances.waveLabel, instances.enemyLabel, instances.baseButton, instances.cashLabel } do
+			-- The column's six-pixel margins are already outside the label.
+			-- Cancel TextLayout's default inner inset: this label has no UIPadding.
+			hudRowHeight = math.max(
+				hudRowHeight,
+				TextLayout.measure(label.Text, label.TextSize, hudColumnWidth + 16, label.Font, TextLayout.scale(label))
+			)
+		end
+		instances.topHud.Size = UDim2.fromOffset(layout.hudWidth, hudRowHeight + 16)
+		for _, panel in
+			{
+				instances.towerPanel,
+				instances.spectatorPanel,
+			}
+		do
+			if panel.Visible then
+				TextLayout.reflow(panel, panel.Size.X.Offset, maximumHeight, layout.touchTarget)
+			end
+		end
+		if instances.readyOverlay.Visible then
+			local title = instances.readyOverlay:FindFirstChild("Title", true) :: TextLabel
+			fitModal(
+				instances.readyOverlay,
+				{ title, instances.readyCountdown, instances.readyStatus, instances.readyHint },
+				{ instances.readyButton },
+				maximumHeight,
+				layout.touchTarget
+			)
+		end
+		if instances.resultsOverlay.Visible then
+			fitModal(instances.resultsOverlay, {
+				instances.resultTitle,
+				instances.resultSummary,
+				instances.resultReward,
+				instances.resultHint,
+				instances.spectatorTarget,
+			}, {
+				instances.replayButton,
+				instances.rematchApproveButton,
+				instances.rematchDeclineButton,
+				instances.returnButton,
+			}, maximumHeight, layout.touchTarget)
+			instances.spectatorPanel.Visible = false
+		end
+		local cardScroll = instances.hotbar:FindFirstChild("ATDHotbarCards") :: ScrollingFrame?
+		if cardScroll == nil then
+			cardScroll = Instance.new("ScrollingFrame")
+			cardScroll.Name = "ATDHotbarCards"
+			cardScroll.BackgroundTransparency = 1
+			cardScroll.BorderSizePixel = 0
+			cardScroll.ScrollBarThickness = 4
+			cardScroll.ScrollingDirection = Enum.ScrollingDirection.X
+			cardScroll.Parent = instances.hotbar
+			for _, button in instances.hotbarButtons do
+				button.Parent = cardScroll
+			end
+		end
+		local optionCount = math.max(1, #snapshot.hotbar)
+		local fittedCardWidth = (layout.hotbarWidth - 16 - (optionCount - 1) * 8) / optionCount
+		local cardWidth = math.max(
+			180,
+			layout.textSize * 10,
+			if layout.mode == "Compact" then math.max(fittedCardWidth, 280 / uiScale) else 0
+		)
+		local cardHeight = layout.touchTarget
+		for _, button in instances.hotbarButtons do
+			if button.Visible then
+				cardHeight = math.max(
+					cardHeight,
+					TextLayout.measure(button.Text, button.TextSize, cardWidth, button.Font, TextLayout.scale(button))
+				)
+			end
+		end
+		for index, button in instances.hotbarButtons do
+			button.Position = UDim2.fromOffset((index - 1) * (cardWidth + 8), 0)
+			button.Size = UDim2.fromOffset(cardWidth, cardHeight)
+		end
+		local showHint = layout.mode ~= "Compact"
+		local hintHeight = if showHint
+			then TextLayout.measure(
+				instances.hintLabel.Text,
+				instances.hintLabel.TextSize,
+				layout.hotbarWidth - 24,
+				instances.hintLabel.Font,
+				TextLayout.scale(instances.hintLabel)
+			)
+			else 0
+		cardScroll.Position = UDim2.fromOffset(8, 8)
+		cardScroll.Size = UDim2.new(1, -16, 0, cardHeight + 6)
+		cardScroll.CanvasSize =
+			UDim2.fromOffset(#snapshot.hotbar * cardWidth + math.max(0, #snapshot.hotbar - 1) * 8, cardHeight)
+		instances.hintLabel.Visible = showHint
+		instances.hintLabel.Position = UDim2.fromOffset(12, cardHeight + 16)
+		instances.hintLabel.Size = UDim2.new(1, -24, 0, hintHeight)
+		instances.hotbar.Size = UDim2.fromOffset(layout.hotbarWidth, cardHeight + hintHeight + 20)
+		if instances.touchPlacementPanel.Visible then
+			local panel = instances.touchPlacementPanel
+			local width = panel.Size.X.Offset
+			local buttonWidth = (width - 32) / 3
+			local buttonHeight = layout.touchTarget
+			for _, button in { instances.touchConfirmButton, instances.touchRotateButton, instances.touchCancelButton } do
+				buttonHeight = math.max(
+					buttonHeight,
+					TextLayout.measure(button.Text, button.TextSize, buttonWidth, button.Font, TextLayout.scale(button))
+				)
+			end
+			local contentHeight = TextLayout.measure(
+				instances.touchPlacementStatus.Text,
+				instances.touchPlacementStatus.TextSize,
+				width - 20,
+				instances.touchPlacementStatus.Font,
+				TextLayout.scale(instances.touchPlacementStatus)
+			)
+			local statusHeight =
+				math.max(32, math.min(contentHeight, math.max(120, maximumHeight * 0.46) - buttonHeight - 24))
+			local statusScroll = panel:FindFirstChild("InstructionScroll") :: ScrollingFrame?
+			if statusScroll == nil then
+				statusScroll = Instance.new("ScrollingFrame")
+				statusScroll.Name = "InstructionScroll"
+				statusScroll.BackgroundTransparency = 1
+				statusScroll.BorderSizePixel = 0
+				statusScroll.ScrollBarThickness = 4
+				statusScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+				statusScroll.Parent = panel
+				instances.touchPlacementStatus.Parent = statusScroll
+			end
+			statusScroll.Position = UDim2.fromOffset(10, 8)
+			statusScroll.Size = UDim2.new(1, -20, 0, statusHeight)
+			statusScroll.CanvasSize = UDim2.fromOffset(0, contentHeight)
+			instances.touchPlacementStatus.Position = UDim2.fromOffset(0, 0)
+			instances.touchPlacementStatus.Size = UDim2.new(1, 0, 0, contentHeight)
+			instances.touchPlacementStatus.TextYAlignment = Enum.TextYAlignment.Top
+			panel.Size = UDim2.fromOffset(width, statusHeight + buttonHeight + 24)
+			for index, button in
+				{ instances.touchConfirmButton, instances.touchRotateButton, instances.touchCancelButton }
+			do
+				button.Position = UDim2.fromOffset(8 + (index - 1) * (buttonWidth + 8), statusHeight + 16)
+				button.Size = UDim2.fromOffset(buttonWidth, buttonHeight)
+			end
+		end
+		if layout.mode == "Compact" and snapshot.placement ~= nil then
+			instances.hotbar.Visible = false
+			instances.tutorialPanel.Visible = false
+			instances.touchPlacementPanel.Position = UDim2.new(0.5, 0, 1, -12)
+		else
+			instances.touchPlacementPanel.Position = UDim2.new(0.5, 0, 1, -(instances.hotbar.Size.Y.Offset + 22))
+		end
+		-- Place notices after final HUD/card measurements. Their text may scroll,
+		-- while the HUD, action cards, and boss health retain their fixed regions.
+		local noticeTop = if instances.topHud.Visible
+			then instances.topHud.Position.Y.Offset + instances.topHud.Size.Y.Offset + 8
+			else 16
+		local noticeBottom = viewport.Y / uiScale - 16
+		if instances.hotbar.Visible then
+			noticeBottom = math.min(noticeBottom, viewport.Y / uiScale - instances.hotbar.Size.Y.Offset - 20)
+		end
+		if instances.touchPlacementPanel.Visible then
+			noticeBottom = math.min(
+				noticeBottom,
+				viewport.Y / uiScale
+					+ instances.touchPlacementPanel.Position.Y.Offset
+					- instances.touchPlacementPanel.Size.Y.Offset
+					- 8
+			)
+		end
+		local remainingHeight = math.max(44, noticeBottom - noticeTop)
+		local leftWidth = layout.hudWidth
+		if instances.bossPanel.Visible then
+			local bossWidth = if layout.mode == "Compact"
+				then math.min(280, layout.hudWidth * 0.44)
+				else math.min(620, layout.hudWidth)
+			local bossBody = instances.bossPanel:FindFirstChild("ATDBossText") :: ScrollingFrame?
+			if bossBody == nil then
+				bossBody = Instance.new("ScrollingFrame")
+				bossBody.Name = "ATDBossText"
+				bossBody.BackgroundTransparency = 1
+				bossBody.BorderSizePixel = 0
+				bossBody.ScrollBarThickness = 3
+				bossBody.ScrollingDirection = Enum.ScrollingDirection.Y
+				bossBody.Parent = instances.bossPanel
+				instances.bossLabel.Parent = bossBody
+			end
+			local textHeight = TextLayout.measure(
+				instances.bossLabel.Text,
+				instances.bossLabel.TextSize,
+				bossWidth - 20,
+				instances.bossLabel.Font,
+				TextLayout.scale(instances.bossLabel)
+			)
+			local bodyHeight = math.min(textHeight, math.max(26, remainingHeight - 18))
+			bossBody.Position = UDim2.fromOffset(10, 3)
+			bossBody.Size = UDim2.fromOffset(bossWidth - 20, bodyHeight)
+			bossBody.CanvasSize = UDim2.fromOffset(0, textHeight)
+			instances.bossLabel.AnchorPoint = Vector2.zero
+			instances.bossLabel.Position = UDim2.fromOffset(0, 0)
+			instances.bossLabel.Size = UDim2.new(1, 0, 0, textHeight)
+			instances.bossLabel.TextYAlignment = Enum.TextYAlignment.Top
+			instances.bossHealth.Position = UDim2.fromOffset(10, bodyHeight + 6)
+			instances.bossPanel.Size = UDim2.fromOffset(bossWidth, bodyHeight + 18)
+			if layout.mode == "Compact" then
+				instances.bossPanel.AnchorPoint = Vector2.new(1, 0)
+				instances.bossPanel.Position = UDim2.new(1, -12, 0, noticeTop)
+				leftWidth = layout.hudWidth - bossWidth - 8
+			else
+				instances.bossPanel.Position = UDim2.new(0.5, 0, 0, noticeTop)
+				noticeTop += instances.bossPanel.Size.Y.Offset + 8
+				remainingHeight = math.max(44, noticeBottom - noticeTop)
+			end
+		end
+		local notices = instances.root:FindFirstChild("ATDMatchNotices") :: ScrollingFrame?
+		if notices == nil then
+			notices = Instance.new("ScrollingFrame")
+			notices.Name = "ATDMatchNotices"
+			notices.BackgroundTransparency = 1
+			notices.BorderSizePixel = 0
+			notices.ScrollBarThickness = 4
+			notices.ScrollingDirection = Enum.ScrollingDirection.Y
+			notices.Parent = instances.root
+			instances.feedback.Parent = notices
+			instances.tutorialPanel.Parent = notices
+		end
+		notices.Position = UDim2.new(0.5, -layout.hudWidth * 0.5, 0, noticeTop)
+		notices.Size = UDim2.fromOffset(leftWidth, remainingHeight)
+		local feedbackCode = if snapshot.feedback == nil then "" else snapshot.feedback.code
+		if notices:GetAttribute("ATDFeedbackCode") ~= feedbackCode then
+			notices.CanvasPosition = Vector2.zero
+			notices:SetAttribute("ATDFeedbackCode", feedbackCode)
+		end
+		notices.Visible = snapshot.ready == nil
+			and snapshot.result == nil
+			and (instances.feedback.Visible or instances.tutorialPanel.Visible)
+		local cursor = 0
+		if instances.feedback.Visible then
+			local feedbackHeight = TextLayout.measure(
+				instances.feedback.Text,
+				instances.feedback.TextSize,
+				leftWidth,
+				instances.feedback.Font,
+				TextLayout.scale(instances.feedback)
+			)
+			instances.feedback.AnchorPoint = Vector2.zero
+			instances.feedback.Position = UDim2.fromOffset(0, 0)
+			instances.feedback.Size = UDim2.fromOffset(leftWidth, feedbackHeight)
+			cursor = feedbackHeight + 8
+		end
+		if instances.tutorialPanel.Visible then
+			instances.tutorialPanel.AnchorPoint = Vector2.zero
+			instances.tutorialPanel.Position = UDim2.fromOffset(0, cursor)
+			instances.tutorialPanel.Size = UDim2.fromOffset(leftWidth, remainingHeight)
+			TextLayout.reflow(instances.tutorialPanel, leftWidth, remainingHeight, layout.touchTarget)
+			cursor += instances.tutorialPanel.Size.Y.Offset + 8
+		end
+		notices.CanvasSize = UDim2.fromOffset(0, cursor)
+	end
+	local controls = currentFocusControls(data, snapshot)
+	pcall(FocusNavigation.link, controls)
+	local preferredFocus = bestFocus(instances, snapshot)
+	if table.find(controls, preferredFocus) == nil then
+		preferredFocus = controls[1]
+	end
 	local nextFocusMode = focusMode(snapshot)
-	if snapshot.inputFamily == "Gamepad" and (data.inputFamily ~= "Gamepad" or data.lastFocusMode ~= nextFocusMode) then
-		data.dependencies.selectObject(bestFocus(instances, snapshot))
+	if (snapshot.inputFamily == "Gamepad" or data.keyboardNavigation) and data.lastFocusMode ~= nextFocusMode then
+		if data.lastFocusMode == "Match" and data.dependencies.getSelectedObject ~= nil then
+			data.focusRestore = data.dependencies.getSelectedObject()
+		end
+		local restore = if nextFocusMode == "Match" and table.find(controls, data.focusRestore) ~= nil
+			then data.focusRestore
+			else preferredFocus
+		data.dependencies.selectObject(restore)
+		pcall(FocusNavigation.reveal, restore)
+	end
+	if snapshot.inputFamily == "Gamepad" or data.keyboardNavigation then
+		local selected = if data.dependencies.getSelectedObject == nil
+			then nil
+			else data.dependencies.getSelectedObject()
+		if selected == nil or table.find(controls, selected) == nil then
+			data.dependencies.selectObject(preferredFocus)
+			pcall(FocusNavigation.reveal, preferredFocus)
+		end
 	end
 	data.lastFocusMode = nextFocusMode
 	data.inputFamily = snapshot.inputFamily
-	data.reducedMotion = snapshot.reducedMotion == true
+	data.reducedMotion = effective.reducedMotion
 	data.lowEffects = snapshot.lowEffects == true
 	data.enemyHealthBars = snapshot.enemyHealthBars ~= false
 	data.towerRange = snapshot.towerRange ~= false
+end
+
+function ViewMethods.setPlacementCursor(self: View, position: Vector2?)
+	local data = requireData(self)
+	if data.cleaned then
+		return
+	end
+	local root = data.instances.root
+	local existing = root:FindFirstChild("PlacementCursor")
+	if position == nil then
+		if existing ~= nil and existing:IsA("GuiObject") then
+			existing.Visible = false
+		end
+		return
+	end
+	if not finiteVector2(position) then
+		return
+	end
+	local cursor: TextLabel
+	if existing == nil then
+		cursor = makeLabel("PlacementCursor", root, data.applyProductionStyle)
+		cursor.Text = "+"
+		cursor.AnchorPoint = Vector2.new(0.5, 0.5)
+		cursor.Size = UDim2.fromOffset(36, 36)
+		cursor.TextSize = 32
+		cursor.TextColor3 = Color3.new(1, 1, 1)
+		cursor.TextStrokeColor3 = Color3.new(0, 0, 0)
+		cursor.TextStrokeTransparency = 0
+		cursor.BackgroundTransparency = 1
+		cursor.ZIndex = 20
+	elseif existing:IsA("TextLabel") then
+		cursor = existing
+	else
+		return
+	end
+	cursor.Visible = data.current ~= nil and data.current.placement ~= nil
+	local scale = data.instances.uiScale.Scale
+	local relative = position / scale
+	if data.applyProductionStyle then
+		relative -= root.AbsolutePosition / scale
+	end
+	cursor.Position = UDim2.fromOffset(relative.X, relative.Y)
 end
 
 function ViewMethods.render(self: View, value: unknown): Outcome<Metrics>
@@ -2425,7 +3080,7 @@ function ViewMethods.render(self: View, value: unknown): Outcome<Metrics>
 		return failure("INVALID_SNAPSHOT")
 	end
 	local previousMatchId = if data.current == nil then nil else data.current.matchId
-	local rendered = pcall(renderSnapshot, data, canonical)
+	local rendered = pcall(ProfileScope.call, "ATD.Client.UI", renderSnapshot, data, canonical)
 	if not rendered then
 		return failure("RENDER_FAILED")
 	end
@@ -2558,7 +3213,7 @@ local function canonicalWorld(value: unknown): ({ TowerVisual }?, { EnemyVisual 
 	return towers, enemies
 end
 
-function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
+local function syncWorld(self: View, value: unknown): Outcome<Metrics>
 	local data = requireData(self)
 	if data.cleaned then
 		return failure("CLEANED_UP")
@@ -2584,6 +3239,8 @@ function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
 				local levelDisplay, levelText = makeTowerLevelDisplay(model, primaryPart, data.applyProductionStyle)
 				local initialLevel = tower.level
 				local towerRecord: TowerRecord = {
+					aim = TowerAim.new(math.rad(tower.rotationDegrees or 0)),
+					position = tower.position,
 					model = model,
 					primaryPart = primaryPart,
 					definitionId = tower.definitionId,
@@ -2653,7 +3310,10 @@ function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
 				then tower.position + Vector3.new(0, record.primaryPart.Size.Y * 0.5, 0)
 				else tower.position
 			local rotation = math.rad(tower.rotationDegrees or 0)
-			pivotVisual(data, record.model, record.primaryPart, CFrame.new(position) * CFrame.Angles(0, rotation, 0))
+			record.position = position
+			TowerAim.setIdle(record.aim, rotation)
+			local yaw = TowerAim.step(record.aim, data.dependencies.now(), 0, data.reducedMotion)
+			pivotVisual(data, record.model, record.primaryPart, CFrame.new(position) * CFrame.Angles(0, yaw, 0))
 			if record.selection ~= nil then
 				record.selection.Enabled = tower.selected == true
 			end
@@ -2704,7 +3364,10 @@ function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
 					then COLORS.Bad
 					elseif healthRatio <= 0.5 then COLORS.Warning
 					else COLORS.Good
-				record.healthText.Text = `{math.ceil(enemy.health)} / {math.ceil(enemy.maxHealth)}`
+				record.healthText.Text = Localization.text(
+					"playable_match_view.value_2",
+					{ health = math.ceil(enemy.health), maxHealth = math.ceil(enemy.maxHealth) }
+				)
 			end
 		end
 		for id, record in data.enemyRecords do
@@ -2728,6 +3391,10 @@ function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
 		return failure("RENDER_FAILED")
 	end
 	return ok(self:getMetrics())
+end
+
+function ViewMethods.syncWorld(self: View, value: unknown): Outcome<Metrics>
+	return ProfileScope.call("ATD.Client.World", syncWorld, self, value)
 end
 
 local function attackPositions(data: ViewData, event: AttackEvent): (Vector3?, Vector3?)
@@ -2793,14 +3460,36 @@ function ViewMethods.playAttackEffect(self: View, value: unknown): Outcome<boole
 	if delta.Magnitude < 0.01 or delta.Magnitude > 10_000 then
 		return failure("INVALID_ARGUMENT")
 	end
-	local created, partOrError = pcall(function(): Part
-		stepEffects(data, data.dependencies.now())
-		local maximum = if data.lowEffects then 8 else MAX_ATTACK_EFFECTS
+	data.lastAttackSequence = event.sequence
+	local towerRecord = data.towerRecords[event.towerId]
+	if towerRecord ~= nil and not data.reducedMotion then
+		TowerAim.observe(towerRecord.aim, origin, target, data.dependencies.now())
+	end
+	local policy = PresentationPolicy.effects({ reducedMotion = data.reducedMotion, lowEffects = data.lowEffects })
+	stepEffects(data, data.dependencies.now())
+	if data.effectsAdmittedThisFrame >= policy.perFrame then
+		return ok(false)
+	end
+	if data.applyProductionStyle then
+		local camera = Workspace.CurrentCamera
+		if
+			camera ~= nil
+			and (camera.CFrame.Position - target).Magnitude > PresentationPolicy.MAX_EFFECT_DISTANCE
+			and (camera.CFrame.Position - origin).Magnitude > PresentationPolicy.MAX_EFFECT_DISTANCE
+		then
+			return ok(false)
+		end
+	end
+	data.effectsAdmittedThisFrame += 1
+	local stagedEffect: Part? = nil
+	local created = pcall(ProfileScope.call, "ATD.Client.EffectCreate", function()
+		local maximum = policy.maximum
 		while #data.effects >= maximum do
 			local oldest = table.remove(data.effects, 1)
 			oldest.part:Destroy()
 		end
 		local effect = makeWorldPart("Attack", data.instances.effectFolder, data.applyProductionStyle)
+		stagedEffect = effect
 		effect.Size = Vector3.new(0.12, 0.12, delta.Magnitude)
 		effect.CFrame = CFrame.lookAt(origin + delta * 0.5, target)
 		effect.Color = COLORS.Effect
@@ -2808,7 +3497,7 @@ function ViewMethods.playAttackEffect(self: View, value: unknown): Outcome<boole
 		if data.applyProductionStyle then
 			effect.Material = Enum.Material.Neon
 		end
-		if not data.lowEffects then
+		if policy.flashes then
 			local muzzleFlash = makeWorldPart("MuzzleFlash", effect, data.applyProductionStyle)
 			muzzleFlash.Shape = Enum.PartType.Ball
 			muzzleFlash.Size = Vector3.new(0.48, 0.48, 0.48)
@@ -2841,20 +3530,22 @@ function ViewMethods.playAttackEffect(self: View, value: unknown): Outcome<boole
 			local label = makeLabel("Value", display, data.applyProductionStyle)
 			label.Size = UDim2.fromScale(1, 1)
 			label.BackgroundTransparency = 1
-			label.Text = `-{event.damage}`
+			label.Text = Localization.text("playable_match_view.value_3", { damage = event.damage })
 			label.TextColor3 = COLORS.Warning
 			label.TextScaled = true
 		end
-		return effect
+		local duration = if data.reducedMotion then 0.04 else EFFECT_DURATION_SECONDS
+		table.insert(data.effects, {
+			part = effect,
+			expiresAt = data.dependencies.now() + duration,
+		})
 	end)
 	if not created then
+		if stagedEffect ~= nil then
+			stagedEffect:Destroy()
+		end
 		return failure("RENDER_FAILED")
 	end
-	local duration = if data.reducedMotion then 0.04 else EFFECT_DURATION_SECONDS
-	table.insert(data.effects, {
-		part = partOrError :: Part,
-		expiresAt = data.dependencies.now() + duration,
-	})
 	data.lastAttackSequence = event.sequence
 	return ok(true)
 end
@@ -2959,6 +3650,9 @@ function ViewMethods.cleanup(self: View): Outcome<boolean>
 	end
 	data.cleaned = true
 	local succeeded = disconnectAll(data.connections)
+	if data.dependencies.cleanupInput ~= nil and not pcall(data.dependencies.cleanupInput) then
+		succeeded = false
+	end
 	if
 		not pcall(function()
 			data.dependencies.selectObject(nil)
@@ -2971,6 +3665,8 @@ function ViewMethods.cleanup(self: View): Outcome<boolean>
 	table.clear(data.towerRecords)
 	table.clear(data.enemyRecords)
 	table.clear(data.effects)
+	table.clear(data.activationCallbacks)
+	data.focusRestore = nil
 	data.current = nil
 	if not succeeded then
 		return failure("CLEANUP_FAILED")
@@ -2979,7 +3675,15 @@ function ViewMethods.cleanup(self: View): Outcome<boolean>
 end
 
 local function productionDependencies(): Dependencies
+	local KeyboardNavigation = require(commonUiRoot().KeyboardNavigation)
+	local releaseKeyboard: (() -> ())? = nil
 	return {
+		cleanupInput = function()
+			if releaseKeyboard ~= nil then
+				releaseKeyboard()
+				releaseKeyboard = nil
+			end
+		end,
 		connectActivated = function(button, callback)
 			return button.Activated:Connect(callback)
 		end,
@@ -2989,6 +3693,18 @@ local function productionDependencies(): Dependencies
 		now = os.clock,
 		selectObject = function(value)
 			GuiService.SelectedObject = value
+		end,
+		getSelectedObject = function()
+			return GuiService.SelectedObject
+		end,
+		connectInputBegan = function(callback)
+			releaseKeyboard = KeyboardNavigation.bind(GUI_NAME, callback)
+			return UserInputService.InputBegan:Connect(function(input, processed)
+				if KeyboardNavigation.ownsKey(input.KeyCode) then
+					return
+				end
+				callback(input.KeyCode.Name, processed)
+			end)
 		end,
 	}
 end
@@ -3033,9 +3749,10 @@ if isExactTestModule() then
 		guiParent: Instance,
 		worldParent: Instance,
 		callback: UiActionCallback,
-		dependencies: Dependencies
+		dependencies: Dependencies,
+		productionLayout: boolean?
 	): ViewResult
-		return construct(guiParent, worldParent, callback, dependencies, false, nil, true)
+		return construct(guiParent, worldParent, callback, dependencies, productionLayout == true, nil, true)
 	end
 	PlayableMatchView.newTemplateBackedForTests = function(
 		guiParent: Instance,

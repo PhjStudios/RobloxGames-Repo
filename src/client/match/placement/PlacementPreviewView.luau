@@ -9,6 +9,8 @@ local PlacementProtocol = require(ReplicatedStorage.Shared.match.PlacementProtoc
 local Result = require(ReplicatedStorage.Shared.util.Result)
 local Validation = require(ReplicatedStorage.Shared.util.Validation)
 
+local Localization = require(ReplicatedStorage.Shared.localization.Localization)
+
 export type UiAction = {
 	kind: "SelectSlot" | "Confirm" | "Cancel" | "Rotate",
 	slot: number?,
@@ -284,7 +286,7 @@ local function createInstances(
 				button.Position = UDim2.fromScale((slot - 1) * (98 / 500), 0)
 				button.Size = UDim2.new(90 / 500, 0, 0, 90)
 			end
-			button.Text = `{slot}\n—`
+			button.Text = Localization.text("placement_preview_view.value", { slot = slot })
 			table.insert(buttons, button)
 		end
 
@@ -294,7 +296,7 @@ local function createInstances(
 			status.Size = UDim2.new(horizontalScale(480), 0, 0, 34)
 			status.TextXAlignment = Enum.TextXAlignment.Left
 		end
-		status.Text = "○ SELECT A TOWER"
+		Localization.bind(status, "placement_preview_view.select_a_tower", "Text")
 
 		local hint = makeTextLabel("InputHint", root, applyProductionStyle)
 		if applyResponsiveLayout then
@@ -302,14 +304,14 @@ local function createInstances(
 			hint.Size = UDim2.new(horizontalScale(188), 0, 0, 34)
 			hint.TextXAlignment = Enum.TextXAlignment.Right
 		end
-		hint.Text = "1–5 Select • R Rotate • Click Place • Q Cancel"
+		Localization.bind(hint, "placement_preview_view.1_5_select_r_rotate_click_place", "Text")
 
 		local confirm = makeButton("TouchConfirm", root, applyProductionStyle)
 		if applyResponsiveLayout then
 			confirm.Position = UDim2.new(horizontalScale(518), 0, 0, 48)
 			confirm.Size = UDim2.new(horizontalScale(170), 0, 0, 42)
 		end
-		confirm.Text = "✓ CONFIRM"
+		Localization.bind(confirm, "placement_preview_view.confirm", "Text")
 		confirm.BackgroundColor3 = COLORS.Valid
 		confirm.Visible = false
 
@@ -318,7 +320,7 @@ local function createInstances(
 			rotate.Position = UDim2.new(horizontalScale(518), 0, 0, 96)
 			rotate.Size = UDim2.new(horizontalScale(82), 0, 0, 46)
 		end
-		rotate.Text = "↻ 15°"
+		Localization.bind(rotate, "placement_preview_view.15", "Text")
 		rotate.Visible = false
 
 		local cancel = makeButton("TouchCancel", root, applyProductionStyle)
@@ -386,38 +388,38 @@ end
 
 local function statusPresentation(validity: string, phase: string, lastRejection: unknown): (string, Color3)
 	if phase == "Submitting" then
-		return "… PLACING — SERVER VALIDATION", COLORS.Warning
+		return Localization.text("placement_preview_view.placing_server_validation"), COLORS.Warning
 	elseif type(lastRejection) == "string" then
-		return `! SERVER: {string.upper(lastRejection)}`, COLORS.Warning
+		return Localization.text("placement.server.rejected"), COLORS.Warning
 	elseif phase == "Idle" then
-		return "○ SELECT A TOWER", COLORS.Unavailable
+		return Localization.text("placement_preview_view.select_a_tower"), COLORS.Unavailable
 	elseif phase == "Selected" or validity == "None" then
-		return "◇ CHOOSE A POSITION", COLORS.Selected
+		return Localization.text("placement_preview_view.choose_a_position"), COLORS.Selected
 	elseif validity == "Valid" then
-		return "✓ VALID — READY TO CONFIRM", COLORS.Valid
+		return Localization.text("placement_preview_view.valid_ready_to_confirm"), COLORS.Valid
 	elseif validity == "Unaffordable" then
-		return "$ NOT AFFORDABLE", COLORS.Warning
+		return Localization.text("placement_preview_view.not_affordable"), COLORS.Warning
 	elseif validity == "Capped" then
-		return "! TOWER CAP REACHED", COLORS.Warning
+		return Localization.text("placement_preview_view.tower_cap_reached"), COLORS.Warning
 	elseif validity == "InvalidSurface" then
-		return "≈ SURFACE NOT SUPPORTED", COLORS.Invalid
+		return Localization.text("placement_preview_view.surface_not_supported"), COLORS.Invalid
 	elseif validity == "OutsideZone" then
-		return "▱ OUTSIDE PLACEMENT ZONE", COLORS.Invalid
+		return Localization.text("placement_preview_view.outside_placement_zone"), COLORS.Invalid
 	elseif validity == "Excluded" then
-		return "⊘ BLOCKED AREA", COLORS.Invalid
+		return Localization.text("placement_preview_view.blocked_area"), COLORS.Invalid
 	elseif validity == "Occupied" then
-		return "◉ SPACE OCCUPIED", COLORS.Invalid
+		return Localization.text("placement_preview_view.space_occupied"), COLORS.Invalid
 	end
-	return "✕ INVALID POSITION", COLORS.Invalid
+	return Localization.text("placement_preview_view.invalid_position"), COLORS.Invalid
 end
 
 local function hintFor(inputFamily: string): string
 	if inputFamily == "Touch" then
-		return "Tap Position • Then Confirm"
+		return Localization.text("placement_preview_view.tap_position_then_confirm")
 	elseif inputFamily == "Gamepad" then
-		return "L Move • A Confirm • B Cancel • RB Rotate"
+		return Localization.text("placement_preview_view.l_move_a_confirm_b_cancel_rb")
 	end
-	return "1–5 Select • R Rotate • Click Place • Q Cancel"
+	return Localization.text("placement_preview_view.1_5_select_r_rotate_click_place")
 end
 
 local function validRenderState(value: unknown): boolean
@@ -541,7 +543,7 @@ local function construct(
 		rangeVisible = false,
 		reticleVisible = false,
 		selectedSlot = nil,
-		statusText = "○ SELECT A TOWER",
+		statusText = Localization.text("placement_preview_view.select_a_tower"),
 		hintText = hintFor("Desktop"),
 		applyProductionLayout = applyResponsiveLayout,
 	}
@@ -573,8 +575,11 @@ function ViewMethods.render(self: View, value: unknown)
 			button.Active = occupied
 			button.AutoButtonColor = occupied
 			button.Text = if occupied
-				then `{slot}\n{metadata.displayName}\n${metadata.placementCost}`
-				else `{slot}\n—`
+				then Localization.text(
+					"placement_preview_view.value_2",
+					{ slot = slot, displayName = metadata.displayName, placementCost = metadata.placementCost }
+				)
+				else Localization.text("placement_preview_view.value", { slot = slot })
 			button.BackgroundColor3 = if state.selectedSlot == slot then COLORS.Selected else COLORS.Neutral
 			button.BorderColor3 = if state.selectedSlot == slot then COLORS.Valid else COLORS.Unavailable
 		end

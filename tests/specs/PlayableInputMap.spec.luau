@@ -224,6 +224,20 @@ return TestHarness.suite("playable Match semantic input map", {
 		end)
 	end),
 
+	TestHarness.case("keyboard brackets inspect owned towers without a pointing device", function(assertions)
+		withInput(function(inputMap)
+			inputMap:setContext("Match")
+			local nextTower = inputMap:handleRaw({ keyCode = "RightBracket", inputType = "Keyboard" }, false)
+			assertions.equal(nextTower.value.kind, "CycleTower")
+			assertions.equal(nextTower.value.direction, 1)
+			inputMap:setContext("Tower")
+			assertions.equal(
+				inputMap:handleRaw({ keyCode = "LeftBracket", inputType = "Keyboard" }, false).value.direction,
+				-1
+			)
+		end)
+	end),
+
 	TestHarness.case("updates concise device and context hints without emitting an action", function(assertions)
 		withInput(function(inputMap, actions, _inputListener, preferredListener)
 			local listener = preferredListener :: any
@@ -232,7 +246,7 @@ return TestHarness.suite("playable Match semantic input map", {
 			listener("Touch")
 			assertions.contains(inputMap:getHints().value, "Tap position")
 			listener("Gamepad")
-			assertions.contains(inputMap:getHints().value, "A Place")
+			assertions.contains(inputMap:getHints().value, "A Confirm")
 			inputMap:setContext("Results")
 			assertions.contains(inputMap:getHints().value, "A Play Again")
 			assertions.equal(#actions, 0)

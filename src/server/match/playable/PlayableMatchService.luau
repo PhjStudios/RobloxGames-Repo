@@ -16,6 +16,7 @@ local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
 local Ids = require(ReplicatedStorage.Shared.util.Ids)
 local Result = require(ReplicatedStorage.Shared.util.Result)
 local Validation = require(ReplicatedStorage.Shared.util.Validation)
+local ProfileScope = require(ReplicatedStorage.Shared.util.ProfileScope)
 
 local DirectStudioParticipantLoadout = require(script.Parent.DirectStudioParticipantLoadout)
 local PlayableMatchRuntime = require(script.Parent.PlayableMatchRuntime)
@@ -80,6 +81,9 @@ export type Metrics = {
 }
 
 type ServiceData = {
+	outcomeObserver: ((PlayableMatchRuntime.Metrics) -> ())?,
+	observedState: string?,
+	observedReady: number?,
 	logger: Log.Logger,
 	lifecycle: LifecycleAdapter,
 	configuration: ConfigTypes.CoreConfiguration,
@@ -118,6 +122,21 @@ local SERVICE_NAME = "PlayableMatch"
 local SNAPSHOT_INTERVAL_SECONDS = 0.1
 local CONTENT_FOLDER_NAME = ContentSelection.PLAYABLE_TEMPLATE_ROOT_NAME
 local CONTENT_CONTRACT = ContentSelection.PLAYABLE_TEMPLATE_CONTRACT_VERSION
+
+local function observeOutcome(data: ServiceData, metrics: PlayableMatchRuntime.Metrics)
+	if
+		data.outcomeObserver == nil
+		or (data.observedState == metrics.state and data.observedReady == metrics.readyCount)
+	then
+		return
+	end
+	data.observedState, data.observedReady = metrics.state, metrics.readyCount
+	local thread = coroutine.create(data.outcomeObserver)
+	local ok = coroutine.resume(thread, metrics)
+	if not ok or coroutine.status(thread) ~= "dead" then
+		pcall(coroutine.close, thread)
+	end
+end
 
 local Methods = {}
 Methods.__index = Methods
@@ -466,7 +485,7 @@ local function runtimeSnapshot(
 	return snapshot
 end
 
-local function publishAll(data: ServiceData, serverTime: number)
+local function publishSnapshots(data: ServiceData, serverTime: number)
 	local runtime = data.runtime
 	if runtime == nil or data.state ~= "Started" then
 		return
@@ -479,6 +498,20 @@ local function publishAll(data: ServiceData, serverTime: number)
 	end
 	data.lastPublishServerTime = serverTime
 	data.publishPending = false
+end
+
+local function publishAll(data: ServiceData, serverTime: number)
+	ProfileScope.call("ATD.Service.SnapshotPublish", publishSnapshots, data, serverTime)
+end
+
+local function publishAttacks(data: ServiceData, attacks: { PlayableMatchProtocol.AttackEvent })
+	for _, event in attacks do
+		for _, player in data.environment.getActivePlayers() do
+			if data.attackSender(player, event) then
+				data.attackPublishCount += 1
+			end
+		end
+	end
 end
 
 local function installReplacement(
@@ -517,6 +550,7 @@ local function handlePlayerAdded(data: ServiceData, player: Player)
 		return
 	end
 	local metrics = runtime:getMetrics()
+	observeOutcome(data, metrics)
 	if data.expectedUserIds ~= nil or metrics.state ~= "Ready" then
 		data.spectatorUserIds[userId] = true
 		data.publishPending = true
@@ -620,7 +654,7 @@ local function mirrorLegacyDefeat(data: ServiceData)
 	end
 end
 
-local function heartbeat(data: ServiceData)
+local function stepService(data: ServiceData)
 	if data.state ~= "Started" then
 		return
 	end
@@ -647,27 +681,34 @@ local function heartbeat(data: ServiceData)
 	local stepped = runtime:step(serverTime)
 	if not stepped.ok then
 		data.state = "Failed"
+		pcall(
+			data.logger.warn,
+			data.logger,
+			"match",
+			"simulation_failed",
+			"Match simulation stopped",
+			{ code = "SIMULATION_FAILED" }
+		)
 		return
 	end
 	if stepped.value.changed then
 		data.publishPending = true
 	end
 	if #stepped.value.attacks > 0 then
-		for _, event in stepped.value.attacks do
-			for _, player in data.environment.getActivePlayers() do
-				if data.attackSender(player, event) then
-					data.attackPublishCount += 1
-				end
-			end
-		end
+		ProfileScope.call("ATD.Service.AttackPublish", publishAttacks, data, stepped.value.attacks)
 	end
 	local metrics = runtime:getMetrics()
+	observeOutcome(data, metrics)
 	if metrics.state == "Results" and metrics.result == "Defeat" then
 		mirrorLegacyDefeat(data)
 	end
 	if data.publishPending and serverTime - data.lastPublishServerTime >= SNAPSHOT_INTERVAL_SECONDS then
 		publishAll(data, serverTime)
 	end
+end
+
+local function heartbeat(data: ServiceData)
+	ProfileScope.call("ATD.Service.Step", stepService, data)
 end
 
 local function initialize(data: ServiceData)
@@ -725,6 +766,7 @@ local function shutdown(data: ServiceData)
 		return
 	end
 	data.state = "Shutdown"
+	data.outcomeObserver = nil
 	for index = #data.connections, 1, -1 do
 		data.connections[index]:Disconnect()
 	end
@@ -878,6 +920,7 @@ function Methods.submitReady(
 	if outcome.accepted then
 		mirrorLegacyReady(data, player)
 		data.publishPending = true
+		observeOutcome(data, runtime:getMetrics())
 	end
 	return receipt(data, player, outcome)
 end
@@ -1199,6 +1242,13 @@ local function construct(
 	})
 	DATA[service] = data
 	return service
+end
+
+function Methods.setOutcomeObserver(self: Service, observer: unknown)
+	local data = requireData(self)
+	if type(observer) == "function" and data.state == "Constructed" then
+		data.outcomeObserver = observer :: (PlayableMatchRuntime.Metrics) -> ()
+	end
 end
 
 function PlayableMatchService.new(

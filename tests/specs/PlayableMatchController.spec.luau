@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DefaultSettings = require(ReplicatedStorage.Shared.config.DefaultSettings)
 local EnvironmentContext = require(ReplicatedStorage.Shared.logging.EnvironmentContext)
 local Log = require(ReplicatedStorage.Shared.logging.Log)
+local Localization = require(ReplicatedStorage.Shared.localization.Localization)
 local MatchTravelProtocol = require(ReplicatedStorage.Shared.match.MatchTravelProtocol)
 local PlayableMatchProtocol = require(ReplicatedStorage.Shared.match.PlayableMatchProtocol)
 local ProductionRemotes = require(ReplicatedStorage.Shared.network.ProductionRemotes)
@@ -177,7 +178,7 @@ local function makeSignal(rig: any): Signal
 	return signal
 end
 
-local function makeRig(localUserId: number?): any
+local function makeRig(localUserId: number?, presentation: any?): any
 	local rig: any = {
 		fires = {},
 		responses = {},
@@ -249,6 +250,7 @@ local function makeRig(localUserId: number?): any
 	end
 
 	local dependencies: any = {
+		presentation = presentation,
 		localUserId = localUserId or 42,
 		tracker = trackerResult.value,
 		getSnapshot = requestEndpoint(PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT),
@@ -395,6 +397,23 @@ local function cleanupRig(rig: any)
 end
 
 return TestHarness.suite("playable Match production client controller", {
+	TestHarness.case(
+		"loading card labels cross the message boundary before any authoritative snapshot",
+		function(assertions)
+			Localization.setMode("pseudo50")
+			local rig = makeRig()
+			local loading = rig.renders[1]
+			Localization.setMode("en")
+			assertions.equal(loading.state, "Loading")
+			assertions.isTrue(#loading.hotbar > 0)
+			for _, card in loading.hotbar do
+				assertions.equal(card.displayName, Localization.format("enum.state.loading", {}, "pseudo50").value)
+				assertions.isFalse(card.available)
+			end
+			assertions.equal(#rig.fires[PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT], 1)
+			cleanupRig(rig)
+		end
+	),
 	TestHarness.case("registers listeners before one initial owner-private snapshot request", function(assertions)
 		local rig = makeRig()
 		assertions.equal(#rig.fires[PlayableMatchProtocol.ENDPOINTS.GET_SNAPSHOT], 1)
@@ -535,7 +554,10 @@ return TestHarness.suite("playable Match production client controller", {
 			}))
 			assertions.equal(rig.controller:getMetrics().selectedSlot, 1)
 			assertions.equal(rig.contexts[#rig.contexts], "Placement")
-			assertions.equal(rig.renders[#rig.renders].hotbar[1].description, "Place Dart Ant.")
+			assertions.equal(
+				rig.renders[#rig.renders].hotbar[1].description,
+				"Reliable single-target damage with balanced range."
+			)
 			assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
 				kind = "Rotate",
 				source = "Desktop",
@@ -665,7 +687,10 @@ return TestHarness.suite("playable Match production client controller", {
 			assertions.equal(rig.controller:getMetrics().selectedTowerId, 1)
 			assertions.equal(rig.contexts[#rig.contexts], "Tower")
 			assertions.equal(rig.renders[#rig.renders].selection.revision, 4)
-			assertions.equal(rig.renders[#rig.renders].selection.description, "Place Dart Ant.")
+			assertions.equal(
+				rig.renders[#rig.renders].selection.description,
+				"Reliable single-target damage with balanced range."
+			)
 			assertions.isTrue((invokeActionForTests :: any)(rig.controller, {
 				kind = "Upgrade",
 				source = "Gamepad",
@@ -706,7 +731,18 @@ return TestHarness.suite("playable Match production client controller", {
 	TestHarness.case(
 		"accepts full replication and presents compact attacks only for the current match",
 		function(assertions)
-			local rig = makeRig()
+			local projectedSnapshots, projectedAttacks, cleaned = 0, 0, 0
+			local rig = makeRig(nil, {
+				snapshot = function()
+					projectedSnapshots += 1
+				end,
+				attack = function()
+					projectedAttacks += 1
+				end,
+				cleanup = function()
+					cleaned += 1
+				end,
+			})
 			deliverInitial(rig, snapshot(7))
 			local nextSnapshot = snapshot(8)
 			nextSnapshot.battleCash = 300
@@ -753,6 +789,9 @@ return TestHarness.suite("playable Match production client controller", {
 			assertions.equal(#rig.effects, 1)
 			assertions.equal(rig.controller:getMetrics().attackEventCount, 1)
 			cleanupRig(rig)
+			assertions.equal(projectedSnapshots, 3)
+			assertions.equal(projectedAttacks, 1)
+			assertions.equal(cleaned, 1)
 		end
 	),
 

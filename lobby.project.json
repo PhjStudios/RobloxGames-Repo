@@ -64,6 +64,11 @@
           "travel": {
             "$path": "src/server/common/travel",
             "$ignoreUnknownInstances": true
+          },
+
+          "analytics": {
+            "$path": "src/server/common/analytics",
+            "$ignoreUnknownInstances": true
           }
         },
 
@@ -140,6 +145,11 @@
 
             "ui": {
               "$path": "src/client/common/ui",
+              "$ignoreUnknownInstances": true
+            },
+
+            "presentation": {
+              "$path": "src/client/common/presentation",
               "$ignoreUnknownInstances": true
             }
           },

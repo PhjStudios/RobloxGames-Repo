@@ -4,6 +4,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Result = require(ReplicatedStorage.Shared.util.Result)
 
+local Localization = require(ReplicatedStorage.Shared.localization.Localization)
+
 export type ErrorCode =
 	"INVALID_CONTEXT"
 	| "INVALID_PARENT"
@@ -273,7 +275,8 @@ local function configureTextLabel(label: TextLabel, name: string, initialText: s
 	label.BackgroundTransparency = 1
 	label.BorderSizePixel = 0
 	label.Text = initialText
-	label.TextWrapped = false
+	label.TextWrapped = true
+	label.AutoLocalize = false
 end
 
 local function applyLayout(data: ViewData)
@@ -344,15 +347,15 @@ local function createView(
 		panel.Parent = nextGui
 
 		local stateLabel = Instance.new("TextLabel")
-		configureTextLabel(stateLabel, "StateLabel", "State: Loading")
+		configureTextLabel(stateLabel, "StateLabel", Localization.text("match_ready_view.state_loading"))
 		stateLabel.Parent = panel
 
 		local countdownLabel = Instance.new("TextLabel")
-		configureTextLabel(countdownLabel, "CountdownLabel", "Countdown: --")
+		configureTextLabel(countdownLabel, "CountdownLabel", Localization.text("match_ready_view.countdown"))
 		countdownLabel.Parent = panel
 
 		local requestLabel = Instance.new("TextLabel")
-		configureTextLabel(requestLabel, "RequestLabel", "Request: Idle")
+		configureTextLabel(requestLabel, "RequestLabel", Localization.text("match_ready_view.request_idle"))
 		requestLabel.Parent = panel
 
 		local rowLabels = table.create(MAX_ROWS) :: { TextLabel }
@@ -366,7 +369,7 @@ local function createView(
 
 		local readyButton = Instance.new("TextButton")
 		readyButton.Name = "ReadyButton"
-		readyButton.Text = "Ready"
+		readyButton.Text = Localization.enum("state", "Ready")
 		readyButton.Visible = false
 		readyButton.Active = false
 		readyButton.Selectable = false
@@ -433,9 +436,16 @@ function ViewMethods.render(self: View, renderState: unknown): OperationResult
 	end
 
 	local rendered = pcall(function()
-		data.stateLabel.Text = `State: {canonical.matchState}`
-		data.countdownLabel.Text = `Countdown: {canonical.countdownText}`
-		data.requestLabel.Text = `Request: {canonical.requestText}`
+		data.stateLabel.Text = Localization.text(
+			"match_ready_view.state",
+			{ matchState = Localization.enum("state", canonical.matchState) }
+		)
+		data.countdownLabel.Text =
+			Localization.text("match_ready_view.countdown_2", { countdownText = canonical.countdownText })
+		data.requestLabel.Text = Localization.text(
+			"match_ready_view.request",
+			{ requestText = Localization.enum("state", canonical.requestText) }
+		)
 
 		for index, label in data.rowLabels do
 			local row = canonical.rows[index]
@@ -443,8 +453,10 @@ function ViewMethods.render(self: View, renderState: unknown): OperationResult
 				label.Text = ""
 				label.Visible = false
 			else
-				local localSuffix = if row.isLocal then " (You)" else ""
-				label.Text = `{row.label}{localSuffix}: {row.status}`
+				label.Text = Localization.text(
+					if row.isLocal then "ready.local_player" else "ready.remote_player",
+					{ index = index, status = Localization.enum("state", row.status) }
+				)
 				label.Visible = true
 			end
 		end

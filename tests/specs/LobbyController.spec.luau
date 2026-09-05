@@ -13,6 +13,7 @@ local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local TowerFixtures = require(script.Parent.Parent.Fixtures.TowerFixtures)
 local LobbyController = require(script.Parent.Parent.ProductionClientLobby.LobbyController)
 local LobbyUiModel = require(script.Parent.Parent.ProductionClientLobbyUi.LobbyUiModel)
+local Localization = require(ReplicatedStorage.Shared.localization.Localization)
 
 type Assertions = TestHarness.Assertions
 
@@ -484,7 +485,7 @@ return TestHarness.suite("LobbyController", {
 			assertions.equal((state.banner :: LobbyUiModel.Banner).onePullCost, 100)
 			assertions.equal(
 				(state.banner :: LobbyUiModel.Banner).policyDisclosure,
-				"Earn-only Gold. No Robux or paid currency conversion."
+				"Gold is earned through play. Odds are disclosed before every Garden Tower Chest pull; duplicates remain separate units."
 			)
 			assertions.equal(
 				(state.banner :: LobbyUiModel.Banner).odds[2].displayName,
@@ -589,6 +590,55 @@ return TestHarness.suite("LobbyController", {
 				assertions.equal(requestCount(rig, LobbyProtocol.ENDPOINTS.PULL_CHEST), 1)
 				shutdown(rig)
 			end
+		end
+	),
+
+	TestHarness.case(
+		"localizes chest actions and complete new duplicate and unavailable outcomes",
+		function(assertions)
+			local rig = readyRig(assertions)
+			Localization.setMode("pseudo50")
+			dispatch(rig, { kind = "PullChest", quantity = 10 })
+			local confirmation = latest(rig).modals[#latest(rig).modals]
+			dispatch(rig, { kind = "ConfirmModal", modalId = confirmation.id })
+			local request = findRequest(rig, LobbyProtocol.ENDPOINTS.PULL_CHEST) :: RequestRecord
+			local receipt = pullReceipt(rig, request, 10, 8)
+			receipt.results[2].towerId = "tower:unavailable"
+			receipt.results[9].towerId = "tower:unavailable"
+			receipt.results[9].isNew = true
+			request.active = false
+			request.callback(true, receipt, nil)
+			local result = latest(rig).modals[#latest(rig).modals]
+			Localization.setMode("en")
+			assertions.equal(confirmation.id, "modal:chest-confirm:10")
+			assertions.equal(confirmation.confirmText, Localization.format("lobby.chest.confirm", {}, "pseudo50").value)
+			assertions.equal(confirmation.cancelText, Localization.format("lobby.chest.cancel", {}, "pseudo50").value)
+			assertions.equal(result.confirmText, Localization.format("lobby.chest.done", {}, "pseudo50").value)
+			assertions.contains(
+				result.message,
+				Localization.format("lobby.chest.duplicate_result", {
+					index = 1,
+					towerName = rig.configuration.single.displayName,
+				}, "pseudo50").value
+			)
+			assertions.contains(
+				result.message,
+				Localization.format("lobby.chest.new_result", {
+					index = 10,
+					towerName = rig.configuration.support.displayName,
+				}, "pseudo50").value
+			)
+			assertions.contains(
+				result.message,
+				Localization.format("lobby.chest.unknown_duplicate_result", { index = 2 }, "pseudo50").value
+			)
+			assertions.contains(
+				result.message,
+				Localization.format("lobby.chest.unknown_new_result", { index = 9 }, "pseudo50").value
+			)
+			assertions.isFalse(string.find(result.message, "Unknown tower", 1, true) ~= nil)
+			assertions.equal(requestCount(rig, LobbyProtocol.ENDPOINTS.PULL_CHEST), 1)
+			shutdown(rig)
 		end
 	),
 
@@ -722,6 +772,29 @@ return TestHarness.suite("LobbyController", {
 		end
 	),
 
+	TestHarness.case(
+		"Settings survives input preference locale and authoritative profile refreshes",
+		function(assertions)
+			local rig = readyRig(assertions)
+			dispatch(rig, { kind = "Play" })
+			dispatch(rig, { kind = "Navigate", screen = "Settings" })
+			assertions.equal(latest(rig).screen, "Settings")
+			for _, family in { "Touch", "Desktop", "Gamepad" } do
+				dispatch(rig, { kind = "InputFamilyChanged", inputFamily = family })
+				assertions.equal(latest(rig).screen, "Settings")
+			end
+			Localization.setMode("pseudo50")
+			rig.now = 1
+			(rig.step :: () -> ())()
+			local screenAfterLocale = latest(rig).screen
+			Localization.setMode("en")
+			assertions.equal(screenAfterLocale, "Settings")
+			local event = rig.events[LobbyProtocol.ENDPOINTS.PROFILE_REPLICATION] :: (unknown) -> ()
+			event({ payload = profile(99) })
+			assertions.equal(latest(rig).screen, "Settings")
+			shutdown(rig)
+		end
+	),
 	TestHarness.case(
 		"preserves input navigation and disconnects cancels and ignores stale callbacks",
 		function(assertions)

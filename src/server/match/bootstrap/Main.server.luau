@@ -212,7 +212,8 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 	if not profileResult.ok then
 		error("[ATD_MATCH_BOOTSTRAP][code=PROFILE_SERVICE_CREATION_FAILED]", 0)
 	end
-	local profile = profileResult.value
+	local telemetry = configuration.telemetry
+	local profile = telemetry:profile(profileResult.value)
 	local tutorial = requireResult(
 		TutorialService.new(profile, configuration.coreConfiguration, { clock = os.time }),
 		"TUTORIAL_SERVICE_UNAVAILABLE"
@@ -312,6 +313,9 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 				difficultyId = studioSelection.difficultyId,
 			}
 		)
+		playable:setOutcomeObserver(
+			telemetry:matchObserver("direct", studioSelection.mapId, studioSelection.difficultyId)
+		)
 	else
 		if game.PrivateServerId == "" or game.PrivateServerOwnerId ~= 0 then
 			error("[ATD_MATCH_BOOTSTRAP][code=AUTHENTICATED_TICKET_HOST_REQUIRED]", 0)
@@ -332,9 +336,11 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 		local resultStore =
 			requireResult(ResultLedgerStoreAdapter.newPublished(configuration.deployment), "RESULT_STORE_UNAVAILABLE")
 		local resultLedger = requireResult(ResultLedgerService.new(resultStore, os.time), "RESULT_LEDGER_UNAVAILABLE")
-		local rewardClaims = requireResult(
-			ProfileRewardClaimService.new(profile, resultLedger, configuration.coreConfiguration, os.time),
-			"REWARD_CLAIMS_UNAVAILABLE"
+		local rewardClaims = telemetry:rewards(
+			requireResult(
+				ProfileRewardClaimService.new(profile, resultLedger, configuration.coreConfiguration, os.time),
+				"REWARD_CLAIMS_UNAVAILABLE"
+			)
 		)
 		local pendingResults = requireResult(PendingResultService.new(profile), "PENDING_RESULTS_UNAVAILABLE")
 		local profileTransfer = requireResult(
@@ -361,7 +367,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			}),
 			"UNEXPECTED_OWNERSHIP_TRANSFER_UNAVAILABLE"
 		)
-		local admission = requireResult(
+		local admission = telemetry:admissions(requireResult(
 			MatchAdmissionService.new(ticketStore, routes, {
 				getUserId = function(player)
 					return if typeof(player) == "Instance" and player:IsA("Player") then player.UserId else nil
@@ -393,7 +399,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 				end,
 			}),
 			"MATCH_ADMISSION_UNAVAILABLE"
-		)
+		))
 
 		local rematchDependenciesCleaned = false
 		local dependencyCleanupPrepared = false
@@ -700,6 +706,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 			}),
 			"SAFE_TELEPORT_UNAVAILABLE"
 		)
+		safeTeleport = telemetry:travel(safeTeleport)
 
 		local function createRematch(activeUserIds, previousTicket)
 			if rematchDependenciesCleaned then
@@ -1014,6 +1021,7 @@ ServerBootstrap.run(PlaceRoles.MATCH_ROLE, function(configuration)
 						tutorialStepProvider = tutorialStepProvider,
 					}
 				)
+				service:setOutcomeObserver(telemetry:matchObserver(ticket.matchId, ticket.mapId, ticket.difficultyId))
 				local definition = service:getServiceDefinition()
 				local initialized = pcall(definition.initialize)
 				if initialized then

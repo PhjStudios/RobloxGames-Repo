@@ -3,6 +3,8 @@
 local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local RobloxAdapter = require(script.Parent.Parent.Support.RobloxAdapter)
 local LobbyView = require(script.Parent.Parent.ProductionClientLobbyUi.LobbyView)
+local Theme = require(script.Parent.Parent.ProductionClientCommonUi.Theme)
+local Localization = require(game:GetService("ReplicatedStorage").Shared.localization.Localization)
 
 local newForTests = LobbyView.newForTests
 if newForTests == nil then
@@ -215,6 +217,8 @@ local function makeFixture(): any
 		searchListeners = {} :: { [TextBox]: (string) -> () },
 		selected = nil :: GuiObject?,
 		disconnectCount = 0,
+		clearFocusOnDynamicDisconnect = false,
+		focusClearCount = 0,
 	}
 	fixture.callback = function(action: any)
 		table.insert(fixture.actions, action)
@@ -224,6 +228,10 @@ local function makeFixture(): any
 			fixture.activations[button] = listener
 			return RobloxAdapter.createConnection(function()
 				fixture.disconnectCount += 1
+				if fixture.clearFocusOnDynamicDisconnect then
+					fixture.selected = nil
+					fixture.focusClearCount += 1
+				end
 			end) :: RBXScriptConnection
 		end,
 		connectInputBegan = function(listener: (string, boolean) -> ())
@@ -309,6 +317,337 @@ local function activate(fixture: any, button: GuiButton)
 end
 
 return TestHarness.suite("persistent Lobby presentation", {
+	TestHarness.case(
+		"expanded noncompact profile status grows the header and reserves the content space",
+		function(assertions)
+			local fixture = makeFixture()
+			local made = (newForTests :: any)(fixture.guiParent, fixture.callback, fixture.dependencies, true)
+			assertions.isTrue(made.ok)
+			local view = made.value
+			local _, root = guiTree(fixture)
+			pcall(function()
+				(root :: any).AbsoluteSize = Vector2.zero
+			end)
+			local state = readyState("Settings", "Touch")
+			state.viewport = Vector2.new(1178, 819)
+			state.settings.uiScale = 0.75
+			state.preferredTextScale = 1.5
+			state.statusText =
+				Localization.format("lobby_controller.welcome_your_starter_towers_and_earn_only", {}, "pseudo50").value
+			assertions.isTrue(view:render(state).ok)
+			local header = child(root, "Header", "Frame") :: Frame
+			local content = child(root, "Content", "Frame") :: Frame
+			local navigation = child(root, "Navigation", "Frame") :: Frame
+			local readiness = child(header, "ProfileReadiness", "TextLabel") :: TextLabel
+			assertions.isTrue(readiness.Visible)
+			assertions.isTrue(header.Size.Y.Offset > 92)
+			assertions.isTrue(content.Position.Y.Offset >= header.Position.Y.Offset + header.Size.Y.Offset)
+			assertions.equal(navigation.Position.Y.Offset, content.Position.Y.Offset)
+			assertions.isTrue(content.Size.Y.Offset > 240)
+			view:cleanup()
+			fixture.guiParent:Destroy()
+		end
+	),
+	TestHarness.case(
+		"expanded inventory toolbar grows without overlapping or moving the grid bottom",
+		function(assertions)
+			local fixture = makeFixture()
+			local made = (newForTests :: any)(fixture.guiParent, fixture.callback, fixture.dependencies, true)
+			assertions.isTrue(made.ok)
+			local view = made.value
+			local _, root = guiTree(fixture)
+			pcall(function()
+				(root :: any).AbsoluteSize = Vector2.zero
+			end)
+			local state = readyState("Inventory", "Touch")
+			state.selectedUnitId = nil
+			state.viewport = Vector2.new(666, 316)
+			state.settings.uiScale = 0.75
+			assertions.isTrue(view:render(state).ok)
+			local page = child(root, "ATDCompactPage", "ScrollingFrame")
+			local content = child(page, "Content", "Frame")
+			local inventory = child(content, "InventoryScreen", "Frame")
+			local filter = child(inventory, "Filter", "TextButton") :: TextButton
+			local sort = child(inventory, "Sort", "TextButton") :: TextButton
+			local grid = child(inventory, "OwnedTowerGrid", "ScrollingFrame") :: ScrollingFrame
+			local beforeHeight = filter.Size.Y.Offset
+			local bottomOffset = grid.Position.Y.Offset + grid.Size.Y.Offset
+			activate(fixture, filter)
+			activate(fixture, filter)
+			state.preferredTextScale = 1.5
+			Localization.setMode("pseudo50")
+			local rendered = view:render(state)
+			Localization.setMode("en")
+			assertions.isTrue(rendered.ok)
+			assertions.isTrue(filter.Size.Y.Offset > beforeHeight)
+			assertions.equal(sort.Size.Y.Offset, filter.Size.Y.Offset)
+			assertions.isTrue(grid.Position.Y.Offset >= filter.Position.Y.Offset + filter.Size.Y.Offset)
+			assertions.equal(grid.Position.Y.Offset + grid.Size.Y.Offset, bottomOffset)
+			assertions.equal((child(inventory, "Search", "TextBox") :: TextBox).PlaceholderText, "Search towers")
+			view:cleanup()
+			fixture.guiParent:Destroy()
+		end
+	),
+	TestHarness.case(
+		"small UI scale preserves physical touch rows and inline contrasting notifications",
+		function(assertions)
+			local fixture = makeFixture()
+			local made = (newForTests :: any)(fixture.guiParent, fixture.callback, fixture.dependencies, true)
+			assertions.isTrue(made.ok)
+			local view = made.value
+			local _, root = guiTree(fixture)
+			pcall(function()
+				(root :: any).AbsoluteSize = Vector2.zero
+			end)
+			local state = readyState("Settings", "Touch")
+			state.viewport = Vector2.new(666, 316)
+			state.settings.uiScale = 0.75
+			state.toasts = {
+				{
+					id = "toast:scale",
+					kind = "Success",
+					title = "Settings saved",
+					message = "Your settings were saved to your profile.",
+					repeatCount = 2,
+				},
+			}
+			assertions.isTrue(view:render(state).ok)
+			local page = child(root, "ATDCompactPage", "ScrollingFrame")
+			local content = child(page, "Content", "Frame") :: Frame
+			local notifications = child(page, "Notifications", "Frame") :: Frame
+			local settingsScreen = child(content, "SettingsScreen", "Frame")
+			local settingsList = child(settingsScreen, "SettingsList", "ScrollingFrame")
+			for _, control in settingsList:GetChildren() do
+				if control:IsA("TextButton") then
+					assertions.isTrue(control.Size.Y.Offset * 0.75 >= 44)
+				end
+			end
+			assertions.isTrue(
+				notifications.Position.Y.Offset + notifications.Size.Y.Offset <= content.Position.Y.Offset
+			)
+			assertions.equal(notifications.Size.X.Offset, 868)
+			local toastBody = child(notifications, "ATDReadableContent", "ScrollingFrame")
+			local toast = child(toastBody, "Toast1", "TextButton") :: TextButton
+			assertions.equal(toast.BackgroundColor3, Theme.Colors.Success)
+			assertions.equal(toast.TextColor3, Theme.Colors.Backdrop)
+			assertions.isTrue(toast.Size.Y.Offset * 0.75 >= 44)
+			activate(fixture, toast)
+			assertions.equal(fixture.actions[#fixture.actions].kind, "DismissToast")
+			view:cleanup()
+			fixture.guiParent:Destroy()
+		end
+	),
+	TestHarness.case(
+		"same-screen scale updates restore surviving focus after engine-style clearing",
+		function(assertions)
+			local fixture = makeFixture()
+			local made = (newForTests :: any)(fixture.guiParent, fixture.callback, fixture.dependencies, true)
+			assertions.isTrue(made.ok)
+			local view = made.value
+			local _, root = guiTree(fixture)
+			pcall(function()
+				(root :: any).AbsoluteSize = Vector2.zero
+			end)
+			local state = readyState("Settings", "Gamepad")
+			state.viewport = Vector2.new(666, 316)
+			state.settings.uiScale = 1
+			assertions.isTrue(view:render(state).ok)
+			fixture.inputListeners[1]("Tab", false)
+			local scaleButton = root:FindFirstChild("uiScale", true) :: TextButton
+			assertions.isNotNil(scaleButton)
+			assertions.isNil(scaleButton:GetAttribute("ATDControlKey"))
+			fixture.selected = scaleButton
+			-- The live engine clears selection during ancestor reparenting. The
+			-- isolated adapter clears it at owned dynamic cleanup in the same render.
+			fixture.clearFocusOnDynamicDisconnect = true
+			state.profileRevision += 1
+			state.settings.uiScale = 1.125
+			assertions.isTrue(view:render(state).ok)
+			assertions.isTrue(fixture.focusClearCount > 0)
+			assertions.equal(fixture.selected, scaleButton)
+			fixture.inputListeners[1]("Return", false)
+			assertions.equal(fixture.actions[#fixture.actions].kind, "UpdateSetting")
+			assertions.equal(fixture.actions[#fixture.actions].settingKey, "uiScale")
+
+			local nextScreen = readyState("Home", "Gamepad")
+			nextScreen.viewport = state.viewport
+			assertions.isTrue(view:render(nextScreen).ok)
+			assertions.isTrue(fixture.selected ~= scaleButton)
+			assertions.equal(fixture.selected, root:FindFirstChild("Play", true))
+			view:cleanup()
+			fixture.guiParent:Destroy()
+		end
+	),
+
+	TestHarness.case("recreated inventory controls restore focus by stable owned-unit identity", function(assertions)
+		withView(function(view, fixture)
+			local state = readyState("Inventory", "Gamepad")
+			assertions.isTrue(view:render(state).ok)
+			local _, root = guiTree(fixture)
+			local content = child(root, "Content", "Frame")
+			local inventory = child(content, "InventoryScreen", "Frame")
+			local grid = child(inventory, "OwnedTowerGrid", "ScrollingFrame")
+			local card = child(grid, "TowerCard2", "TextButton") :: TextButton
+			local key = card:GetAttribute("ATDControlKey")
+			fixture.selected = card
+			state.preferredTextScale = 1.5
+			assertions.isTrue(view:render(state).ok)
+			assertions.isTrue(fixture.selected ~= card)
+			assertions.equal(fixture.selected:GetAttribute("ATDControlKey"), key)
+			assertions.isTrue(fixture.selected.TextSize >= 16)
+		end)
+	end),
+	TestHarness.case("ordinary updates and input changes preserve the selected tutorial action", function(assertions)
+		withView(function(view, fixture)
+			local state = readyState("Home", "Desktop")
+			state.tutorialGuidance = {
+				step = 1,
+				title = "Gold and Battle Cash",
+				message = "Gold is permanent; Battle Cash is match-only.",
+				primaryActionText = "GOT IT",
+				canAdvance = true,
+				canSkip = true,
+				canReplay = false,
+			}
+			assertions.isTrue(view:render(state).ok)
+			fixture.inputListeners[1]("Tab", false)
+			local _, root = guiTree(fixture)
+			local skip = child(child(root, "ATDTutorialGuidance", "Frame"), "Skip", "TextButton")
+			fixture.selected = skip
+			for _, family in { "Desktop", "Touch", "Gamepad", "Desktop" } do
+				state.inputFamily = family
+				state.preferredTextScale = 1.5
+				state.preferredTransparency = 0
+				assertions.isTrue(view:render(state).ok)
+				assertions.equal(fixture.selected, skip)
+			end
+			fixture.inputListeners[1]("Return", false)
+			assertions.equal(fixture.actions[#fixture.actions].kind, "SkipTutorial")
+		end)
+	end),
+	TestHarness.case(
+		"small safe landscape with largest expanded text keeps chrome separate and guidance actions reachable",
+		function(assertions)
+			local fixture = makeFixture()
+			local result = (newForTests :: any)(fixture.guiParent, fixture.callback, fixture.dependencies, true)
+			assertions.isTrue(result.ok)
+			local view = result.value
+			local _, testRoot = guiTree(fixture)
+			pcall(function()
+				(testRoot :: any).AbsoluteSize = Vector2.zero
+			end)
+			local state = readyState("Home", "Touch")
+			state.viewport = Vector2.new(666, 316)
+			state.settings.uiScale = 1
+			state.preferredTextScale = 1.5
+			Localization.setMode("pseudo50")
+			state.tutorialGuidance = {
+				step = 1,
+				title = "Gold and Battle Cash",
+				message = Localization.text("lobby_controller.gold_is_permanent_and_opens_earn_only"),
+				primaryActionText = Localization.enum("action", "CONTINUE"),
+				canAdvance = true,
+				canSkip = true,
+				canReplay = false,
+			}
+			local rendered = view:render(state)
+			Localization.setMode("en")
+			assertions.isTrue(rendered.ok)
+			local _, root = guiTree(fixture)
+			local page = child(root, "ATDCompactPage", "ScrollingFrame") :: ScrollingFrame
+			local header = child(root, "Header", "Frame") :: Frame
+			local navigation = child(root, "Navigation", "Frame") :: Frame
+			local guide = child(page, "ATDTutorialGuidance", "Frame") :: Frame
+			local body = child(guide, "GuideBody", "ScrollingFrame") :: ScrollingFrame
+			local primary = child(guide, "Primary", "TextButton") :: TextButton
+			local content = child(page, "Content", "Frame") :: Frame
+			assertions.isTrue(header.Position.Y.Offset + header.Size.Y.Offset <= page.Position.Y.Offset)
+			assertions.isTrue(page.Position.Y.Offset + page.Size.Y.Offset <= 316 + navigation.Position.Y.Offset)
+			assertions.isTrue(primary.Size.Y.Offset >= 44)
+			assertions.isTrue(primary.Position.Y.Offset + primary.Size.Y.Offset <= guide.Size.Y.Offset)
+			assertions.isTrue(body.CanvasSize.Y.Offset > body.Size.Y.Offset)
+			assertions.isTrue(content.Position.Y.Offset >= guide.Size.Y.Offset)
+			assertions.isTrue(content.Size.Y.Offset >= 240)
+			assertions.isTrue(page.CanvasSize.Y.Offset >= content.Position.Y.Offset + content.Size.Y.Offset)
+			local home = child(content, "HomeScreen", "Frame")
+			local homeBody = child(home, "ATDReadableContent", "ScrollingFrame") :: ScrollingFrame
+			local heading = child(homeBody, "Heading", "TextLabel") :: TextLabel
+			local progression = child(homeBody, "Progression", "TextLabel") :: TextLabel
+			local play = child(homeBody, "Play", "TextButton") :: TextButton
+			assertions.equal(heading.Size.X.Scale, 1)
+			assertions.isTrue(heading.Size.Y.Offset < 200)
+			assertions.isTrue(play.Position.Y.Offset >= progression.Position.Y.Offset + progression.Size.Y.Offset)
+			assertions.isTrue(homeBody.CanvasSize.Y.Offset < 800)
+			assertions.isTrue(view:render(state).ok)
+			assertions.equal(heading.Size.X.Scale, 1)
+			assertions.isTrue(heading.Size.Y.Offset < 200)
+			local navScroll = child(navigation, "ATDNavigationScroll", "ScrollingFrame") :: ScrollingFrame
+			assertions.isTrue(navScroll.CanvasSize.X.Offset > 646)
+			for _, control in navScroll:GetChildren() do
+				if control:IsA("TextButton") then
+					assertions.isTrue(control.TextSize >= 23)
+					assertions.isTrue(control.Size.Y.Offset >= 44)
+				end
+			end
+			view:cleanup()
+			fixture.guiParent:Destroy()
+		end
+	),
+	TestHarness.case("keyboard traversal contains modal focus and restores the surviving control", function(assertions)
+		withView(function(view, fixture)
+			local state = readyState("Settings", "Desktop")
+			assertions.isTrue(view:render(state).ok)
+			fixture.inputListeners[1]("Tab", false)
+			assertions.isNotNil(fixture.selected)
+			local before = fixture.selected
+			local modalState = readyState("Settings", "Desktop")
+			modalState.modals = {
+				{
+					id = "modal:keyboard",
+					title = "Confirm",
+					message = "Confirm the action.",
+					confirmText = "Confirm",
+					cancelText = "Cancel",
+					dismissable = true,
+					busy = false,
+				},
+			}
+			assertions.isTrue(view:render(modalState).ok)
+			local _, root = guiTree(fixture)
+			local scrim = child(root, "ModalScrim", "Frame") :: Frame
+			local panel = child(scrim, "ModalPanel", "Frame") :: Frame
+			for _ = 1, 5 do
+				fixture.inputListeners[1]("Tab", false)
+				assertions.isTrue(fixture.selected:IsDescendantOf(panel))
+			end
+			fixture.inputListeners[1]("Return", false)
+			assertions.isTrue(#fixture.actions > 0)
+			assertions.isTrue(view:render(state).ok)
+			assertions.equal(fixture.selected, before)
+		end)
+	end),
+	TestHarness.case("party invitation cycles present candidates without any keyboard text entry", function(assertions)
+		withView(function(view, fixture)
+			fixture.dependencies.getPresentPlayers = function()
+				return { { userId = 999, displayName = "Second" }, { userId = 998, displayName = "First" } }
+			end
+			local state = squadState("Party")
+			state.inputFamily = "Gamepad"
+			assertions.isTrue(view:render(state).ok)
+			local _, root = guiTree(fixture)
+			local content = child(root, "Content", "Frame") :: Frame
+			local screen = child(content, "PartyScreen", "Frame") :: Frame
+			local party = child(screen, "PartyContent", "ScrollingFrame") :: ScrollingFrame
+			local picker = child(party, "ChoosePlayer", "TextButton") :: TextButton
+			assertions.contains(picker.Text, "First")
+			assertions.isFalse((child(party, "InviteUserId", "TextBox") :: TextBox).Visible)
+			activate(fixture, picker)
+			assertions.contains(picker.Text, "Second")
+			activate(fixture, child(party, "InviteMember", "TextButton") :: TextButton)
+			assertions.equal(fixture.actions[#fixture.actions].kind, "InvitePartyMember")
+			assertions.equal(fixture.actions[#fixture.actions].targetUserId, 999)
+		end)
+	end),
 	TestHarness.case("owns one GUI and never flashes default profile values", function(assertions)
 		withView(function(view, fixture)
 			assertions.isTrue(table.isfrozen(LobbyView))
@@ -376,7 +715,7 @@ return TestHarness.suite("persistent Lobby presentation", {
 			assertions.isTrue(view:render(readyState("Home")).ok)
 			local _, root = guiTree(fixture)
 			local header = child(root, "Header", "Frame") :: Frame
-			assertions.equal((child(header, "Gold", "TextLabel") :: TextLabel).Text, "GOLD 2500")
+			assertions.equal((child(header, "Gold", "TextLabel") :: TextLabel).Text, "GOLD 2,500")
 			assertions.isTrue((child(header, "Title", "TextLabel") :: TextLabel).Visible)
 			assertions.isFalse(view:getMetrics().blockingVisible)
 			assertOneActiveScreen(assertions, root, "Home")
@@ -460,16 +799,21 @@ return TestHarness.suite("persistent Lobby presentation", {
 			assertions.contains(odds, "Guard Ant: 10%")
 			assertions.contains((child(chestScroll, "Pity", "TextLabel") :: TextLabel).Text, "2 / 10")
 			assertions.contains((child(chestScroll, "OnePull", "TextButton") :: TextButton).Text, "250 GOLD")
-			assertions.contains((child(chestScroll, "TenPull", "TextButton") :: TextButton).Text, "2250 GOLD")
+			assertions.contains((child(chestScroll, "TenPull", "TextButton") :: TextButton).Text, "2,250 GOLD")
 
 			local notifications = child(root, "Notifications", "Frame") :: Frame
 			assertions.equal(view:getMetrics().toastCount, 4)
+			for index, color in { Theme.Colors.Info, Theme.Colors.Success, Theme.Colors.Warning, Theme.Colors.Error } do
+				local toast = child(notifications, `Toast{index}`, "TextButton") :: TextButton
+				assertions.equal(toast.BackgroundColor3, color)
+				assertions.equal(toast.TextColor3, Theme.Colors.Backdrop)
+			end
 			assertions.contains((child(notifications, "Toast1", "TextButton") :: TextButton).Text, "i Info")
 			assertions.contains((child(notifications, "Toast2", "TextButton") :: TextButton).Text, "✓ Saved")
 			assertions.contains((child(notifications, "Toast3", "TextButton") :: TextButton).Text, "! Notice")
 			local repeated = child(notifications, "Toast4", "TextButton") :: TextButton
 			assertions.contains(repeated.Text, "✕ Network")
-			assertions.contains(repeated.Text, "repeated ×3")
+			assertions.contains(repeated.Text, "Repeated ×3")
 			activate(fixture, repeated)
 			assertions.equal(fixture.actions[#fixture.actions].kind, "DismissToast")
 			assertions.equal(fixture.actions[#fixture.actions].toastId, "toast:error")
@@ -499,6 +843,19 @@ return TestHarness.suite("persistent Lobby presentation", {
 			robloxReduced.reducedMotion = true
 			assertions.isTrue(view:render(robloxReduced).ok)
 			assertions.equal(gui:GetAttribute("ATDReducedMotion"), true)
+		end)
+	end),
+
+	TestHarness.case("processed Escape stays with Roblox while unprocessed Backspace goes back", function(assertions)
+		withView(function(view, fixture)
+			assertions.isTrue(view:render(readyState("Party")).ok)
+			fixture.inputListeners[1]("Escape", true)
+			assertions.equal(#fixture.actions, 0)
+			fixture.inputListeners[1]("Backspace", true)
+			assertions.equal(#fixture.actions, 0)
+			fixture.inputListeners[1]("Backspace", false)
+			assertions.equal(#fixture.actions, 1)
+			assertions.equal(fixture.actions[1].kind, "Back")
 		end)
 	end),
 
@@ -678,7 +1035,8 @@ return TestHarness.suite("persistent Lobby presentation", {
 				formedParty.viewport = Vector2.new(749, 361)
 				assertions.isTrue(view:render(formedParty).ok)
 				assertions.isFalse(create.Visible)
-				assertions.isTrue(inviteInput.Visible)
+				assertions.isFalse(inviteInput.Visible)
+				assertions.isTrue((child(party, "ChoosePlayer", "TextButton") :: TextButton).Visible)
 				for _, name in { "InviteFriends", "Privacy", "LeaveParty", "DisbandParty" } do
 					local action = child(party, name, "TextButton") :: TextButton
 					assertions.isTrue(action.Position.Y.Offset + action.Size.Y.Offset <= party.CanvasSize.Y.Offset)

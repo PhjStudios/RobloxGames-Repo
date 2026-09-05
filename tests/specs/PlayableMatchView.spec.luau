@@ -4,6 +4,7 @@ local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local RobloxAdapter = require(script.Parent.Parent.Support.RobloxAdapter)
 
 local PlayableMatchView = require(script.Parent.Parent.ProductionClientPlayable.PlayableMatchView)
+local Localization = require(game:GetService("ReplicatedStorage").Shared.localization.Localization)
 
 local newForTests = PlayableMatchView.newForTests
 local newTemplateBackedForTests = PlayableMatchView.newTemplateBackedForTests
@@ -79,7 +80,7 @@ local function child(parent: Instance, name: string, className: string): Instanc
 	return value
 end
 
-local function withView(callback: (any, any) -> (), templateRoot: Instance?)
+local function withView(callback: (any, any) -> (), templateRoot: Instance?, productionLayout: boolean?)
 	local guiParent = Instance.new("Folder")
 	guiParent.Name = "PlayableGuiParent"
 	local worldParent = Instance.new("Folder")
@@ -90,6 +91,9 @@ local function withView(callback: (any, any) -> (), templateRoot: Instance?)
 		stepListeners = {} :: { (number) -> () },
 		disconnectCount = 0,
 		clock = 10,
+		failEffectClock = false,
+		failedEffectRoots = {} :: { Part },
+		failedEffectChildCounts = {} :: { number },
 		selected = nil :: GuiObject?,
 		guiParent = guiParent,
 		worldParent = worldParent,
@@ -111,14 +115,27 @@ local function withView(callback: (any, any) -> (), templateRoot: Instance?)
 			end) :: RBXScriptConnection
 		end,
 		now = function()
+			if fixture.failEffectClock then
+				local world = worldParent:FindFirstChild(PlayableMatchView.WORLD_FOLDER_NAME)
+				local effects = if world then world:FindFirstChild("AttackEffects") else nil
+				local staged = if effects then effects:FindFirstChild("Attack") else nil
+				if staged then
+					table.insert(fixture.failedEffectRoots, staged :: Part)
+					table.insert(fixture.failedEffectChildCounts, #staged:GetChildren())
+					error("injected effect completion clock failure", 0)
+				end
+			end
 			return fixture.clock
 		end,
 		selectObject = function(value)
 			fixture.selected = value
 		end,
+		getSelectedObject = function()
+			return fixture.selected
+		end,
 	}
 	local result = if templateRoot == nil
-		then (newForTests :: any)(guiParent, worldParent, actionCallback, dependencies)
+		then (newForTests :: any)(guiParent, worldParent, actionCallback, dependencies, productionLayout)
 		else (newTemplateBackedForTests :: any)(guiParent, worldParent, templateRoot, actionCallback, dependencies)
 	if not result.ok then
 		guiParent:Destroy()
@@ -275,11 +292,11 @@ return TestHarness.suite("playable local Match presentation", {
 				endless.lowEffects = true
 				assertions.isTrue(view:render(endless).ok)
 				local metrics = view:getMetrics()
-				assertions.contains(metrics.waveText, "1250")
+				assertions.contains(metrics.waveText, "1,250")
 				assertions.contains(metrics.waveText, "ENDLESS")
 				assertions.isTrue(metrics.bossVisible)
 				assertions.contains(metrics.bossText, "QUEEN ANT")
-				assertions.contains(metrics.bossText, "2500 / 10000 HP")
+				assertions.contains(metrics.bossText, "2,500 / 10,000 HP")
 
 				local _, root = guiTree(fixture)
 				local bossPanel = child(root, "BossStatus", "Frame") :: Frame
@@ -417,6 +434,50 @@ return TestHarness.suite("playable local Match presentation", {
 			assertions.equal(#fixture.actions, 1)
 			assertions.equal(fixture.actions[1].kind, "Ready")
 			assertions.equal(fixture.actions[1].source, "Gamepad")
+		end)
+	end),
+
+	TestHarness.case("disabled Ready and Results modals never focus controls outside their scope", function(assertions)
+		withView(function(view, fixture)
+			local ready = snapshot()
+			ready.state = "ReadyCheck"
+			ready.inputFamily = "Gamepad"
+			ready.ready = { enabled = true, countdownSeconds = 18, status = "Waiting for you" }
+			assertions.isTrue(view:render(ready).ok)
+			local _, root = guiTree(fixture)
+			local overlay = child(root, "ReadyOverlay", "Frame") :: Frame
+			assertions.equal(fixture.selected, child(overlay, "Ready", "TextButton"))
+
+			ready.revision += 1
+			ready.ready.enabled = false
+			assertions.isTrue(view:render(ready).ok)
+			assertions.isTrue(overlay.Visible)
+			assertions.isNil(fixture.selected)
+			ready.revision += 1
+			assertions.isTrue(view:render(ready).ok)
+			assertions.isNil(fixture.selected)
+
+			local results = snapshot()
+			results.revision = ready.revision + 1
+			results.inputFamily = "Gamepad"
+			results.state = "Results"
+			results.result = {
+				kind = "Defeat",
+				summary = "The base was overrun.",
+				canReplay = false,
+				rewardStatus = "Pending",
+				persistentGoldAwarded = 0,
+				firstClearBonus = 0,
+				battleCashEarned = 0,
+				battleCashSpent = 0,
+			}
+			assertions.isTrue(view:render(results).ok)
+			assertions.isNil(fixture.selected)
+			results.revision += 1
+			results.result.canReplay = true
+			assertions.isTrue(view:render(results).ok)
+			local resultsPanel = child(root, "ResultsOverlay", "Frame") :: Frame
+			assertions.isTrue(fixture.selected ~= nil and fixture.selected:IsDescendantOf(resultsPanel))
 		end)
 	end),
 
@@ -639,9 +700,11 @@ return TestHarness.suite("playable local Match presentation", {
 	TestHarness.case("resolves compact phone standard and ten-foot layouts with touch targets", function(assertions)
 		withView(function(_view)
 			local phone = (resolveResponsiveLayoutForTests :: any)(375, 667)
+			local landscapeSafeRoot = (resolveResponsiveLayoutForTests :: any)(666, 316)
 			local desktop = (resolveResponsiveLayoutForTests :: any)(1280, 720)
 			local tenFoot = (resolveResponsiveLayoutForTests :: any)(1920, 1080)
 			assertions.equal(phone.mode, "Compact")
+			assertions.equal(landscapeSafeRoot.mode, "Compact")
 			assertions.isTrue(phone.hudWidth < 375)
 			assertions.isTrue(phone.touchTarget >= 48)
 			assertions.equal(desktop.mode, "Standard")
@@ -652,6 +715,172 @@ return TestHarness.suite("playable local Match presentation", {
 		end)
 	end),
 
+	TestHarness.case(
+		"compact two-option loadouts fill the hotbar and preserve a bounded battlefield gap",
+		function(assertions)
+			for _, scale in { 0.75, 1, 1.25 } do
+				withView(function(view, fixture)
+					local _, root = guiTree(fixture)
+					local measuredRoot: any = root
+					local injectedSafeRoot = pcall(function()
+						measuredRoot.AbsoluteSize = Vector2.new(666, 316)
+					end)
+					local state = snapshot()
+					state.viewport = if injectedSafeRoot then Vector2.new(666, 374) else Vector2.new(666, 316)
+					state.uiScale = scale
+					state.hotbar = {
+						{ slot = 1, displayName = "Dart Ant", cost = 100, available = true, selected = false },
+						{ slot = 2, displayName = "Bomb Ant", cost = 250, available = true, selected = false },
+					}
+					Localization.setMode("pseudo50")
+					local rendered = view:render(state)
+					Localization.setMode("en")
+					assertions.isTrue(rendered.ok)
+					local hud = child(root, "TopHUD", "Frame") :: Frame
+					local bar = child(root, "TowerHotbar", "Frame") :: Frame
+					local cards = child(bar, "ATDHotbarCards", "ScrollingFrame") :: ScrollingFrame
+					local first = cards:FindFirstChild("TowerSlot1") :: TextButton
+					local second = cards:FindFirstChild("TowerSlot2") :: TextButton
+					assertions.isTrue(first.Size.X.Offset * scale > 280)
+					assertions.equal(first.Size.X.Offset, second.Size.X.Offset)
+					assertions.isTrue(
+						math.abs(second.Position.X.Offset + second.Size.X.Offset - (bar.Size.X.Offset - 16)) < 0.01
+					)
+					assertions.isNil(string.find(first.Text, "\n", 1, true))
+					-- Deterministic layout occupancy only. Native preferred-font pixels
+					-- and placement visibility still require the real-client check.
+					assertions.isTrue((hud.Size.Y.Offset + bar.Size.Y.Offset + 22) * scale < 316 * 0.65)
+					local occupied = hud.Size.Y.Offset + bar.Size.Y.Offset
+					Localization.setMode("pseudo50")
+					local repeated = view:render(state)
+					Localization.setMode("en")
+					assertions.isTrue(repeated.ok)
+					assertions.equal(hud.Size.Y.Offset + bar.Size.Y.Offset, occupied)
+				end, nil, true)
+			end
+		end
+	),
+	TestHarness.case(
+		"expanded notices follow the measured HUD and stay above the hotbar without instance growth",
+		function(assertions)
+			withView(function(view, fixture)
+				local _, root = guiTree(fixture)
+				pcall(function()
+					(root :: any).AbsoluteSize = Vector2.new(666, 316)
+				end)
+				local state = snapshot()
+				state.viewport = Vector2.new(666, 316)
+				state.inputFamily = "Touch"
+				state.tutorialStep = 5
+				state.hotbar = { { slot = 1, displayName = "Dart Ant", cost = 100, available = true, selected = true } }
+				state.wave.bossKind = "Boss"
+				state.feedback = { code = "REQUEST_PENDING" }
+				Localization.setMode("pseudo50")
+				local rendered = view:render(state)
+				Localization.setMode("en")
+				assertions.isTrue(rendered.ok)
+				local hud = child(root, "TopHUD", "Frame") :: Frame
+				local bar = child(root, "TowerHotbar", "Frame") :: Frame
+				local notices = child(root, "ATDMatchNotices", "ScrollingFrame") :: ScrollingFrame
+				local tutorial = child(notices, "TutorialGuidance", "Frame") :: Frame
+				local boss = child(root, "BossStatus", "Frame") :: Frame
+				assertions.isTrue(notices.Position.Y.Offset >= hud.Position.Y.Offset + hud.Size.Y.Offset + 8)
+				assertions.isTrue(notices.Position.Y.Offset + notices.Size.Y.Offset <= 316 - bar.Size.Y.Offset - 20)
+				assertions.isTrue(tutorial.Size.Y.Offset <= notices.Size.Y.Offset)
+				assertions.equal(boss.Position.Y.Offset, notices.Position.Y.Offset)
+				assertions.isTrue(notices.Size.X.Offset + boss.Size.X.Offset + 8 <= hud.Size.X.Offset)
+				local count = #root:GetDescendants()
+				Localization.setMode("pseudo50")
+				for _ = 1, 8 do
+					assertions.isTrue(view:render(state).ok)
+				end
+				Localization.setMode("en")
+				assertions.equal(#root:GetDescendants(), count)
+				notices.CanvasPosition = Vector2.new(0, 20)
+				assertions.isTrue(view:render(state).ok)
+				assertions.equal(notices.CanvasPosition.Y, 20)
+				state.feedback = { code = "RATE_LIMITED" }
+				assertions.isTrue(view:render(state).ok)
+				assertions.equal(notices.CanvasPosition.Y, 0)
+				assertions.isTrue(view:cleanup().ok)
+				assertions.isNil(root.Parent)
+			end, nil, true)
+		end
+	),
+	TestHarness.case(
+		"production modals use inset-safe landscape height and retain reachable action footers",
+		function(assertions)
+			for _, scale in { 0.75, 1, 1.25 } do
+				withView(function(view, fixture)
+					local _, root = guiTree(fixture)
+					-- The headless adapter permits an explicit safe-root measurement;
+					-- this is layout arithmetic evidence, not an engine font-render check.
+					local measuredRoot: any = root
+					local injectedSafeRoot = pcall(function()
+						measuredRoot.AbsoluteSize = Vector2.new(666, 316)
+					end)
+					local state = snapshot()
+					state.viewport = if injectedSafeRoot then Vector2.new(666, 374) else Vector2.new(666, 316)
+					state.uiScale = scale
+					state.inputFamily = "Gamepad"
+					state.state = "ReadyCheck"
+					state.ready = { enabled = true, status = string.rep("Ready status ", 25) }
+					Localization.setMode("pseudo50")
+					local rendered = view:render(state)
+					Localization.setMode("en")
+					assertions.isTrue(rendered.ok)
+					local ready = child(root, "ReadyOverlay", "Frame") :: Frame
+					local body = child(ready, "ATDModalBody", "ScrollingFrame") :: ScrollingFrame
+					local button = child(ready, "Ready", "TextButton") :: TextButton
+					assertions.isTrue(ready.Size.Y.Offset * scale <= 316 - 24)
+					assertions.isTrue(body.CanvasSize.Y.Offset > body.Size.Y.Offset)
+					assertions.isTrue(button.Position.Y.Offset + button.Size.Y.Offset <= ready.Size.Y.Offset)
+					assertions.isTrue(button.Size.Y.Offset * scale >= 44)
+					assertions.equal(fixture.selected, button)
+					state.ready = nil
+					state.state = "Results"
+					state.result = {
+						kind = "Defeat",
+						summary = string.rep("Result summary ", 16),
+						canReplay = true,
+						rewardStatus = "Ineligible",
+						persistentGoldAwarded = 0,
+						firstClearBonus = 0,
+						battleCashEarned = 0,
+						battleCashSpent = 0,
+					}
+					Localization.setMode("pseudo50")
+					local resultRendered = view:render(state)
+					Localization.setMode("en")
+					assertions.isTrue(resultRendered.ok)
+					local resultPanel = child(root, "ResultsOverlay", "Frame") :: Frame
+					local replay = child(resultPanel, "Replay", "TextButton") :: TextButton
+					assertions.isTrue(resultPanel.Size.Y.Offset * scale <= 316 - 24)
+					assertions.isTrue(replay.Position.Y.Offset + replay.Size.Y.Offset <= resultPanel.Size.Y.Offset)
+					assertions.isTrue(replay.Size.Y.Offset * scale >= 44)
+					assertions.equal(fixture.selected, replay)
+					state.travel = {
+						returnStatus = "Idle",
+						canReturn = true,
+						rematchState = "Pending",
+						rematchStatus = "Pending",
+						canApprove = true,
+						canDecline = true,
+					}
+					Localization.setMode("pseudo50")
+					local travelRendered = view:render(state)
+					Localization.setMode("en")
+					assertions.isTrue(travelRendered.ok)
+					assertions.isTrue(resultPanel.Size.Y.Offset * scale <= 316 - 24)
+					for _, name in { "Replay", "ApproveRematch", "DeclineRematch", "ReturnToLobby" } do
+						local action = resultPanel:FindFirstChild(name, true) :: TextButton
+						assertions.isTrue(action.Position.Y.Offset + action.Size.Y.Offset <= resultPanel.Size.Y.Offset)
+						assertions.isTrue(action.Size.Y.Offset * scale >= 44)
+					end
+				end, nil, true)
+			end
+		end
+	),
 	TestHarness.case(
 		"renders bounded loading feedback and explicit two-step touch placement controls",
 		function(assertions)
@@ -697,9 +926,15 @@ return TestHarness.suite("playable local Match presentation", {
 				fixture.activations[13]()
 				assertions.equal(fixture.actions[3].kind, "Confirm")
 
-				local invalidDesktop = snapshot()
-				invalidDesktop.placement = { positionSelected = true, rotationDegrees = 0, controlsEnabled = true }
-				assertions.isFalse(view:render(invalidDesktop).ok)
+				local desktop = snapshot()
+				desktop.placement = { positionSelected = true, rotationDegrees = 0, controlsEnabled = true }
+				assertions.isTrue(view:render(desktop).ok)
+				assertions.isTrue(confirm.Active)
+				view:setPlacementCursor(Vector2.new(320, 180))
+				local cursor = child(root, "PlacementCursor", "TextLabel") :: TextLabel
+				assertions.isTrue(cursor.Visible)
+				view:setPlacementCursor(nil)
+				assertions.isFalse(cursor.Visible)
 			end)
 		end
 	),
@@ -790,7 +1025,6 @@ return TestHarness.suite("playable local Match presentation", {
 			assertions.equal(view:getMetrics().attackEffectCount, 1)
 			local effects = world:FindFirstChild("AttackEffects") :: Folder
 			local effect = effects:GetChildren()[1] :: Part
-			local normalEffectTransparency = effect.Transparency
 			assertions.isNotNil(effect:FindFirstChild("DamageNumber"))
 			local muzzleFlash = effect:FindFirstChild("MuzzleFlash") :: Part
 			local impactFlash = effect:FindFirstChild("ImpactFlash") :: Part
@@ -807,11 +1041,8 @@ return TestHarness.suite("playable local Match presentation", {
 			assertions.isTrue(view:render(reducedMotion).ok)
 			attack.sequence = 2
 			assertions.isTrue(view:playAttackEffect(attack).ok)
-			local reducedEffect = effects:GetChildren()[1] :: Part
-			assertions.isNotNil(reducedEffect:FindFirstChild("MuzzleFlash"))
-			assertions.isNotNil(reducedEffect:FindFirstChild("ImpactFlash"))
-			assertions.isTrue(reducedEffect.Transparency > normalEffectTransparency)
-			assertions.equal(view:stepEffects(11.039).value, 1)
+			assertions.equal(#effects:GetChildren(), 0)
+			assertions.isTrue((enemyModel:FindFirstChild("HealthDisplay") :: BillboardGui).Enabled)
 			assertions.equal(view:stepEffects(11.041).value, 0)
 
 			fixture.clock = 11.1
@@ -820,6 +1051,9 @@ return TestHarness.suite("playable local Match presentation", {
 			assertions.isTrue(view:render(lowDetail).ok)
 			for sequence = 3, 12 do
 				attack.sequence = sequence
+				for _, listener in fixture.stepListeners do
+					listener(0)
+				end
 				assertions.isTrue(view:playAttackEffect(attack).ok)
 			end
 			assertions.equal(view:getMetrics().attackEffectCount, 8)
@@ -870,6 +1104,146 @@ return TestHarness.suite("playable local Match presentation", {
 			assertions.equal(view:getMetrics().worldTowerCount, 0)
 			assertions.equal(view:getMetrics().worldEnemyCount, 0)
 			assertions.isFalse(view:syncWorld({ towers = { [2] = {} }, enemies = {} }).ok)
+		end)
+	end),
+
+	TestHarness.case(
+		"failed effect construction destroys unregistered roots before the next frame",
+		function(assertions)
+			withView(function(view, fixture)
+				assertions.isTrue(view:render(snapshot()).ok)
+				local world = fixture.worldParent:FindFirstChild(PlayableMatchView.WORLD_FOLDER_NAME) :: Folder
+				local effects = world:FindFirstChild("AttackEffects") :: Folder
+				local attack = {
+					matchId = "match:playable-view",
+					sequence = 1,
+					towerId = "tower:one",
+					targetId = "enemy:one",
+					origin = Vector3.zero,
+					target = Vector3.new(10, 0, 0),
+					damage = 12,
+				}
+				fixture.failEffectClock = true
+				for sequence = 1, 40 do
+					attack.sequence = sequence
+					for _, listener in fixture.stepListeners do
+						listener(0)
+					end
+					local outcome = view:playAttackEffect(attack)
+					assertions.isFalse(outcome.ok)
+					assertions.equal(outcome.error.code, "RENDER_FAILED")
+					assertions.equal(view:getMetrics().attackEffectCount, 0)
+					assertions.equal(#effects:GetChildren(), 0)
+					local staged = fixture.failedEffectRoots[sequence]
+					assertions.isNotNil(staged)
+					assertions.equal(fixture.failedEffectChildCounts[sequence], 3)
+					-- Destroyed Lune instances reject even reads; Roblox locks their
+					-- Parent. Both must reject reattachment to the live effect root.
+					assertions.isFalse(pcall(function()
+						staged.Parent = effects
+					end))
+				end
+				assertions.equal(#fixture.failedEffectRoots, 40)
+				fixture.failEffectClock = false
+				attack.sequence = 41
+				assertions.isTrue(view:playAttackEffect(attack).ok)
+				assertions.equal(#effects:GetChildren(), 1)
+				assertions.equal(view:getMetrics().attackEffectCount, 1)
+				fixture.clock += 1
+				assertions.equal(view:stepEffects(fixture.clock).value, 0)
+				assertions.equal(#effects:GetChildren(), 0)
+			end)
+		end
+	),
+
+	TestHarness.case(
+		"dense attacks are admitted per frame and reduced motion clears all optional flashes",
+		function(assertions)
+			withView(function(view, fixture)
+				view:render(snapshot())
+				local attack = {
+					matchId = "match:playable-view",
+					sequence = 1,
+					towerId = "tower:one",
+					targetId = "enemy:one",
+					origin = Vector3.zero,
+					target = Vector3.new(10, 0, 0),
+				}
+				for sequence = 1, 20 do
+					attack.sequence = sequence
+					assertions.isTrue(view:playAttackEffect(attack).ok)
+				end
+				assertions.equal(view:getMetrics().attackEffectCount, 4)
+				for _, listener in fixture.stepListeners do
+					listener(0)
+				end
+				for sequence = 21, 40 do
+					attack.sequence = sequence
+					view:playAttackEffect(attack)
+				end
+				assertions.equal(view:getMetrics().attackEffectCount, 8)
+				local reduced = snapshot()
+				reduced.reducedMotion = true
+				view:render(reduced)
+				for _, listener in fixture.stepListeners do
+					listener(0)
+				end
+				assertions.equal(view:getMetrics().attackEffectCount, 0)
+			end)
+		end
+	),
+
+	TestHarness.case("visual aim survives snapshots returns idle and retires with the entity", function(assertions)
+		withView(function(view, fixture)
+			view:render(snapshot())
+			local world = {
+				towers = {
+					{
+						id = "tower:one",
+						definitionId = "tower:dart-ant",
+						position = Vector3.zero,
+						rotationDegrees = 0,
+						level = 1,
+					},
+				},
+				enemies = {},
+			}
+			assertions.isTrue(view:syncWorld(world).ok)
+			local folder = fixture.worldParent:FindFirstChild(PlayableMatchView.WORLD_FOLDER_NAME) :: Folder
+			local model = (folder:FindFirstChild("Towers") :: Folder):FindFirstChild("tower:one") :: Model
+			view:playAttackEffect({
+				matchId = "match:playable-view",
+				sequence = 1,
+				towerId = "tower:one",
+				targetId = "enemy:gone",
+				origin = Vector3.zero,
+				target = Vector3.new(10, 0, 0),
+			})
+			fixture.clock += 0.1
+			for _, listener in fixture.stepListeners do
+				listener(0.1)
+			end
+			local aimX = (model.PrimaryPart :: BasePart).CFrame.LookVector.X
+			assertions.isTrue(aimX > 0.5 and aimX < 1)
+			view:syncWorld(world)
+			assertions.isTrue(math.abs((model.PrimaryPart :: BasePart).CFrame.LookVector.X - aimX) < 1e-5)
+			fixture.clock += 1
+			for _, listener in fixture.stepListeners do
+				listener(1)
+			end
+			assertions.isTrue((model.PrimaryPart :: BasePart).CFrame.LookVector.X < aimX)
+			local reduced = snapshot()
+			reduced.reducedMotion = true
+			view:render(reduced)
+			for _, listener in fixture.stepListeners do
+				listener(0)
+			end
+			assertions.isTrue(math.abs((model.PrimaryPart :: BasePart).CFrame.LookVector.X) < 1e-5)
+			view:syncWorld({ towers = {}, enemies = {} })
+			for _, listener in fixture.stepListeners do
+				listener(0)
+			end
+			assertions.equal(view:getMetrics().worldTowerCount, 0)
 		end)
 	end),
 

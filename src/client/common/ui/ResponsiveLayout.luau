@@ -23,7 +23,8 @@ export type Layout = {
 }
 
 local MIN_VIEWPORT_WIDTH = 240
-local MIN_VIEWPORT_HEIGHT = 320
+-- CoreUISafeInsets can reduce a supported 375px landscape viewport below 320px.
+local MIN_VIEWPORT_HEIGHT = 240
 local MAX_VIEWPORT_AXIS = 16_384
 local MIN_UI_SCALE = 0.75
 local MAX_UI_SCALE = 1.25
@@ -90,7 +91,7 @@ function ResponsiveLayout.resolve(viewportValue: unknown, uiScaleValue: unknown?
 	local navigationWidth = if mode == "Compact" then 0 else (if mode == "TenFoot" then 252 else 208)
 	local bottomNavigationHeight = if mode == "Compact" then 68 else 0
 	local panelPadding = if mode == "TenFoot" then 24 elseif mode == "Compact" then 10 else 16
-	local touchTarget = if mode == "TenFoot" then 64 else 48
+	local touchTarget = math.max(if mode == "TenFoot" then 64 else 48, math.ceil(44 / uiScale))
 	local contentWidth = math.max(
 		MIN_CARD_WIDTH,
 		logicalWidth - safeMargin * 2 - navigationWidth - (if navigationWidth > 0 then panelPadding else 0)

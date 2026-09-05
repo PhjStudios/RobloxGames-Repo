@@ -1,6 +1,10 @@
 --!strict
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local UserInputService = game:GetService("UserInputService")
+
+local Localization = require(ReplicatedStorage.Shared.localization.Localization)
 
 export type InputFamily = "Desktop" | "Touch" | "Gamepad"
 export type Context = "Match" | "Ready" | "Placement" | "Tower" | "Results"
@@ -105,29 +109,29 @@ local ACTION_KINDS: { [ActionKind]: boolean } = table.freeze({
 
 local HINTS: { [Context]: { [InputFamily]: string } } = table.freeze({
 	Match = table.freeze({
-		Desktop = "1–5 Select Tower • F Focus Base",
-		Touch = "Tap a tower card • Tap Base to focus",
-		Gamepad = "A Select Tower • LB/RB Build • D-Pad Left/Right Tower • D-Pad Down Toggle Base",
+		Desktop = "playable_input_map.1_5_select_tower_f_focus_base",
+		Touch = "playable_input_map.tap_a_tower_card_tap_base_to",
+		Gamepad = "playable_input_map.a_select_tower_lb_rb_build_d",
 	}),
 	Ready = table.freeze({
-		Desktop = "R / Enter Ready",
-		Touch = "Tap Ready",
-		Gamepad = "A Ready",
+		Desktop = "playable_input_map.r_enter_ready",
+		Touch = "playable_input_map.tap_ready",
+		Gamepad = "playable_input_map.a_ready",
 	}),
 	Placement = table.freeze({
-		Desktop = "Click/Enter Place • R Rotate • Q Cancel",
-		Touch = "Tap position • Confirm • Rotate • Cancel",
-		Gamepad = "A Place • B Cancel • RT Rotate • LB/RB Tower",
+		Desktop = "playable_input_map.click_enter_place_r_rotate_q_cancel",
+		Touch = "playable_input_map.tap_position_confirm_rotate_cancel",
+		Gamepad = "playable_input_map.a_place_b_cancel_rt_rotate_lb",
 	}),
 	Tower = table.freeze({
-		Desktop = "U Upgrade • T Target • X Sell • Q Close",
-		Touch = "Use Upgrade, Target, Sell, or Close",
-		Gamepad = "Y Upgrade • RB Target • X Sell • D-Pad Left/Right Tower • B Close",
+		Desktop = "playable_input_map.u_upgrade_t_target_x_sell_q",
+		Touch = "playable_input_map.use_upgrade_target_sell_or_close",
+		Gamepad = "playable_input_map.y_upgrade_rb_target_x_sell_d",
 	}),
 	Results = table.freeze({
-		Desktop = "R / Enter Play Again",
-		Touch = "Tap Play Again",
-		Gamepad = "A Play Again",
+		Desktop = "playable_input_map.r_enter_play_again",
+		Touch = "playable_input_map.tap_play_again",
+		Gamepad = "playable_input_map.a_play_again",
 	}),
 })
 
@@ -329,10 +333,10 @@ local function resolveRaw(context: Context, preferredInput: InputFamily, rawValu
 	if
 		kind == nil
 		and (context == "Match" or context == "Tower")
-		and (keyCode == "DPadLeft" or keyCode == "DPadRight")
+		and (keyCode == "DPadLeft" or keyCode == "DPadRight" or keyCode == "LeftBracket" or keyCode == "RightBracket")
 	then
 		kind = "CycleTower"
-		fields.direction = if keyCode == "DPadLeft" then -1 else 1
+		fields.direction = if keyCode == "DPadLeft" or keyCode == "LeftBracket" then -1 else 1
 	elseif kind == nil and (keyCode == "F" or keyCode == "DPadDown") then
 		kind = "FocusBase"
 	elseif
@@ -466,7 +470,7 @@ function InputMethods.getHints(self: InputMap): Outcome<string>
 	if data.cleaned then
 		return failure("CLEANED_UP")
 	end
-	return ok(HINTS[data.context][data.preferredInput])
+	return ok(Localization.text(HINTS[data.context][data.preferredInput]))
 end
 
 function InputMethods.getMetrics(self: InputMap): Metrics
@@ -474,7 +478,7 @@ function InputMethods.getMetrics(self: InputMap): Metrics
 	return table.freeze({
 		context = data.context,
 		preferredInput = data.preferredInput,
-		hint = HINTS[data.context][data.preferredInput],
+		hint = Localization.text(HINTS[data.context][data.preferredInput]),
 		actionCount = data.actionCount,
 		connectionCount = #data.connections,
 		cleaned = data.cleaned,
@@ -554,38 +558,45 @@ local function construct(callback: ActionCallback, dependencies: Dependencies): 
 	return ok(inputMap)
 end
 
-local function inputFamilyFromType(inputType: Enum.UserInputType): InputFamily
-	local name = inputType.Name
-	if inputType == Enum.UserInputType.Touch then
+local function preferredFamily(): InputFamily
+	local preferred = UserInputService.PreferredInput
+	if preferred == Enum.PreferredInput.Touch then
 		return "Touch"
-	elseif string.sub(name, 1, 7) == "Gamepad" then
+	elseif preferred == Enum.PreferredInput.Gamepad then
 		return "Gamepad"
 	end
 	return "Desktop"
 end
 
 local function productionDependencies(): Dependencies
-	local initial: InputFamily = "Desktop"
-	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
-		initial = "Touch"
-	elseif UserInputService.GamepadEnabled and not UserInputService.KeyboardEnabled then
-		initial = "Gamepad"
-	end
 	return {
-		initialPreferredInput = initial,
+		initialPreferredInput = preferredFamily(),
 		connectInputBegan = function(listener)
 			return UserInputService.InputBegan:Connect(function(input, processed)
+				local focusedActivation = false
+				if
+					input.KeyCode == Enum.KeyCode.Return
+					or input.KeyCode == Enum.KeyCode.KeypadEnter
+					or input.KeyCode == Enum.KeyCode.Space
+					or input.KeyCode == Enum.KeyCode.ButtonA
+				then
+					pcall(function()
+						local selected = game:GetService("GuiService").SelectedObject
+						local screen = if selected == nil then nil else selected:FindFirstAncestorOfClass("ScreenGui")
+						focusedActivation = screen ~= nil and screen.Name == "ATDPlayableMatch"
+					end)
+				end
 				local position = input.Position
 				listener({
 					keyCode = input.KeyCode.Name,
 					inputType = input.UserInputType.Name,
 					position = Vector2.new(position.X, position.Y),
-				}, processed)
+				}, processed or focusedActivation)
 			end)
 		end,
 		connectPreferredInputChanged = function(listener)
-			return UserInputService.LastInputTypeChanged:Connect(function(inputType)
-				listener(inputFamilyFromType(inputType))
+			return UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(function()
+				listener(preferredFamily())
 			end)
 		end,
 	}

@@ -142,7 +142,7 @@ return TestHarness.suite("minimal Match ready GUI view", {
 		assertions.isTrue(view:render(renderState()).ok)
 
 		local _, panel, button = getTree(parent)
-		assertions.equal((child(panel, "StateLabel", "TextLabel") :: TextLabel).Text, "State: ReadyCheck")
+		assertions.equal((child(panel, "StateLabel", "TextLabel") :: TextLabel).Text, "State: Ready check")
 		assertions.equal((child(panel, "CountdownLabel", "TextLabel") :: TextLabel).Text, "Countdown: 45s")
 		assertions.equal((child(panel, "RequestLabel", "TextLabel") :: TextLabel).Text, "Request: Idle")
 		assertions.equal((child(panel, "PlayerRow1", "TextLabel") :: TextLabel).Text, "Player 1: Ready")

@@ -4,6 +4,13 @@ local TestHarness = require(script.Parent.Parent.Support.TestHarness)
 local ResponsiveLayout = require(script.Parent.Parent.ProductionClientCommonUi.ResponsiveLayout)
 
 return TestHarness.suite("responsive Lobby layout rules", {
+	TestHarness.case("supports the usable safe area of the smallest landscape phone", function(assertions)
+		local layout = ResponsiveLayout.resolve(Vector2.new(666, 316), 1, 1.5)
+		assertions.isNotNil(layout)
+		assertions.equal((layout :: any).mode, "Compact")
+		assertions.equal((layout :: any).baseTextSize, 24)
+		assertions.isTrue((layout :: any).touchTarget >= 44)
+	end),
 	TestHarness.case("resolves compact standard and ten-foot safe layouts", function(assertions)
 		local compact = ResponsiveLayout.resolve(Vector2.new(375, 667), 1, 1)
 		local standard = ResponsiveLayout.resolve(Vector2.new(1280, 720), 1, 1)

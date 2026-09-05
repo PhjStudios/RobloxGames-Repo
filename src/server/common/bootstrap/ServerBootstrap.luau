@@ -14,8 +14,10 @@ local Cleanup = require(ReplicatedStorage.Shared.util.Cleanup)
 local ProductionRateLimits = require(script.Parent.Parent.networking.ProductionRateLimits)
 local ServerRemoteRegistry = require(script.Parent.Parent.networking.ServerRemoteRegistry)
 local Shutdown = require(script.Parent.Shutdown)
+local OutcomeObserver = require(script.Parent.Parent.analytics.OutcomeObserver)
 
 export type Configuration = {
+	telemetry: any,
 	role: PlaceRoles.PlaceRole,
 	deployment: PlaceRoles.Deployment,
 	log: Log.Logger,
@@ -143,6 +145,18 @@ function ServerBootstrap.run(expectedRole: PlaceRoles.PlaceRole?, configure: Con
 	local coreConfiguration = coreConfigurationResult.value
 
 	local lifecycleRunner = ServiceLifecycle.new(log)
+	-- No external destination is configured. Records are validated and counted,
+	-- then discarded by the disabled sink; gameplay never waits on delivery.
+	local telemetry = OutcomeObserver.new(log)
+	lifecycleRunner:register({
+		name = "Observability",
+		dependencies = {},
+		initialize = function() end,
+		start = function() end,
+		shutdown = function()
+			telemetry:cleanup()
+		end,
+	})
 	local serverRemoteRegistry: ServerRemoteRegistry.Server? = nil
 	if roleResult.role ~= PlaceRoles.DEVELOPMENT_ROLE then
 		serverRemoteRegistry =
@@ -152,6 +166,7 @@ function ServerBootstrap.run(expectedRole: PlaceRoles.PlaceRole?, configure: Con
 
 	if configure ~= nil then
 		configure({
+			telemetry = telemetry,
 			role = roleResult.role,
 			deployment = roleResult.deployment,
 			log = log,

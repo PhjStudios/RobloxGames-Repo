@@ -1,5 +1,7 @@
 --!strict
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
@@ -25,6 +27,11 @@ end
 local commonUi = findCommonUi()
 local ResponsiveLayout = require(commonUi.ResponsiveLayout)
 local Theme = require(commonUi.Theme)
+local FocusNavigation = require(commonUi.FocusNavigation)
+local TextLayout = require(commonUi.TextLayout)
+local Accessibility = require(ReplicatedStorage.Shared.settings.Accessibility)
+
+local Localization = require(ReplicatedStorage.Shared.localization.Localization)
 
 export type InputFamily = LobbyUiModel.InputFamily
 export type PrimaryScreen = LobbyUiModel.PrimaryScreen
@@ -102,10 +109,12 @@ export type Callback = (Action) -> ()
 export type Dependencies = {
 	connectActivated: (GuiButton, () -> ()) -> RBXScriptConnection,
 	connectInputBegan: ((string, boolean) -> ()) -> RBXScriptConnection,
+	cleanupInput: (() -> ())?,
 	connectInputFamilyChanged: ((InputFamily) -> ()) -> RBXScriptConnection,
 	connectSearchCommitted: (TextBox, (string) -> ()) -> RBXScriptConnection,
 	selectObject: (GuiObject?) -> (),
 	getSelectedObject: () -> GuiObject?,
+	getPresentPlayers: (() -> { { userId: number, displayName: string } })?,
 }
 
 export type ErrorCode =
@@ -155,13 +164,17 @@ type Instances = {
 	navigationButtons: { [PrimaryScreen]: TextButton },
 	content: Frame,
 	screens: { [PrimaryScreen]: Frame },
+	homeHeading: TextLabel,
 	homeStatus: TextLabel,
+	inventoryHeading: TextLabel,
+	settingsHeading: TextLabel,
 	homeProgression: TextLabel,
 	playButton: TextButton,
 	partyScroll: ScrollingFrame,
 	partyHeading: TextLabel,
 	partyStatus: TextLabel,
 	partyInviteInput: TextBox,
+	partyInvitePicker: TextButton,
 	partyCreateButton: TextButton,
 	partyInviteButton: TextButton,
 	partyPlatformInviteButton: TextButton,
@@ -247,6 +260,10 @@ type ViewData = {
 	cleaned: boolean,
 	productionStyle: boolean,
 	compactMode: boolean,
+	keyboardNavigation: boolean,
+	activationCallbacks: { [GuiObject]: () -> () },
+	inviteCandidateIndex: number,
+	inviteCandidateUserId: number?,
 }
 
 local ViewMethods = {}
@@ -277,18 +294,18 @@ local SETTING_ORDER: { string } = table.freeze({
 	"uiScale",
 })
 local SETTING_LABELS: { [string]: string } = table.freeze({
-	masterVolume = "Master Volume",
-	musicVolume = "Music Volume",
-	sfxVolume = "Sound Effects",
-	uiVolume = "Interface Sounds",
-	cameraShakeIntensity = "Camera Shake",
-	reducedMotionEnabled = "Reduced Motion",
-	damageNumbersEnabled = "Damage Numbers",
-	enemyHealthBarsEnabled = "Enemy Health Bars",
-	otherPlayerEffectsEnabled = "Other-player Effects",
-	lowDetailEnabled = "Low Detail",
-	towerRangeEnabled = "Tower Range",
-	uiScale = "UI Scale",
+	masterVolume = "lobby_view.master_volume",
+	musicVolume = "lobby_view.music_volume",
+	sfxVolume = "lobby_view.sound_effects",
+	uiVolume = "lobby_view.interface_sounds",
+	cameraShakeIntensity = "lobby_view.camera_shake",
+	reducedMotionEnabled = "lobby_view.reduced_motion",
+	damageNumbersEnabled = "lobby_view.damage_numbers",
+	enemyHealthBarsEnabled = "lobby_view.enemy_health_bars",
+	otherPlayerEffectsEnabled = "lobby_view.other_player_effects",
+	lowDetailEnabled = "lobby_view.low_detail",
+	towerRangeEnabled = "lobby_view.tower_range",
+	uiScale = "lobby_view.ui_scale",
 })
 
 local ERRORS: { [ErrorCode]: Error } = table.freeze({
@@ -356,13 +373,19 @@ local function makeLabel(name: string, parent: Instance, text: string, zIndex: n
 	label.Name = name
 	label.BackgroundTransparency = 1
 	label.BorderSizePixel = 0
-	label.Text = text
+	if Localization.isKey(text) then
+		Localization.bind(label, text)
+	else
+		label.Text = text
+	end
 	label.TextColor3 = Theme.Colors.Text
 	label.TextWrapped = true
 	label.RichText = false
+	label.AutoLocalize = false
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.TextYAlignment = Enum.TextYAlignment.Center
 	label.Font = Enum.Font.Gotham
+	label.TextSize = 16
 	label.ZIndex = zIndex
 	label.Parent = parent
 	return label
@@ -374,11 +397,17 @@ local function makeButton(name: string, parent: Instance, text: string, zIndex: 
 	button.BackgroundColor3 = Theme.Colors.SurfaceRaised
 	button.BorderSizePixel = 0
 	button.AutoButtonColor = false
-	button.Text = text
+	if Localization.isKey(text) then
+		Localization.bind(button, text)
+	else
+		button.Text = text
+	end
 	button.TextColor3 = Theme.Colors.Text
 	button.TextWrapped = true
 	button.RichText = false
+	button.AutoLocalize = false
 	button.Font = Enum.Font.GothamBold
+	button.TextSize = 16
 	button.ZIndex = zIndex
 	button.Parent = parent
 	addCorner(button, Theme.Radii.Small)
@@ -439,30 +468,36 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 
 		local header = makeFrame("Header", root, Theme.ZIndex.Navigation)
 		addCorner(header, Theme.Radii.Medium)
-		local title = label("Title", header, "ANT TOWER DEFENSE", Theme.ZIndex.Navigation + 1)
+		local title = label("Title", header, "lobby_view.ant_tower_defense", Theme.ZIndex.Navigation + 1)
 		title.Font = Enum.Font.GothamBold
-		local readiness = label("ProfileReadiness", header, "LOADING PROFILE", Theme.ZIndex.Navigation + 1)
-		local gold = label("Gold", header, "GOLD —", Theme.ZIndex.Navigation + 1)
+		local readiness = label("ProfileReadiness", header, "lobby_view.loading_profile", Theme.ZIndex.Navigation + 1)
+		local gold = label("Gold", header, "lobby_view.gold", Theme.ZIndex.Navigation + 1)
 		gold.TextXAlignment = Enum.TextXAlignment.Right
-		local backButton = button("Back", header, "‹ BACK", Theme.ZIndex.Navigation + 1)
+		local backButton = button("Back", header, "lobby_view.back", Theme.ZIndex.Navigation + 1)
 
 		local tutorialPanel = makeFrame("ATDTutorialGuidance", root, Theme.ZIndex.Navigation)
 		tutorialPanel.BackgroundColor3 = Theme.Colors.SurfaceRaised
 		addCorner(tutorialPanel, Theme.Radii.Medium)
 		addStroke(tutorialPanel, Theme.Colors.Focus, Theme.Stroke.Normal)
-		local tutorialTitle = label("Title", tutorialPanel, "GETTING STARTED", Theme.ZIndex.Navigation + 1)
+		local tutorialTitle = label("Title", tutorialPanel, "lobby_view.getting_started", Theme.ZIndex.Navigation + 1)
 		tutorialTitle.Font = Enum.Font.GothamBold
 		local tutorialMessage = label("Message", tutorialPanel, "", Theme.ZIndex.Navigation + 1)
-		local tutorialPrimary = button("Primary", tutorialPanel, "CONTINUE", Theme.ZIndex.Navigation + 1)
+		local tutorialPrimary = button("Primary", tutorialPanel, "enum.action.continue", Theme.ZIndex.Navigation + 1)
 		tutorialPrimary.SelectionOrder = 8
-		local tutorialSkip = button("Skip", tutorialPanel, "SKIP", Theme.ZIndex.Navigation + 1)
+		local tutorialSkip = button("Skip", tutorialPanel, "enum.action.skip", Theme.ZIndex.Navigation + 1)
 		tutorialSkip.SelectionOrder = 9
 
 		local navigation = makeFrame("Navigation", root, Theme.ZIndex.Navigation)
 		addCorner(navigation, Theme.Radii.Medium)
 		local navigationButtons = {} :: { [PrimaryScreen]: TextButton }
 		for index, screen in NAVIGATION_ORDER do
-			local navigationButton = button(screen, navigation, string.upper(screen), Theme.ZIndex.Navigation + 1)
+			local navigationButton = button(
+				screen,
+				navigation,
+				string.upper(Localization.enum("navigation", screen)),
+				Theme.ZIndex.Navigation + 1
+			)
+			Localization.bind(navigationButton, "enum.navigation." .. string.lower(screen))
 			navigationButton.SelectionOrder = 10 + index
 			navigationButtons[screen] = navigationButton
 		end
@@ -481,11 +516,15 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		end
 
 		local home = screens.Home
-		local homeTitle = label("Heading", home, "WELCOME TO THE COLONY", Theme.ZIndex.Content + 2)
+		local homeTitle = label("Heading", home, "lobby_view.welcome_to_the_colony", Theme.ZIndex.Content + 2)
 		homeTitle.Font = Enum.Font.GothamBold
+		homeTitle:SetAttribute("ATDFlowOrder", 10)
 		local homeStatus = label("Status", home, "", Theme.ZIndex.Content + 2)
+		homeStatus:SetAttribute("ATDFlowOrder", 20)
 		local homeProgression = label("Progression", home, "", Theme.ZIndex.Content + 2)
-		local playButton = button("Play", home, "PLAY\nLocal Match", Theme.ZIndex.Content + 2)
+		homeProgression:SetAttribute("ATDFlowOrder", 30)
+		local playButton = button("Play", home, "lobby_view.play_local_match", Theme.ZIndex.Content + 2)
+		playButton:SetAttribute("ATDFlowOrder", 40)
 		playButton.SelectionOrder = 1
 
 		local partyScreen = screens.Party
@@ -499,15 +538,15 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		party.ScrollBarThickness = 8
 		party.ZIndex = Theme.ZIndex.Content + 1
 		party.Parent = partyScreen
-		local partyHeading = label("Heading", party, "SAME-SERVER PARTY", Theme.ZIndex.Content + 2)
+		local partyHeading = label("Heading", party, "lobby_view.same_server_party", Theme.ZIndex.Content + 2)
 		partyHeading.Font = Enum.Font.GothamBold
-		local partyStatus = label("Status", party, "LOADING AUTHORITATIVE PARTY…", Theme.ZIndex.Content + 2)
+		local partyStatus = label("Status", party, "lobby_view.loading_authoritative_party", Theme.ZIndex.Content + 2)
 		local partyInviteInput = Instance.new("TextBox")
 		partyInviteInput.Name = "InviteUserId"
 		partyInviteInput.BackgroundColor3 = Theme.Colors.SurfaceRaised
 		partyInviteInput.BorderSizePixel = 0
 		partyInviteInput.ClearTextOnFocus = false
-		partyInviteInput.PlaceholderText = "Present player name"
+		Localization.bind(partyInviteInput, "lobby_view.present_player_name", "PlaceholderText")
 		partyInviteInput.PlaceholderColor3 = Theme.Colors.TextMuted
 		partyInviteInput.Text = ""
 		partyInviteInput.TextColor3 = Theme.Colors.Text
@@ -516,14 +555,18 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		partyInviteInput.ZIndex = Theme.ZIndex.Content + 2
 		partyInviteInput.SelectionOrder = 61
 		partyInviteInput.Parent = party
+		partyInviteInput.AutoLocalize = false
+		local partyInvitePicker = button("ChoosePlayer", party, "lobby.party.no_candidates", Theme.ZIndex.Content + 3)
+		partyInvitePicker.SelectionOrder = 61
 		addCorner(partyInviteInput, Theme.Radii.Small)
 		addStroke(partyInviteInput, Theme.Colors.SurfaceMuted, Theme.Stroke.Normal)
-		local partyCreateButton = button("CreateParty", party, "CREATE PARTY", Theme.ZIndex.Content + 2)
-		local partyInviteButton = button("InviteMember", party, "INVITE PLAYER", Theme.ZIndex.Content + 2)
-		local partyPlatformInviteButton = button("InviteFriends", party, "INVITE FRIENDS", Theme.ZIndex.Content + 2)
-		local partyPrivacyButton = button("Privacy", party, "PRIVACY", Theme.ZIndex.Content + 2)
-		local partyLeaveButton = button("LeaveParty", party, "LEAVE", Theme.ZIndex.Content + 2)
-		local partyDisbandButton = button("DisbandParty", party, "DISBAND", Theme.ZIndex.Content + 2)
+		local partyCreateButton = button("CreateParty", party, "lobby_view.create_party", Theme.ZIndex.Content + 2)
+		local partyInviteButton = button("InviteMember", party, "lobby_view.invite_player", Theme.ZIndex.Content + 2)
+		local partyPlatformInviteButton =
+			button("InviteFriends", party, "lobby_view.invite_friends", Theme.ZIndex.Content + 2)
+		local partyPrivacyButton = button("Privacy", party, "enum.action.privacy", Theme.ZIndex.Content + 2)
+		local partyLeaveButton = button("LeaveParty", party, "enum.action.leave", Theme.ZIndex.Content + 2)
+		local partyDisbandButton = button("DisbandParty", party, "enum.action.disband", Theme.ZIndex.Content + 2)
 		local partyList = Instance.new("ScrollingFrame")
 		partyList.Name = "PartyRosterAndInvites"
 		partyList.BackgroundColor3 = Theme.Colors.Backdrop
@@ -553,9 +596,9 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		queue.ScrollBarThickness = 8
 		queue.ZIndex = Theme.ZIndex.Content + 1
 		queue.Parent = queueScreen
-		local queueHeading = label("Heading", queue, "SQUAD QUEUE", Theme.ZIndex.Content + 2)
+		local queueHeading = label("Heading", queue, "lobby_view.squad_queue", Theme.ZIndex.Content + 2)
 		queueHeading.Font = Enum.Font.GothamBold
-		local queueStatus = label("Status", queue, "LOADING AUTHORITATIVE QUEUES…", Theme.ZIndex.Content + 2)
+		local queueStatus = label("Status", queue, "lobby_view.loading_authoritative_queues", Theme.ZIndex.Content + 2)
 		local queueList = Instance.new("ScrollingFrame")
 		queueList.Name = "QueueSelector"
 		queueList.BackgroundColor3 = Theme.Colors.Backdrop
@@ -573,28 +616,29 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		queueListLayout.Padding = UDim.new(0, Theme.Spacing.Small)
 		queueListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		queueListLayout.Parent = queueList
-		local queueRoster = label("Roster", queue, "ROSTER —", Theme.ZIndex.Content + 2)
+		local queueRoster = label("Roster", queue, "lobby_view.roster", Theme.ZIndex.Content + 2)
 		queueRoster.TextYAlignment = Enum.TextYAlignment.Top
-		local queueConfiguration = label("Configuration", queue, "CONFIGURATION —", Theme.ZIndex.Content + 2)
+		local queueConfiguration = label("Configuration", queue, "lobby_view.configuration", Theme.ZIndex.Content + 2)
 		queueConfiguration.TextYAlignment = Enum.TextYAlignment.Top
-		local queueJoinButton = button("JoinQueue", queue, "JOIN VIA UI", Theme.ZIndex.Content + 2)
-		local queueLeaveButton = button("LeaveQueue", queue, "LEAVE QUEUE", Theme.ZIndex.Content + 2)
-		local queueMapButton = button("Map", queue, "MAP", Theme.ZIndex.Content + 2)
-		local queueDifficultyButton = button("Difficulty", queue, "DIFFICULTY", Theme.ZIndex.Content + 2)
-		local queuePrivacyButton = button("QueuePrivacy", queue, "PRIVACY", Theme.ZIndex.Content + 2)
-		local queueCapacityButton = button("Capacity", queue, "CAPACITY", Theme.ZIndex.Content + 2)
-		local queueStartButton = button("StartQueue", queue, "LOCK & START", Theme.ZIndex.Content + 2)
-		local reconnectButton = button("ReconnectMatch", queue, "RECONNECT TO ACTIVE MATCH", Theme.ZIndex.Content + 2)
+		local queueJoinButton = button("JoinQueue", queue, "lobby_view.join_via_ui", Theme.ZIndex.Content + 2)
+		local queueLeaveButton = button("LeaveQueue", queue, "lobby_view.leave_queue", Theme.ZIndex.Content + 2)
+		local queueMapButton = button("Map", queue, "enum.action.map", Theme.ZIndex.Content + 2)
+		local queueDifficultyButton = button("Difficulty", queue, "enum.action.difficulty", Theme.ZIndex.Content + 2)
+		local queuePrivacyButton = button("QueuePrivacy", queue, "enum.action.privacy", Theme.ZIndex.Content + 2)
+		local queueCapacityButton = button("Capacity", queue, "enum.action.capacity", Theme.ZIndex.Content + 2)
+		local queueStartButton = button("StartQueue", queue, "lobby_view.lock_start", Theme.ZIndex.Content + 2)
+		local reconnectButton =
+			button("ReconnectMatch", queue, "lobby_view.reconnect_to_active_match", Theme.ZIndex.Content + 2)
 
 		local inventory = screens.Inventory
-		local inventoryTitle = label("Heading", inventory, "INVENTORY & LOADOUT", Theme.ZIndex.Content + 2)
+		local inventoryTitle = label("Heading", inventory, "lobby_view.inventory_loadout", Theme.ZIndex.Content + 2)
 		inventoryTitle.Font = Enum.Font.GothamBold
 		local inventorySearch = Instance.new("TextBox")
 		inventorySearch.Name = "Search"
 		inventorySearch.BackgroundColor3 = Theme.Colors.SurfaceRaised
 		inventorySearch.BorderSizePixel = 0
 		inventorySearch.ClearTextOnFocus = false
-		inventorySearch.PlaceholderText = "Search owned towers"
+		Localization.bind(inventorySearch, "lobby_view.search_owned_towers", "PlaceholderText")
 		inventorySearch.PlaceholderColor3 = Theme.Colors.TextMuted
 		inventorySearch.Text = ""
 		inventorySearch.TextColor3 = Theme.Colors.Text
@@ -605,9 +649,9 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		inventorySearch.Parent = inventory
 		addCorner(inventorySearch, Theme.Radii.Small)
 		addStroke(inventorySearch, Theme.Colors.SurfaceMuted, Theme.Stroke.Normal)
-		local inventorySort = button("Sort", inventory, "SORT: NAME", Theme.ZIndex.Content + 2)
+		local inventorySort = button("Sort", inventory, "lobby_view.sort_name", Theme.ZIndex.Content + 2)
 		inventorySort.SelectionOrder = 22
-		local inventoryFilter = button("Filter", inventory, "FILTER: ALL", Theme.ZIndex.Content + 2)
+		local inventoryFilter = button("Filter", inventory, "lobby_view.filter_all", Theme.ZIndex.Content + 2)
 		inventoryFilter.SelectionOrder = 23
 		local inventoryGrid = Instance.new("ScrollingFrame")
 		inventoryGrid.Name = "OwnedTowerGrid"
@@ -637,17 +681,17 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		detailPanel.ZIndex = Theme.ZIndex.Content + 2
 		detailPanel.Parent = inventory
 		addCorner(detailPanel, Theme.Radii.Medium)
-		local detailBackButton = button("CloseDetails", detailPanel, "‹ TOWER LIST", Theme.ZIndex.Content + 3)
+		local detailBackButton = button("CloseDetails", detailPanel, "lobby_view.tower_list", Theme.ZIndex.Content + 3)
 		detailBackButton.SelectionOrder = 230
-		local detailTitle = label("TowerName", detailPanel, "SELECT A TOWER", Theme.ZIndex.Content + 3)
+		local detailTitle = label("TowerName", detailPanel, "lobby_view.select_a_tower", Theme.ZIndex.Content + 3)
 		detailTitle.Font = Enum.Font.GothamBold
 		local detailOwnership = label("Ownership", detailPanel, "", Theme.ZIndex.Content + 3)
 		local detailDescription = label("Description", detailPanel, "", Theme.ZIndex.Content + 3)
 		local detailStats = label("CombatStats", detailPanel, "", Theme.ZIndex.Content + 3)
 		local detailUpgrade = label("UpgradePreview", detailPanel, "", Theme.ZIndex.Content + 3)
-		local equipButton = button("Equip", detailPanel, "EQUIP", Theme.ZIndex.Content + 3)
-		local favoriteButton = button("Favorite", detailPanel, "☆ FAVORITE", Theme.ZIndex.Content + 3)
-		local lockButton = button("Lock", detailPanel, "◇ LOCK", Theme.ZIndex.Content + 3)
+		local equipButton = button("Equip", detailPanel, "enum.action.equip", Theme.ZIndex.Content + 3)
+		local favoriteButton = button("Favorite", detailPanel, "lobby_view.favorite", Theme.ZIndex.Content + 3)
+		local lockButton = button("Lock", detailPanel, "lobby_view.lock", Theme.ZIndex.Content + 3)
 
 		local chests = screens.Chests
 		local chestScroll = Instance.new("ScrollingFrame")
@@ -660,18 +704,19 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		chestScroll.ScrollBarThickness = 8
 		chestScroll.ZIndex = Theme.ZIndex.Content + 2
 		chestScroll.Parent = chests
-		local chestTitle = label("Heading", chestScroll, "CHESTS", Theme.ZIndex.Content + 2)
+		local chestTitle = label("Heading", chestScroll, "enum.navigation.chests", Theme.ZIndex.Content + 2)
 		chestTitle.Font = Enum.Font.GothamBold
 		local chestPolicy = label("Policy", chestScroll, "", Theme.ZIndex.Content + 2)
 		local chestPity = label("Pity", chestScroll, "", Theme.ZIndex.Content + 2)
 		local chestOdds = label("Odds", chestScroll, "", Theme.ZIndex.Content + 2)
 		chestOdds.TextYAlignment = Enum.TextYAlignment.Top
-		local onePullButton = button("OnePull", chestScroll, "OPEN 1", Theme.ZIndex.Content + 2)
-		local tenPullButton = button("TenPull", chestScroll, "OPEN 10", Theme.ZIndex.Content + 2)
-		local skipButton = button("SkipPresentation", chestScroll, "SKIP PRESENTATION", Theme.ZIndex.Content + 2)
+		local onePullButton = button("OnePull", chestScroll, "lobby_view.open_1", Theme.ZIndex.Content + 2)
+		local tenPullButton = button("TenPull", chestScroll, "lobby_view.open_10", Theme.ZIndex.Content + 2)
+		local skipButton =
+			button("SkipPresentation", chestScroll, "lobby_view.skip_presentation", Theme.ZIndex.Content + 2)
 
 		local settings = screens.Settings
-		local settingsHeading = label("Heading", settings, "SETTINGS", Theme.ZIndex.Content + 2)
+		local settingsHeading = label("Heading", settings, "enum.navigation.settings", Theme.ZIndex.Content + 2)
 		settingsHeading.Font = Enum.Font.GothamBold
 		local settingsList = Instance.new("ScrollingFrame")
 		settingsList.Name = "SettingsList"
@@ -709,27 +754,27 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 		local modalTitle = label("Title", modalPanel, "", Theme.ZIndex.Modal + 1)
 		modalTitle.Font = Enum.Font.GothamBold
 		local modalMessage = label("Message", modalPanel, "", Theme.ZIndex.Modal + 1)
-		local modalConfirm = button("Confirm", modalPanel, "CONFIRM", Theme.ZIndex.Modal + 1)
+		local modalConfirm = button("Confirm", modalPanel, "enum.action.confirm", Theme.ZIndex.Modal + 1)
 		modalConfirm.SelectionOrder = 101
-		local modalCancel = button("Cancel", modalPanel, "CANCEL", Theme.ZIndex.Modal + 1)
+		local modalCancel = button("Cancel", modalPanel, "enum.action.cancel", Theme.ZIndex.Modal + 1)
 		modalCancel.SelectionOrder = 102
 
 		local blocking = makeFrame("ProfileBlocking", root, Theme.ZIndex.Blocking)
 		blocking.Active = true
 		blocking.BackgroundColor3 = Theme.Colors.Backdrop
-		local blockingTitle = label("Title", blocking, "LOADING PROFILE", Theme.ZIndex.Blocking + 1)
+		local blockingTitle = label("Title", blocking, "lobby_view.loading_profile", Theme.ZIndex.Blocking + 1)
 		blockingTitle.Font = Enum.Font.GothamBold
 		blockingTitle.TextXAlignment = Enum.TextXAlignment.Center
 		local blockingMessage = label(
 			"Message",
 			blocking,
-			"Loading your saved data safely. Inventory and Gold stay hidden until the server is ready.",
+			"lobby_view.loading_your_saved_data_safely_inventory_and",
 			Theme.ZIndex.Blocking + 1
 		)
 		blockingMessage.TextXAlignment = Enum.TextXAlignment.Center
-		local retryButton = button("Retry", blocking, "RETRY", Theme.ZIndex.Blocking + 1)
+		local retryButton = button("Retry", blocking, "enum.action.retry", Theme.ZIndex.Blocking + 1)
 		retryButton.SelectionOrder = 201
-		local leaveButton = button("Leave", blocking, "LEAVE SAFELY", Theme.ZIndex.Blocking + 1)
+		local leaveButton = button("Leave", blocking, "lobby_view.leave_safely", Theme.ZIndex.Blocking + 1)
 		leaveButton.SelectionOrder = 202
 
 		result = {
@@ -750,13 +795,17 @@ local function createInstances(parent: Instance, productionStyle: boolean): Inst
 			navigationButtons = navigationButtons,
 			content = content,
 			screens = screens,
+			homeHeading = homeTitle,
 			homeStatus = homeStatus,
+			inventoryHeading = inventoryTitle,
+			settingsHeading = settingsHeading,
 			homeProgression = homeProgression,
 			playButton = playButton,
 			partyScroll = party,
 			partyHeading = partyHeading,
 			partyStatus = partyStatus,
 			partyInviteInput = partyInviteInput,
+			partyInvitePicker = partyInvitePicker,
 			partyCreateButton = partyCreateButton,
 			partyInviteButton = partyInviteButton,
 			partyPlatformInviteButton = partyPlatformInviteButton,
@@ -900,9 +949,14 @@ local function applyLayout(instances: Instances, layout: ResponsiveLayout.Layout
 		label.TextSize = layout.baseTextSize
 	end
 	for _, button in instances.allButtons do
-		button.TextSize = math.max(14, layout.baseTextSize - 1)
+		button.TextSize = math.max(16, layout.baseTextSize - 1)
 	end
 	instances.title.TextSize = layout.titleTextSize
+	for _, heading in { instances.homeHeading, instances.inventoryHeading, instances.settingsHeading } do
+		heading.Position = UDim2.fromOffset(0, 0)
+		heading.Size = UDim2.new(1, 0, 0, 46)
+	end
+	instances.inventoryHeading.Visible = layout.mode ~= "Compact"
 
 	instances.homeStatus.Position = UDim2.fromOffset(0, 66)
 	instances.homeStatus.Size = UDim2.new(1, 0, 0, 82)
@@ -964,6 +1018,9 @@ local function applyLayout(instances: Instances, layout: ResponsiveLayout.Layout
 		partyListTop = 58 + layout.touchTarget + 10
 	end
 	local partyListHeight = math.max(160, squadViewportHeight - partyListTop)
+	instances.partyInvitePicker.Position = instances.partyInviteInput.Position
+	instances.partyInvitePicker.Size = instances.partyInviteInput.Size
+	instances.partyInvitePicker.TextSize = layout.baseTextSize
 	instances.partyList.Position = UDim2.fromOffset(0, partyListTop)
 	instances.partyList.Size = UDim2.new(1, -10, 0, partyListHeight)
 	instances.partyScroll.CanvasSize = UDim2.fromOffset(0, partyListTop + partyListHeight)
@@ -1118,8 +1175,16 @@ local function applyLayout(instances: Instances, layout: ResponsiveLayout.Layout
 		instances.skipButton.Size = UDim2.new(0.24, -3, 0, layout.touchTarget)
 	end
 
-	instances.settingsList.Position = UDim2.fromOffset(0, 58)
-	instances.settingsList.Size = UDim2.new(1, 0, 1, -58)
+	local settingsHeadingHeight = TextLayout.measure(
+		instances.settingsHeading.Text,
+		instances.settingsHeading.TextSize,
+		layout.contentWidth,
+		instances.settingsHeading.Font,
+		instances.uiScale.Scale
+	)
+	instances.settingsHeading.Size = UDim2.new(1, 0, 0, settingsHeadingHeight)
+	instances.settingsList.Position = UDim2.fromOffset(0, settingsHeadingHeight + 8)
+	instances.settingsList.Size = UDim2.new(1, 0, 1, -(settingsHeadingHeight + 8))
 	for _, key in SETTING_ORDER do
 		instances.settingsButtons[key].Size = UDim2.new(1, -10, 0, layout.touchTarget + 4)
 	end
@@ -1201,6 +1266,7 @@ local function emit(data: ViewData, fields: { [string]: any })
 end
 
 local function connectButton(data: ViewData, button: TextButton, callback: () -> ()): boolean
+	data.activationCallbacks[button] = callback
 	local connected, connection = pcall(data.dependencies.connectActivated, button, function()
 		if not data.cleaned and button.Active then
 			callback()
@@ -1211,6 +1277,66 @@ local function connectButton(data: ViewData, button: TextButton, callback: () ->
 	end
 	table.insert(data.connections, connection :: RBXScriptConnection)
 	return true
+end
+
+local function inviteCandidates(data: ViewData): { { userId: number, displayName: string } }
+	local snapshot = data.current
+	local candidates = {}
+	local supplied = {}
+	pcall(function()
+		if data.dependencies.getPresentPlayers ~= nil then
+			supplied = data.dependencies.getPresentPlayers()
+		else
+			for _, player in Players:GetPlayers() do
+				table.insert(supplied, { userId = player.UserId, displayName = player.DisplayName })
+			end
+		end
+	end)
+	local excluded = {}
+	if snapshot ~= nil then
+		excluded[snapshot.localUserId] = true
+		local party = if snapshot.partySnapshot == nil then nil else snapshot.partySnapshot.party
+		if party ~= nil then
+			for _, member in party.members do
+				excluded[member.userId] = true
+			end
+		end
+	end
+	for _, candidate in supplied do
+		if #candidates >= 64 then
+			break
+		end
+		if
+			type(candidate) == "table"
+			and type(candidate.userId) == "number"
+			and candidate.userId % 1 == 0
+			and candidate.userId > 0
+			and candidate.userId <= MAX_SAFE_USER_ID
+			and not excluded[candidate.userId]
+			and type(candidate.displayName) == "string"
+			and #candidate.displayName <= 64
+		then
+			table.insert(
+				candidates,
+				{ userId = candidate.userId, displayName = Localization.properName(candidate.displayName) }
+			)
+		end
+	end
+	table.sort(candidates, function(left, right)
+		return left.userId < right.userId
+	end)
+	return candidates
+end
+
+local function currentFocusControls(data: ViewData): { GuiObject }
+	local snapshot = data.current
+	local scope: Instance? = nil
+	if snapshot ~= nil and snapshot.profileState ~= "Ready" then
+		scope = data.instances.blocking
+	elseif snapshot ~= nil and #snapshot.modals > 0 then
+		scope = data.instances.modalPanel
+	end
+	return FocusNavigation.controls(data.instances.gui, scope)
 end
 
 local function selectedTower(data: ViewData): LobbyUiModel.TowerCard?
@@ -1287,11 +1413,13 @@ end
 
 local function privacyDisplayName(value: string): string
 	if value == "PartyOnly" then
-		return "Party Only"
+		return Localization.text("lobby_view.party_only")
 	elseif value == "InviteOnly" then
-		return "Invite Only"
+		return Localization.text("lobby_view.invite_only")
+	elseif value == "FriendsOnly" then
+		return Localization.enum("state", value)
 	end
-	return "Public"
+	return Localization.enum("state", "Public")
 end
 
 local function mapOption(snapshot: LobbyUiModel.RenderState, mapId: string): LobbyUiModel.MapOption?
@@ -1305,7 +1433,7 @@ end
 
 local function mapDisplayName(snapshot: LobbyUiModel.RenderState, mapId: string): string
 	local option = mapOption(snapshot, mapId)
-	return if option == nil then "Unavailable map" else option.displayName
+	return if option == nil then Localization.text("lobby_view.unavailable_map") else option.displayName
 end
 
 local function difficultyDisplayName(snapshot: LobbyUiModel.RenderState, mapId: string, difficultyId: string): string
@@ -1315,7 +1443,7 @@ local function difficultyDisplayName(snapshot: LobbyUiModel.RenderState, mapId: 
 			return difficulty.displayName
 		end
 	end
-	return "Unavailable difficulty"
+	return Localization.text("lobby_view.unavailable_difficulty")
 end
 
 local function nextMap(snapshot: LobbyUiModel.RenderState, current: string): LobbyUiModel.MapOption?
@@ -1487,9 +1615,18 @@ local function connectStatic(data: ViewData): boolean
 			if input.Text ~= bounded then
 				input.Text = bounded
 			end
-			local targetUserId = resolvePresentPlayer(bounded)
+			local targetUserId = data.inviteCandidateUserId or resolvePresentPlayer(bounded)
 			if targetUserId ~= nil then
 				emit(data, { kind = "InvitePartyMember", targetUserId = targetUserId })
+			end
+		end)
+		or not connectButton(data, data.instances.partyInvitePicker, function()
+			local candidates = inviteCandidates(data)
+			if #candidates > 0 then
+				data.inviteCandidateIndex = data.inviteCandidateIndex % #candidates + 1
+			end
+			if data.current ~= nil then
+				renderCanonical(data, data.current)
 			end
 		end)
 		or not connectButton(data, data.instances.partyPlatformInviteButton, function()
@@ -1651,7 +1788,44 @@ local function connectStatic(data: ViewData): boolean
 	end
 
 	local inputConnected, inputConnection = pcall(data.dependencies.connectInputBegan, function(keyCode, processed)
-		if not data.cleaned and not processed and (keyCode == "Escape" or keyCode == "ButtonB") then
+		if not data.cleaned and not processed and keyCode == "Tab" then
+			data.keyboardNavigation = true
+			local selected: GuiObject? = nil
+			local direction = 1
+			pcall(function()
+				selected = data.dependencies.getSelectedObject()
+				if
+					UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+					or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+				then
+					direction = -1
+				end
+			end)
+			local nextControl = FocusNavigation.next(currentFocusControls(data), selected, direction)
+			pcall(data.dependencies.selectObject, nextControl)
+			pcall(FocusNavigation.reveal, nextControl)
+		elseif
+			not data.cleaned
+			and not processed
+			and data.keyboardNavigation
+			and (keyCode == "Return" or keyCode == "KeypadEnter" or keyCode == "Space")
+		then
+			local selected: GuiObject? = nil
+			pcall(function()
+				selected = data.dependencies.getSelectedObject()
+			end)
+			if selected ~= nil and table.find(currentFocusControls(data), selected) ~= nil then
+				local callback = data.activationCallbacks[selected]
+				if callback ~= nil then
+					callback()
+				end
+			end
+		end
+		if
+			not data.cleaned
+			and not processed
+			and (keyCode == "Escape" or keyCode == "ButtonB" or keyCode == "Backspace")
+		then
 			if not closeCompactDetails(data) then
 				emit(data, { kind = "Back" })
 			end
@@ -1736,6 +1910,7 @@ local function clearDynamic(data: ViewData): boolean
 end
 
 local function connectDynamic(data: ViewData, button: TextButton, callback: () -> ()): boolean
+	data.activationCallbacks[button] = callback
 	local connected, connection = pcall(data.dependencies.connectActivated, button, function()
 		if not data.cleaned and button.Active then
 			callback()
@@ -1781,8 +1956,10 @@ end
 
 local function renderInventory(data: ViewData, snapshot: LobbyUiModel.RenderState)
 	local instances = data.instances
-	instances.inventorySort.Text = `SORT: {string.upper(data.inventorySort)}`
-	instances.inventoryFilter.Text = `FILTER: {string.upper(data.inventoryFilter)}`
+	instances.inventorySort.Text =
+		Localization.text("lobby_view.sort", { inventorySort = Localization.enum("sort", data.inventorySort) })
+	instances.inventoryFilter.Text =
+		Localization.text("lobby_view.filter", { inventoryFilter = Localization.enum("filter", data.inventoryFilter) })
 	instances.inventorySearch.Text = data.inventoryQuery
 	local selectedId = snapshot.selectedUnitId or data.localSelectedUnitId
 	local tower = selectedTower(data)
@@ -1795,14 +1972,20 @@ local function renderInventory(data: ViewData, snapshot: LobbyUiModel.RenderStat
 	instances.detailBackButton.Visible = compactDetail
 	for index, cardTower in inventoryCards(data, snapshot) do
 		local badges = `{if cardTower.favorite then "★ " else ""}{if cardTower.locked then "◆ " else ""}`
-		local equipped = if cardTower.equippedSlot == nil then "NOT EQUIPPED" else `SLOT {cardTower.equippedSlot}`
+		local equipped = if cardTower.equippedSlot == nil
+			then Localization.text("lobby_view.not_equipped")
+			else Localization.text("lobby_view.slot", { equippedSlot = cardTower.equippedSlot })
 		local card = makeButton(
 			`TowerCard{index}`,
 			instances.inventoryGrid,
-			`{badges}{cardTower.displayName}\nCOPIES {cardTower.copies} • {equipped}`,
+			Localization.text(
+				"lobby_view.copies",
+				{ badges = badges, displayName = cardTower.displayName, copies = cardTower.copies, equipped = equipped }
+			),
 			Theme.ZIndex.Content + 3
 		)
 		card.LayoutOrder = index
+		card:SetAttribute("ATDControlKey", "inventory:" .. cardTower.unitId)
 		card.SelectionOrder = 200 + index
 		card.BackgroundColor3 = if cardTower.unitId == selectedId
 			then Theme.Colors.AccentStrong
@@ -1827,8 +2010,8 @@ local function renderInventory(data: ViewData, snapshot: LobbyUiModel.RenderStat
 	end
 
 	if tower == nil then
-		instances.detailTitle.Text = "SELECT A TOWER"
-		instances.detailOwnership.Text = "Owned tower details and match upgrades are shown separately here."
+		Localization.bind(instances.detailTitle, "lobby_view.select_a_tower", "Text")
+		Localization.bind(instances.detailOwnership, "lobby_view.owned_tower_details_and_match_upgrades_are", "Text")
 		instances.detailDescription.Text = ""
 		instances.detailStats.Text = ""
 		instances.detailUpgrade.Text = ""
@@ -1838,19 +2021,35 @@ local function renderInventory(data: ViewData, snapshot: LobbyUiModel.RenderStat
 		return
 	end
 	instances.detailTitle.Text = tower.displayName
-	instances.detailOwnership.Text = `OWNED COPIES {tower.copies} • {if tower.equippedSlot == nil
-		then "NOT EQUIPPED"
-		else `EQUIPPED SLOT {tower.equippedSlot}`}\nSOURCE: {tower.acquisitionSource}`
+	instances.detailOwnership.Text = if tower.equippedSlot == nil
+		then Localization.text(
+			"lobby.inventory.owned_unequipped",
+			{ copies = tower.copies, source = tower.acquisitionSource }
+		)
+		else Localization.text(
+			"lobby.inventory.owned_equipped",
+			{ copies = tower.copies, slot = tower.equippedSlot, source = tower.acquisitionSource }
+		)
 	instances.detailDescription.Text = tower.description
-	instances.detailStats.Text =
-		`MATCH LEVEL 1 • DAMAGE {tower.damage} • RANGE {tower.rangeStuds}\nCOOLDOWN {string.format(
-			"%.2fs",
-			tower.cooldownSeconds
-		)} • COST ${tower.placementCost} • LIMIT {tower.placementCap}\nTARGETING: {tower.targetModesText}`
-	instances.detailUpgrade.Text = `MATCH UPGRADE PREVIEW: {tower.upgradePreview}`
-	instances.equipButton.Text = if tower.equippedSlot == nil then "EQUIP" else "UNEQUIP"
-	instances.favoriteButton.Text = if tower.favorite then "★ FAVORITE" else "☆ FAVORITE"
-	instances.lockButton.Text = if tower.locked then "◆ LOCKED" else "◇ LOCK"
+	instances.detailStats.Text = Localization.text("lobby_view.match_level_1_damage_range_cooldown_cost", {
+		damage = tower.damage,
+		rangeStuds = tower.rangeStuds,
+		cooldownSeconds = string.format("%.2fs", tower.cooldownSeconds),
+		placementCost = tower.placementCost,
+		placementCap = tower.placementCap,
+		targetModesText = tower.targetModesText,
+	})
+	instances.detailUpgrade.Text =
+		Localization.text("lobby_view.match_upgrade_preview", { upgradePreview = tower.upgradePreview })
+	instances.equipButton.Text = if tower.equippedSlot == nil
+		then Localization.enum("action", "EQUIP")
+		else Localization.enum("action", "UNEQUIP")
+	instances.favoriteButton.Text = if tower.favorite
+		then Localization.text("lobby_view.favorite_2")
+		else Localization.text("lobby_view.favorite")
+	instances.lockButton.Text = if tower.locked
+		then Localization.text("lobby_view.locked")
+		else Localization.text("lobby_view.lock")
 	for _, button in { instances.equipButton, instances.favoriteButton, instances.lockButton } do
 		setButtonEnabled(button, #snapshot.modals == 0)
 	end
@@ -1858,13 +2057,13 @@ end
 
 local function playerDisplayName(userId: number, localUserId: number): string
 	if userId == localUserId then
-		return "You"
+		return Localization.text("common.you")
 	end
 	local succeeded, player = pcall(function()
 		return Players:GetPlayerByUserId(userId)
 	end)
 	if not succeeded or player == nil then
-		return "Player"
+		return Localization.text("common.player")
 	end
 	local resolved = player :: Player
 	if resolved.DisplayName == resolved.Name then
@@ -1879,10 +2078,11 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 	-- The TextBox owns its draft; snapshots can arrive before FocusLost.
 	if snapshot.partyState ~= "Ready" or snapshot.partySnapshot == nil then
 		instances.partyStatus.Text = if snapshot.partyState == "Failed"
-			then "PARTY UNAVAILABLE • Refreshing server-owned state."
-			else "LOADING AUTHORITATIVE PARTY…"
+			then Localization.text("lobby_view.party_unavailable_refreshing_server_owned_state")
+			else Localization.text("lobby_view.loading_authoritative_party")
 		instances.partyInviteInput.Visible = false
-		instances.partyInviteInput.PlaceholderText = "Waiting for party snapshot"
+		instances.partyInvitePicker.Visible = false
+		Localization.bind(instances.partyInviteInput, "lobby_view.waiting_for_party_snapshot", "PlaceholderText")
 		instances.partyInviteInput.Active = false
 		instances.partyInviteInput.Selectable = false
 		for _, button in
@@ -1906,10 +2106,19 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 	local partyHasRoom = party ~= nil and #party.members < 4
 	instances.partyCreateButton.Visible = party == nil
 	setButtonEnabled(instances.partyCreateButton, party == nil and interactive)
-	instances.partyInviteInput.Visible = party ~= nil
-	instances.partyInviteInput.PlaceholderText = "Present player name"
-	instances.partyInviteInput.Active = isLeader and interactive and partyHasRoom
-	instances.partyInviteInput.Selectable = instances.partyInviteInput.Active
+	instances.partyInviteInput.Visible = false
+	Localization.bind(instances.partyInviteInput, "lobby_view.present_player_name", "PlaceholderText")
+	instances.partyInviteInput.Active = false
+	instances.partyInviteInput.Selectable = false
+	local candidates = inviteCandidates(data)
+	data.inviteCandidateIndex = if #candidates == 0 then 1 else math.clamp(data.inviteCandidateIndex, 1, #candidates)
+	local candidate = candidates[data.inviteCandidateIndex]
+	data.inviteCandidateUserId = if candidate == nil then nil else candidate.userId
+	instances.partyInvitePicker.Visible = party ~= nil
+	instances.partyInvitePicker.Text = if candidate == nil
+		then Localization.text("lobby.party.no_candidates")
+		else Localization.text("lobby.party.picker", { player = candidate.displayName })
+	setButtonEnabled(instances.partyInvitePicker, isLeader and interactive and partyHasRoom and candidate ~= nil)
 	instances.partyInviteButton.Visible = party ~= nil
 	instances.partyPlatformInviteButton.Visible = party ~= nil
 	instances.partyPrivacyButton.Visible = party ~= nil
@@ -1921,18 +2130,31 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 	setButtonEnabled(instances.partyLeaveButton, party ~= nil and interactive)
 	setButtonEnabled(instances.partyDisbandButton, isLeader and interactive)
 	if party == nil then
-		instances.partyStatus.Text = `NO PARTY • {#snapshot.partySnapshot.incomingInvitations} bounded invitation(s)`
+		instances.partyStatus.Text = Localization.text(
+			"lobby_view.no_party_bounded_invitation_s",
+			{ incomingInvitations = #snapshot.partySnapshot.incomingInvitations }
+		)
 	else
 		local privacyName = privacyDisplayName(party.privacy)
-		instances.partyStatus.Text = `PARTY {#party.members}/4 • {privacyName} • {party.queueState}`
-		instances.partyPrivacyButton.Text = `PRIVACY\n{string.upper(privacyName)}`
+		instances.partyStatus.Text = Localization.text("lobby_view.party_4", {
+			members = #party.members,
+			privacyName = privacyName,
+			queueState = Localization.enum("state", party.queueState),
+		})
+		instances.partyPrivacyButton.Text =
+			Localization.text("lobby_view.privacy", { privacyName = string.upper(privacyName) })
 		for index, member in party.members do
 			local memberLabel = makeButton(
 				`PartyMember{index}`,
 				instances.partyList,
-				`{if member.isLeader then "CAPTAIN • " else ""}{playerDisplayName(member.userId, snapshot.localUserId)}\n{if member.profileReady
-					then "PROFILE READY"
-					else "PROFILE LOADING"}`,
+				Localization.text(
+					if member.isLeader
+						then (if member.profileReady then "lobby.party.captain_ready" else "lobby.party.captain_loading")
+						else (if member.profileReady
+							then "lobby.party.member_ready"
+							else "lobby.party.member_loading"),
+					{ player = playerDisplayName(member.userId, snapshot.localUserId) }
+				),
 				Theme.ZIndex.Content + 3
 			)
 			memberLabel.LayoutOrder = index * 3
@@ -1943,10 +2165,14 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 				local kick = makeButton(
 					`KickMember{index}`,
 					instances.partyList,
-					`REMOVE {playerDisplayName(member.userId, snapshot.localUserId)}`,
+					Localization.text(
+						"lobby_view.remove",
+						{ localUserId = playerDisplayName(member.userId, snapshot.localUserId) }
+					),
 					Theme.ZIndex.Content + 3
 				)
 				kick.LayoutOrder = index * 3 + 1
+				kick:SetAttribute("ATDControlKey", "kick:" .. tostring(member.userId))
 				kick.Size = UDim2.new(1, -10, 0, layout.touchTarget)
 				setButtonEnabled(kick, interactive)
 				if
@@ -1959,10 +2185,14 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 				local transfer = makeButton(
 					`TransferMember{index}`,
 					instances.partyList,
-					`TRANSFER TO {playerDisplayName(member.userId, snapshot.localUserId)}`,
+					Localization.text(
+						"lobby_view.transfer_to",
+						{ localUserId = playerDisplayName(member.userId, snapshot.localUserId) }
+					),
 					Theme.ZIndex.Content + 3
 				)
 				transfer.LayoutOrder = index * 3 + 2
+				transfer:SetAttribute("ATDControlKey", "transfer:" .. tostring(member.userId))
 				transfer.Size = UDim2.new(1, -10, 0, layout.touchTarget)
 				setButtonEnabled(transfer, interactive)
 				if
@@ -1979,10 +2209,14 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 		local accept = makeButton(
 			`AcceptInvitation{index}`,
 			instances.partyList,
-			`ACCEPT INVITE FROM {playerDisplayName(invitation.inviterUserId, snapshot.localUserId)}`,
+			Localization.text(
+				"lobby_view.accept_invite_from",
+				{ localUserId = playerDisplayName(invitation.inviterUserId, snapshot.localUserId) }
+			),
 			Theme.ZIndex.Content + 3
 		)
 		accept.LayoutOrder = 100 + index * 2
+		accept:SetAttribute("ATDControlKey", "accept:" .. invitation.invitationId)
 		accept.Size = UDim2.new(1, -10, 0, layout.touchTarget)
 		setButtonEnabled(accept, party == nil and interactive)
 		if
@@ -1995,10 +2229,14 @@ local function renderParty(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 		local decline = makeButton(
 			`DeclineInvitation{index}`,
 			instances.partyList,
-			`DECLINE INVITE FROM {playerDisplayName(invitation.inviterUserId, snapshot.localUserId)}`,
+			Localization.text(
+				"lobby_view.decline_invite_from",
+				{ localUserId = playerDisplayName(invitation.inviterUserId, snapshot.localUserId) }
+			),
 			Theme.ZIndex.Content + 3
 		)
 		decline.LayoutOrder = 101 + index * 2
+		decline:SetAttribute("ATDControlKey", "decline:" .. invitation.invitationId)
 		decline.Size = UDim2.new(1, -10, 0, layout.touchTarget)
 		setButtonEnabled(decline, interactive)
 		if
@@ -2019,19 +2257,21 @@ local function renderQueue(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 		and snapshot.activeRoute.status == "Available"
 	setButtonEnabled(instances.reconnectButton, routeAvailable and interactive)
 	instances.reconnectButton.Text = if snapshot.activeRouteState == "Loading"
-		then "CHECKING ACTIVE MATCH…"
-		elseif routeAvailable then "RECONNECT TO ACTIVE MATCH"
-		elseif
-			snapshot.activeRoute ~= nil and snapshot.activeRoute.status == "Stale"
-		then "RECONNECT EXPIRED • SAFE IN LOBBY"
-		elseif snapshot.activeRouteState == "Failed" then "RECONNECT STATUS UNAVAILABLE"
-		else "NO ACTIVE MATCH"
+		then Localization.text("lobby_view.checking_active_match")
+		elseif routeAvailable then Localization.text("lobby_view.reconnect_to_active_match")
+		elseif snapshot.activeRoute ~= nil and snapshot.activeRoute.status == "Stale" then Localization.text(
+			"lobby_view.reconnect_expired_safe_in_lobby"
+		)
+		elseif snapshot.activeRouteState == "Failed" then Localization.text(
+			"lobby_view.reconnect_status_unavailable"
+		)
+		else Localization.text("lobby_view.no_active_match")
 	if snapshot.queuesState ~= "Ready" or snapshot.queueSnapshots == nil then
 		instances.queueStatus.Text = if snapshot.queuesState == "Failed"
-			then "QUEUES UNAVAILABLE • Refreshing server-owned state."
-			else "LOADING AUTHORITATIVE QUEUES…"
-		instances.queueRoster.Text = "ROSTER —"
-		instances.queueConfiguration.Text = "CONFIGURATION —"
+			then Localization.text("lobby_view.queues_unavailable_refreshing_server_owned_state")
+			else Localization.text("lobby_view.loading_authoritative_queues")
+		Localization.bind(instances.queueRoster, "lobby_view.roster", "Text")
+		Localization.bind(instances.queueConfiguration, "lobby_view.configuration", "Text")
 		for _, button in
 			{
 				instances.queueJoinButton,
@@ -2054,10 +2294,17 @@ local function renderQueue(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 		local selector = makeButton(
 			`Queue{index}`,
 			instances.queueList,
-			`{mapName} • {difficultyName}\n{#queue.members}/{queue.configuration.maxPlayers} • {queue.state}`,
+			Localization.text("lobby_view.value_2", {
+				mapName = mapName,
+				difficultyName = difficultyName,
+				members = #queue.members,
+				maxPlayers = queue.configuration.maxPlayers,
+				state = Localization.enum("state", queue.state),
+			}),
 			Theme.ZIndex.Content + 3
 		)
 		selector.LayoutOrder = index
+		selector:SetAttribute("ATDControlKey", "queue:" .. queue.queueId)
 		selector.Size = UDim2.new(1, -10, 0, layout.touchTarget + 14)
 		selector.TextXAlignment = Enum.TextXAlignment.Left
 		selector.BackgroundColor3 = if queue.queueId == snapshot.selectedQueueId
@@ -2074,9 +2321,9 @@ local function renderQueue(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 	end
 	local queue = selectedQueue(snapshot)
 	if queue == nil then
-		instances.queueStatus.Text = "NO CONFIGURED QUEUE"
-		instances.queueRoster.Text = "ROSTER —"
-		instances.queueConfiguration.Text = "CONFIGURATION —"
+		Localization.bind(instances.queueStatus, "lobby_view.no_configured_queue", "Text")
+		Localization.bind(instances.queueRoster, "lobby_view.roster", "Text")
+		Localization.bind(instances.queueConfiguration, "lobby_view.configuration", "Text")
 		return
 	end
 	local isMember = false
@@ -2084,23 +2331,32 @@ local function renderQueue(data: ViewData, snapshot: LobbyUiModel.RenderState, l
 	local roster = table.create(#queue.members)
 	for index, member in queue.members do
 		isMember = isMember or member.userId == snapshot.localUserId
-		roster[index] = `{if member.isCaptain then "CAPTAIN • " else ""}{playerDisplayName(
-			member.userId,
-			snapshot.localUserId
-		)} • {member.readiness}`
+		roster[index] = Localization.text(if member.isCaptain then "lobby.queue.captain" else "lobby.queue.member", {
+			player = playerDisplayName(member.userId, snapshot.localUserId),
+			readiness = Localization.enum("state", member.readiness),
+		})
 	end
 	local status = queue.publicStatus or queue.state
-	instances.queueStatus.Text = `MATCH QUEUE • {string.upper(status)}`
-	instances.queueRoster.Text = if #roster == 0 then "ROSTER • EMPTY" else `ROSTER\n{table.concat(roster, "\n")}`
+	instances.queueStatus.Text =
+		Localization.text("lobby_view.match_queue", { status = Localization.enum("state", status) })
+	instances.queueRoster.Text = if #roster == 0
+		then Localization.text("lobby_view.roster_empty")
+		else Localization.text("lobby_view.roster_2", { n = table.concat(roster, "\n") })
 	local mapName = mapDisplayName(snapshot, queue.configuration.mapId)
 	local difficultyName = difficultyDisplayName(snapshot, queue.configuration.mapId, queue.configuration.difficultyId)
 	local privacyName = privacyDisplayName(queue.configuration.privacy)
-	instances.queueConfiguration.Text =
-		`MAP {mapName} • DIFFICULTY {difficultyName}\n{privacyName} • CAPACITY {queue.configuration.maxPlayers}`
-	instances.queueMapButton.Text = `MAP\n{mapName}`
-	instances.queueDifficultyButton.Text = `DIFFICULTY\n{difficultyName}`
-	instances.queuePrivacyButton.Text = `PRIVACY\n{privacyName}`
-	instances.queueCapacityButton.Text = `CAPACITY\n{queue.configuration.maxPlayers}`
+	instances.queueConfiguration.Text = Localization.text("lobby_view.map_difficulty_capacity", {
+		mapName = mapName,
+		difficultyName = difficultyName,
+		privacyName = privacyName,
+		maxPlayers = queue.configuration.maxPlayers,
+	})
+	instances.queueMapButton.Text = Localization.text("lobby_view.map", { mapName = mapName })
+	instances.queueDifficultyButton.Text =
+		Localization.text("lobby_view.difficulty", { difficultyName = difficultyName })
+	instances.queuePrivacyButton.Text = Localization.text("lobby_view.privacy", { privacyName = privacyName })
+	instances.queueCapacityButton.Text =
+		Localization.text("lobby_view.capacity", { maxPlayers = queue.configuration.maxPlayers })
 	local open = queue.state == "Open"
 	setButtonEnabled(instances.queueJoinButton, interactive and open and not isMember)
 	setButtonEnabled(instances.queueLeaveButton, interactive and open and isMember)
@@ -2122,22 +2378,38 @@ local function renderToasts(data: ViewData, snapshot: LobbyUiModel.RenderState, 
 		local toastButton = makeButton(
 			`Toast{index}`,
 			data.instances.toastContainer,
-			`{toast.kind == "Success" and "✓" or toast.kind == "Warning" and "!" or toast.kind == "Error" and "✕" or "i"} {toast.title}\n{toast.message}{if toast.repeatCount
-					> 1
-				then ` • repeated ×{toast.repeatCount}`
-				else ""}`,
+			Localization.text(
+				if toast.repeatCount > 1 then "lobby.toast.repeated" else "lobby.toast.single",
+				(function()
+					local arguments: any = {
+						symbol = if toast.kind == "Success"
+							then "✓"
+							elseif toast.kind == "Warning" then "!"
+							elseif toast.kind == "Error" then "✕"
+							else "i",
+						title = toast.title,
+						message = toast.message,
+					}
+					if toast.repeatCount > 1 then
+						arguments.count = toast.repeatCount
+					end
+					return arguments
+				end)()
+			),
 			Theme.ZIndex.Toast + index
 		)
 		toastButton.Position = UDim2.fromOffset(0, (index - 1) * (layout.touchTarget + 42))
 		toastButton.Size = UDim2.new(1, 0, 0, layout.touchTarget + 34)
-		toastButton.TextSize = layout.baseTextSize - 1
+		toastButton.TextSize = math.max(16, layout.baseTextSize - 1)
 		toastButton.TextXAlignment = Enum.TextXAlignment.Left
+		toastButton:SetAttribute("ATDControlKey", "toast:" .. toast.id)
+		setButtonEnabled(toastButton, #snapshot.modals == 0)
+		toastButton.TextColor3 = Theme.Colors.Backdrop
 		toastButton.BackgroundColor3 = if toast.kind == "Success"
 			then Theme.Colors.Success
 			elseif toast.kind == "Warning" then Theme.Colors.Warning
 			elseif toast.kind == "Error" then Theme.Colors.Error
 			else Theme.Colors.Info
-		setButtonEnabled(toastButton, #snapshot.modals == 0)
 		if
 			not connectDynamic(data, toastButton, function()
 				emit(data, { kind = "DismissToast", toastId = toast.id })
@@ -2152,15 +2424,24 @@ local function renderSettings(instances: Instances, settings: LobbyUiModel.Setti
 	for _, key in SETTING_ORDER do
 		local button = instances.settingsButtons[key]
 		if settings == nil then
-			button.Text = `{SETTING_LABELS[key]}: —`
+			button.Text = Localization.text("lobby_view.value_5", { key = Localization.text(SETTING_LABELS[key]) })
 			setButtonEnabled(button, false)
 		else
 			local value = (settings :: any)[key]
 			local display = if type(value) == "boolean"
-				then (if value then "ON" else "OFF")
-				elseif key == "uiScale" then `{math.floor((value :: number) * 100 + 0.5)}%`
-				else `{math.floor((value :: number) * 100 + 0.5)}%`
-			button.Text = `{SETTING_LABELS[key]}: {display}`
+				then (if value then Localization.enum("boolean", "On") else Localization.enum("boolean", "Off"))
+				elseif key == "uiScale" then Localization.text(
+					"lobby_view.value_6",
+					{ number = math.floor((value :: number) * 100 + 0.5) }
+				)
+				else Localization.text(
+					"lobby_view.value_6",
+					{ number = math.floor((value :: number) * 100 + 0.5) }
+				)
+			button.Text = Localization.text(
+				"lobby_view.value_7",
+				{ key = Localization.text(SETTING_LABELS[key]), display = display }
+			)
 			setButtonEnabled(button, enabled)
 		end
 	end
@@ -2192,11 +2473,11 @@ local function bestFocus(instances: Instances, snapshot: LobbyUiModel.RenderStat
 		if snapshot.partyState ~= "Ready" or snapshot.partySnapshot == nil then
 			return instances.backButton
 		end
-		return if snapshot.partySnapshot.party == nil then instances.partyCreateButton else instances.partyInviteInput
+		return if snapshot.partySnapshot.party == nil then instances.partyCreateButton else instances.partyInvitePicker
 	elseif snapshot.screen == "Queue" then
 		return instances.queueJoinButton
 	elseif snapshot.screen == "Inventory" then
-		return instances.inventorySearch
+		return instances.inventorySort
 	elseif snapshot.screen == "Chests" then
 		return if snapshot.banner ~= nil and snapshot.banner.canPullOne
 			then instances.onePullButton
@@ -2216,16 +2497,20 @@ local function updateFocus(data: ViewData, snapshot: LobbyUiModel.RenderState, p
 				restore = entry.object
 			end
 		end
-		if snapshot.inputFamily == "Gamepad" and restore ~= nil and restore:IsDescendantOf(data.instances.gui) then
+		if
+			(snapshot.inputFamily == "Gamepad" or data.keyboardNavigation)
+			and restore ~= nil
+			and restore:IsDescendantOf(data.instances.gui)
+			and table.find(currentFocusControls(data), restore) ~= nil
+		then
 			pcall(data.dependencies.selectObject, restore)
 			return
 		end
 	end
 	if
-		snapshot.inputFamily == "Gamepad"
+		(snapshot.inputFamily == "Gamepad" or data.keyboardNavigation)
 		and (
 			previous == nil
-			or previous.inputFamily ~= "Gamepad"
 			or previous.screen ~= snapshot.screen
 			or previousDepth ~= nextDepth
 			or previous.profileState ~= snapshot.profileState
@@ -2257,29 +2542,244 @@ local function prepareFocusTransition(
 	local hidesSelectedSurface = previous.profileState ~= snapshot.profileState
 		or previous.screen ~= snapshot.screen
 		or nextDepth ~= previousDepth
-		or (previous.inputFamily == "Gamepad" and snapshot.inputFamily ~= "Gamepad")
 	if hidesSelectedSurface and selected ~= nil and selected:IsDescendantOf(data.instances.gui) then
 		pcall(data.dependencies.selectObject, nil)
+	end
+end
+
+local function readableChrome(data: ViewData, layout: any)
+	local instances = data.instances
+	local margin = layout.safeMargin
+	local compact = layout.mode == "Compact"
+	local width = layout.logicalWidth - margin * 2
+	local navScroll = instances.navigation:FindFirstChild("ATDNavigationScroll") :: ScrollingFrame?
+	if navScroll == nil then
+		navScroll = Instance.new("ScrollingFrame")
+		navScroll.Name = "ATDNavigationScroll"
+		navScroll.BackgroundTransparency = 1
+		navScroll.BorderSizePixel = 0
+		navScroll.ScrollBarThickness = 4
+		navScroll.Parent = instances.navigation
+		for _, button in instances.navigationButtons do
+			button.Parent = navScroll
+		end
+	end
+	navScroll.Position = UDim2.fromOffset(6, 6)
+	navScroll.Size = UDim2.new(1, -12, 1, -12)
+	navScroll.ScrollingDirection = if compact then Enum.ScrollingDirection.X else Enum.ScrollingDirection.Y
+	local buttonWidth = if compact then math.max(120, layout.baseTextSize * 7) else layout.navigationWidth - 24
+	local buttonHeight = layout.touchTarget
+	for _, button in instances.navigationButtons do
+		buttonHeight = math.max(
+			buttonHeight,
+			TextLayout.measure(button.Text, button.TextSize, buttonWidth, button.Font, instances.uiScale.Scale)
+		)
+	end
+	for index, screen in NAVIGATION_ORDER do
+		local button = instances.navigationButtons[screen]
+		button.Position = if compact
+			then UDim2.fromOffset((index - 1) * (buttonWidth + 8), 0)
+			else UDim2.fromOffset(0, (index - 1) * (buttonHeight + 8))
+		button.Size = UDim2.fromOffset(buttonWidth, buttonHeight)
+	end
+	navScroll.CanvasSize = if compact
+		then UDim2.fromOffset(#NAVIGATION_ORDER * (buttonWidth + 8), buttonHeight)
+		else UDim2.fromOffset(buttonWidth, #NAVIGATION_ORDER * (buttonHeight + 8))
+	local headerHeight = layout.headerHeight
+	local backWidth = math.min(width * 0.4, math.max(140, layout.baseTextSize * 8))
+	local backHeight = math.max(
+		layout.touchTarget,
+		TextLayout.measure(
+			instances.backButton.Text,
+			instances.backButton.TextSize,
+			backWidth,
+			instances.backButton.Font,
+			instances.uiScale.Scale
+		)
+	)
+	instances.backButton.Size = UDim2.fromOffset(backWidth, backHeight)
+	if compact then
+		instances.readiness.Visible = false
+		instances.title.Text = Localization.enum("navigation", data.current.screen)
+		instances.title.TextSize = layout.baseTextSize
+		instances.gold.Position = UDim2.fromScale(0.5, 0)
+		instances.gold.Size = UDim2.new(0.5, -14, 1, 0)
+		headerHeight = math.max(
+			backHeight,
+			TextLayout.measure(
+				instances.gold.Text,
+				instances.gold.TextSize,
+				width * 0.5 - 14,
+				instances.gold.Font,
+				instances.uiScale.Scale
+			)
+		)
+		instances.header.Size = UDim2.new(1, -margin * 2, 0, headerHeight)
+		instances.backButton.Position = UDim2.fromOffset(12, 0)
+	else
+		instances.readiness.Visible = true
+		Localization.bind(instances.title, "lobby_view.ant_tower_defense")
+		headerHeight = math.max(headerHeight, backHeight + 20)
+		for _, label in { instances.title, instances.readiness, instances.gold } do
+			if label.Visible then
+				local labelWidth = width * label.Size.X.Scale + label.Size.X.Offset
+				headerHeight = math.max(
+					headerHeight,
+					TextLayout.measure(label.Text, label.TextSize, labelWidth, label.Font, instances.uiScale.Scale)
+				)
+			end
+		end
+		instances.header.Size = UDim2.new(1, -margin * 2, 0, headerHeight)
+		instances.toastContainer.Position = UDim2.new(1, -margin, 0, margin + headerHeight + 8)
+	end
+	local guideHeight = 0
+	if instances.tutorialPanel.Visible then
+		local body = instances.tutorialPanel:FindFirstChild("GuideBody") :: ScrollingFrame?
+		if body == nil then
+			body = Instance.new("ScrollingFrame")
+			body.Name = "GuideBody"
+			body.BackgroundTransparency = 1
+			body.BorderSizePixel = 0
+			body.ScrollBarThickness = 4
+			body.ScrollingDirection = Enum.ScrollingDirection.Y
+			body.Parent = instances.tutorialPanel
+			instances.tutorialTitle.Parent = body
+			instances.tutorialMessage.Parent = body
+		end
+		local bodyWidth = width * 0.6 - 20
+		local actionWidth = (width * 0.4 - 24) / 2
+		local actionHeight = layout.touchTarget
+		for _, button in { instances.tutorialPrimary, instances.tutorialSkip } do
+			if button.Visible then
+				actionHeight = math.max(
+					actionHeight,
+					TextLayout.measure(button.Text, button.TextSize, actionWidth, button.Font, instances.uiScale.Scale)
+				)
+			end
+		end
+		local titleHeight = TextLayout.measure(
+			instances.tutorialTitle.Text,
+			instances.tutorialTitle.TextSize,
+			bodyWidth,
+			instances.tutorialTitle.Font,
+			instances.uiScale.Scale
+		)
+		local messageHeight = TextLayout.measure(
+			instances.tutorialMessage.Text,
+			instances.tutorialMessage.TextSize,
+			bodyWidth,
+			instances.tutorialMessage.Font,
+			instances.uiScale.Scale
+		)
+		local bodyHeight =
+			math.max(actionHeight, math.min(titleHeight + messageHeight + 8, if compact then 96 else 140))
+		guideHeight = bodyHeight + 16
+		instances.tutorialPanel.Size = UDim2.fromOffset(width, guideHeight)
+		body.Position = UDim2.fromOffset(10, 8)
+		body.Size = UDim2.fromOffset(bodyWidth, bodyHeight)
+		body.CanvasSize = UDim2.fromOffset(0, titleHeight + messageHeight + 8)
+		instances.tutorialTitle.Position = UDim2.fromOffset(0, 0)
+		instances.tutorialTitle.Size = UDim2.new(1, 0, 0, titleHeight)
+		instances.tutorialMessage.Position = UDim2.fromOffset(0, titleHeight + 8)
+		instances.tutorialMessage.Size = UDim2.new(1, 0, 0, messageHeight)
+		for index, button in { instances.tutorialPrimary, instances.tutorialSkip } do
+			button.AnchorPoint = Vector2.zero
+			button.Position = UDim2.fromOffset(width * 0.6 + (index - 1) * (actionWidth + 8), 8)
+			button.Size = UDim2.fromOffset(actionWidth, actionHeight)
+		end
+	end
+	local top = margin + headerHeight + layout.panelPadding
+	if compact then
+		local navHeight = buttonHeight + 16
+		instances.navigation.Position = UDim2.new(0, margin, 1, -(navHeight + margin))
+		instances.navigation.Size = UDim2.fromOffset(width, navHeight)
+		local page = instances.root:FindFirstChild("ATDCompactPage") :: ScrollingFrame?
+		if page == nil then
+			page = Instance.new("ScrollingFrame")
+			page.Name = "ATDCompactPage"
+			page.BackgroundTransparency = 1
+			page.BorderSizePixel = 0
+			page.ScrollBarThickness = 5
+			page.ScrollingDirection = Enum.ScrollingDirection.Y
+			page.Parent = instances.root
+		end
+		page.Visible = instances.content.Visible
+		page.Position = UDim2.fromOffset(margin, top)
+		page.Size =
+			UDim2.fromOffset(width, math.max(44, layout.logicalHeight - top - navHeight - margin - layout.panelPadding))
+		instances.tutorialPanel.Parent = page
+		instances.tutorialPanel.Position = UDim2.fromOffset(0, 0)
+		instances.content.Parent = page
+		local guideSpace = if guideHeight > 0 then guideHeight + layout.panelPadding else 0
+		local toastSpace = if instances.toastContainer.Visible
+			then instances.toastContainer.Size.Y.Offset + layout.panelPadding
+			else 0
+		instances.toastContainer.Parent = page
+		instances.toastContainer.AnchorPoint = Vector2.zero
+		instances.toastContainer.Position = UDim2.fromOffset(0, guideSpace)
+		local contentHeight = math.max(240, page.Size.Y.Offset)
+		instances.content.Position = UDim2.fromOffset(0, guideSpace + toastSpace)
+		instances.content.Size = UDim2.fromOffset(width, contentHeight)
+		page.CanvasSize = UDim2.fromOffset(0, guideSpace + toastSpace + contentHeight + 8)
+		layout.contentHeight = contentHeight - layout.panelPadding * 2
+	else
+		local contentTop = top + (if guideHeight > 0 then guideHeight + layout.panelPadding else 0)
+		instances.tutorialPanel.Position = UDim2.fromOffset(margin, top)
+		instances.navigation.Position = UDim2.fromOffset(margin, contentTop)
+		instances.navigation.Size = UDim2.fromOffset(layout.navigationWidth, layout.logicalHeight - contentTop - margin)
+		instances.content.Position = UDim2.fromOffset(margin + layout.navigationWidth + layout.panelPadding, contentTop)
+		instances.content.Size = UDim2.new(
+			1,
+			-(margin * 2 + layout.navigationWidth + layout.panelPadding),
+			0,
+			layout.logicalHeight - contentTop - margin
+		)
+		layout.contentHeight = math.max(44, layout.logicalHeight - contentTop - margin - layout.panelPadding * 2)
 	end
 end
 
 renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 	local instances = data.instances
 	local previous = data.current
+	local previousSelected: GuiObject? = nil
+	local previousControlKey: string? = nil
+	pcall(function()
+		local selected = data.dependencies.getSelectedObject()
+		if selected ~= nil and selected:IsDescendantOf(instances.gui) then
+			previousSelected = selected
+			previousControlKey = selected:GetAttribute("ATDControlKey")
+		end
+	end)
 	prepareFocusTransition(data, snapshot, previous)
+	Localization.refresh(instances.gui)
+	if data.productionStyle then
+		instances.content.Parent = instances.root
+		instances.tutorialPanel.Parent = instances.root
+		instances.toastContainer.Parent = instances.root
+		local page = instances.root:FindFirstChild("ATDCompactPage")
+		if page ~= nil and page:IsA("GuiObject") then
+			page.Visible = false
+		end
+	end
 	local uiScale = if snapshot.settings == nil then 1 else snapshot.settings.uiScale
 	local effectiveReducedMotion = snapshot.reducedMotion
 		or (snapshot.settings ~= nil and snapshot.settings.reducedMotionEnabled)
-	local layout = ResponsiveLayout.resolve(snapshot.viewport, uiScale, snapshot.preferredTextScale)
+	local viewport = snapshot.viewport
+	if data.productionStyle and instances.root.AbsoluteSize.X > 0 and instances.root.AbsoluteSize.Y >= 240 then
+		viewport = instances.root.AbsoluteSize
+	end
+	local resolvedLayout = ResponsiveLayout.resolve(viewport, uiScale, snapshot.preferredTextScale)
+	local layout = if resolvedLayout == nil then nil else table.clone(resolvedLayout)
 	if layout == nil then
 		error("invalid responsive layout", 0)
 	end
 	data.compactMode = layout.mode == "Compact"
-	applyLayout(instances, layout, snapshot.tutorialGuidance ~= nil)
 	instances.root.Size = UDim2.fromScale(1 / uiScale, 1 / uiScale)
 	instances.uiScale.Scale = uiScale
+	applyLayout(instances, layout, snapshot.tutorialGuidance ~= nil)
 	instances.gui:SetAttribute("ATDReducedMotion", effectiveReducedMotion)
-	local baseTransparency = math.clamp(0.04 + snapshot.preferredTransparency * 0.35, 0.04, 0.5)
+	local baseTransparency =
+		Accessibility.resolve(snapshot.settings, { transparency = snapshot.preferredTransparency }).transparency
 	instances.header.BackgroundTransparency = baseTransparency
 	instances.navigation.BackgroundTransparency = baseTransparency
 	instances.content.BackgroundTransparency = baseTransparency
@@ -2289,7 +2789,9 @@ renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 		error("dynamic cleanup failed", 0)
 	end
 	instances.readiness.Text = string.upper(snapshot.statusText)
-	instances.gold.Text = if snapshot.profileState == "Ready" then `GOLD {snapshot.gold}` else "GOLD —"
+	instances.gold.Text = if snapshot.profileState == "Ready"
+		then Localization.text("lobby_view.gold_2", { gold = snapshot.gold })
+		else Localization.text("lobby_view.gold")
 	instances.header.Visible = snapshot.profileState == "Ready"
 	instances.tutorialPanel.Visible = snapshot.profileState == "Ready" and snapshot.tutorialGuidance ~= nil
 	instances.navigation.Visible = snapshot.profileState == "Ready"
@@ -2303,9 +2805,10 @@ renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 	setButtonEnabled(instances.backButton, instances.backButton.Visible)
 	local guidance = snapshot.tutorialGuidance
 	if guidance ~= nil then
-		instances.tutorialTitle.Text = `STEP {guidance.step} • {string.upper(guidance.title)}`
+		instances.tutorialTitle.Text =
+			Localization.text("lobby_view.step", { step = guidance.step, title = string.upper(guidance.title) })
 		instances.tutorialMessage.Text = guidance.message
-		instances.tutorialPrimary.Text = guidance.primaryActionText or "CONTINUE"
+		instances.tutorialPrimary.Text = guidance.primaryActionText or Localization.enum("action", "CONTINUE")
 		instances.tutorialPrimary.Visible = guidance.canAdvance or guidance.canReplay
 		instances.tutorialSkip.Visible = guidance.canSkip
 		setButtonEnabled(
@@ -2320,9 +2823,9 @@ renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 
 	if snapshot.profileState ~= "Ready" then
 		instances.blockingTitle.Text = if snapshot.profileState == "Loading"
-			then "LOADING PROFILE"
-			elseif snapshot.profileState == "Failed" then "PROFILE LOAD FAILED"
-			else "SAVING & RELEASING"
+			then Localization.text("lobby_view.loading_profile")
+			elseif snapshot.profileState == "Failed" then Localization.text("lobby_view.profile_load_failed")
+			else Localization.text("lobby_view.saving_releasing")
 		instances.blockingMessage.Text = snapshot.statusText
 		instances.retryButton.Visible = snapshot.canRetry
 		instances.leaveButton.Visible = snapshot.canLeave
@@ -2330,10 +2833,13 @@ renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 		setButtonEnabled(instances.leaveButton, snapshot.canLeave)
 	else
 		instances.homeStatus.Text = if snapshot.isFirstJoin
-			then "NEW COLONY READY • Your starter tower is equipped. Inventory, Chests, and Settings are ready."
-			elseif snapshot.didMigrate then "WELCOME BACK • Your saved profile was migrated safely."
-			else "WELCOME BACK • Your Gold, inventory, loadout, pity, and settings are ready."
-		instances.homeProgression.Text = `PROGRESSION • {snapshot.progressionText}`
+			then Localization.text("lobby_view.new_colony_ready_your_starter_tower_is")
+			elseif snapshot.didMigrate then Localization.text(
+				"lobby_view.welcome_back_your_saved_profile_was_migrated"
+			)
+			else Localization.text("lobby_view.welcome_back_your_gold_inventory_loadout_pity")
+		instances.homeProgression.Text =
+			Localization.text("lobby_view.progression", { progressionText = snapshot.progressionText })
 		for _, screen in NAVIGATION_ORDER do
 			local active = screen == snapshot.screen
 			instances.screens[screen].Visible = active
@@ -2352,27 +2858,39 @@ renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 
 		local banner = snapshot.banner
 		if banner == nil then
-			instances.chestTitle.Text = "CHESTS UNAVAILABLE"
-			instances.chestPolicy.Text =
-				"Earn-only chest configuration is not currently available. No Gold can be spent."
-			instances.chestPity.Text = "PITY —"
-			instances.chestOdds.Text = "Exact odds unavailable."
-			instances.onePullButton.Text = "OPEN 1 —"
-			instances.tenPullButton.Text = "OPEN 10 —"
+			Localization.bind(instances.chestTitle, "lobby_view.chests_unavailable", "Text")
+			Localization.bind(
+				instances.chestPolicy,
+				"lobby_view.earn_only_chest_configuration_is_not_currently",
+				"Text"
+			)
+			Localization.bind(instances.chestPity, "lobby_view.pity", "Text")
+			Localization.bind(instances.chestOdds, "lobby_view.exact_odds_unavailable", "Text")
+			Localization.bind(instances.onePullButton, "lobby_view.open_1_2", "Text")
+			Localization.bind(instances.tenPullButton, "lobby_view.open_10_2", "Text")
 			for _, button in { instances.onePullButton, instances.tenPullButton, instances.skipButton } do
 				setButtonEnabled(button, false)
 			end
 		else
 			instances.chestTitle.Text = banner.displayName
-			instances.chestPolicy.Text = `EARN-ONLY GOLD • {banner.policyDisclosure}`
-			instances.chestPity.Text = `PITY {banner.pityCount} / {banner.hardPityPullCount}`
+			instances.chestPolicy.Text =
+				Localization.text("lobby_view.earn_only_gold", { policyDisclosure = banner.policyDisclosure })
+			instances.chestPity.Text = Localization.text(
+				"lobby_view.pity_2",
+				{ pityCount = banner.pityCount, hardPityPullCount = banner.hardPityPullCount }
+			)
 			local oddsLines = table.create(#banner.odds)
 			for index, odd in banner.odds do
-				oddsLines[index] = `{odd.displayName}: {string.format("%.4g", odd.probabilityPercent)}%`
+				oddsLines[index] = Localization.text(
+					"lobby_view.value_8",
+					{ displayName = odd.displayName, probabilityPercent = Localization.percent(odd.probabilityPercent) }
+				)
 			end
-			instances.chestOdds.Text = `EXACT ODDS\n{table.concat(oddsLines, "\n")}`
-			instances.onePullButton.Text = `OPEN 1\n{banner.onePullCost} GOLD`
-			instances.tenPullButton.Text = `OPEN 10\n{banner.tenPullCost} GOLD`
+			instances.chestOdds.Text = Localization.text("lobby_view.exact_odds", { n = table.concat(oddsLines, "\n") })
+			instances.onePullButton.Text =
+				Localization.text("lobby_view.open_1_gold", { onePullCost = banner.onePullCost })
+			instances.tenPullButton.Text =
+				Localization.text("lobby_view.open_10_gold", { tenPullCost = banner.tenPullCost })
 			setButtonEnabled(
 				instances.onePullButton,
 				banner.canPullOne and not banner.transactionPending and #snapshot.modals == 0
@@ -2391,20 +2909,145 @@ renderCanonical = function(data: ViewData, snapshot: LobbyUiModel.RenderState)
 	instances.modalScrim.Visible = modal ~= nil
 	if modal ~= nil then
 		instances.modalDepth.Text = if #snapshot.modals > 1
-			then `DIALOG {#snapshot.modals} OF {#snapshot.modals}`
-			else "CONFIRMATION"
+			then Localization.text("lobby_view.dialog_of", { modals = #snapshot.modals, modals2 = #snapshot.modals })
+			else Localization.text("common.confirmation")
 		instances.modalTitle.Text = modal.title
 		instances.modalMessage.Text = modal.message
 		instances.modalConfirm.Visible = modal.confirmText ~= nil
-		instances.modalConfirm.Text = modal.confirmText or "CONFIRM"
+		instances.modalConfirm.Text = modal.confirmText or Localization.enum("action", "CONFIRM")
 		instances.modalCancel.Visible = modal.cancelText ~= nil or modal.dismissable
-		instances.modalCancel.Text = modal.cancelText or "CLOSE"
+		instances.modalCancel.Text = modal.cancelText or Localization.enum("action", "CLOSE")
 		setButtonEnabled(instances.modalConfirm, modal.confirmText ~= nil and not modal.busy)
 		setButtonEnabled(instances.modalCancel, (modal.cancelText ~= nil or modal.dismissable) and not modal.busy)
 	end
 
 	renderToasts(data, snapshot, layout)
+	if data.productionStyle then
+		local notificationWidth = if layout.mode == "Compact"
+			then layout.logicalWidth - layout.safeMargin * 2
+			else layout.toastWidth
+		instances.toastContainer.Visible = #snapshot.toasts > 0
+		instances.toastContainer.Size = UDim2.fromOffset(notificationWidth, layout.logicalHeight * 0.5)
+		TextLayout.reflow(instances.toastContainer, notificationWidth, layout.logicalHeight * 0.5, layout.touchTarget)
+		readableChrome(data, layout)
+		if snapshot.screen == "Inventory" and instances.inventorySort.Visible then
+			local innerWidth = layout.contentWidth - layout.panelPadding * 2
+			local originalHeight = instances.inventorySort.Size.Y.Offset
+			local toolbarHeight = layout.touchTarget
+			for _, button in { instances.inventorySort, instances.inventoryFilter } do
+				local width = innerWidth * button.Size.X.Scale + button.Size.X.Offset
+				toolbarHeight = math.max(
+					toolbarHeight,
+					TextLayout.measure(button.Text, button.TextSize, width, button.Font, instances.uiScale.Scale)
+				)
+			end
+			for _, control in { instances.inventorySearch, instances.inventorySort, instances.inventoryFilter } do
+				control.Size = UDim2.new(control.Size.X.Scale, control.Size.X.Offset, 0, toolbarHeight)
+			end
+			local delta = toolbarHeight - originalHeight
+			local grid = instances.inventoryGrid
+			grid.Position = UDim2.new(
+				grid.Position.X.Scale,
+				grid.Position.X.Offset,
+				grid.Position.Y.Scale,
+				grid.Position.Y.Offset + delta
+			)
+			grid.Size = UDim2.new(grid.Size.X.Scale, grid.Size.X.Offset, grid.Size.Y.Scale, grid.Size.Y.Offset - delta)
+			if layout.mode ~= "Compact" then
+				local details = instances.detailPanel
+				details.Position = UDim2.new(
+					details.Position.X.Scale,
+					details.Position.X.Offset,
+					details.Position.Y.Scale,
+					details.Position.Y.Offset + delta
+				)
+				details.Size = UDim2.new(
+					details.Size.X.Scale,
+					details.Size.X.Offset,
+					details.Size.Y.Scale,
+					details.Size.Y.Offset - delta
+				)
+			end
+		end
+		local cell = instances.inventoryGridLayout.CellSize
+		local cellHeight = layout.touchTarget
+		for _, card in instances.inventoryGrid:GetChildren() do
+			if card:IsA("TextButton") then
+				card.TextSize = math.max(16, layout.baseTextSize - 1)
+				cellHeight = math.max(
+					cellHeight,
+					TextLayout.measure(card.Text, card.TextSize, cell.X.Offset, card.Font, instances.uiScale.Scale)
+				)
+			end
+		end
+		instances.inventoryGridLayout.CellSize = UDim2.fromOffset(cell.X.Offset, cellHeight)
+		for _, panel in { instances.partyList, instances.queueList } do
+			for _, control in panel:GetChildren() do
+				if control:IsA("TextButton") then
+					control.TextSize = math.max(16, layout.baseTextSize - 1)
+				end
+			end
+			local width = (layout.contentWidth - layout.panelPadding * 2) * panel.Size.X.Scale + panel.Size.X.Offset
+			TextLayout.reflow(panel, math.max(44, width), layout.contentHeight, layout.touchTarget)
+		end
+		local maximumHeight = layout.logicalHeight - layout.safeMargin * 2
+		if instances.blocking.Visible then
+			TextLayout.reflow(instances.blocking, layout.logicalWidth, maximumHeight, layout.touchTarget)
+		end
+		if instances.modalScrim.Visible then
+			TextLayout.reflow(instances.modalPanel, layout.modalWidth, maximumHeight, layout.touchTarget)
+		end
+		if snapshot.screen == "Home" then
+			TextLayout.reflow(
+				instances.screens.Home,
+				layout.contentWidth - layout.panelPadding * 2,
+				layout.contentHeight,
+				layout.touchTarget
+			)
+		end
+		for _, panel in
+			{
+				instances.partyScroll,
+				instances.queueScroll,
+				instances.chestScroll,
+				instances.detailPanel,
+				instances.settingsList,
+			}
+		do
+			if panel.Visible and panel.Parent ~= nil and (panel.Parent :: GuiObject).Visible then
+				local panelWidth = (layout.contentWidth - layout.panelPadding * 2) * panel.Size.X.Scale
+					+ panel.Size.X.Offset
+				TextLayout.reflow(panel, math.max(44, panelWidth), layout.contentHeight, layout.touchTarget)
+			end
+		end
+	end
+	local controls = currentFocusControls(data)
+	pcall(FocusNavigation.link, controls)
 	updateFocus(data, snapshot, previous)
+	if data.keyboardNavigation or snapshot.inputFamily == "Gamepad" then
+		pcall(function()
+			local selected = data.dependencies.getSelectedObject()
+			if selected == nil or table.find(controls, selected) == nil then
+				local restore = controls[1]
+				local sameSurface = previous ~= nil
+					and previous.profileState == snapshot.profileState
+					and previous.screen == snapshot.screen
+					and #previous.modals == #snapshot.modals
+				if sameSurface and table.find(controls, previousSelected) ~= nil then
+					restore = previousSelected
+				elseif sameSurface and previousControlKey ~= nil then
+					for _, control in controls do
+						if control:GetAttribute("ATDControlKey") == previousControlKey then
+							restore = control
+							break
+						end
+					end
+				end
+				data.dependencies.selectObject(restore)
+			end
+			FocusNavigation.reveal(data.dependencies.getSelectedObject())
+		end)
+	end
 end
 
 local function construct(
@@ -2452,14 +3095,21 @@ local function construct(
 		renderCount = 0,
 		actionCount = 0,
 		inventoryCardCount = 0,
-		goldText = "GOLD —",
+		goldText = Localization.text("lobby_view.gold"),
 		blockingVisible = true,
 		cleaned = false,
 		productionStyle = productionStyle,
 		compactMode = false,
+		keyboardNavigation = false,
+		activationCallbacks = setmetatable({}, { __mode = "k" }),
+		inviteCandidateIndex = 1,
+		inviteCandidateUserId = nil,
 	}
 	DATA[view] = data
 	if not connectStatic(data) then
+		if dependencies.cleanupInput ~= nil then
+			dependencies.cleanupInput()
+		end
 		disconnectAll(data.connections)
 		instances.gui:Destroy()
 		DATA[view] = nil
@@ -2518,7 +3168,7 @@ function ViewMethods.cleanup(self: View): Outcome<boolean>
 		return ok(true)
 	end
 	data.cleaned = true
-	data.goldText = "GOLD —"
+	data.goldText = Localization.text("lobby_view.gold")
 	data.blockingVisible = false
 	local succeeded = pcall(function()
 		local selected = data.dependencies.getSelectedObject()
@@ -2532,12 +3182,16 @@ function ViewMethods.cleanup(self: View): Outcome<boolean>
 	if not disconnectAll(data.connections) then
 		succeeded = false
 	end
+	if data.dependencies.cleanupInput ~= nil and not pcall(data.dependencies.cleanupInput) then
+		succeeded = false
+	end
 	if not pcall(function()
 		data.instances.gui:Destroy()
 	end) then
 		succeeded = false
 	end
 	table.clear(data.focusStack)
+	table.clear(data.activationCallbacks)
 	data.current = nil
 	if not succeeded then
 		return failure("CLEANUP_FAILED")
@@ -2545,28 +3199,41 @@ function ViewMethods.cleanup(self: View): Outcome<boolean>
 	return ok(true)
 end
 
-local function inputFamilyFromType(inputType: Enum.UserInputType): InputFamily
-	if inputType == Enum.UserInputType.Touch then
+local function preferredFamily(): InputFamily
+	local inputType = UserInputService.PreferredInput
+	if inputType == Enum.PreferredInput.Touch then
 		return "Touch"
-	elseif string.sub(inputType.Name, 1, 7) == "Gamepad" then
+	elseif inputType == Enum.PreferredInput.Gamepad then
 		return "Gamepad"
 	end
 	return "Desktop"
 end
 
 local function productionDependencies(): Dependencies
+	local KeyboardNavigation = require(commonUi.KeyboardNavigation)
+	local releaseKeyboard: (() -> ())? = nil
 	return {
+		cleanupInput = function()
+			if releaseKeyboard ~= nil then
+				releaseKeyboard()
+				releaseKeyboard = nil
+			end
+		end,
 		connectActivated = function(button, callback)
 			return button.Activated:Connect(callback)
 		end,
 		connectInputBegan = function(callback)
+			releaseKeyboard = KeyboardNavigation.bind(GUI_NAME, callback, true)
 			return UserInputService.InputBegan:Connect(function(input, processed)
+				if KeyboardNavigation.ownsKey(input.KeyCode, true) then
+					return
+				end
 				callback(input.KeyCode.Name, processed)
 			end)
 		end,
 		connectInputFamilyChanged = function(callback)
-			return UserInputService.LastInputTypeChanged:Connect(function(inputType)
-				callback(inputFamilyFromType(inputType))
+			return UserInputService:GetPropertyChangedSignal("PreferredInput"):Connect(function()
+				callback(preferredFamily())
 			end)
 		end,
 		connectSearchCommitted = function(textBox, callback)
@@ -2575,7 +3242,13 @@ local function productionDependencies(): Dependencies
 			end)
 		end,
 		selectObject = function(value)
-			GuiService.SelectedObject = value
+			local player = Players.LocalPlayer
+			local playerGui = if player == nil then nil else player:FindFirstChildOfClass("PlayerGui")
+			local gui = if playerGui == nil then nil else playerGui:FindFirstChild(GUI_NAME)
+			local target = FocusNavigation.validSelection(gui, value)
+			if GuiService.SelectedObject ~= target then
+				GuiService.SelectedObject = target
+			end
 		end,
 		getSelectedObject = function()
 			return GuiService.SelectedObject
@@ -2611,11 +3284,16 @@ local function isExactTestModule(): boolean
 end
 
 if isExactTestModule() then
-	LobbyView.newForTests = function(parent: Instance, callback: Callback, dependencies: Dependencies): ViewResult
+	LobbyView.newForTests = function(
+		parent: Instance,
+		callback: Callback,
+		dependencies: Dependencies,
+		productionLayout: boolean?
+	): ViewResult
 		if typeof(parent) ~= "Instance" or not parent:IsA("Folder") then
 			return failure("INVALID_PARENT")
 		end
-		return construct(parent, callback, dependencies, false)
+		return construct(parent, callback, dependencies, productionLayout == true)
 	end
 end
 

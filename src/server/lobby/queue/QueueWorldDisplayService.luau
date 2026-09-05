@@ -5,6 +5,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServiceLifecycle = require(ReplicatedStorage.Shared.lifecycle.ServiceLifecycle)
 local QueueProtocol = require(ReplicatedStorage.Shared.queue.QueueProtocol)
 local Result = require(ReplicatedStorage.Shared.util.Result)
+local Localization = require(ReplicatedStorage.Shared.localization.Localization)
+local WorldMessages = require(ReplicatedStorage.Shared.localization.WorldMessages)
 
 export type Anchor = {
 	queueId: string,
@@ -82,6 +84,8 @@ local function label(name: string, parent: Instance, height: number, order: numb
 	instance.TextStrokeTransparency = 0.55
 	instance.TextSize = 18
 	instance.TextWrapped = true
+	instance.AutoLocalize = false
+	instance.RichText = false
 	instance.TextXAlignment = Enum.TextXAlignment.Left
 	instance.Parent = parent
 	return instance
@@ -127,12 +131,12 @@ local function createDisplay(anchor: Anchor): Display?
 
 	local title = label("Title", panel, 28, 1)
 	title.Font = Enum.Font.GothamBold
-	title.Text = "SQUAD QUEUE"
+	WorldMessages.set(title, "queue_world.title")
 	local state = label("State", panel, 24, 2)
 	local configuration = label("Configuration", panel, 42, 3)
 	local roster = label("Roster", panel, 28, 4)
 	local blockers = label("Readiness", panel, 30, 5)
-	blockers.TextSize = 15
+	blockers.TextSize = 18
 
 	local portraits = Instance.new("Frame")
 	portraits.Name = "Portraits"
@@ -171,46 +175,74 @@ local function resolvedName(callback: ((any) -> string?)?, value: any, fallback:
 		return fallback
 	end
 	local called, result = pcall(callback, value)
-	return if called and type(result) == "string" and #result >= 1 and #result <= 64 then result else fallback
+	return if called
+			and type(result) == "string"
+			and #result >= 1
+			and #result <= 64
+			and Localization.properName(result) ~= "…"
+		then result
+		else fallback
 end
 
 local function render(data: ServiceData, display: Display, snapshot: QueueProtocol.Snapshot)
-	display.state.Text = `STATE: {string.upper(snapshot.state)}{if snapshot.publicStatus == nil
-		then ""
-		else ` · {snapshot.publicStatus}`}`
+	if snapshot.publicStatus == nil then
+		WorldMessages.set(display.state, "queue_world.state", { state = snapshot.state })
+	else
+		WorldMessages.set(
+			display.state,
+			"queue_world.state_status",
+			{ state = snapshot.state, publicStatus = snapshot.publicStatus }
+		)
+	end
 	local dependencies = data.dependencies
 	local mapName = resolvedName(
 		if dependencies == nil then nil else dependencies.mapDisplayName,
 		snapshot.configuration.mapId,
-		"Unavailable map"
+		Localization.text("common.unavailable")
 	)
 	local difficultyName = resolvedName(
 		if dependencies == nil then nil else dependencies.difficultyDisplayName,
 		snapshot.configuration.difficultyId,
-		"Unavailable difficulty"
+		Localization.text("common.unavailable")
 	)
-	display.configuration.Text = `{mapName}\n{difficultyName} · {snapshot.configuration.privacy}`
+	WorldMessages.set(
+		display.configuration,
+		"queue_world.configuration",
+		{ mapName = mapName, difficultyName = difficultyName, privacy = snapshot.configuration.privacy }
+	)
 	local captainName = if snapshot.captainUserId == nil
 		then nil
 		else resolvedName(
 			if dependencies == nil then nil else dependencies.playerDisplayName,
 			snapshot.captainUserId,
-			"Player"
+			Localization.text("common.player")
 		)
-	display.roster.Text = `PLAYERS {#snapshot.members}/{snapshot.configuration.maxPlayers}{if snapshot.captainUserId
-			== nil
-		then ""
-		else ` · CAPTAIN {captainName}`}`
+	if captainName == nil then
+		WorldMessages.set(
+			display.roster,
+			"queue_world.roster",
+			{ count = #snapshot.members, capacity = snapshot.configuration.maxPlayers }
+		)
+	else
+		WorldMessages.set(
+			display.roster,
+			"queue_world.roster_captain",
+			{ count = #snapshot.members, capacity = snapshot.configuration.maxPlayers, captain = captainName }
+		)
+	end
 	local blockerCount = 0
 	for _, member in snapshot.members do
 		if member.readiness ~= "Ready" then
 			blockerCount += 1
 		end
 	end
-	display.blockers.Text = if #snapshot.members == 0
-		then "Walk onto the zone or use the Queue screen."
-		elseif blockerCount == 0 then "READY · Captain starts manually"
-		else `{blockerCount} readiness blocker{if blockerCount == 1 then "" else "s"}`
+	if #snapshot.members == 0 then
+		WorldMessages.set(display.blockers, "queue_world.empty")
+	elseif blockerCount == 0 then
+		WorldMessages.set(display.blockers, "queue_world.ready")
+	else
+		WorldMessages.set(display.blockers, "queue_world.blocked", { count = blockerCount })
+	end
 	clearPortraits(display)
 	for index, member in snapshot.members do
 		local portrait = Instance.new("ImageLabel")

@@ -13,6 +13,7 @@ local ConfigTypes = require(ReplicatedStorage.Shared.types.ConfigTypes)
 local Ids = require(ReplicatedStorage.Shared.util.Ids)
 local Result = require(ReplicatedStorage.Shared.util.Result)
 local Validation = require(ReplicatedStorage.Shared.util.Validation)
+local ProfileScope = require(ReplicatedStorage.Shared.util.ProfileScope)
 
 local BattleCashLedger = require(script.Parent.BattleCashLedger)
 local DirectStudioParticipantLoadout = require(script.Parent.DirectStudioParticipantLoadout)
@@ -998,8 +999,15 @@ local function attackWithTower(
 	if attack == nil then
 		return {}
 	end
-	local selectionResult =
-		TargetQuery.select(CFrame.new(tower.position), level.rangeStuds, tower.targetMode, targetCandidates(data))
+	local candidates = ProfileScope.call("ATD.Runtime.TargetCandidates", targetCandidates, data)
+	local selectionResult = ProfileScope.call(
+		"ATD.Runtime.TargetSelect",
+		TargetQuery.select,
+		CFrame.new(tower.position),
+		level.rangeStuds,
+		tower.targetMode,
+		candidates
+	)
 	if not selectionResult.ok or selectionResult.value == nil then
 		return {}
 	end
@@ -1622,7 +1630,7 @@ function Methods.setTargetMode(
 	return ACCEPTED
 end
 
-function Methods.step(self: Runtime, serverTimeValue: unknown): Result.Result<StepOutcome, RuntimeError>
+local function stepRuntime(self: Runtime, serverTimeValue: unknown): Result.Result<StepOutcome, RuntimeError>
 	local data = requireData(self)
 	if data.cleaned then
 		return errorResult("CLEANED", "step")
@@ -1661,13 +1669,19 @@ function Methods.step(self: Runtime, serverTimeValue: unknown): Result.Result<St
 				and serverTime >= data.nextWaveServerTime
 				and data.spawnCursor > #data.spawnQueue
 			then
-				tickChanged = startNextWave(data, serverTime) or tickChanged
+				tickChanged = ProfileScope.call("ATD.Runtime.WaveStart", startNextWave, data, serverTime) or tickChanged
 			end
 			if data.state == "Playing" then
-				tickChanged = spawnDueEnemies(data, serverTime) or tickChanged
+				tickChanged = ProfileScope.call("ATD.Runtime.Spawn", spawnDueEnemies, data, serverTime) or tickChanged
 				local remainingAttackBudget = MAX_ATTACKS_PER_STEP - #attacks
 				if remainingAttackBudget > 0 then
-					local tickAttacks = processAttacks(data, serverTime, remainingAttackBudget)
+					local tickAttacks = ProfileScope.call(
+						"ATD.Runtime.Attacks",
+						processAttacks,
+						data,
+						serverTime,
+						remainingAttackBudget
+					)
 					for _, event in tickAttacks do
 						table.insert(attacks, event)
 					end
@@ -1675,8 +1689,15 @@ function Methods.step(self: Runtime, serverTimeValue: unknown): Result.Result<St
 				end
 			end
 			if data.state == "Playing" then
-				tickChanged = moveEnemies(data, FIXED_STEP_SECONDS, serverTime) or tickChanged
-				tickChanged = completeResolvedWaves(data, serverTime) or tickChanged
+				tickChanged = ProfileScope.call(
+					"ATD.Runtime.Movement",
+					moveEnemies,
+					data,
+					FIXED_STEP_SECONDS,
+					serverTime
+				) or tickChanged
+				tickChanged = ProfileScope.call("ATD.Runtime.WaveResolve", completeResolvedWaves, data, serverTime)
+					or tickChanged
 			end
 			if tickChanged then
 				advanceRevision(data)
@@ -1690,6 +1711,10 @@ function Methods.step(self: Runtime, serverTimeValue: unknown): Result.Result<St
 		changed = changed,
 		attacks = table.freeze(attacks),
 	}))
+end
+
+function Methods.step(self: Runtime, serverTimeValue: unknown): Result.Result<StepOutcome, RuntimeError>
+	return ProfileScope.call("ATD.Runtime.Step", stepRuntime, self, serverTimeValue)
 end
 
 local function towerSnapshot(data: RuntimeData, tower: TowerRecord): PlayableMatchProtocol.TowerSnapshot
@@ -1739,7 +1764,7 @@ local function enemyThreatClass(definition: ConfigTypes.EnemyDefinition): Playab
 	return "Standard"
 end
 
-local function buildSnapshot(
+local function buildSnapshotContents(
 	data: RuntimeData,
 	serverTime: number,
 	viewerRole: PlayableMatchProtocol.ViewerRole,
@@ -1911,6 +1936,15 @@ local function buildSnapshot(
 		return errorResult("INTERNAL_ERROR", "snapshot")
 	end
 	return Result.ok(validated.value)
+end
+
+local function buildSnapshot(
+	data: RuntimeData,
+	serverTime: number,
+	viewerRole: PlayableMatchProtocol.ViewerRole,
+	userId: number?
+): Result.Result<PlayableMatchProtocol.Snapshot, RuntimeError>
+	return ProfileScope.call("ATD.Runtime.Snapshot", buildSnapshotContents, data, serverTime, viewerRole, userId)
 end
 
 function Methods.getSnapshot(
@@ -2152,6 +2186,7 @@ function Methods.cleanup(self: Runtime): Result.Result<boolean, RuntimeError>
 	table.clear(data.enemies)
 	table.clear(data.spawnQueue)
 	table.clear(data.waveOrigins)
+	data.activeWaveOriginCount = 0
 	table.clear(data.resolvedWaveNumbers)
 	table.clear(data.ready)
 	table.clear(data.participantSet)

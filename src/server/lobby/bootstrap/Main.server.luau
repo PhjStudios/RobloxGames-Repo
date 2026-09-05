@@ -166,7 +166,8 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 	if not profileResult.ok then
 		error("[ATD_LOBBY_BOOTSTRAP][code=PROFILE_SERVICE_CREATION_FAILED]", 0)
 	end
-	local profile = profileResult.value
+	local telemetry = configuration.telemetry
+	local profile = telemetry:profile(profileResult.value)
 	local tutorial = required(
 		TutorialService.new(profile, configuration.coreConfiguration, { clock = os.time }),
 		"TUTORIAL_SERVICE_UNAVAILABLE"
@@ -178,7 +179,7 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		error("[ATD_LOBBY_BOOTSTRAP][code=LOBBY_SERVICE_CREATION_FAILED]", 0)
 	end
 	local inventory = inventoryResult.value
-	local acquisition = acquisitionResult.value
+	local acquisition = telemetry:acquisition(acquisitionResult.value)
 	local settings = settingsResult.value
 
 	local sendProfile =
@@ -320,6 +321,7 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 				return if state == "Starting" then "Starting" elseif state == "Traveling" then "Traveling" else "Queued"
 			end,
 			onChanged = function(change: PartyService.Change)
+				telemetry:record("party.v1", { action = change.kind, members = #change.userIds }, "server")
 				if queue ~= nil and change.membershipChanged then
 					queue:invalidateParty(change.partyId, change.userIds)
 				end
@@ -400,6 +402,7 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 	)
 
 	local safeTeleport: any = nil
+	queue = telemetry:queue(queue)
 	safeTeleport = required(
 		SafeTeleportService.new(ticketStore, teleportAdapter, {
 			now = os.time,
@@ -412,6 +415,7 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 				return if travel == nil then false else travel:onReserved(reserved)
 			end,
 			onRollback = function(rollback)
+				telemetry:record("travel.v1", { action = "Failed", failureClass = "Terminal" }, "server")
 				if travel ~= nil then
 					travel:onRollback(rollback)
 				end
@@ -419,6 +423,7 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		}),
 		"SAFE_TELEPORT_UNAVAILABLE"
 	)
+	safeTeleport = telemetry:travel(safeTeleport)
 	local lobbyPlaceId = PlaceRoles.getConfiguredPlaceId(configuration.deployment, PlaceRoles.LOBBY_ROLE) :: number
 	local matchPlaceId = PlaceRoles.getConfiguredPlaceId(configuration.deployment, PlaceRoles.MATCH_ROLE) :: number
 	travel = required(
@@ -449,9 +454,11 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 		"LOBBY_TRAVEL_COORDINATOR_UNAVAILABLE"
 	)
 
-	local rewardClaims = required(
-		ProfileRewardClaimService.new(profile, resultLedger, configuration.coreConfiguration, os.time),
-		"REWARD_CLAIM_SERVICE_UNAVAILABLE"
+	local rewardClaims = telemetry:rewards(
+		required(
+			ProfileRewardClaimService.new(profile, resultLedger, configuration.coreConfiguration, os.time),
+			"REWARD_CLAIM_SERVICE_UNAVAILABLE"
+		)
 	)
 	local pendingClaims = required(
 		PendingClaimCoordinator.new({
@@ -730,6 +737,12 @@ ServerBootstrap.run(PlaceRoles.LOBBY_ROLE, function(configuration)
 				end
 				local admitted = returns:admitJoinData(userId, (joinData :: any).TeleportData)
 				if admitted.ok then
+					telemetry:record(
+						"travel.v1",
+						{ action = "Returned", failureClass = "None" },
+						userId,
+						`return:{userId}:{admitted.value.matchId}`
+					)
 					hasValidReturn = true
 					returnStateConfirmed = true
 					local observedReturn = tutorial:observeLobbyReturn(userId, admitted.value.matchId)

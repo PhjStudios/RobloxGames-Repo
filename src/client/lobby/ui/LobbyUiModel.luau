@@ -148,8 +148,8 @@ local MAX_INVENTORY = 200
 local MAX_MODAL_DEPTH = 4
 local MAX_TOASTS = 5
 local MAX_ODDS = 32
-local MAX_TEXT_BYTES = 240
-local MAX_MODAL_MESSAGE_BYTES = 1_024
+local MAX_TEXT_BYTES = 1_024
+local MAX_MODAL_MESSAGE_BYTES = 4_096
 local MAX_GOLD = 2 ^ 31 - 1
 local MAX_USER_ID = Validation.MAX_SAFE_INTEGER
 local MAX_COPIES = 10_000
@@ -801,7 +801,7 @@ function LobbyUiModel.canonicalize(value: unknown): RenderState?
 		or rawget(INPUT_FAMILIES, inputFamily) ~= true
 		or typeof(viewport) ~= "Vector2"
 		or not boundedNumber((viewport :: Vector2).X, 240, 16_384)
-		or not boundedNumber((viewport :: Vector2).Y, 320, 16_384)
+		or not boundedNumber((viewport :: Vector2).Y, 240, 16_384)
 		or not boundedNumber(preferredTextScale, 0.85, 1.5)
 		or not boundedNumber(preferredTransparency, 0, 1)
 		or type(reducedMotion) ~= "boolean"

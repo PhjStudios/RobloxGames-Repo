@@ -316,6 +316,32 @@ local function runToResults(assertions: Assertions, rig: any)
 end
 
 return TestHarness.suite("playable match service integration", {
+	TestHarness.case(
+		"observes terminal heartbeat transitions once while failed observers leave gameplay intact",
+		function(assertions)
+			local rig = makeRig()
+			local states = {}
+			rig.service:setOutcomeObserver(function(metrics)
+				states[metrics.state] = (states[metrics.state] or 0) + 1
+				if metrics.state == "Playing" then
+					coroutine.yield()
+				elseif metrics.state == "Results" then
+					error("unavailable observer")
+				end
+			end)
+			startRig(rig)
+			ready(assertions, rig, rig.first)
+			runToResults(assertions, rig)
+			assertions.equal(states.Results, 1)
+			assertions.equal(states.Playing, 1)
+			local result = rig.service:getMetrics().runtime.result
+			rig.fireHeartbeat()
+			rig.fireHeartbeat()
+			assertions.equal(states.Results, 1)
+			assertions.equal(rig.service:getMetrics().runtime.result, result)
+			cleanupRig(rig)
+		end
+	),
 	TestHarness.case("accepts the complete authenticated model catalog and rejects extras", function(assertions)
 		local exact = makeRig()
 		startRig(exact)

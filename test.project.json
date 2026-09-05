@@ -41,6 +41,10 @@
           "$path": "src/server/common/travel"
         },
 
+        "ProductionServerAnalytics": {
+          "$path": "src/server/common/analytics"
+        },
+
         "ProductionServerLobbyInventory": {
           "$path": "src/server/lobby/inventory"
         },
@@ -71,6 +75,10 @@
 
         "ProductionClientCommonUi": {
           "$path": "src/client/common/ui"
+        },
+
+        "ProductionClientPresentation": {
+          "$path": "src/client/common/presentation"
         },
 
         "ProductionClientLobbyUi": {

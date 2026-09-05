@@ -3,6 +3,7 @@
 local fs = require("@lune/fs")
 local process = require("@lune/process")
 local roblox = require("@lune/roblox")
+local messages = require("../src/shared/localization/Messages")
 
 type Role = "Default" | "Lobby" | "Match" | "Test"
 
@@ -158,6 +159,254 @@ local function readSource(path: string): string?
 		return nil
 	end
 	return normalizeNewlines(value :: string)
+end
+
+type LocalizationToken = { kind: string, value: string, position: number }
+
+-- A bounded lexical guard, not a Luau type checker. It checks literal arguments
+-- and simple conditional fallbacks, not aliases, computed keys, interpolated
+-- expressions, or whether arbitrary English source should be localized.
+local function localizationTokens(source: string): { LocalizationToken }
+	local tokens: { LocalizationToken } = {}
+	local cursor = 1
+	while cursor <= #source do
+		if #tokens >= 250_000 then
+			error("localization token limit", 0)
+		end
+		local char = string.sub(source, cursor, cursor)
+		local comment = string.sub(source, cursor, cursor + 1) == "--"
+		local opening = if comment then cursor + 2 else cursor
+		local longEnd: number? = nil
+		if string.sub(source, opening, opening) == "[" then
+			local probe = opening + 1
+			while string.sub(source, probe, probe) == "=" do
+				probe += 1
+			end
+			if string.sub(source, probe, probe) == "[" then
+				longEnd = probe
+			end
+		end
+		if longEnd ~= nil then
+			local closing = "]" .. string.sub(source, opening + 1, longEnd - 1) .. "]"
+			local closeStart, closeEnd = string.find(source, closing, (longEnd :: number) + 1, true)
+			if closeStart == nil then
+				error("unterminated localization scan literal", 0)
+			end
+			if not comment then
+				table.insert(tokens, {
+					kind = "literal",
+					value = string.sub(source, (longEnd :: number) + 1, closeStart - 1),
+					position = cursor,
+				})
+			end
+			cursor = (closeEnd :: number) + 1
+		elseif comment then
+			cursor = string.find(source, "\n", cursor + 2, true) or (#source + 1)
+		elseif char == '"' or char == "'" or char == "`" then
+			local first = cursor
+			cursor += 1
+			while cursor <= #source and string.sub(source, cursor, cursor) ~= char do
+				cursor += if string.sub(source, cursor, cursor) == "\\" then 2 else 1
+			end
+			if cursor > #source then
+				error("unterminated localization scan quote", 0)
+			end
+			table.insert(tokens, {
+				kind = if char == "`" then "template" else "literal",
+				value = string.sub(source, first + 1, cursor - 1),
+				position = first,
+			})
+			cursor += 1
+		elseif string.match(char, "%s") ~= nil then
+			cursor += 1
+		else
+			if string.match(char, "[%a_]") ~= nil then
+				local first, last = string.find(source, "[%a_][%w_]*", cursor)
+				table.insert(
+					tokens,
+					{ kind = "identifier", value = string.sub(source, first, last), position = cursor }
+				)
+				cursor = (last :: number) + 1
+			else
+				local value = if string.sub(source, cursor, cursor + 1) == ".." then ".." else char
+				table.insert(tokens, { kind = "punct", value = value, position = cursor })
+				cursor += #value
+			end
+		end
+	end
+	return tokens
+end
+
+local function localizationReferences(source: string, lobbyFactories: boolean): { LocalizationToken }
+	local tokens = localizationTokens(source)
+	local references: { LocalizationToken } = {}
+	for index, token in tokens do
+		local open: number? = nil
+		local argument: number? = nil
+		local factory = false
+		if
+			token.kind == "identifier"
+			and tokens[index + 1] ~= nil
+			and tokens[index + 1].value == "."
+			and tokens[index + 2] ~= nil
+			and tokens[index + 3] ~= nil
+			and tokens[index + 3].value == "("
+		then
+			local method = tokens[index + 2].value
+			if token.value == "Localization" and (method == "text" or method == "format" or method == "bind") then
+				open, argument = index + 3, if method == "bind" then 2 else 1
+			elseif token.value == "WorldMessages" and method == "set" then
+				open, argument = index + 3, 2
+			end
+		elseif
+			lobbyFactories
+			and token.kind == "identifier"
+			and (token.value == "label" or token.value == "button" or token.value == "makeLabel" or token.value == "makeButton")
+			and tokens[index + 1] ~= nil
+			and tokens[index + 1].value == "("
+		then
+			open, argument, factory = index + 1, 3, true
+		end
+		if open == nil then
+			continue
+		end
+		local depth, currentArgument, first = 1, 1, (open :: number) + 1
+		for cursor = (open :: number) + 1, #tokens do
+			local current = tokens[cursor]
+			local value = current.value
+			if current.kind == "punct" then
+				if value == "(" or value == "[" or value == "{" then
+					depth += 1
+				elseif value == ")" or value == "]" or value == "}" then
+					depth -= 1
+				end
+			end
+			if depth == 0 or (depth == 1 and current.kind == "punct" and value == ",") then
+				if currentArgument == argument then
+					for candidateIndex = first, cursor - 1 do
+						local candidate = tokens[candidateIndex]
+						local before = tokens[candidateIndex - 1].value
+						local after = tokens[candidateIndex + 1].value
+						local simple = candidateIndex == first and candidateIndex == cursor - 1
+						local fallback = before == "then" or before == "else" or before == "or" or before == "and"
+						local keyShape = string.match(candidate.value, "^[a-z][a-z0-9_]*%.[a-z0-9_.]+$") ~= nil
+						if
+							candidate.kind == "literal"
+							and (simple or fallback)
+							and before ~= ".."
+							and after ~= ".."
+							and (not factory or keyShape)
+						then
+							table.insert(references, candidate)
+						end
+					end
+					break
+				end
+				if depth == 0 then
+					break
+				end
+				currentArgument += 1
+				first = cursor + 1
+			end
+		end
+	end
+	return references
+end
+
+local function verifyLocalizationReferences(): boolean
+	local fixture = [==[
+-- Localization.text("missing.comment")
+--[=[ Localization.bind(object, "missing.long_comment") ]=]
+local ignored = 'Localization.format("missing.quoted")'
+local template = `Localization.text("missing.template")`
+Localization.text("common.you")
+Localization.text([=[common.you]=])
+Localization.format('common.you', { nested = { "missing.argument" } })
+Localization.bind(find(object, { "missing.owner" }), "common.you")
+Localization.text(if state == "Ready" then "common.you" else "common.unavailable")
+Localization.text(key or "common.unavailable")
+Localization.text("enum.navigation." .. suffix)
+Localization.text(registry[key])
+WorldMessages.set(object, "queue_world.title")
+label("Heading", root, "common.you", 12)
+button("Action", root, "Literal display text", 12)
+]==]
+	if #localizationReferences(fixture, true) ~= 9 or #localizationReferences(fixture, false) ~= 8 then
+		emit("FAIL", "All", "LOCALIZATION_REFERENCE_SCANNER_FIXTURE_FAILED")
+		return false
+	end
+	for _, source in
+		{
+			'Localization.text("missing.literal")',
+			'Localization.bind(object, "missing.literal")',
+			'label("Heading", root, "missing.literal")',
+		}
+	do
+		local references = localizationReferences(source, true)
+		if #references ~= 1 or messages.entries[references[1].value] ~= nil then
+			emit("FAIL", "All", "LOCALIZATION_UNKNOWN_KEY_FIXTURE_FAILED")
+			return false
+		end
+	end
+	for _, registry in { messages.descriptions, messages.policies } do
+		for _, key in registry do
+			if messages.entries[key] == nil then
+				emit("FAIL", "All", "LOCALIZATION_REGISTRY_KEY_UNKNOWN")
+				return false
+			end
+		end
+	end
+	for _, registry in messages.enums do
+		for _, key in registry do
+			if messages.entries[key] == nil then
+				emit("FAIL", "All", "LOCALIZATION_ENUM_KEY_UNKNOWN")
+				return false
+			end
+		end
+	end
+	local pending = { "src" }
+	local fileCount, sourceBytes, referenceCount = 0, 0, 0
+	local directoryCount = 0
+	while #pending > 0 do
+		local directory = table.remove(pending) :: string
+		directoryCount += 1
+		local children = fs.readDir(directory)
+		if directoryCount > 2_048 or #children > 4_096 then
+			emit("FAIL", "All", "LOCALIZATION_DIRECTORY_BOUND_EXCEEDED", directory)
+			return false
+		end
+		table.sort(children)
+		for _, name in children do
+			local path = directory .. "/" .. name
+			if fs.isDir(path) then
+				table.insert(pending, path)
+			elseif string.sub(name, -5) == ".luau" then
+				local source = readSource(path)
+				fileCount += 1
+				sourceBytes += if source == nil then 0 else #source
+				if source == nil or #source > 1_000_000 or sourceBytes > 16_000_000 or fileCount > 2_048 then
+					emit("FAIL", "All", "LOCALIZATION_SOURCE_BOUND_EXCEEDED", path)
+					return false
+				end
+				for _, reference in localizationReferences(source, path == "src/client/lobby/ui/LobbyView.luau") do
+					referenceCount += 1
+					if messages.entries[reference.value] == nil then
+						local _, lines = string.gsub(string.sub(source, 1, reference.position), "\n", "")
+						emit("FAIL", "All", "LOCALIZATION_LITERAL_KEY_UNKNOWN", path .. ":" .. tostring(lines + 1))
+						return false
+					end
+				end
+			end
+		end
+	end
+	if referenceCount < 100 then
+		emit("FAIL", "All", "LOCALIZATION_REFERENCE_COVERAGE_MISSING")
+		return false
+	end
+	print(
+		`[ATD_BUILD][PASS][build=All][code=LOCALIZATION_LITERAL_REFERENCES_VALID][files={fileCount}][references={referenceCount}]`
+	)
+	return true
 end
 
 local function quotedField(record: string, fieldName: string): string?
@@ -706,6 +955,12 @@ local function hasTestLeak(dataModel: DataModel): boolean
 		if
 			string.find(path, "AutomatedTests", 1, true) ~= nil
 			or string.find(path, "NegativeControls", 1, true) ~= nil
+			or descendant.Name == "SafeDevelopmentCommands"
+			or descendant.Name == "PlatformProfile"
+			or descendant.Name == "RepeatedSessionProfile"
+			or descendant.Name == "MicroProfile"
+			or descendant.Name == "UiLayoutAudit"
+			or descendant.Name == "PerformanceScenarios"
 			or string.sub(descendant.Name, -5) == ".spec"
 		then
 			return true
@@ -716,6 +971,8 @@ local function hasTestLeak(dataModel: DataModel): boolean
 				string.find(source, "[ATD_TEST]", 1, true) ~= nil
 				or string.find(source, "[ATD_PHASE", 1, true) ~= nil
 				or string.find(source, "PRIVATE_MODULE_LOAD_VALUE", 1, true) ~= nil
+				or string.find(source, "ATD_REPEATED_SESSION_PROFILE", 1, true) ~= nil
+				or string.find(source, "development commands require the exact isolated test root", 1, true) ~= nil
 			then
 				return true
 			end
@@ -1057,6 +1314,7 @@ local function run(): boolean
 		or not verifyMatchDirectStudioSelectionBoundary()
 		or not verifyMatchContentRewardBoundary()
 		or not verifyProjectSourceIsolation()
+		or not verifyLocalizationReferences()
 	then
 		return false
 	end

@@ -356,7 +356,7 @@ return TestHarness.suite("Match ready client controller", {
 			local rig = makeRig()
 			local first = makeSnapshot(1, "ReadyCheck", false, nil, nil)
 			rig.snapshotSignal:fire({ payload = first })
-			assertions.equal(labelText(rig, "StateLabel"), "State: ReadyCheck")
+			assertions.equal(labelText(rig, "StateLabel"), "State: Ready check")
 			rig.getResponseSignal:fire(successWire(rig.getFires[1], first))
 			assertions.equal(rig.tracker:getStats().pendingCount, 0)
 			activate(rig)
@@ -492,11 +492,11 @@ return TestHarness.suite("Match ready client controller", {
 			assertions.equal(rig.tracker:getStats().pendingCount, 1)
 			rig.snapshotSignal:fire({ payload = makeSnapshot(2, "PreWave", true, nil, nil) })
 			assertions.equal(rig.tracker:getStats().pendingCount, 0)
-			assertions.equal(labelText(rig, "StateLabel"), "State: PreWave")
-			assertions.equal(labelText(rig, "RequestLabel"), "Request: StateChanged")
+			assertions.equal(labelText(rig, "StateLabel"), "State: Preparing wave")
+			assertions.equal(labelText(rig, "RequestLabel"), "Request: State changed")
 			assertions.isFalse(button(rig).Visible)
 			rig.readyResponseSignal:fire(successWire(rig.readyFires[1], makeSnapshot(2, "PreWave", true, nil, nil)))
-			assertions.equal(labelText(rig, "StateLabel"), "State: PreWave")
+			assertions.equal(labelText(rig, "StateLabel"), "State: Preparing wave")
 			shutdown(rig)
 		end
 	),
