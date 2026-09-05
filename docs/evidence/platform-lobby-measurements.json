@@ -1,0 +1,554 @@
+{
+  "version": 1,
+  "date": "2026-09-04",
+  "evidence": "Studio-emulated on the recorded developer desktop; not physical-device or published-client acceptance",
+  "role": "Lobby",
+  "scenario": "Settings, phone emulator viewport666x374, Largest preferred text, opaque panels, reduced motion, savedUIScale0.75, pseudo50; before final physical-scale text-measurement correction",
+  "profile": {
+    "durationSeconds": 12.1821455,
+    "frames": 730,
+    "meanMs": 16.663990519,
+    "p95Ms": 18.02809909,
+    "maximumMs": 23.57620001,
+    "memoryBeforeMb": 2216.35546875,
+    "memoryAfterMb": 2216.5078125,
+    "instancesBefore": 5704,
+    "instancesAfter": 5704,
+    "instancesAdded": 121,
+    "instancesRemoved": 121,
+    "probeConnectionsAfter": 0
+  },
+  "micro": {
+    "meaning": "CPU inclusive work summed across threads; not GPU or critical-path time",
+    "last": {
+      "id": 107,
+      "absoluteId": 4049199
+    },
+    "frameMs": {
+      "p50": 16.57468070536163,
+      "mean": 16.663193115436552,
+      "maximum": 18.050154644606323,
+      "p99": 18.04960765857777,
+      "count": 107,
+      "available": true,
+      "retained": 107,
+      "rejected": 0,
+      "percentileScope": "AllSamples",
+      "p95": 17.591046585115123
+    },
+    "first": {
+      "id": 1,
+      "absoluteId": 4049093
+    },
+    "restored": {
+      "frameLimit": 128,
+      "profilerEnabled": false,
+      "captureEnabled": false
+    },
+    "scopes": {
+      "1": {
+        "name": "physicsSteppedTotal",
+        "maximumSpanMs": 0.15350007135862143,
+        "meanPerCapturedFrameMs": 0.0831205833208304,
+        "inclusiveCpuMs": 8.893902415328853,
+        "spans": 214
+      },
+      "2": {
+        "name": "RunService.Heartbeat",
+        "maximumSpanMs": 0.12987542751920955,
+        "meanPerCapturedFrameMs": 0.060319210850347166,
+        "inclusiveCpuMs": 6.454155560987147,
+        "spans": 428
+      },
+      "3": {
+        "name": "Script_Main",
+        "maximumSpanMs": 0.36980406230964036,
+        "meanPerCapturedFrameMs": 0.05357268792525706,
+        "inclusiveCpuMs": 5.732277608002505,
+        "spans": 536
+      },
+      "4": {
+        "name": "RenderSteppedInternal",
+        "maximumSpanMs": 0.013024612803747004,
+        "meanPerCapturedFrameMs": 0.014422488034136214,
+        "inclusiveCpuMs": 1.5432062196525749,
+        "spans": 214
+      },
+      "5": {
+        "name": "Script_main",
+        "maximumSpanMs": 0.2724548619885354,
+        "meanPerCapturedFrameMs": 0.011862416584335733,
+        "inclusiveCpuMs": 1.2692785745239235,
+        "spans": 10
+      },
+      "6": {
+        "name": "render2D",
+        "maximumSpanMs": 0.0006913063718911872,
+        "meanPerCapturedFrameMs": 0.0007771695634155294,
+        "inclusiveCpuMs": 0.08315714328546164,
+        "spans": 214
+      },
+      "7": {
+        "name": "render3D",
+        "maximumSpanMs": 0.00013024612803747004,
+        "meanPerCapturedFrameMs": 0.0000636717232677783,
+        "inclusiveCpuMs": 0.006812874389652279,
+        "spans": 107
+      }
+    }
+  },
+  "scene": {
+    "GetAudioMemoryAsync": {
+      "groups": 3,
+      "size": 2843594
+    },
+    "GetAnimationMemoryAsync": {
+      "groups": 2,
+      "size": 139261
+    },
+    "GetScriptMemoryAsync": {
+      "unavailable": true
+    },
+    "GetInstanceCompositionAsync": {
+      "Name": "InstanceComposition",
+      "Children": {
+        "1": {
+          "Name": "3D Objects",
+          "Children": {
+            "1": {
+              "Name": "Camera",
+              "Size": 1
+            },
+            "2": {
+              "Name": "Terrain",
+              "Size": 1
+            },
+            "3": {
+              "Name": "Model",
+              "Size": 1
+            },
+            "4": {
+              "Name": "Status",
+              "Size": 1
+            },
+            "5": {
+              "Name": "MeshPart",
+              "Size": 16
+            },
+            "6": {
+              "Name": "Part",
+              "Size": 3
+            },
+            "7": {
+              "Name": "SpawnLocation",
+              "Size": 1
+            }
+          },
+          "Size": 24
+        },
+        "2": {
+          "Name": "Physics",
+          "Children": {
+            "1": {
+              "Name": "Attachment",
+              "Size": 55
+            },
+            "2": {
+              "Name": "RigidConstraint",
+              "Size": 1
+            },
+            "3": {
+              "Name": "BallSocketConstraint",
+              "Size": 14
+            },
+            "4": {
+              "Name": "AnimationConstraint",
+              "Size": 15
+            },
+            "5": {
+              "Name": "NoCollisionConstraint",
+              "Size": 19
+            }
+          },
+          "Size": 104
+        },
+        "3": {
+          "Name": "UI",
+          "Children": {
+            "1": {
+              "Name": "BillboardGui",
+              "Size": 1
+            },
+            "2": {
+              "Name": "Frame",
+              "Size": 19
+            },
+            "3": {
+              "Name": "TextLabel",
+              "Size": 35
+            },
+            "4": {
+              "Name": "UIPadding",
+              "Size": 2
+            },
+            "5": {
+              "Name": "UIStroke",
+              "Size": 60
+            },
+            "6": {
+              "Name": "UIListLayout",
+              "Size": 5
+            },
+            "7": {
+              "Name": "UICorner",
+              "Size": 65
+            },
+            "8": {
+              "Name": "ImageLabel",
+              "Size": 11
+            },
+            "9": {
+              "Name": "PlayerGui",
+              "Size": 1
+            },
+            "10": {
+              "Name": "ScreenGui",
+              "Size": 3
+            },
+            "11": {
+              "Name": "UIScale",
+              "Size": 1
+            },
+            "12": {
+              "Name": "TextButton",
+              "Size": 54
+            },
+            "13": {
+              "Name": "ScrollingFrame",
+              "Size": 15
+            },
+            "14": {
+              "Name": "TextBox",
+              "Size": 2
+            },
+            "15": {
+              "Name": "UIGridLayout",
+              "Size": 1
+            },
+            "16": {
+              "Name": "ImageButton",
+              "Size": 2
+            },
+            "17": {
+              "Name": "ChatInputBarConfiguration",
+              "Size": 1
+            },
+            "18": {
+              "Name": "ChannelTabsConfiguration",
+              "Size": 1
+            },
+            "19": {
+              "Name": "BubbleChatConfiguration",
+              "Size": 1
+            },
+            "20": {
+              "Name": "UIGradient",
+              "Size": 1
+            },
+            "21": {
+              "Name": "TextChannel",
+              "Size": 2
+            },
+            "22": {
+              "Name": "TextSource",
+              "Size": 2
+            },
+            "23": {
+              "Name": "TextChatCommand",
+              "Size": 9
+            },
+            "24": {
+              "Name": "ChatWindowConfiguration",
+              "Size": 1
+            }
+          },
+          "Size": 295
+        },
+        "4": {
+          "Name": "PostProcessing",
+          "Children": {
+            "1": {
+              "Name": "Sky",
+              "Size": 1
+            },
+            "2": {
+              "Name": "DepthOfFieldEffect",
+              "Size": 1
+            },
+            "3": {
+              "Name": "BloomEffect",
+              "Size": 1
+            },
+            "4": {
+              "Name": "SunRaysEffect",
+              "Size": 1
+            },
+            "5": {
+              "Name": "Atmosphere",
+              "Size": 1
+            }
+          },
+          "Size": 5
+        },
+        "5": {
+          "Name": "Scripts",
+          "Children": {
+            "1": {
+              "Name": "Script",
+              "Size": 5
+            },
+            "2": {
+              "Name": "LocalScript",
+              "Size": 6
+            },
+            "3": {
+              "Name": "BindableFunction",
+              "Size": 1
+            },
+            "4": {
+              "Name": "ModuleScript",
+              "Size": 146
+            },
+            "5": {
+              "Name": "RemoteEvent",
+              "Size": 67
+            }
+          },
+          "Size": 225
+        },
+        "6": {
+          "Name": "Audio",
+          "Children": {
+            "1": {
+              "Name": "AudioListener",
+              "Size": 1
+            },
+            "2": {
+              "Name": "Wire",
+              "Size": 1
+            },
+            "3": {
+              "Name": "Sound",
+              "Size": 9
+            },
+            "4": {
+              "Name": "SoundGroup",
+              "Size": 4
+            },
+            "5": {
+              "Name": "AudioDeviceOutput",
+              "Size": 1
+            }
+          },
+          "Size": 16
+        },
+        "7": {
+          "Name": "Animation",
+          "Children": {
+            "1": {
+              "Name": "Animator",
+              "Size": 1
+            },
+            "2": {
+              "Name": "Animation",
+              "Size": 27
+            }
+          },
+          "Size": 28
+        },
+        "8": {
+          "Name": "Values",
+          "Children": {
+            "1": {
+              "Name": "NumberValue",
+              "Size": 18
+            },
+            "2": {
+              "Name": "StringValue",
+              "Size": 21
+            },
+            "3": {
+              "Name": "Vector3Value",
+              "Size": 71
+            }
+          },
+          "Size": 110
+        },
+        "9": {
+          "Name": "Character",
+          "Children": {
+            "1": {
+              "Name": "Humanoid",
+              "Size": 1
+            },
+            "2": {
+              "Name": "HumanoidDescription",
+              "Size": 1
+            },
+            "3": {
+              "Name": "BodyPartDescription",
+              "Size": 6
+            },
+            "4": {
+              "Name": "AccessoryDescription",
+              "Size": 1
+            },
+            "5": {
+              "Name": "BodyColors",
+              "Size": 1
+            },
+            "6": {
+              "Name": "Accessory",
+              "Size": 1
+            },
+            "7": {
+              "Name": "WrapTarget",
+              "Size": 15
+            },
+            "8": {
+              "Name": "FaceControls",
+              "Size": 1
+            }
+          },
+          "Size": 27
+        },
+        "10": {
+          "Name": "Textures",
+          "Children": {
+            "1": {
+              "Name": "Texture",
+              "Size": 1
+            },
+            "2": {
+              "Name": "Decal",
+              "Size": 1
+            }
+          },
+          "Size": 2
+        },
+        "11": {
+          "Name": "Services & Storage",
+          "Children": {
+            "1": {
+              "Name": "Folder",
+              "Size": 77
+            },
+            "2": {
+              "Name": "Player",
+              "Size": 1
+            }
+          },
+          "Size": 78
+        },
+        "12": {
+          "Name": "Misc",
+          "Children": {
+            "1": {
+              "Name": "PlayerScripts",
+              "Size": 1
+            },
+            "2": {
+              "Name": "StarterGear",
+              "Size": 1
+            },
+            "3": {
+              "Name": "Backpack",
+              "Size": 1
+            },
+            "4": {
+              "Name": "StarterCharacterScripts",
+              "Size": 1
+            },
+            "5": {
+              "Name": "StarterPlayerScripts",
+              "Size": 1
+            }
+          },
+          "Size": 5
+        },
+        "13": {
+          "Name": "Unclassified",
+          "Children": {
+            "1": {
+              "Name": "AudioDeviceInput",
+              "Size": 1
+            },
+            "2": {
+              "Name": "InputContext",
+              "Size": 6
+            },
+            "3": {
+              "Name": "InputAction",
+              "Size": 40
+            },
+            "4": {
+              "Name": "InputBinding",
+              "Size": 92
+            }
+          },
+          "Size": 139
+        }
+      },
+      "Size": 1058
+    },
+    "role": "Lobby",
+    "GetUnparentedInstancesAsync": {
+      "groups": 7,
+      "size": 13
+    },
+    "viewport": "666, 374",
+    "evidence": "Studio-emulated",
+    "context": "Client",
+    "GetTriangleCompositionAsync": {
+      "Name": "TriangleComposition",
+      "Children": {
+        "1": {
+          "Name": "Opaque",
+          "Sizes": {
+            "Drawcalls": 7,
+            "Triangles": 7488
+          }
+        },
+        "2": {
+          "Name": "UI",
+          "Sizes": {
+            "Drawcalls": 1,
+            "Triangles": 1492
+          }
+        },
+        "3": {
+          "Name": "Shadows",
+          "Sizes": {
+            "Drawcalls": 29,
+            "Triangles": 29989
+          }
+        }
+      },
+      "Sizes": {
+        "Drawcalls": 37,
+        "Triangles": 38969
+      }
+    }
+  },
+  "unparented": {
+    "total": 13,
+    "attributedToATD": 0,
+    "interpretation": "Reported owners were engine PlayerModule/character Animate; this checkpoint does not prove absence of all retained references."
+  },
+  "limits": [
+    "Script-memory query unavailable.",
+    "Audio/animation totals include engine character assets; the owned ATD audio manifest is empty.",
+    "Scene triangles/draws are one current viewpoint, not a camera sweep or device budget.",
+    "No known previous profiler frame-limit value was recorded before the first early capture. Later captures restore their explicitly recorded working value; final cleanup uses documented256-frame default and disabled profiler/capture."
+  ]
+}

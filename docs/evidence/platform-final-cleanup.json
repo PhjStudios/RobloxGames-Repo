@@ -1,0 +1,107 @@
+{
+  "evidence": "Studio-emulated",
+  "recordedUtc": "2026-09-05",
+  "lobby": {
+    "creatorId": 35420107,
+    "profiler": {
+      "captureOff": true,
+      "frameLimitDefault": true,
+      "profilerOff": true
+    },
+    "placeId": 140661668701496,
+    "role": "Lobby",
+    "runtimeResidue": [],
+    "gameId": 10764687717,
+    "device": "xbox",
+    "camera": {
+      "1": -19.696094512939453,
+      "2": 14.09162425994873,
+      "3": -19.30388641357422,
+      "4": -0.7061508893966675,
+      "5": 0.3129657804965973,
+      "6": -0.6351404190063477,
+      "7": 1.4901162970204496e-8,
+      "8": 0.8970131874084473,
+      "9": 0.4420037269592285,
+      "10": 0.7080613970756531,
+      "11": 0.31212133169174194,
+      "12": -0.6334266662597656
+    },
+    "queueZone": {
+      "descendants": 1,
+      "children": 1,
+      "attributes": []
+    },
+    "creatorType": "Group"
+  },
+  "match": {
+    "creatorId": 35420107,
+    "mapTemplates": {
+      "descendants": 237,
+      "collidable": 21,
+      "scripts": 0,
+      "shadows": 31,
+      "attributes": [],
+      "children": 2,
+      "parts": 208
+    },
+    "device": "default",
+    "placeId": 104415140644510,
+    "role": "Match",
+    "runtimeResidue": [],
+    "gameId": 10764687717,
+    "camera": {
+      "1": 11.245905876159668,
+      "2": 31.198455810546875,
+      "3": 45.458282470703125,
+      "4": -0.48256924748420715,
+      "5": 0.763692319393158,
+      "6": 0.42883697152137756,
+      "7": 1.4901162970204496e-8,
+      "8": 0.4896194338798523,
+      "9": -0.8719362616539001,
+      "10": -0.875857949256897,
+      "11": -0.4207696318626404,
+      "12": -0.23627524077892303
+    },
+    "playableTemplates": {
+      "descendants": 83,
+      "collidable": 0,
+      "scripts": 0,
+      "shadows": 0,
+      "attributes": {
+        "ATDContentContract": "playable-local-match-v1",
+        "ContentVersion": 1
+      },
+      "children": 10,
+      "parts": 73
+    },
+    "creatorType": "Group"
+  },
+  "preferencesRestored": {
+    "text": "Medium",
+    "transparency": 1,
+    "reducedMotion": false
+  },
+  "lobbyEmulatorRestored": {
+    "device": "xbox",
+    "resolution": [
+      1920,
+      1080
+    ],
+    "scaling": "ScaleToPhysicalSize"
+  },
+  "profiler": {
+    "capture": false,
+    "enabled": false,
+    "frameLimit": 256,
+    "limitQualification": "Restored to documented default; initial frame-limit value was not captured."
+  },
+  "managedRojoProcessesRemaining": 0,
+  "temporaryClientsRemaining": 0,
+  "remainingStudioParents": 2,
+  "ownedInventoryChanged": false,
+  "persistentAssetsEdited": false,
+  "published": false,
+  "limits": "Both parents returned to Edit; initial cameras restored and test attributes/runtime fixtures removed. Temporary profiler/controller panes closed. Exact original dock-pane arrangement was not captured."
+}

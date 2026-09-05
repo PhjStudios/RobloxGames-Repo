@@ -1,0 +1,33 @@
+{
+  "evidence": "Studio-emulated actual Roblox in-game Settings UI, not direct property injection",
+  "stagingRole": "Lobby",
+  "observations": [
+    {
+      "stage": "Before",
+      "preferredTextSize": "Medium",
+      "preferredTransparency": 1,
+      "reducedMotion": false
+    },
+    {
+      "stage": "Text slider Largest",
+      "preferredTextSize": "Largest",
+      "preferredTransparency": 1,
+      "reducedMotion": false
+    },
+    {
+      "stage": "Background slider Opaque",
+      "preferredTextSize": "Largest",
+      "preferredTransparency": 0,
+      "reducedMotion": false
+    },
+    {
+      "stage": "Reduced motion On",
+      "preferredTextSize": "Largest",
+      "preferredTransparency": 0,
+      "reducedMotion": true,
+      "homeTextSize": 33,
+      "homeBackgroundTransparency": 0
+    }
+  ],
+  "limitations": "Initial live layout checks found blocked smallest-phone guidance/controls and a focus restoration race. These observations are not final layout acceptance. Saved settings remained schema2. Restore original preferences after validation; final cleanup recorded in design lock."
+}

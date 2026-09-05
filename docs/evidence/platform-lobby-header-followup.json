@@ -1,0 +1,319 @@
+{
+  "version": 1,
+  "date": "2026-09-04",
+  "evidence": "Studio-emulated",
+  "preferences": {
+    "text": "Largest",
+    "transparency": 0,
+    "reducedMotion": true,
+    "pseudo": "pseudo50",
+    "uiScale": 0.75
+  },
+  "purpose": "Closure of ProfileReadiness clipping from platform-lobby-final-ui.json",
+  "layouts": [
+    {
+      "label": "tablet",
+      "controls": 21,
+      "selectedOrProblems": {
+        "1": {
+          "layoutOrder": 12,
+          "path": "Root/Content/SettingsScreen/SettingsList/uiScale",
+          "undersizedTouchCandidate": false,
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "RequiresInputVerification",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "activeOverlayCandidates": [],
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 26,
+              "x": 201
+            },
+            "localizationKey": "lobby_view.ui_scale",
+            "fits": true,
+            "wrapped": true,
+            "overflowCandidate": false,
+            "size": 17
+          },
+          "visibleRect": {
+            "y": 663,
+            "x": 193.49996948242188,
+            "height": 43.5,
+            "width": 951.5000610351562
+          },
+          "scrollAncestors": {
+            "1": {
+              "enabled": true,
+              "direction": "XY",
+              "path": "Root/Content/SettingsScreen/SettingsList",
+              "viewportOutsideSafeRoot": false,
+              "canvasPosition": {
+                "y": 255.25,
+                "x": 0
+              },
+              "rect": {
+                "y": 365.25,
+                "x": 193.49996948242188,
+                "height": 341.25,
+                "width": 953
+              },
+              "canvasSize": {
+                "y": 609,
+                "x": 959
+              }
+            }
+          },
+          "navigation": {
+            "left": "Root/Content/SettingsScreen/SettingsList/towerRangeEnabled",
+            "right": "Root/Header/Back",
+            "down": "Root/Header/Back",
+            "up": "Root/Content/SettingsScreen/SettingsList/towerRangeEnabled"
+          },
+          "rect": {
+            "y": 663,
+            "x": 193.49996948242188,
+            "height": 44.25,
+            "width": 951.5000610351562
+          },
+          "clipAncestors": [],
+          "selectionOrder": 52,
+          "textBoxFocused": false,
+          "selected": true,
+          "clippedNow": false,
+          "zIndex": 13
+        }
+      },
+      "viewport": {
+        "y": 819,
+        "x": 1178
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 732,
+        "width": 1178
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "offSafeRoot": 1,
+        "labelOverflowCandidates": 0,
+        "undersizedTouchControls": 0,
+        "ClippedWithoutScroll": 0,
+        "overlayCandidates": 0,
+        "WithinCurrentViewport": 14,
+        "ScrollableOffViewport": 7,
+        "disabledControls": 0,
+        "textOverflowCandidates": 0
+      },
+      "labelProblems": []
+    },
+    {
+      "label": "desktop",
+      "controls": 21,
+      "selectedOrProblems": {
+        "1": {
+          "layoutOrder": 12,
+          "path": "Root/Content/SettingsScreen/SettingsList/uiScale",
+          "undersizedTouchCandidate": false,
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "RequiresInputVerification",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "activeOverlayCandidates": [],
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 30,
+              "x": 232
+            },
+            "localizationKey": "lobby_view.ui_scale",
+            "fits": true,
+            "wrapped": true,
+            "overflowCandidate": false,
+            "size": 22
+          },
+          "visibleRect": {
+            "y": 899.5,
+            "x": 252,
+            "height": 48,
+            "width": 1614.5
+          },
+          "scrollAncestors": {
+            "1": {
+              "enabled": true,
+              "direction": "XY",
+              "path": "Root/Content/SettingsScreen/SettingsList",
+              "viewportOutsideSafeRoot": false,
+              "canvasPosition": {
+                "y": 46.5,
+                "x": 0
+              },
+              "rect": {
+                "y": 352.5,
+                "x": 252,
+                "height": 595.5,
+                "width": 1616
+              },
+              "canvasSize": {
+                "y": 654,
+                "x": 1622
+              }
+            }
+          },
+          "navigation": {
+            "left": "Root/Content/SettingsScreen/SettingsList/towerRangeEnabled",
+            "right": "Root/Header/Back",
+            "down": "Root/Header/Back",
+            "up": "Root/Content/SettingsScreen/SettingsList/towerRangeEnabled"
+          },
+          "rect": {
+            "y": 899.5,
+            "x": 252,
+            "height": 48,
+            "width": 1614.5
+          },
+          "clipAncestors": [],
+          "selectionOrder": 52,
+          "textBoxFocused": false,
+          "selected": true,
+          "clippedNow": false,
+          "zIndex": 13
+        }
+      },
+      "viewport": {
+        "y": 1080,
+        "x": 1919
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 993,
+        "width": 1919
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "offSafeRoot": 0,
+        "labelOverflowCandidates": 0,
+        "undersizedTouchControls": 0,
+        "ClippedWithoutScroll": 0,
+        "overlayCandidates": 0,
+        "WithinCurrentViewport": 20,
+        "ScrollableOffViewport": 1,
+        "disabledControls": 0,
+        "textOverflowCandidates": 0
+      },
+      "labelProblems": []
+    },
+    {
+      "label": "tenFoot",
+      "controls": 21,
+      "selectedOrProblems": {
+        "1": {
+          "layoutOrder": 12,
+          "path": "Root/Content/SettingsScreen/SettingsList/uiScale",
+          "undersizedTouchCandidate": false,
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "RequiresInputVerification",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "activeOverlayCandidates": [],
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 30,
+              "x": 232
+            },
+            "localizationKey": "lobby_view.ui_scale",
+            "fits": true,
+            "wrapped": true,
+            "overflowCandidate": false,
+            "size": 22
+          },
+          "visibleRect": {
+            "y": 899.5,
+            "x": 252,
+            "height": 48,
+            "width": 1614.5
+          },
+          "scrollAncestors": {
+            "1": {
+              "enabled": true,
+              "direction": "XY",
+              "path": "Root/Content/SettingsScreen/SettingsList",
+              "viewportOutsideSafeRoot": false,
+              "canvasPosition": {
+                "y": 46.5,
+                "x": 0
+              },
+              "rect": {
+                "y": 352.5,
+                "x": 252,
+                "height": 595.5,
+                "width": 1616
+              },
+              "canvasSize": {
+                "y": 654,
+                "x": 1622
+              }
+            }
+          },
+          "navigation": {
+            "left": "Root/Content/SettingsScreen/SettingsList/towerRangeEnabled",
+            "right": "Root/Header/Back",
+            "down": "Root/Header/Back",
+            "up": "Root/Content/SettingsScreen/SettingsList/towerRangeEnabled"
+          },
+          "rect": {
+            "y": 899.5,
+            "x": 252,
+            "height": 48,
+            "width": 1614.5
+          },
+          "clipAncestors": [],
+          "selectionOrder": 52,
+          "textBoxFocused": false,
+          "selected": true,
+          "clippedNow": false,
+          "zIndex": 13
+        }
+      },
+      "viewport": {
+        "y": 1080,
+        "x": 1919
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 993,
+        "width": 1919
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "offSafeRoot": 0,
+        "labelOverflowCandidates": 0,
+        "undersizedTouchControls": 0,
+        "ClippedWithoutScroll": 0,
+        "overlayCandidates": 0,
+        "WithinCurrentViewport": 20,
+        "ScrollableOffViewport": 1,
+        "disabledControls": 0,
+        "textOverflowCandidates": 0
+      },
+      "labelProblems": []
+    }
+  ],
+  "console": "Expected configuration/bootstrap info; one aggregated GetLobbyBanner rate-limit warning during rapid layout/input exercise; no invalid-focus warning or Luau error."
+}

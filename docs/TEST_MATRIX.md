@@ -8,7 +8,7 @@ that are automated today from Studio, published-client, device, and destructive
 checks that require later systems or explicit authorization.
 
 The Playable Local Match, Persistent Lobby Loop, and Squad Travel Loop outcomes
-through historical Phase 28 are complete. Their clean baseline at commit
+through historical Phase 28 are complete. Their historical baseline at commit
 `fe48b9fe2a9b597d6d169530877465654c8c4e96` passed `1,419` headless tests, all
 four structural builds, isolated Studio verification, and the authorized
 private-staging Lobby/Match loop. The staging observations covered real solo
@@ -17,25 +17,46 @@ refresh, and return; deterministic tests—not published clients—covered the
 documented adversarial edges. Production was not tested or changed.
 
 Content and Onboarding combines historical Phases 29–33 and is complete on
-`codex/content-onboarding`. Current source contains validated release map and
-difficulty selection, four strategic towers, six enemy roles, exact
+`codex/content-onboarding` at verified clean baseline commit
+`ddd01c9c0d459d91639c122c5ae784c1e59608c3`. That outcome contains validated
+release map and difficulty selection, four strategic towers, six enemy roles, exact
 20/30/40-wave finite campaigns, bounded seeded Endless generation in the
 existing runtime, version-2 results/rewards, and the profile-v6 authoritative
 tutorial. Focused and full-gate checks cover content compatibility, authored
 campaigns and balance, Endless determinism/bounds, reward idempotency, tutorial
 transitions, travel continuity, protocols, and client projections. The
-consolidated review is clean, current cumulative headless coverage is
+historical consolidated review was clean, cumulative headless coverage was
 `1,486/1,486`, all four builds passed, and the Garden solo/mobile and
 four-client Studio gates passed. Reduced-effects behavior is deterministic
 client projection/view evidence, not a claimed live Studio toggle. No newly
 published staging-client validation or uninstructed first-time-player
 observation is claimed.
 
+Platform, Presentation, Performance, and Analytics combines historical Phases
+34–37 on `codex/platform-hardening`. Repository implementation and scoped local
+verification are complete, the consolidated review is clean, cumulative headless
+coverage is `1,601/1,601`, and all four builds passed. Delivery branch:
+`codex/platform-hardening`. The
+baseline full gate was not rerun merely to establish the starting point. H-17
+and S-08 index the new contracts and local evidence. Phase 38 has not begun.
+
+The message/pseudolocalization boundary, shared accessibility preferences,
+cross-input navigation, client presentation/audio architecture, measured local
+budgets, bounded analytics/logging, isolated commands and read-only balance
+report have focused deterministic coverage. Studio observations include bounded
+solo and four-client sessions; they do not establish physical-phone/tablet,
+genuine console, published-client or external-service acceptance. No new version
+was published, no analytics destination was configured and no experience platform
+settings changed. Exact limitations are recorded in
+[the design lock](PLATFORM_HARDENING_DESIGN_LOCK.md),
+[presentation](PRESENTATION.md), [performance budgets](PERFORMANCE_BUDGETS.md)
+and [analytics](ANALYTICS.md).
+
 Rows for earlier packets preserve their original evidence and may describe the
-repository as it existed then. H-16, S-07, and M-11 are the current Content and
-Onboarding overlay; the current status text in M-02 through M-05, P-01 through
-P-03, and D-01 through D-05 distinguishes completed current evidence from later
-published, physical-device, destructive, and post-Phase-33 gates.
+repository as it existed then. H-16, S-07 and M-11 retain the completed Content
+and Onboarding evidence; H-17 and S-08 are the current platform-hardening overlay.
+Current status rows distinguish that historical baseline from new deterministic,
+Studio, published, physical-device, destructive and external-service gates.
 
 ## Status vocabulary
 
@@ -75,7 +96,7 @@ linked historical document for the original Studio evidence.
 - Production universe `10757629094` is not a routine persistence-test target.
   Keep Studio API access disabled there. The complete environment policy is in
   [Place and test-environment inventory](PLACE_INVENTORY.md).
-- Content and Onboarding Studio work is restricted to private staging GameId
+- Current Studio work is restricted to private staging GameId
   `10764687717`, Lobby PlaceId `140661668701496`, and Match PlaceId
   `104415140644510`, after confirming `PHJGAMES` group `35420107` ownership and
   the configured Lobby/Match role. No staging publication is implied.
@@ -1601,9 +1622,10 @@ linked historical document for the original Studio evidence.
 - **System or contract:** complete first-session, Lobby, queue, travel, Match,
   result, persistence, compliance, operations, and rollback readiness.
 - **Test category:** private published closed-alpha and release gate.
-- **Current status:** `Unavailable`; the core through Content and Onboarding is
-  implemented, but the Phase 34–40 platform, presentation, operations, release
-  configuration, and closed-alpha gates have not begun or completed.
+- **Current status:** `Unavailable`; Phases 34–37 repository implementation and
+  scoped local verification are complete, with external platform/assets/analytics
+  gates pending. Release configuration and closed-alpha acceptance in Phases 38–40
+  have not begun and are outside the current outcome.
 - **Environment:** clean private alpha version, followed only later by a reviewed
   production candidate.
 - **Command or procedure:** none yet; Phase 40 must supply the exact operations
@@ -1627,12 +1649,16 @@ linked historical document for the original Studio evidence.
 - **System or contract:** privacy-safe event delivery, bounded dimensions,
   funnel/error usefulness, and dashboard interpretation.
 - **Test category:** private published-client/external-service integration test.
-- **Current status:** `Unavailable`; analytics contracts, sinks, dashboard, and a
-  private published test release do not exist.
+- **Current status:** `Unavailable externally`; the versioned dictionary,
+  authoritative observers, bounded delivery abstraction and mock-sink coverage
+  exist. A reviewed destination/dashboard and current private published test
+  release are not configured. Packet 37.6 remains pending.
 - **Environment:** future private test release with a reviewed analytics
   destination and non-sensitive designated accounts.
-- **Command or procedure:** none yet; Packet 37.6 must define event-by-event
-  evidence and retention/privacy boundaries before execution.
+- **Command or procedure:** H-17 and scoped local verification are complete; use the
+  bounded approval contract in [analytics](ANALYTICS.md). Approval must name
+  experience/version, provider, event subset, accounts, expected writes,
+  retention/privacy, abort conditions and cleanup before external execution.
 - **Required players or devices:** representative private clients for the flows
   that emit each event.
 - **Authorization requirement:** explicit analytics-service, publication, and
@@ -1641,9 +1667,10 @@ linked historical document for the original Studio evidence.
   the approved analytics destination.
 - **Destructive-data risk:** low for gameplay data but material privacy risk if
   payloads are not bounded; raw profiles/private player payloads are prohibited.
-- **Expected evidence:** expected bounded events arrive once with useful safe
-  dimensions, missing/duplicate events are diagnosable, and no secret or raw
-  private value appears.
+- **Expected evidence:** bounded events arrive with useful safe dimensions;
+  duplicates, drops and failures are diagnosable within the documented
+  best-effort delivery contract; retention is verified; no secret or raw
+  private value appears. Mock records establish none of this provider evidence.
 - **Cleanup procedure:** remove only test dashboard data when the provider and
   future policy support an exact safe operation; otherwise document retention.
 - **Phase or prerequisite:** Phase 37, specifically Packet 37.6.
@@ -1681,19 +1708,20 @@ linked historical document for the original Studio evidence.
 - **System or contract:** responsive HUD, camera, desktop input, touch placement,
   gamepad placement/navigation, enemy/base health presentation, and safe areas.
 - **Test category:** device and input smoke test.
-- **Current status:** `Partially complete; current Content and Onboarding device
+- **Current status:** `Partially complete; historical Content and Onboarding device
   gate passed`. The gameplay HUD, bounded camera, desktop/touch/gamepad
   placement, and input actions retain their earlier evidence. S-07 additionally
   verified Garden framing and bounds plus touch placement, selection, upgrade,
   and defeat at an iPhone 17 Pro landscape viewport. Content version 1 finite/
   Endless labels, boss warning/health, contextual tutorial, and reduced-effects
-  behavior passed deterministic view coverage. A live reduced-effects toggle
-  and the broader Phase 34 physical-device/platform matrix are not claimed.
+  behavior passed deterministic view coverage. Current Phases 34–37 input,
+  localization and preference work has completed the scoped local S-08 checks;
+  its full-flow, physical-device and published-client acceptance remains pending.
 - **Environment:** current private staging Match Studio device emulation plus
   representative physical devices later in the roadmap.
-- **Command or procedure:** run the current client reducer/view/controller specs,
-  then execute S-07's bounded desktop/phone Studio observations. Phase 34 will
-  broaden supported-platform acceptance after this milestone.
+- **Command or procedure:** run H-17's client reducer/view/controller specs and
+  S-08's current bounded input/layout procedures. Preserve S-07 as its earlier
+  desktop/phone evidence, not a pass for the new current-tree matrix.
 - **Required players or devices:** one player on each supported input family;
   include representative phone/tablet aspect ratios and a gamepad.
 - **Authorization requirement:** none for local Studio/hardware tests; console or
@@ -1713,17 +1741,18 @@ linked historical document for the original Studio evidence.
   model, Roblox accessibility preferences, focus, text scaling, and responsive
   layout.
 - **Test category:** device, controller, touch, accessibility, and layout test.
-- **Current status:** `Partially complete; current Content and Onboarding phone
+- **Current status:** `Partially complete; historical Content and Onboarding phone
   gate passed`. The shared Lobby shell, persistent settings, responsive layouts,
   and Match presentation exist. Tutorial, content-selection, boss, Endless, and
   reduced-effects projections have deterministic layout/reducer coverage; S-07
   verified current Match phone layout and touch gameplay in Studio. That local
-  milestone evidence is not the broader Phase 34 accessibility/platform
-  acceptance, which has not begun.
+  milestone evidence is not the broader current Phases 34–37 acceptance.
+  Shared preference precedence, localization expansion and focus improvements
+  are implemented; H-17 and the scoped S-08 local checks are complete.
 - **Environment:** Lobby and Match Studio device emulation now; representative
   physical supported devices remain later acceptance work.
-- **Command or procedure:** run the focused Lobby/Match UI specs and S-07. Do not
-  treat that milestone check as the broader Phase 34 supported-platform audit.
+- **Command or procedure:** run the focused Lobby/Match UI specs in H-17 and the
+  S-08 preference/input/expansion matrix. S-07 remains historical evidence.
 - **Required players or devices:** one player per supported input family and
   representative desktop/mobile/tablet viewports.
 - **Authorization requirement:** none locally; private publication may be needed
@@ -1748,15 +1777,16 @@ linked historical document for the original Studio evidence.
   loadout, earn-only Garden chest disclosure, party/queue configuration, and
   responsive Lobby UI exist. Content version 1 projects player-facing map and
   difficulty names plus concise tutorial guidance. Those projections passed the
-  current full headless gate. The private-staging Lobby queue root was verified
+  historical Content and Onboarding headless gate. The private-staging Lobby
+  queue root was verified
   unchanged and script-free, but no newly published physical-client newcomer
   journey or uninstructed first-time-player observation is claimed.
 - **Environment:** private staging Lobby Studio device emulation; a newly
   published private physical-client newcomer gate would require separate
   approval.
-- **Command or procedure:** use H-16 for projections and S-07 for the authorized
-  local staging boundary. Record a first-time-player test only when another
-  person actually performs it against an approved version.
+- **Command or procedure:** use H-17 for current projections and S-08 for the
+  authorized local staging boundary. Record a first-time-player test only when
+  another person actually performs it against an approved version.
 - **Required players or devices:** representative desktop, phone, tablet, and
   gamepad/controller; multiple players for party/queue presentation.
 - **Authorization requirement:** local tests require none; real private clients
@@ -1779,13 +1809,17 @@ linked historical document for the original Studio evidence.
   console/gamepad, localization expansion, color/readability, reduced-motion or
   other supported preferences, and final supported-platform claims.
 - **Test category:** accessibility, localization, and cross-platform audit.
-- **Current status:** `Deferred`; core user flows now exist, but the Phase 34
-  accessibility/localization audit, expanded surfaces, and supported-platform
-  decision have not begun.
+- **Current status:** `Scoped local verification complete; external acceptance pending`;
+  the bounded audit/design lock, localization/formatting/pseudolocalization,
+  preference precedence and cross-input implementation exist. H-17/S-08 record
+  the verified current surfaces and full-flow limits; no physical-device, console, screen-reader,
+  assistive-device or production-language support is inferred from emulation.
 - **Environment:** representative physical hardware, Studio emulation, and
   private published clients where platform behavior requires it.
-- **Command or procedure:** none yet; Phase 34 must define audited scenarios and
-  acceptance criteria.
+- **Command or procedure:** follow S-08 and the acceptance criteria/evidence
+  levels in [the design lock](PLATFORM_HARDENING_DESIGN_LOCK.md). English source
+  plus 30–50% pseudolocalization is the current scope; human translation and
+  review are required before any additional language-support claim.
 - **Required players or devices:** keyboard-only desktop, mouse/keyboard desktop,
   phone, tablet, controller/console-style device, and representative assistive
   settings; language pseudo-localization and target locales.
@@ -1808,19 +1842,27 @@ linked historical document for the original Studio evidence.
 - **System or contract:** frame time, memory, network traffic, instance/effect
   density, map/assets, lower-end device behavior, and long-session stability.
 - **Test category:** device performance profile and soak test.
-- **Current status:** `Partially complete; current content-density check
+- **Current status:** `Partially complete; historical content-density check
   passed`. Gameplay content and explicit generator/runtime bounds include a
   deterministic 10,000-wave soak with saturated-growth and distant-wave probes.
   Private-staging scene analysis measured 76,971 client triangles/79 draws with
   shadows, or 52,386 creator-adjusted triangles/44 draws; the server contained
   1,290 instances, with no unparented ATD instance. S-07/M-11 also exercised
-  solo mobile and four-client wave-12 load. Representative frame-time/memory/
-  network profiling, low-end physical hardware, and a hosted long-session trace
-  remain later Phases 35–36 work; deterministic generation and scene counts are
-  not substitutes for those device-performance results.
+  solo mobile and four-client wave-12 load. Current S-08 adds bounded solo and
+  four-client frame/Stats/network-count and named CPU captures plus actual
+  replay cleanup. Final-source Garden Hard reached twelve towers/twenty enemies
+  with boss-bracketed client/server CPU captures, and SceneAnalysis recorded
+  181,255 triangles/143 draws including shadows at wave 21. Two active 30-second
+  Endless windows and an unchanged-source three-cycle repeat are recorded in
+  [performance budgets](PERFORMANCE_BUDGETS.md). Representative low-end hardware,
+  published transport, hosted/all-composition capacity and long-duration traces
+  remain pending. Historical scene counts and deterministic generation do not
+  substitute for those gates.
 - **Environment:** representative supported physical hardware and controlled
   private clients, with Roblox profiling tools.
-- **Command or procedure:** none yet.
+- **Command or procedure:** S-08 with the test-only PlatformProfile harness,
+  MicroProfiler scopes and PerformanceScenarios accounting in H-17; use the
+  matching-environment thresholds in [performance budgets](PERFORMANCE_BUDGETS.md).
 - **Required players or devices:** lower/mid/high representative desktop and
   mobile targets, controller target, multi-client server, and long-duration host.
 - **Authorization requirement:** explicit private publication if real-client or
@@ -1979,13 +2021,233 @@ linked historical document for the original Studio evidence.
 - **Phase or prerequisite:** Packet 38.5 after the affected systems and private
   test environment exist.
 
+## Platform hardening procedures — 2026-09-04
+
+These procedures were recorded before execution. Status: implementation and
+scoped local verification are complete, the consolidated review is clean and
+the milestone gate has cumulative `1,601/1,601` coverage with all four builds
+passed. Delivery branch: `codex/platform-hardening`; external acceptance remains
+pending. Historical
+S-07/M-11 evidence remains historical.
+The [design lock](PLATFORM_HARDENING_DESIGN_LOCK.md) defines evidence labels and
+platform claims; no whole-outcome acceptance is asserted from partial checks.
+
+### S-08 — Unsaved platform and performance sessions
+
+Read-only geometry companion: inject the returned function from
+`tests/studio/UiLayoutAudit.luau` through the direct Studio Client tool after
+identity verification, then invoke with `{}` for the role's exact ATD GUI.
+Run after a fresh layout/frame update at each selected device/input/preference
+checkpoint. The probe inspects at most 4,096 instances and reports at most 512
+visible interactive controls, stable relative names, focus, safe-root bounds,
+text fit, scroll clipping and overlapping active objects. It retains no raw UI
+text, creates no instances or connections, and mutates nothing. Abort on an
+identity/root mismatch or truncation. Record scrolling candidates separately
+from fixed-container clipping, and verify reachability with actual input and
+screenshots; zero geometry flags alone do not establish human acceptance.
+The final probe also checks up to 512 ancestry-visible text labels for engine
+TextFits failures and marks interactive controls below 44 physical pixels.
+These are review candidates: a label inside a scrollable reading panel may be
+outside the current viewport, and disabled modal-background controls are not
+actionable. Check the actual text fit and foreground control geometry separately.
+The touch-size check uses a 0.01 px tolerance; geometry uses 1 px. Nonempty
+TextBox placeholders expose bounded counts and an explicit unmeasured flag.
+Inspect their rendering visually at the tested preferences and UI scale.
+
+
+- Current status: `Recorded local scenarios; external acceptance pending`.
+  Confirmed staging evidence includes solo Garden/Endless, four-client Easy
+  wave-20 Victory/replay, two three-cycle finite replays, and final-source Hard
+  with twelve towers/twenty enemies. The unchanged-source repeat left zero owned
+  entities/effects and probe connections, with no monotonic process-memory rise.
+  Hard client/server CPU captures were bracketed by visible boss-health summaries;
+  the later Endless MicroProfiler was already Results and remains labeled that
+  way. Active Endless has two 30-second Playing traces, not a long-duration soak.
+  Exact input/layout evidence and final restoration are recorded separately;
+  [performance budgets](PERFORMANCE_BUDGETS.md) preserves source JSON, settings,
+  focus and measurement limits. No physical or published acceptance follows.
+- Final Match follow-up: the additional 12.150-second trace was still active
+  boss/dense combat, not cleanup. The natural terminal observation later reached
+  Results at wave 34 with base health zero; an accepted ordinary replay returned
+  to Ready with zero towers/enemies/effects and three presentation descendants.
+  The terminal result enum was not captured reliably and is not inferred from
+  the probe's discarded default. All four temporary clients closed; Match Edit
+  emulator/camera were restored, test attributes removed and owned-template
+  inventory unchanged, with zero ATD runtime residue. The
+  [final cleanup record](evidence/platform-final-cleanup.json) additionally
+  confirms Lobby preference/emulator/camera restoration, unchanged queue-root
+  inventory and zero remaining managed Rojo processes. Profiler capture/display
+  are off and the documented 256 frame-limit default restored; its initial
+  value and exact original dock-pane arrangement were not captured. The
+  [fresh-source chest modal check](evidence/platform-lobby-final-modal.json)
+  records readable Confirm/Cancel at Largest text and pseudo50, with only
+  intentional overlap over disabled modal-background controls.
+- Environment: confirmed PHJGAMES staging GameId `10764687717`, Lobby
+  `140661668701496`/`lobby.project.json`, Match
+  `104415140644510`/`match.project.json`, group `35420107`. Reverify live identity
+  and role before runtime actions. Use one managed Rojo process per project.
+- Authorization: source synchronization and unsaved/runtime testing only; no
+  publication, stored-profile mutation, persistent Team Create edits, external
+  analytics, API-access changes or experience settings.
+- Record before/after ATD root inventory, camera, emulator and profiler state.
+  Start with direct non-rewarding Studio Match; Lobby persistent-service behavior
+  that cannot be tested without stores uses a test-only injected in-memory service
+  or remains a published-client gate. Never infer travel from a direct Match.
+- Players/devices: one solo and four local clients; desktop 16:9, ultrawide,
+  minimum landscape 667×375, common phone, tablet, keyboard-only and controller
+  TenFoot. Emulation has no claim to phone/tablet/console hardware performance.
+- Run first-join/loading/failure/retry, tutorial/help/skip/replay, currencies and
+  odds/acquisition/rewards, inventory/loadout/settings, party/queue/captain/travel,
+  Ready/HUD/camera/placement/cancel/select/target/upgrade/sell, boss/wave/Endless,
+  victory/defeat/rematch/return/reconnect/spectating and modal/error/recovery paths.
+  Exercise keyboard traversal and Back at every depth, controller without required
+  typing, touch confirm/cancel, safe areas and scroll reachability.
+- Compare English and pseudo30/40/50 with largest preferred text, opaque panels,
+  reduced motion, low detail, saved scale/shake/audio controls including live
+  changes. Capture text extents, visible control bounds, selection/focus and
+  screenshots; programmatic visibility alone does not prove visual readability.
+- Profile idle/normal/boss/dense/results/cleanup. Use test-only
+  `tests/studio/PlatformProfile.luau` with `tests/support/PerformanceWindow.luau`
+  injected locally, 10–30-second bounded captures, engine Stats and LibMP snapshots
+  plus SceneAnalysisService. Payload counts are JSON-like estimates, explicitly
+  separate from engine aggregate Kbps counters. Do not retain raw remote payloads.
+- Dense scenario: four independent players, all current legal tower slots,
+  rapid-fire and splash roles, overlapping regular/boss enemies within authority
+  caps. Repeated-session scenario: at least three finite rematch cycles and one
+  bounded real-time Endless session, sampling equal idle/combat/cleanup points.
+  Thousands of generated waves are deterministic coverage, not a real-time soak.
+- Abort on identity mismatch, persistent-service mutation requirement, unexpected
+  runtime authority, unbounded growth, UI-critical obstruction or tool failure.
+  Record partial measurements honestly; do not average missing results into passes.
+- Cleanup: disconnect all probe listeners; dispose LibMP sessions/arrays/iterators;
+  stop Play/clients; restore emulator, profiler capture/UI/frame limit and camera;
+  remove only runtime test fixtures; stop the exact managed Rojo PID; verify no
+  test attributes, preview/runtime roots, generated places or profiler residue.
+  Reinventory ATD roots and record any difference. Persistent assets stay unchanged.
+
+#### S-08 repeated finite-session measurement
+
+This procedure was recorded before execution. Status: `Passed for the bounded
+local repeated-session procedure; long-duration memory acceptance remains open`.
+`docs/evidence/platform-repeated-stable-source.json` records three ordinary solo
+Garden Easy no-tower wave-10 defeats and replays in 504.379 seconds, seven accepted
+requests/checkpoints and zero remaining probe connections. Its 191-file source
+fingerprint was unchanged throughout. All checkpoints had zero tower/enemy/effect
+roots and three empty presentation folders. Instances changed 2,692 → 2,694 once
+and then stayed flat; Ready memory changed 2356.21875 → 2348.421875 MB
+(-7.796875 MB). A separate 12.199-second warmed Ready probe retained 732 frames,
+p95 17.9634 ms and maximum 23.9034 ms, with 6,513 instances flat, zero additions/
+removals/connections and memory 2348.484375 → 2348.496094 MB.
+
+The earlier `docs/evidence/platform-repeated-sessions.json` trace completed three
+cycles in 504.41 seconds with owned-object cleanup, but process memory rose
+64.324 MB while source synchronization occurred. That increase was not reproduced
+in the unchanged-source follow-up and remains unexplained. The two runs used
+different viewport/preferences; neither explains away the other. See
+[performance evidence](PERFORMANCE_BUDGETS.md). No full-session frame,
+long-Endless, absolute hardware-memory or published-client acceptance follows.
+
+Use `tests/studio/RepeatedSessionProfile.luau` as a returned runner inside one
+temporary runtime-only LocalScript, with the local PerformanceWindow dependency:
+`runner(Window, 600)`. The wrapper runs asynchronously, stores only the returned
+sanitized report for inspection, and is destroyed after the runner finishes.
+Neither harness is mapped into a Rojo project or synchronized as persistent code.
+
+- Environment/authorization: confirmed unsaved private staging Match, GameId
+  `10764687717`, PlaceId `104415140644510`, PHJGAMES Group `35420107`, Match role
+  and `match.project.json`; one local Studio participant, a non-rewarding finite
+  Garden Easy runtime initially Ready with no towers. Verify identity and
+  before-inventory, source freshness, emulator and profiler state. Existing
+  permission covers ordinary local gameplay requests, not service/data mutation.
+- Actions: one validated GetPlayableMatchSnapshot read, then three ordinary
+  SubmitPlayableReady requests and three ordinary SubmitPlayableReplay requests.
+  Each uses production RequestProtocol envelopes and current authenticated Match
+  identity. No tower placement, test cash, wave/entity injection, forced outcome,
+  profile/store access or changes to authoritative behavior occur. Let actual
+  enemies leak to produce finite defeats; do not call these campaign victories.
+- Evidence: at most 600 seconds total requested duration, including two-second
+  settlement at each Ready/terminal checkpoint. Seven bounded checkpoint records
+  contain map/difficulty names, content version, terminal wave/outcome, numeric
+  memory/instance/world counts, settled frame samples and cumulative request/event
+  counts with JSON-like size estimates. Final replay remains Ready without starting
+  a fourth match; its three owned presentation folders must be empty. This is a
+  local repeated-session trace, not published rematch/return, wire bandwidth or a
+  long-Endless/device-memory acceptance result.
+- Abort: identity/role mismatch, rewarding/spectator/multi-participant/Endless
+  state, any tower placement, unexpected map/difficulty/match change, rejected or
+  malformed response, missing endpoints, failure to reach the expected state,
+  cleanup mismatch or timeout. No automatic retries of rejected gameplay actions.
+  Retain partial sanitized evidence and report its failure code; do not turn it
+  into a pass. Do not destroy the wrapper while the runner is active.
+- Cleanup: runner disconnects every owned listener after success/error/timeout,
+  checks actual connection state and clears transient current/request/retired IDs.
+  The wrapper retains no raw snapshot, UserId, profile or receipt. Read the report,
+  destroy only the exact runtime wrapper, stop Play, restore emulator/camera/
+  profiler/settings, and verify no runtime roots/test attributes remain. Reinventory
+  the unchanged ATD-owned templates. No save, publication or persistent edit.
+
+#### S-08 final UI observations and remaining flow acceptance
+
+The source boundary review covers all critical Lobby and Match messages,
+including failure/recovery, tutorial, economy/acquisition, inventory/settings,
+party/queue/travel, placement/owner actions, results, reconnect and spectating.
+That review and deterministic reducers do not establish a rendered full-flow pass.
+The recorded engine evidence is deliberately narrower:
+
+| Flow family | Current local evidence | Remaining acceptance |
+| --- | --- | --- |
+| Lobby Help/tutorial, inventory/details, settings, chest confirmation/result | Actual navigation and pseudo50 geometry; saved scale/focus changes; final header follow-up closes three earlier candidates | Independent newcomer and complete first-session matrix on published clients |
+| Party/queue and navigation Back | Local party/privacy/captain controls and keyboard/controller discrete actions; deterministic failures and travel projections | Real designated accounts, invitation, authenticated queue/travel and recovery |
+| Match Ready, HUD, touch placement | Smallest landscape Ready and tower selection generated Touch; map tap enabled Confirm with zero authoritative towers; explicit confirmation placed one tower | Physical phone/tablet gestures, thumb reach and complete match interaction |
+| Match tower owner controls and replay | Keyboard selection/target/upgrade/sell exercised; actual R Results→Ready; earlier four-client campaign reached Victory and replay cleaned owned entities | Full controller owner-action and sustained analog matrix, published rematch/return |
+| Match expanded Results | Six final device-layout samples had zero text-overflow, undersized-touch or fixed-clipping candidates | All other critical surfaces across complete per-device first-session/full-match runs |
+| Virtual controller | Actual A Ready and A placement confirmation; stick pulse probe observed 20 axis events but zero held-axis samples over 600 Placement/Gamepad1 frames | Sustained analog input and complete controller path on a named physical controller; no console inference |
+| Failure, reconnect, spectating, persistent rewards | Deterministic contracts and whole-message review | Current private published version and designated-account recovery/reward checks |
+
+Sources are `docs/evidence/platform-lobby-final-ui.json`,
+`platform-lobby-header-followup.json`, and `platform-match-final-ui.json` in the
+same evidence directory. Each is Studio-emulated evidence on the development
+desktop. Scrollable controls outside the viewport require scrolling; geometry
+alone is not interaction evidence. A later controller owner-action attempt had
+inconsistent observations and is not recorded as a pass. No physical-device,
+assistive-device, console or complete advertised-platform exit is claimed.
+
+### H-17 — Platform/observability deterministic contracts
+
+Current status: `Passed`, with a clean consolidated review and cumulative
+`1,601/1,601` headless coverage. The full milestone sequence ran once: StyLua
+check/verify, Selene configuration and all-source lint, and Default/Lobby/Match/
+Test builds passed. The complete headless run initially passed `1,599/1,601`;
+two ReadyController cases still expected old English copy. A diagnostic rerun
+reproduced those same failures. Four assertions were corrected in test sources
+only, formatted and linted; the affected ReadyController/ReadyView/ReadyViewModel
+bundle then passed `30/30`, closing cumulative coverage at `1,601/1,601` without
+another full gate or any production-source change. Overlapping focused counts
+are not added together. The historical H-16 `1,486/1,486` remains baseline evidence.
+
+Run selected Localization, Accessibility, Focus, Presentation, Audio, Performance,
+Analytics, Operational, DevelopmentCommands and balance-report specs in a combined
+selector invocation after their files stabilize. Validate bounded hostile inputs,
+whole-message completeness, expansion ratios, preference precedence, focus graph
+containment/restoration, reducer reordering and cleanup, asset failure/concurrency,
+payload/measurement limits, private schema/delivery failure, command fail-closed
+identity and production exclusion, read-only report reproducibility and repeated
+finite/Endless runtime cleanup. Headless results do not establish device rendering,
+sound quality, engine memory/frame/network behavior or dashboard delivery.
+
+Generate the reproducible read-only artifact with
+`lune run tests/balance-report.luau`; output is
+`build/content-balance-report.md`. Inputs, content version, production runtime
+reuse and evidence limits are documented in [content balance](CONTENT_BALANCE.md).
+The command changes no configuration, profile, live state or external service.
+
 ## Current execution order
 
-Content and Onboarding completed the risk-based ladder in `AGENTS.md` on
-2026-09-04. During implementation it formatted and linted changed Luau files,
-ran relevant specs together with repeated `--spec` selectors, and built affected
-projects at meaningful checkpoints. After implementation and the consolidated
-review stabilized, it ran this full milestone sequence once:
+Platform hardening followed the risk-based ladder in `AGENTS.md`: format/lint
+changed Luau, batch nearby specs and build affected projects at meaningful
+checkpoints. The full milestone gate below ran once after implementation and
+review stabilized. H-17 records the two test-only expectation corrections and
+affected rerun. Git hygiene and branch delivery follow without repeating the gate:
 
 1. `stylua --check --verify src tests`
 2. `selene validate-config`
@@ -1996,9 +2258,10 @@ review stabilized, it ran this full milestone sequence once:
 
 H-16 records the initial `1,484/1,486` full-suite result, the two stale
 expectation corrections, the affected `15/15` rerun and Test build, and the
-resulting cumulative `1,486/1,486` current-tree coverage. Do not rerun a full
-gate unless a later fix can affect it. The verifier runs the complete headless
-suite and builds Default, Lobby, Match, and Test once each.
+resulting historical cumulative `1,486/1,486` baseline coverage. That gate was
+not rerun merely to establish the baseline. After the current gate, rerun only
+checks affected by subsequent fixes. The verifier runs the complete
+headless suite and builds Default, Lobby, Match, and Test once each.
 
 Run the applicable Studio, multi-client, published-client, device, or destructive
 row only when its prerequisites exist and its authorization line is satisfied.

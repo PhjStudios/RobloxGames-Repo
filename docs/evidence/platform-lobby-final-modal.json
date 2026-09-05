@@ -1,0 +1,35 @@
+{
+  "evidence": "Studio-emulated",
+  "role": "Lobby",
+  "scenario": "Fresh final source; chest confirmation and cancellation; pseudo50, Largest preferred text, transparency0, reduced motion enabled",
+  "audit": {
+    "controls": 13,
+    "selectedOrProblems": [],
+    "viewport": {
+      "y": 768,
+      "x": 1365
+    },
+    "safeRoot": {
+      "y": 0,
+      "x": 0,
+      "height": 710,
+      "width": 1365
+    },
+    "counts": {
+      "NoDrawableArea": 0,
+      "offSafeRoot": 0,
+      "labelOverflowCandidates": 0,
+      "disabledControls": 10,
+      "undersizedTouchControls": 0,
+      "ClippedWithoutScroll": 0,
+      "placeholdersNeedingVisualReview": 0,
+      "WithinCurrentViewport": 10,
+      "ScrollableOffViewport": 3,
+      "overlayCandidates": 9,
+      "textOverflowCandidates": 0
+    },
+    "labelProblems": []
+  },
+  "interpretation": "Nine overlay candidates were the intentional modal overlay over disabled background controls. Confirm and Cancel were visible within the readable-content footer after scrolling to the purchase control. Cancel closed the modal. This mouse observation does not establish keyboard focus restoration.",
+  "profileMutation": "No purchase in this final modal check; in-memory direct Studio profile only."
+}

@@ -1,0 +1,289 @@
+{
+  "version": 1,
+  "date": "2026-09-04",
+  "hardware": {
+    "cpu": "AMD Ryzen 7 7800X3D",
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "memoryBytes": 33903378432
+  },
+  "limitations": [
+    "Solo Studio shares process memory and aggregate Stats; receive Kbps reports zero and is not a wire-traffic acceptance result.",
+    "Payload estimates count JSON-like field names and values; no raw payload, account ID or receipt is retained.",
+    "Frames are developer-desktop Studio observations, not representative phone/tablet/console hardware.",
+    "Checkpoint measurement before final UI fixes; not final acceptance."
+  ],
+  "records": [
+    {
+      "scenario": "early solo Ready client",
+      "evidence": "Studio-emulated on local hardware; implementation checkpoint before final localization",
+      "durationSeconds": 12.19977390000713,
+      "frameMs": {
+        "p50": 16.63769967854023,
+        "percentileScope": "AllSamples",
+        "maximum": 18.86500045657158,
+        "p99": 18.187399953603745,
+        "count": 731,
+        "retained": 731,
+        "rejected": 0,
+        "mean": 16.66511284511042,
+        "p95": 17.992500215768814
+      },
+      "before": {
+        "memoryMb": 2982.453125,
+        "Enemies": 0,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.5312247276306152,
+        "presentationInstances": 3,
+        "instances": 5949,
+        "AttackEffects": 0,
+        "Towers": 0,
+        "PhysicsSendKbps": 0
+      },
+      "after": {
+        "memoryMb": 2983.09375,
+        "Enemies": 0,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.5389605760574341,
+        "presentationInstances": 3,
+        "instances": 5949,
+        "AttackEffects": 0,
+        "Towers": 0,
+        "PhysicsSendKbps": 0
+      },
+      "network": [],
+      "instancesAdded": 0,
+      "instancesRemoved": 0,
+      "probeConnectionsAfter": 0
+    },
+    {
+      "scenario": "early solo Ready server",
+      "evidence": "Studio-emulated on local hardware; implementation checkpoint before final localization",
+      "durationSeconds": 12.133737100011786,
+      "frameMs": {
+        "p50": 16.935331746935844,
+        "percentileScope": "AllSamples",
+        "maximum": 19.405914470553398,
+        "p99": 19.021812826395035,
+        "count": 727,
+        "retained": 727,
+        "rejected": 0,
+        "mean": 16.665620711392517,
+        "p95": 18.02966371178627
+      },
+      "before": {
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.5416192412376404,
+        "memoryMb": 2983.2421875,
+        "PhysicsSendKbps": 0,
+        "instances": 3385
+      },
+      "after": {
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.5800295472145081,
+        "memoryMb": 2983.4765625,
+        "PhysicsSendKbps": 0,
+        "instances": 3385
+      },
+      "network": [],
+      "instancesAdded": 0,
+      "instancesRemoved": 0,
+      "probeConnectionsAfter": 0
+    },
+    {
+      "scenario": "early solo Garden wave6 no towers",
+      "evidence": "Studio-emulated on local hardware; implementation checkpoint before final localization",
+      "durationSeconds": 12.164849199994933,
+      "frameMs": {
+        "p50": 16.591200605034828,
+        "percentileScope": "AllSamples",
+        "maximum": 19.705699756741524,
+        "p99": 18.902799114584923,
+        "count": 729,
+        "retained": 729,
+        "rejected": 0,
+        "mean": 16.666016588690187,
+        "p95": 18.19010078907013
+      },
+      "before": {
+        "memoryMb": 3123.30078125,
+        "Enemies": 20,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.43394869565963745,
+        "presentationInstances": 284,
+        "instances": 6236,
+        "AttackEffects": 0,
+        "Towers": 0,
+        "PhysicsSendKbps": 0
+      },
+      "after": {
+        "memoryMb": 3123.94921875,
+        "Enemies": 18,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.4427625834941864,
+        "presentationInstances": 256,
+        "instances": 6208,
+        "AttackEffects": 0,
+        "Towers": 0,
+        "PhysicsSendKbps": 0
+      },
+      "network": {
+        "CombatAttackEvent": {
+          "maximumBytes": 0,
+          "count": 0,
+          "unmeasurable": 0,
+          "estimatedBytes": 0,
+          "transport": "RemoteEvent"
+        },
+        "PlayableMatchReplication": {
+          "maximumBytes": 6183,
+          "count": 112,
+          "unmeasurable": 0,
+          "estimatedBytes": 670434,
+          "transport": "RemoteEvent"
+        }
+      },
+      "instancesAdded": 140,
+      "instancesRemoved": 168,
+      "probeConnectionsAfter": 0
+    },
+    {
+      "scenario": "early solo Garden 4 towers combat",
+      "evidence": "Studio-emulated on local hardware; implementation checkpoint before final localization",
+      "durationSeconds": 12.182111100002658,
+      "frameMs": {
+        "p50": 16.61520078778267,
+        "percentileScope": "AllSamples",
+        "maximum": 19.50860023498535,
+        "p99": 19.061099737882614,
+        "count": 730,
+        "retained": 730,
+        "rejected": 0,
+        "mean": 16.666445477980457,
+        "p95": 18.38430017232895
+      },
+      "before": {
+        "memoryMb": 3119.11328125,
+        "Enemies": 20,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 1.3789678812026978,
+        "presentationInstances": 326,
+        "instances": 6279,
+        "AttackEffects": 1,
+        "Towers": 4,
+        "PhysicsSendKbps": 0
+      },
+      "after": {
+        "memoryMb": 3119.125,
+        "Enemies": 18,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.4848365783691406,
+        "presentationInstances": 293,
+        "instances": 6246,
+        "AttackEffects": 0,
+        "Towers": 4,
+        "PhysicsSendKbps": 0
+      },
+      "network": {
+        "CombatAttackEvent": {
+          "maximumBytes": 276,
+          "count": 42,
+          "unmeasurable": 0,
+          "estimatedBytes": 11141,
+          "transport": "RemoteEvent"
+        },
+        "PlayableMatchReplication": {
+          "maximumBytes": 7461,
+          "count": 112,
+          "unmeasurable": 0,
+          "estimatedBytes": 735913,
+          "transport": "RemoteEvent"
+        }
+      },
+      "instancesAdded": 406,
+      "instancesRemoved": 439,
+      "probeConnectionsAfter": 0
+    },
+    {
+      "scenario": "early solo Results MicroProfiler",
+      "meaning": "CPU inclusive work summed across threads; not GPU or critical-path time",
+      "last": {
+        "id": 363,
+        "absoluteId": 3670891
+      },
+      "frameMs": {
+        "p50": 16.565526539356654,
+        "percentileScope": "AllSamples",
+        "maximum": 18.090639268054645,
+        "p99": 18.01406259412653,
+        "count": 128,
+        "retained": 128,
+        "rejected": 0,
+        "mean": 16.66137148807082,
+        "p95": 17.533436213231994
+      },
+      "first": {
+        "id": 236,
+        "absoluteId": 3670764
+      },
+      "scopes": {
+        "1": {
+          "name": "physicsSteppedTotal",
+          "maximumSpanMs": 0.10382693176740077,
+          "meanPerCapturedFrameMs": 0.0837493205485067,
+          "inclusiveCpuMs": 10.719913030208858,
+          "spans": 256
+        },
+        "2": {
+          "name": "RunService.Heartbeat",
+          "maximumSpanMs": 0.09550113997943299,
+          "meanPerCapturedFrameMs": 0.056415011918428126,
+          "inclusiveCpuMs": 7.2211215255588,
+          "spans": 512
+        },
+        "3": {
+          "name": "Script_Main",
+          "maximumSpanMs": 0.31562866269115375,
+          "meanPerCapturedFrameMs": 0.03858204881836258,
+          "inclusiveCpuMs": 4.93850224875041,
+          "spans": 515
+        },
+        "4": {
+          "name": "RenderSteppedInternal",
+          "maximumSpanMs": 0.025528420548425856,
+          "meanPerCapturedFrameMs": 0.013259759572964658,
+          "inclusiveCpuMs": 1.6972492253394762,
+          "spans": 256
+        },
+        "5": {
+          "name": "Script_main",
+          "maximumSpanMs": 0.32365388437847287,
+          "meanPerCapturedFrameMs": 0.004754643279635928,
+          "inclusiveCpuMs": 0.6085943397933988,
+          "spans": 2
+        },
+        "6": {
+          "name": "render2D",
+          "maximumSpanMs": 0.0007213682415567746,
+          "meanPerCapturedFrameMs": 0.000783908739061534,
+          "inclusiveCpuMs": 0.10034031859987635,
+          "spans": 256
+        },
+        "7": {
+          "name": "render3D",
+          "maximumSpanMs": 0.00023043707716396966,
+          "meanPerCapturedFrameMs": 0.00006927201538386996,
+          "inclusiveCpuMs": 0.008866817969135354,
+          "spans": 128
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,692 @@
+{
+  "evidence": [
+    "Studio-emulated",
+    "local-hardware"
+  ],
+  "normalCombat": {
+    "profile": {
+      "instancesRemoved": 182,
+      "after": {
+        "memoryMb": 2310.78125,
+        "Enemies": 18,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.4660145938396454,
+        "presentationInstances": 265,
+        "instances": 6109,
+        "AttackEffects": 0,
+        "Towers": 1,
+        "PhysicsSendKbps": 0
+      },
+      "secondSamples": {
+        "1": {
+          "memoryMb": 2310.7578125,
+          "Enemies": 20,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5144340991973877,
+          "presentationInstances": 293,
+          "instances": 6137,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "2": {
+          "memoryMb": 2310.7578125,
+          "Enemies": 20,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4582936763763428,
+          "presentationInstances": 293,
+          "instances": 6137,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "3": {
+          "memoryMb": 2310.7578125,
+          "Enemies": 20,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4732716381549835,
+          "presentationInstances": 293,
+          "instances": 6137,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "4": {
+          "memoryMb": 2310.7578125,
+          "Enemies": 20,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4635942578315735,
+          "presentationInstances": 293,
+          "instances": 6137,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "5": {
+          "memoryMb": 2310.7578125,
+          "Enemies": 20,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4523620307445526,
+          "presentationInstances": 293,
+          "instances": 6137,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "6": {
+          "memoryMb": 2310.7578125,
+          "Enemies": 20,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.46182355284690857,
+          "presentationInstances": 293,
+          "instances": 6137,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "7": {
+          "memoryMb": 2310.7578125,
+          "Enemies": 20,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4483817219734192,
+          "presentationInstances": 293,
+          "instances": 6137,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "8": {
+          "memoryMb": 2310.7578125,
+          "Enemies": 20,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4701645076274872,
+          "presentationInstances": 293,
+          "instances": 6137,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "9": {
+          "memoryMb": 2310.7578125,
+          "Enemies": 18,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4651540219783783,
+          "presentationInstances": 265,
+          "instances": 6109,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "10": {
+          "memoryMb": 2310.76171875,
+          "Enemies": 18,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.46538931131362915,
+          "presentationInstances": 265,
+          "instances": 6109,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "11": {
+          "memoryMb": 2310.77734375,
+          "Enemies": 17,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4597526788711548,
+          "presentationInstances": 251,
+          "instances": 6095,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "12": {
+          "memoryMb": 2310.77734375,
+          "Enemies": 17,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4596501588821411,
+          "presentationInstances": 251,
+          "instances": 6095,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        },
+        "13": {
+          "memoryMb": 2310.78125,
+          "Enemies": 18,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4660145938396454,
+          "presentationInstances": 265,
+          "instances": 6109,
+          "AttackEffects": 0,
+          "Towers": 1,
+          "PhysicsSendKbps": 0
+        }
+      },
+      "probeConnectionsAfter": 0,
+      "evidence": "Studio-emulated",
+      "durationSeconds": 12.180733799992595,
+      "role": "Match",
+      "frameMs": {
+        "p50": 16.623500734567642,
+        "mean": 16.666821730304026,
+        "maximum": 26.537299156188965,
+        "p99": 19.356699660420418,
+        "count": 731,
+        "available": true,
+        "retained": 731,
+        "rejected": 0,
+        "percentileScope": "AllSamples",
+        "p95": 18.727300688624382
+      },
+      "instancesAdded": 154,
+      "network": {
+        "CombatAttackEvent": {
+          "maximumBytes": 289,
+          "count": 14,
+          "unmeasurable": 0,
+          "estimatedBytes": 4036,
+          "transport": "RemoteEvent"
+        },
+        "PlayableMatchReplication": {
+          "maximumBytes": 6549,
+          "count": 113,
+          "unmeasurable": 0,
+          "estimatedBytes": 712156,
+          "transport": "RemoteEvent"
+        }
+      },
+      "before": {
+        "memoryMb": 2310.7578125,
+        "Enemies": 20,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.5144340991973877,
+        "presentationInstances": 293,
+        "instances": 6137,
+        "AttackEffects": 0,
+        "Towers": 1,
+        "PhysicsSendKbps": 0
+      },
+      "context": "Client",
+      "payloadUnit": "JSON-like estimate including field names; not wire bytes"
+    },
+    "after": {
+      "state": "Playing",
+      "wave": 8,
+      "towers": 1,
+      "boss": "None",
+      "enemies": 17
+    },
+    "before": {
+      "state": "Playing",
+      "wave": 7,
+      "towers": 1,
+      "boss": "None",
+      "enemies": 20
+    }
+  },
+  "initialRepeatedFollowup": {
+    "scene": {
+      "ScriptMemory": {
+        "available": false
+      },
+      "Unparented": {
+        "other": 13,
+        "total": 13,
+        "groups": 7,
+        "atd": 0
+      }
+    },
+    "warmIdle": {
+      "instancesRemoved": 0,
+      "after": {
+        "memoryMb": 2270.50390625,
+        "Enemies": 0,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.5516107082366943,
+        "presentationInstances": 3,
+        "instances": 5843,
+        "AttackEffects": 0,
+        "Towers": 0,
+        "PhysicsSendKbps": 0
+      },
+      "secondSamples": {
+        "1": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5297664403915405,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "2": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.49824950098991394,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "3": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.546858549118042,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "4": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.504172682762146,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "5": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4827609956264496,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "6": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5382451415061951,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "7": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.49593237042427063,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "8": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5156394839286804,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "9": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5459992289543152,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "10": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5149542093276978,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "11": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.520000159740448,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "12": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5370228886604309,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "13": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5443232655525208,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "14": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5046554803848267,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "15": {
+          "memoryMb": 2268.5546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5452701449394226,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "16": {
+          "memoryMb": 2268.5390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5208160877227783,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "17": {
+          "memoryMb": 2268.5390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5194161534309387,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "18": {
+          "memoryMb": 2268.5390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5465995669364929,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "19": {
+          "memoryMb": 2268.5390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4946383833885193,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "20": {
+          "memoryMb": 2268.5390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.49424588680267334,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "21": {
+          "memoryMb": 2268.5390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5579782128334045,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "22": {
+          "memoryMb": 2268.5390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.49676719307899475,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "23": {
+          "memoryMb": 2268.5390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5416529774665833,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "24": {
+          "memoryMb": 2268.5390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5454075932502747,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "25": {
+          "memoryMb": 2268.546875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5169932842254639,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "26": {
+          "memoryMb": 2270.4921875,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5611792802810669,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "27": {
+          "memoryMb": 2270.50390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.504050612449646,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "28": {
+          "memoryMb": 2270.50390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.4889869689941406,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "29": {
+          "memoryMb": 2270.50390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.47876423597335815,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "30": {
+          "memoryMb": 2270.50390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5416820645332336,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        },
+        "31": {
+          "memoryMb": 2270.50390625,
+          "Enemies": 0,
+          "DataReceiveKbps": 0,
+          "PhysicsReceiveKbps": 0,
+          "DataSendKbps": 0.5516107082366943,
+          "presentationInstances": 3,
+          "instances": 5843,
+          "AttackEffects": 0,
+          "Towers": 0,
+          "PhysicsSendKbps": 0
+        }
+      },
+      "probeConnectionsAfter": 0,
+      "evidence": "Studio-emulated",
+      "durationSeconds": 30.53087649999361,
+      "role": "Match",
+      "frameMs": {
+        "p50": 16.63910038769245,
+        "mean": 16.76630374852691,
+        "maximum": 210.63150465488434,
+        "p99": 18.215499818325043,
+        "count": 1820,
+        "available": true,
+        "retained": 1820,
+        "rejected": 0,
+        "percentileScope": "AllSamples",
+        "p95": 17.980700358748436
+      },
+      "instancesAdded": 0,
+      "network": {
+        "CombatAttackEvent": {
+          "maximumBytes": 0,
+          "count": 0,
+          "unmeasurable": 0,
+          "estimatedBytes": 0,
+          "transport": "RemoteEvent"
+        },
+        "PlayableMatchReplication": {
+          "maximumBytes": 0,
+          "count": 0,
+          "unmeasurable": 0,
+          "estimatedBytes": 0,
+          "transport": "RemoteEvent"
+        }
+      },
+      "before": {
+        "memoryMb": 2268.5546875,
+        "Enemies": 0,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.5297664403915405,
+        "presentationInstances": 3,
+        "instances": 5843,
+        "AttackEffects": 0,
+        "Towers": 0,
+        "PhysicsSendKbps": 0
+      },
+      "context": "Client",
+      "payloadUnit": "JSON-like estimate including field names; not wire bytes"
+    },
+    "limitations": "The 30.53-second idle follow-up had one 210.63ms maximum frame and ~1.95MB process increase. It followed the source-confounded trace. The outlier is retained without an unsupported allocation/GC attribution."
+  }
+}

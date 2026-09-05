@@ -1,0 +1,893 @@
+{
+  "version": 1,
+  "evidence": [
+    "Studio-emulated",
+    "local-hardware"
+  ],
+  "source": {
+    "files": 191,
+    "sha256": "A0277C76FA61DE03F76ED8B0F9078E3D775F89DFC88494D2715E6D9B27A0D683",
+    "lastWriteUtc": "2026-09-05T01:13:47.8294463Z",
+    "changesDuringTrace": false
+  },
+  "environment": "Same developer desktop, foreground solo Garden Easy; average laptop emulation 1366x768 requested; English, Medium text, transparency1, reduced motion false, UI scale1. No publication or external writes.",
+  "start": {
+    "tags": {
+      "LuaHeap": 859.100830078125,
+      "GraphicsTextureCharacter": 3.971019744873047,
+      "GraphicsSpatialHash": 0.029266357421875,
+      "Internal": 1279.029541015625,
+      "GraphicsParts": 0.686065673828125,
+      "Sounds": 5.5911407470703125,
+      "StreamingSounds": 0,
+      "GraphicsSlimModels": 0,
+      "GraphicsTerrain": 0,
+      "GraphicsMeshParts": 2.6062164306640625,
+      "GraphicsSolidModels": 0,
+      "Script": 224.39210510253906,
+      "Animation": 13.927108764648438,
+      "HttpCache": 0.0098419189453125,
+      "GraphicsTexture": 44.428688049316406,
+      "GeometryCSG": 0,
+      "TerrainVoxels": 0,
+      "BaseParts": 21.806076049804688,
+      "Navigation": 0,
+      "GraphicsParticles": 11.904510498046875,
+      "PhysicsCollision": 0.000640869140625,
+      "Signals": 15.432113647460938,
+      "Instances": 184.70230102539062,
+      "Gui": 35.81404113769531
+    },
+    "memoryMb": 2356.21875,
+    "utc": "2026-09-05T01:20:25Z",
+    "started": true
+  },
+  "result": {
+    "ok": true,
+    "requestedCycles": 3,
+    "procedure": "ATD_REPEATED_SESSION_PROFILE",
+    "code": "Completed",
+    "samples": {
+      "1": {
+        "contentVersion": 1,
+        "worldChildren": 3,
+        "instances": 2692,
+        "frameMs": {
+          "p50": 16.871899366378784,
+          "mean": 16.66375888030856,
+          "maximum": 18.070200458168983,
+          "p99": 17.982300370931625,
+          "count": 124,
+          "available": true,
+          "retained": 124,
+          "rejected": 0,
+          "p95": 17.599700018763542,
+          "percentileScope": "AllSamples"
+        },
+        "difficultyName": "Easy",
+        "terminalWave": 0,
+        "network": {
+          "GetPlayableMatchSnapshot.Response": {
+            "maximumBytes": 1561,
+            "estimatedBytes": 1561,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Request": {
+            "maximumBytes": 58,
+            "estimatedBytes": 58,
+            "count": 1,
+            "unmeasurable": 0
+          }
+        },
+        "wavesCompleted": 0,
+        "phase": "Ready",
+        "memoryMb": 2356.21875,
+        "mapName": "Backyard Garden",
+        "effects": 0,
+        "state": "Ready",
+        "cycle": 1,
+        "baseHealth": 100,
+        "towers": 0,
+        "elapsedSeconds": 2.1829256000055466,
+        "worldDescendants": 3,
+        "enemies": 0,
+        "outcome": "None"
+      },
+      "2": {
+        "contentVersion": 1,
+        "worldChildren": 3,
+        "instances": 2694,
+        "frameMs": {
+          "p50": 16.587700694799423,
+          "mean": 16.66151059836876,
+          "maximum": 18.14810000360012,
+          "p99": 18.11010017991066,
+          "count": 123,
+          "available": true,
+          "retained": 123,
+          "rejected": 0,
+          "p95": 17.724400386214256,
+          "percentileScope": "AllSamples"
+        },
+        "difficultyName": "Easy",
+        "terminalWave": 10,
+        "network": {
+          "GetPlayableMatchSnapshot.Response": {
+            "maximumBytes": 1561,
+            "estimatedBytes": 1561,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Response": {
+            "maximumBytes": 196,
+            "estimatedBytes": 196,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "PlayableMatchReplication": {
+            "maximumBytes": 6259,
+            "estimatedBytes": 8001959,
+            "count": 1453,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Request": {
+            "maximumBytes": 112,
+            "estimatedBytes": 112,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Request": {
+            "maximumBytes": 58,
+            "estimatedBytes": 58,
+            "count": 1,
+            "unmeasurable": 0
+          }
+        },
+        "wavesCompleted": 8,
+        "phase": "Terminal",
+        "memoryMb": 2346.02734375,
+        "mapName": "Backyard Garden",
+        "effects": 0,
+        "state": "Results",
+        "cycle": 1,
+        "baseHealth": 0,
+        "towers": 0,
+        "elapsedSeconds": 167.49306789999537,
+        "worldDescendants": 3,
+        "enemies": 0,
+        "outcome": "Defeat"
+      },
+      "3": {
+        "contentVersion": 1,
+        "worldChildren": 3,
+        "instances": 2694,
+        "frameMs": {
+          "p50": 16.6494008153677,
+          "mean": 16.663312331819142,
+          "maximum": 18.073799088597298,
+          "p99": 18.038200214505196,
+          "count": 122,
+          "available": true,
+          "retained": 122,
+          "rejected": 0,
+          "p95": 17.562400549650192,
+          "percentileScope": "AllSamples"
+        },
+        "difficultyName": "Easy",
+        "terminalWave": 0,
+        "network": {
+          "SubmitPlayableReplay.Response": {
+            "maximumBytes": 200,
+            "estimatedBytes": 200,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Response": {
+            "maximumBytes": 1561,
+            "estimatedBytes": 1561,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Response": {
+            "maximumBytes": 196,
+            "estimatedBytes": 196,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReplay.Request": {
+            "maximumBytes": 112,
+            "estimatedBytes": 112,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "PlayableMatchReplication": {
+            "maximumBytes": 6259,
+            "estimatedBytes": 8003459,
+            "count": 1454,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Request": {
+            "maximumBytes": 58,
+            "estimatedBytes": 58,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Request": {
+            "maximumBytes": 112,
+            "estimatedBytes": 112,
+            "count": 1,
+            "unmeasurable": 0
+          }
+        },
+        "wavesCompleted": 0,
+        "phase": "Ready",
+        "memoryMb": 2346.03125,
+        "mapName": "Backyard Garden",
+        "effects": 0,
+        "state": "Ready",
+        "cycle": 2,
+        "baseHealth": 100,
+        "towers": 0,
+        "elapsedSeconds": 169.6433892000059,
+        "worldDescendants": 3,
+        "enemies": 0,
+        "outcome": "None"
+      },
+      "4": {
+        "contentVersion": 1,
+        "worldChildren": 3,
+        "instances": 2694,
+        "frameMs": {
+          "p50": 16.6253000497818,
+          "mean": 16.66696371150113,
+          "maximum": 19.95209977030754,
+          "p99": 18.098099157214165,
+          "count": 124,
+          "available": true,
+          "retained": 124,
+          "rejected": 0,
+          "p95": 17.64179952442646,
+          "percentileScope": "AllSamples"
+        },
+        "difficultyName": "Easy",
+        "terminalWave": 10,
+        "network": {
+          "SubmitPlayableReplay.Response": {
+            "maximumBytes": 200,
+            "estimatedBytes": 200,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Response": {
+            "maximumBytes": 1561,
+            "estimatedBytes": 1561,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Response": {
+            "maximumBytes": 196,
+            "estimatedBytes": 392,
+            "count": 2,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReplay.Request": {
+            "maximumBytes": 112,
+            "estimatedBytes": 112,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "PlayableMatchReplication": {
+            "maximumBytes": 6259,
+            "estimatedBytes": 16071692,
+            "count": 2917,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Request": {
+            "maximumBytes": 58,
+            "estimatedBytes": 58,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Request": {
+            "maximumBytes": 112,
+            "estimatedBytes": 224,
+            "count": 2,
+            "unmeasurable": 0
+          }
+        },
+        "wavesCompleted": 8,
+        "phase": "Terminal",
+        "memoryMb": 2348.5859375,
+        "mapName": "Backyard Garden",
+        "effects": 0,
+        "state": "Results",
+        "cycle": 2,
+        "baseHealth": 0,
+        "towers": 0,
+        "elapsedSeconds": 334.85274950000166,
+        "worldDescendants": 3,
+        "enemies": 0,
+        "outcome": "Defeat"
+      },
+      "5": {
+        "contentVersion": 1,
+        "worldChildren": 3,
+        "instances": 2694,
+        "frameMs": {
+          "p50": 16.808899119496346,
+          "mean": 16.667318828098598,
+          "maximum": 18.166599795222282,
+          "p99": 18.095800653100014,
+          "count": 122,
+          "available": true,
+          "retained": 122,
+          "rejected": 0,
+          "p95": 17.91580021381378,
+          "percentileScope": "AllSamples"
+        },
+        "difficultyName": "Easy",
+        "terminalWave": 0,
+        "network": {
+          "SubmitPlayableReplay.Response": {
+            "maximumBytes": 200,
+            "estimatedBytes": 400,
+            "count": 2,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Response": {
+            "maximumBytes": 1561,
+            "estimatedBytes": 1561,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Response": {
+            "maximumBytes": 196,
+            "estimatedBytes": 392,
+            "count": 2,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReplay.Request": {
+            "maximumBytes": 112,
+            "estimatedBytes": 224,
+            "count": 2,
+            "unmeasurable": 0
+          },
+          "PlayableMatchReplication": {
+            "maximumBytes": 6259,
+            "estimatedBytes": 16073191,
+            "count": 2918,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Request": {
+            "maximumBytes": 58,
+            "estimatedBytes": 58,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Request": {
+            "maximumBytes": 112,
+            "estimatedBytes": 224,
+            "count": 2,
+            "unmeasurable": 0
+          }
+        },
+        "wavesCompleted": 0,
+        "phase": "Ready",
+        "memoryMb": 2348.5859375,
+        "mapName": "Backyard Garden",
+        "effects": 0,
+        "state": "Ready",
+        "cycle": 3,
+        "baseHealth": 100,
+        "towers": 0,
+        "elapsedSeconds": 337.0027820999967,
+        "worldDescendants": 3,
+        "enemies": 0,
+        "outcome": "None"
+      },
+      "6": {
+        "contentVersion": 1,
+        "worldChildren": 3,
+        "instances": 2694,
+        "frameMs": {
+          "p50": 16.899200156331062,
+          "mean": 16.63842133139489,
+          "maximum": 18.200600519776344,
+          "p99": 18.200300633907318,
+          "count": 122,
+          "available": true,
+          "retained": 122,
+          "rejected": 0,
+          "p95": 17.98740029335022,
+          "percentileScope": "AllSamples"
+        },
+        "difficultyName": "Easy",
+        "terminalWave": 10,
+        "network": {
+          "SubmitPlayableReplay.Response": {
+            "maximumBytes": 200,
+            "estimatedBytes": 400,
+            "count": 2,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Response": {
+            "maximumBytes": 1561,
+            "estimatedBytes": 1561,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Response": {
+            "maximumBytes": 196,
+            "estimatedBytes": 588,
+            "count": 3,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReplay.Request": {
+            "maximumBytes": 112,
+            "estimatedBytes": 224,
+            "count": 2,
+            "unmeasurable": 0
+          },
+          "PlayableMatchReplication": {
+            "maximumBytes": 6259,
+            "estimatedBytes": 24126250,
+            "count": 4380,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Request": {
+            "maximumBytes": 58,
+            "estimatedBytes": 58,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Request": {
+            "maximumBytes": 112,
+            "estimatedBytes": 336,
+            "count": 3,
+            "unmeasurable": 0
+          }
+        },
+        "wavesCompleted": 8,
+        "phase": "Terminal",
+        "memoryMb": 2350.875,
+        "mapName": "Backyard Garden",
+        "effects": 0,
+        "state": "Results",
+        "cycle": 3,
+        "baseHealth": 0,
+        "towers": 0,
+        "elapsedSeconds": 502.21257190000324,
+        "worldDescendants": 3,
+        "enemies": 0,
+        "outcome": "Defeat"
+      },
+      "7": {
+        "contentVersion": 1,
+        "worldChildren": 3,
+        "instances": 2694,
+        "frameMs": {
+          "p50": 16.872700303792953,
+          "mean": 16.664618656523828,
+          "maximum": 18.27099919319153,
+          "p99": 18.186800181865692,
+          "count": 123,
+          "available": true,
+          "retained": 123,
+          "rejected": 0,
+          "p95": 18.00129935145378,
+          "percentileScope": "AllSamples"
+        },
+        "difficultyName": "Easy",
+        "terminalWave": 0,
+        "network": {
+          "SubmitPlayableReplay.Response": {
+            "maximumBytes": 200,
+            "estimatedBytes": 600,
+            "count": 3,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Response": {
+            "maximumBytes": 1561,
+            "estimatedBytes": 1561,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Response": {
+            "maximumBytes": 196,
+            "estimatedBytes": 588,
+            "count": 3,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReplay.Request": {
+            "maximumBytes": 112,
+            "estimatedBytes": 336,
+            "count": 3,
+            "unmeasurable": 0
+          },
+          "PlayableMatchReplication": {
+            "maximumBytes": 6259,
+            "estimatedBytes": 24127748,
+            "count": 4381,
+            "unmeasurable": 0
+          },
+          "GetPlayableMatchSnapshot.Request": {
+            "maximumBytes": 58,
+            "estimatedBytes": 58,
+            "count": 1,
+            "unmeasurable": 0
+          },
+          "SubmitPlayableReady.Request": {
+            "maximumBytes": 112,
+            "estimatedBytes": 336,
+            "count": 3,
+            "unmeasurable": 0
+          }
+        },
+        "wavesCompleted": 0,
+        "phase": "FinalReady",
+        "memoryMb": 2348.421875,
+        "mapName": "Backyard Garden",
+        "effects": 0,
+        "state": "Ready",
+        "cycle": 3,
+        "baseHealth": 100,
+        "towers": 0,
+        "elapsedSeconds": 504.3790108999965,
+        "worldDescendants": 3,
+        "enemies": 0,
+        "outcome": "None"
+      }
+    },
+    "meaning": "No-tower finite leak outcomes and local replay; not campaign victory, published return, or long-term soak acceptance",
+    "requests": 7,
+    "durationSeconds": 504.3792678000027,
+    "maximumSeconds": 600,
+    "version": 1,
+    "probeConnectionsAfter": 0,
+    "completedCycles": 3,
+    "network": {
+      "SubmitPlayableReplay.Response": {
+        "maximumBytes": 200,
+        "estimatedBytes": 600,
+        "count": 3,
+        "unmeasurable": 0
+      },
+      "GetPlayableMatchSnapshot.Response": {
+        "maximumBytes": 1561,
+        "estimatedBytes": 1561,
+        "count": 1,
+        "unmeasurable": 0
+      },
+      "SubmitPlayableReady.Response": {
+        "maximumBytes": 196,
+        "estimatedBytes": 588,
+        "count": 3,
+        "unmeasurable": 0
+      },
+      "SubmitPlayableReplay.Request": {
+        "maximumBytes": 112,
+        "estimatedBytes": 336,
+        "count": 3,
+        "unmeasurable": 0
+      },
+      "PlayableMatchReplication": {
+        "maximumBytes": 6259,
+        "estimatedBytes": 24127748,
+        "count": 4381,
+        "unmeasurable": 0
+      },
+      "GetPlayableMatchSnapshot.Request": {
+        "maximumBytes": 58,
+        "estimatedBytes": 58,
+        "count": 1,
+        "unmeasurable": 0
+      },
+      "SubmitPlayableReady.Request": {
+        "maximumBytes": 112,
+        "estimatedBytes": 336,
+        "count": 3,
+        "unmeasurable": 0
+      }
+    },
+    "evidence": "Studio-emulated",
+    "payloadUnit": "JSON-like estimates; not Roblox wire bytes"
+  },
+  "end": {
+    "memoryMb": 2348.44921875,
+    "remainingProbe": false,
+    "tags": {
+      "LuaHeap": 857.9990234375,
+      "GraphicsTextureCharacter": 3.971019744873047,
+      "GraphicsSpatialHash": 0.02923583984375,
+      "Internal": 1280.642578125,
+      "GraphicsParts": 0.71942138671875,
+      "Sounds": 5.5911407470703125,
+      "StreamingSounds": 0,
+      "GraphicsSlimModels": 0,
+      "GraphicsTerrain": 0,
+      "GraphicsMeshParts": 2.6062164306640625,
+      "GraphicsSolidModels": 0,
+      "Script": 224.40798950195312,
+      "Animation": 13.841567993164062,
+      "HttpCache": 0.0098419189453125,
+      "GraphicsTexture": 44.428688049316406,
+      "GeometryCSG": 0,
+      "TerrainVoxels": 0,
+      "BaseParts": 25.14581298828125,
+      "Navigation": 0,
+      "GraphicsParticles": 11.904510498046875,
+      "PhysicsCollision": 0.000640869140625,
+      "Signals": 15.357681274414062,
+      "Instances": 186.20016479492188,
+      "Gui": 36.1588134765625
+    }
+  },
+  "warmIdle": {
+    "instancesRemoved": 0,
+    "after": {
+      "guiPhase": "Ready",
+      "AttackEffects": 0,
+      "memoryMb": 2348.49609375,
+      "bossPanelVisible": false,
+      "instances": 6513,
+      "DataReceiveKbps": 0,
+      "PhysicsReceiveKbps": 0,
+      "DataSendKbps": 0.48264363408088684,
+      "bossHealthVisible": false,
+      "Enemies": 0,
+      "Towers": 0,
+      "presentationInstances": 3,
+      "PhysicsSendKbps": 0
+    },
+    "probeConnectionsAfter": 0,
+    "payloadUnit": "JSON-like estimate including field names; not wire bytes",
+    "evidence": "Studio-emulated",
+    "durationSeconds": 12.198957799992058,
+    "before": {
+      "guiPhase": "Ready",
+      "AttackEffects": 0,
+      "memoryMb": 2348.484375,
+      "bossPanelVisible": false,
+      "instances": 6513,
+      "DataReceiveKbps": 0,
+      "PhysicsReceiveKbps": 0,
+      "DataSendKbps": 0.4612959027290344,
+      "bossHealthVisible": false,
+      "Enemies": 0,
+      "Towers": 0,
+      "presentationInstances": 3,
+      "PhysicsSendKbps": 0
+    },
+    "role": "Match",
+    "frameMs": {
+      "p50": 16.86299964785576,
+      "mean": 16.66585738704504,
+      "maximum": 23.90339970588684,
+      "p99": 18.224699422717094,
+      "count": 732,
+      "available": true,
+      "retained": 732,
+      "rejected": 0,
+      "percentileScope": "AllSamples",
+      "p95": 17.96340011060238
+    },
+    "instancesAdded": 0,
+    "network": {
+      "CombatAttackEvent": {
+        "maximumBytes": 0,
+        "count": 0,
+        "unmeasurable": 0,
+        "estimatedBytes": 0,
+        "transport": "RemoteEvent"
+      },
+      "PlayableMatchReplication": {
+        "maximumBytes": 0,
+        "count": 0,
+        "unmeasurable": 0,
+        "estimatedBytes": 0,
+        "transport": "RemoteEvent"
+      }
+    },
+    "secondSamples": {
+      "1": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.484375,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.4612959027290344,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "2": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.484375,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.44671016931533813,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "3": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.48828125,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.4734387695789337,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "4": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.48828125,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.4654099643230438,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "5": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.48828125,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.4511202871799469,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "6": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.48828125,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.5042293667793274,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "7": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.48828125,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.47880053520202637,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "8": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.48828125,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.4599058926105499,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "9": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.48828125,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.5029114484786987,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "10": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.49609375,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.4689760208129883,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "11": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.49609375,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.46858716011047363,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "12": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.49609375,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.48406606912612915,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      },
+      "13": {
+        "guiPhase": "Ready",
+        "AttackEffects": 0,
+        "memoryMb": 2348.49609375,
+        "bossPanelVisible": false,
+        "instances": 6513,
+        "DataReceiveKbps": 0,
+        "PhysicsReceiveKbps": 0,
+        "DataSendKbps": 0.48264363408088684,
+        "bossHealthVisible": false,
+        "Enemies": 0,
+        "Towers": 0,
+        "presentationInstances": 3,
+        "PhysicsSendKbps": 0
+      }
+    },
+    "context": "Client",
+    "guiPhaseMeaning": "Client GUI observation only; boss panel may warn of an upcoming wave, health visibility indicates a displayed boss summary"
+  },
+  "interpretation": "Three actual finite leak-defeat/replay cycles. No monotonic process-memory rise in the seven checkpoints; owned folders empty, no remaining probe listeners. This does not explain the earlier source-confounded 64MB increase, prove long-term memory behavior or establish physical-device budgets."
+}

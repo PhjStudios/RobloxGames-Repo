@@ -5,16 +5,20 @@ Rojo, Team Create, Rokit, StyLua, and Selene.
 
 ## Project status
 
-The Playable Local Match (historical Phases 14–18), Persistent Lobby Loop
-(Phases 19–23), and Squad Travel Loop (Phases 24–28) outcomes are complete. The
-clean Content and Onboarding baseline is commit
-`fe48b9fe2a9b597d6d169530877465654c8c4e96`; it passed `1,419` headless tests,
-all four isolated builds, and the authorized private-staging Lobby/Match travel
-loop. Production was not tested or changed.
+Platform, Presentation, Performance, and Analytics combines historical Phases
+34–37 on `codex/platform-hardening`. Repository implementation and local milestone
+verification are complete, with a clean consolidated review, cumulative
+`1,601/1,601` headless coverage, formatting/lint passed and all four builds passed.
+The full gate ran once; stale English expectations in two cases were corrected
+and their affected suites passed afterward, as recorded in the
+[verification history](docs/PLATFORM_HARDENING_DESIGN_LOCK.md#local-milestone-verification).
+The delivery branch is `codex/platform-hardening`. External acceptance remains
+pending and Phase 38 has not begun.
 
-Content and Onboarding combines historical Phases 29–33 and is complete on
-`codex/content-onboarding`. The implementation adds the `Backyard Garden`
-release map, four distinct three-level towers, six readable enemy roles, exact
+The verified clean starting point is the completed Content and Onboarding
+branch `codex/content-onboarding` at commit
+`ddd01c9c0d459d91639c122c5ae784c1e59608c3`. That outcome delivered the
+`Backyard Garden` release map, four distinct three-level towers, six readable enemy roles, exact
 20/30/40-wave Easy/Normal/Hard campaigns, seeded unbounded Endless play in the
 existing authoritative runtime, difficulty-specific exactly-once rewards, and
 a persistent server-observed onboarding journey across Lobby and Match.
@@ -22,22 +26,50 @@ Existing graybox/local, tower, enemy, banner, ticket, inventory, first-clear,
 and result identifiers remain compatible; the graybox/local pair is a hidden,
 non-rewarding direct-development fallback.
 
-The private staging map and playable templates were authored under the bounded
-Team Create roots after an exact identity check. The consolidated review is
-clean, formatting/lint and all four builds passed, and current headless coverage
-is `1,486/1,486`: its one full run found two stale expectations after
-`1,484/1,486`, then only those affected specs passed `15/15` with the affected
-Test build. Consolidated private-staging Studio sessions passed solo mobile
-touch/camera/gameplay and four-client Garden integration; the final authorized
-roots contained no scripts or runtime residue. Production remained untouched.
-No new staging version was published, no uninstructed first-time-player test is
-claimed, and Phase 34 has not begun.
+The baseline's historical evidence is cumulative `1,486/1,486` headless coverage,
+all four builds, a clean consolidated review, and private-staging solo/mobile
+and four-client Studio checks. That full gate was not repeated to establish the
+baseline. Earlier local-match, persistent-Lobby and squad-travel outcomes remain
+complete; their evidence is recorded in the roadmap and test matrix.
+
+The current work adds a stable message/formatting boundary and pseudolocalization,
+shared accessibility preferences and cross-input navigation, bounded client audio
+and visual feedback, measurement tools and local regression budgets, private
+server-outcome analytics, safe test-only commands, and a reproducible read-only
+balance report. Existing gameplay authority, saved identifiers and rewards remain
+unchanged. Studio and deterministic evidence are recorded separately.
+
+Current Studio-emulated Lobby geometry checks cover minimum landscape, common
+phone, tablet, desktop, ultrawide and TenFoot layouts at Largest text, opaque
+panels, reduced motion, 50% pseudolocalization and 75% UI scale. The recorded
+header follow-up closes the earlier tablet/desktop/TenFoot text overflow.
+Keyboard focus and Backspace were exercised; native Escape opens Roblox's menu.
+These are bounded layout/input observations, not full-platform acceptance. See
+the [current evidence and support decision](docs/PLATFORM_HARDENING_DESIGN_LOCK.md#platform-and-evidence-decision).
+
+Advertised-platform acceptance remains pending. Physical phones/tablets,
+sustained controller analog input, and the complete
+published-client loop require their own evidence. Local controller Ready and
+placement checks do not establish full controller upgrade/target/sell acceptance.
+Console hardware acceptance is required only if console is later advertised.
+English is the source language; human translation and review are required only
+before advertising additional languages. Audio architecture is complete with
+18 unavailable manifest entries;
+owned assets and listening/mix acceptance remain pending. A new private staging
+publication, an independent newcomer, and an explicitly reviewed analytics
+destination/dashboard are separate gates. No destination is configured and
+Packet 37.6 delivery is unverified. Production, experience platform availability,
+and persistent Studio assets remain unchanged; VR is deferred.
 
 - [Current delivery roadmap](ROADMAP.md)
 - [Current contributor workflow](AGENTS.md)
 - [Historical detailed development plan](docs/DEVELOPMENT_PLAN.md)
 - [Game design decisions](docs/GAME_DESIGN.md)
 - [Content and onboarding design lock](docs/CONTENT_ONBOARDING_DESIGN_LOCK.md)
+- [Platform hardening design lock and acceptance boundaries](docs/PLATFORM_HARDENING_DESIGN_LOCK.md)
+- [Client presentation and asset contracts](docs/PRESENTATION.md)
+- [Measured performance and regression budgets](docs/PERFORMANCE_BUDGETS.md)
+- [Analytics dictionary, privacy and safe development commands](docs/ANALYTICS.md)
 - [Current content balance and reward policy](docs/CONTENT_BALANCE.md)
 - [Roblox place and test-environment inventory](docs/PLACE_INVENTORY.md)
 - [Verified toolchain baseline](docs/TOOLCHAIN.md)
@@ -138,6 +170,9 @@ Use the risk-based ladder in `AGENTS.md` and selector details in
   `lune run tests/verify-builds.luau --builds-only --project Match`.
 - Full headless suite plus all four project builds, once each:
   `lune run tests/verify-builds.luau`.
+- Reproducible read-only content report: `lune run tests/balance-report.luau`,
+  producing `build/content-balance-report.md` from production configuration and
+  the existing runtime. See [content balance](docs/CONTENT_BALANCE.md).
 
 Run the correct `rojo serve` project only as a managed background process for
 Studio validation; check readiness, connect once, reuse it, and stop it

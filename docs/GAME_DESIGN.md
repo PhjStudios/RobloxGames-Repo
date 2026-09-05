@@ -19,7 +19,12 @@ production-data changes, or monetization.
 - Status: Accepted for core development
 - Current roadmap checkpoint: the Playable Local Match, Persistent Lobby Loop,
   Squad Travel Loop, and Content and Onboarding outcomes through historical
-  Phase 33 are complete. Phase 34 has not begun.
+  Phase 33 are complete. Platform, Presentation, Performance, and Analytics
+  (Phases 34–37) has completed repository implementation and local milestone
+  verification on `codex/platform-hardening`: clean consolidated review,
+  cumulative `1,601/1,601` headless coverage, formatting/lint and all four builds
+  passed. Delivery branch: `codex/platform-hardening`.
+  External acceptance is incomplete and Phase 38 has not begun.
 
 ## Product identity and game loop
 
@@ -587,6 +592,109 @@ No production place, production data, experience setting, purchased/uploaded
 asset, or published place version was involved. A newly published
 staging-client gate and an uninstructed first-time-player test were not run and
 remain separate acceptance evidence if later required.
+
+## Platform hardening implementation addendum — 2026-09-04
+
+This addendum records the Phases 34–37 implementation contracts. The clean
+starting point was `ddd01c9c0d459d91639c122c5ae784c1e59608c3`, with historical
+`1,486/1,486` coverage. Repository implementation and local milestone verification
+are complete. Consolidated review is clean; formatting/lint and all four builds
+passed. The full milestone gate ran once. Its initial headless result was
+`1,599/1,601`; a diagnostic headless rerun reproduced two stale ReadyController
+English expectations. Four test-only expectations were corrected, formatted and
+linted; the affected ReadyController/View/ViewModel suites passed `30/30`, giving
+cumulative `1,601/1,601` coverage without production-source changes or another
+full gate. Delivery branch: `codex/platform-hardening`. Neither check establishes external
+platform, published-client or analytics acceptance.
+
+### GD-037 — Evidence-based platform and language support
+
+**Decision:** Candidate inputs are desktop mouse/keyboard, keyboard-only,
+landscape phone touch, tablet touch and controller/TenFoot. Advertise a target
+only after its first-session and full-match criteria have evidence at the
+appropriate level. Studio emulation, local desktop hardware, physical devices,
+published clients and external services are different evidence classes. A
+desktop controller does not establish console support; genuine console hardware
+acceptance is required only if console is later advertised. VR remains deferred;
+experience platform availability is unchanged.
+
+Current Studio-emulated Lobby geometry covers minimum landscape, common phone,
+tablet, desktop, ultrawide and TenFoot at Largest text, transparency 0, reduced
+motion, pseudo50 and saved UI scale 0.75. The
+[final Lobby sample](evidence/platform-lobby-final-ui.json) retains three header
+label failures; the separate
+[header follow-up](evidence/platform-lobby-header-followup.json) closes them.
+Observed controls have no remaining text-overflow, undersized-touch,
+fixed-clipping or overlay candidates. Scrollable off-viewport controls still
+require input verification; these samples are not a full-session or full-match
+acceptance matrix. Recorded keyboard checks include stable setting focus and
+Backspace returning to Home. Escape opens Roblox's Core menu.
+
+Local controller Ready and placement were observed. A native stick trace recorded
+600 frames and 20 axis events with peak magnitude 1, but zero frames reading a
+nonzero polled axis; brief injected taps do not verify sustained analog control.
+That hardware/input gate and complete controller upgrade/target/sell acceptance
+remain pending. No physical phone/tablet, genuine console, published full-loop,
+screen-reader or assistive-device acceptance is inferred from these observations.
+
+English messages use stable keys and bounded named arguments, consistent number,
+currency, odds, timer and wave formatting, and explicit proper-name treatment.
+Automated 30–50% pseudolocalization is an expansion test, not a translation.
+Advertising an additional language requires human translation and review.
+English remains the source-language scope. Roblox text
+size/transparency preferences apply consistently with bounded saved settings;
+effective reduced motion is Roblox OR saved preference. Critical controls reflow
+or scroll rather than becoming unreadably small. Exact precedence, layout/focus
+criteria and remaining acceptance gates are in the
+[design lock](PLATFORM_HARDENING_DESIGN_LOCK.md).
+
+### GD-038 — Presentation cannot decide gameplay
+
+**Decision:** Validated snapshots and events drive generic client feedback and
+smooth tower aiming. They never decide attacks, damage, targeting, income,
+rewards or results. Persistent health, ranges, ownership, navigation and warnings
+remain visible when optional effects, motion or sound are disabled. Master,
+music, SFX and UI audio routing is bounded and fails silently for unavailable
+assets. All 18 manifest entries remain unavailable: five music scenes and 13
+feedback cues. Approved owned audio is still required for listening and mix
+acceptance; procedural tower aiming needs no uploaded animation. Any future
+authored media needs provenance and permission approval. No invented asset IDs,
+uploads or purchases are authorized. See
+[presentation architecture and provenance](PRESENTATION.md).
+
+### GD-039 — Measure before optimizing
+
+**Decision:** Use recorded local frame, CPU, process-memory, instance and network
+observations to set matching-environment regression thresholds. JSON-like payload
+estimates, server Heartbeat cadence, deterministic cleanup and generated Endless
+descriptions cannot substitute for wire traffic, simulation CPU, engine memory
+or real-time device soaks. The initial traces do not justify changing authority,
+spatial indexing, replication protocols or pooling. Physical-device and published
+budgets remain pending. [Performance budgets](PERFORMANCE_BUDGETS.md) records
+hardware, scenarios, limitations and thresholds.
+
+### GD-040 — Private bounded observability and isolated development tools
+
+**Decision:** A versioned event dictionary observes successful server outcomes
+with bounded allowlisted dimensions and ephemeral correlation. Delivery cannot
+block gameplay or create persistence/reward authority. Raw identities, profiles,
+inventories, chat, secrets, receipts and teleport data never enter analytics.
+External delivery is disabled; mock sinks do not complete dashboard acceptance.
+Operational warnings are structured, rate-limited and owned by one layer.
+Packet 37.6 remains pending a reviewed destination and explicit authorization
+for designated accounts, event subset, retention boundary and expected writes.
+A new private publication and independent newcomer/full-loop test remain separate
+acceptance gates; historical published-client checks belong to their earlier
+outcome and do not validate the current source.
+
+Development commands exist only under the isolated test root, with exact staging
+identity and server/environment authorization on every invocation. Their finite
+test Battle Cash and scenario adapters cannot mutate persistent Gold, profiles,
+inventory, stores, receipts or production. The read-only report command
+`lune run tests/balance-report.luau` reuses production configuration and the
+existing simulator/runtime; it does not change balance or live state. Contracts
+are in [analytics and commands](ANALYTICS.md) and
+[content balance](CONTENT_BALANCE.md). Phase 38 remains outside this outcome.
 
 ## Core scope boundary
 

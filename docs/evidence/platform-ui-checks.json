@@ -1,0 +1,957 @@
+{
+  "version": 1,
+  "date": "2026-09-04",
+  "evidence": "Studio-emulated",
+  "identity": {
+    "gameId": 10764687717,
+    "groupId": 35420107,
+    "lobbyPlaceId": 140661668701496,
+    "matchPlaceId": 104415140644510
+  },
+  "preferences": {
+    "preferredTextSize": "Largest",
+    "preferredTransparency": 0,
+    "reducedMotion": true,
+    "localization": "pseudo50"
+  },
+  "status": "Implementation checkpoint; final source recheck pending",
+  "verifiedActions": [
+    "Keyboard F6 traverses all six Lobby sections and scrolls the selected control into view.",
+    "Smallest phone tutorial body accepts touch scrolling while Got It and Skip remain visible.",
+    "Smallest phone horizontal navigation scroll and Settings touch activation succeeded.",
+    "Tutorial Skip accepted; Help replay returned to step1 using actual keyboard activation.",
+    "MasterVolume100 to0 changed SoundService.Master.Volume to0 immediately.",
+    "Saved UI scale traversed100,112.5,125,75,87.5,100 through actual controls.",
+    "Studio virtual Xbox controller: ButtonB Settings→Home; ButtonA Play→Queue, Join, captain privacy change, Lock & Start. PreferredInput reported Gamepad.",
+    "Queue start used Studio development travel adapters, returned to Open queue; this is not published teleport evidence.",
+    "Keyboard inventory card selection and Favorite action succeeded without typing.",
+    "Chest confirmation Cancel restored OnePull focus; Confirm consumed250 in-memory Studio Gold, returned1750 and a duplicate acquisition result.",
+    "Party create, privacy cycle and Leave accepted via keyboard. No invitation was sent."
+  ],
+  "inputLimits": [
+    "VirtualInput tool cannot send reserved Tab/One/ButtonB; Studio's native virtual-controller mapping was used for Gamepad0=B,9=A,1=up.",
+    "The virtual controller intercepts ordinary keyboard keys while enabled; it was disabled before keyboard testing.",
+    "Single Studio guest has no eligible other player for a real invite. No external invite or user message was sent."
+  ],
+  "foundAndAddressedDuringIteration": [
+    "Largest preferred font was applied twice; ordinary client TextService measurement now owns reflow.",
+    "Fixed compact tutorial/page boundaries obscured actions; scrollable content and fixed navigation introduced.",
+    "Home heading reference lost after wrapping; retained references corrected width.",
+    "Back button expansion, toast contrast/physical-scale text measurement, minimum touch target and inventory action sizing identified for final source recheck."
+  ],
+  "acquisitionModalGeometryMatrix": [
+    {
+      "label": "minimumLandscape",
+      "controls": 13,
+      "selectedOrProblems": {
+        "1": {
+          "layoutOrder": 0,
+          "path": "Root/Header/Back",
+          "navigation": {
+            "left": "Root/ATDCompactPage/Content/ChestsScreen/ChestScroll/OnePull",
+            "right": "Root/ATDCompactPage/ATDTutorialGuidance/Primary",
+            "down": "Root/ATDCompactPage/ATDTutorialGuidance/Primary",
+            "up": "Root/ATDCompactPage/Content/ChestsScreen/ChestScroll/OnePull"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "NotApplicable",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 30,
+              "x": 90
+            },
+            "localizationKey": "lobby_view.back",
+            "fits": false,
+            "wrapped": true,
+            "overflowCandidate": true,
+            "size": 16
+          },
+          "activeOverlayCandidates": {
+            "1": {
+              "class": "Frame",
+              "path": "Root/ModalScrim"
+            }
+          },
+          "scrollAncestors": [],
+          "selected": false,
+          "rect": {
+            "y": 10,
+            "x": 22,
+            "height": 48,
+            "width": 96
+          },
+          "clipAncestors": [],
+          "selectionOrder": 0,
+          "zIndex": 21,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 10,
+            "x": 22,
+            "height": 48,
+            "width": 96
+          }
+        },
+        "2": {
+          "layoutOrder": 0,
+          "path": "Root/ModalScrim/ModalPanel/ATDReadableContent/Cancel",
+          "navigation": {
+            "left": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "right": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "down": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "up": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "RequiresInputVerification",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 30,
+              "x": 133
+            },
+            "localizationKey": "enum.action.cancel",
+            "fits": true,
+            "wrapped": true,
+            "overflowCandidate": false,
+            "size": 16
+          },
+          "activeOverlayCandidates": [],
+          "scrollAncestors": {
+            "1": {
+              "enabled": true,
+              "direction": "Y",
+              "path": "Root/ModalScrim/ModalPanel/ATDReadableContent",
+              "viewportOutsideSafeRoot": false,
+              "canvasPosition": {
+                "y": 0,
+                "x": 0
+              },
+              "rect": {
+                "y": 27,
+                "x": 123,
+                "height": 262,
+                "width": 420
+              },
+              "canvasSize": {
+                "y": 262,
+                "x": 420
+              }
+            }
+          },
+          "selected": true,
+          "rect": {
+            "y": 235,
+            "x": 339,
+            "height": 46,
+            "width": 186
+          },
+          "clipAncestors": [],
+          "selectionOrder": 102,
+          "zIndex": 91,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 235,
+            "x": 339,
+            "height": 46,
+            "width": 186
+          }
+        }
+      },
+      "viewport": {
+        "y": 374,
+        "x": 666
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "textOverflowCandidates": 1,
+        "ClippedWithoutScroll": 0,
+        "overlayCandidates": 8,
+        "offSafeRoot": 3,
+        "ScrollableOffViewport": 5,
+        "WithinCurrentViewport": 8,
+        "disabledControls": 10
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 316,
+        "width": 666
+      }
+    },
+    {
+      "label": "commonPhone",
+      "controls": 13,
+      "selectedOrProblems": {
+        "1": {
+          "layoutOrder": 0,
+          "path": "Root/Header/Back",
+          "navigation": {
+            "left": "Root/ATDCompactPage/Content/ChestsScreen/ChestScroll/OnePull",
+            "right": "Root/ATDCompactPage/ATDTutorialGuidance/Primary",
+            "down": "Root/ATDCompactPage/ATDTutorialGuidance/Primary",
+            "up": "Root/ATDCompactPage/Content/ChestsScreen/ChestScroll/OnePull"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "NotApplicable",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 30,
+              "x": 90
+            },
+            "localizationKey": "lobby_view.back",
+            "fits": false,
+            "wrapped": true,
+            "overflowCandidate": true,
+            "size": 16
+          },
+          "activeOverlayCandidates": {
+            "1": {
+              "class": "Frame",
+              "path": "Root/ModalScrim"
+            }
+          },
+          "scrollAncestors": [],
+          "selected": false,
+          "rect": {
+            "y": 10,
+            "x": 22,
+            "height": 48,
+            "width": 96
+          },
+          "clipAncestors": [],
+          "selectionOrder": 0,
+          "zIndex": 21,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 10,
+            "x": 22,
+            "height": 48,
+            "width": 96
+          }
+        },
+        "2": {
+          "layoutOrder": 0,
+          "path": "Root/ModalScrim/ModalPanel/ATDReadableContent/Cancel",
+          "navigation": {
+            "left": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "right": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "down": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "up": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "RequiresInputVerification",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 30,
+              "x": 133
+            },
+            "localizationKey": "enum.action.cancel",
+            "fits": true,
+            "wrapped": true,
+            "overflowCandidate": false,
+            "size": 16
+          },
+          "activeOverlayCandidates": [],
+          "scrollAncestors": {
+            "1": {
+              "enabled": true,
+              "direction": "Y",
+              "path": "Root/ModalScrim/ModalPanel/ATDReadableContent",
+              "viewportOutsideSafeRoot": false,
+              "canvasPosition": {
+                "y": 0,
+                "x": 0
+              },
+              "rect": {
+                "y": 20.5,
+                "x": 164.5,
+                "height": 262,
+                "width": 420
+              },
+              "canvasSize": {
+                "y": 262,
+                "x": 420
+              }
+            }
+          },
+          "selected": true,
+          "rect": {
+            "y": 228.5,
+            "x": 380.5,
+            "height": 46,
+            "width": 186
+          },
+          "clipAncestors": [],
+          "selectionOrder": 102,
+          "zIndex": 91,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 228.5,
+            "x": 380.5,
+            "height": 46,
+            "width": 186
+          }
+        }
+      },
+      "viewport": {
+        "y": 361,
+        "x": 749
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "textOverflowCandidates": 1,
+        "ClippedWithoutScroll": 0,
+        "overlayCandidates": 9,
+        "offSafeRoot": 3,
+        "ScrollableOffViewport": 5,
+        "WithinCurrentViewport": 8,
+        "disabledControls": 10
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 303,
+        "width": 749
+      }
+    },
+    {
+      "label": "tablet",
+      "controls": 13,
+      "selectedOrProblems": {
+        "1": {
+          "layoutOrder": 0,
+          "path": "Root/Header/Back",
+          "navigation": {
+            "left": "Root/Content/ChestsScreen/ChestScroll/OnePull",
+            "right": "Root/ATDTutorialGuidance/Primary",
+            "down": "Root/ATDTutorialGuidance/Primary",
+            "up": "Root/Content/ChestsScreen/ChestScroll/OnePull"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "NotApplicable",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 31,
+              "x": 93
+            },
+            "localizationKey": "lobby_view.back",
+            "fits": false,
+            "wrapped": true,
+            "overflowCandidate": true,
+            "size": 17
+          },
+          "activeOverlayCandidates": {
+            "1": {
+              "class": "Frame",
+              "path": "Root/ModalScrim"
+            }
+          },
+          "scrollAncestors": [],
+          "selected": false,
+          "rect": {
+            "y": 28,
+            "x": 30,
+            "height": 48,
+            "width": 96
+          },
+          "clipAncestors": [],
+          "selectionOrder": 0,
+          "zIndex": 21,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 28,
+            "x": 30,
+            "height": 48,
+            "width": 96
+          }
+        },
+        "2": {
+          "layoutOrder": 0,
+          "path": "Root/ModalScrim/ModalPanel/ATDReadableContent/Cancel",
+          "navigation": {
+            "left": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "right": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "down": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "up": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "RequiresInputVerification",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 31,
+              "x": 139
+            },
+            "localizationKey": "enum.action.cancel",
+            "fits": true,
+            "wrapped": true,
+            "overflowCandidate": false,
+            "size": 17
+          },
+          "activeOverlayCandidates": [],
+          "scrollAncestors": {
+            "1": {
+              "enabled": true,
+              "direction": "Y",
+              "path": "Root/ModalScrim/ModalPanel/ATDReadableContent",
+              "viewportOutsideSafeRoot": false,
+              "canvasPosition": {
+                "y": 0,
+                "x": 0
+              },
+              "rect": {
+                "y": 261,
+                "x": 309,
+                "height": 239,
+                "width": 560
+              },
+              "canvasSize": {
+                "y": 239,
+                "x": 560
+              }
+            }
+          },
+          "selected": true,
+          "rect": {
+            "y": 445,
+            "x": 595,
+            "height": 47,
+            "width": 256
+          },
+          "clipAncestors": [],
+          "selectionOrder": 102,
+          "zIndex": 91,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 445,
+            "x": 595,
+            "height": 47,
+            "width": 256
+          }
+        }
+      },
+      "viewport": {
+        "y": 819,
+        "x": 1178
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "textOverflowCandidates": 1,
+        "ClippedWithoutScroll": 0,
+        "overlayCandidates": 9,
+        "offSafeRoot": 3,
+        "ScrollableOffViewport": 3,
+        "WithinCurrentViewport": 10,
+        "disabledControls": 10
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 761,
+        "width": 1178
+      }
+    },
+    {
+      "label": "desktop16x9",
+      "controls": 13,
+      "selectedOrProblems": {
+        "1": {
+          "layoutOrder": 0,
+          "path": "Root/Header/Back",
+          "navigation": {
+            "left": "Root/Content/ChestsScreen/ChestScroll/OnePull",
+            "right": "Root/ATDTutorialGuidance/Primary",
+            "down": "Root/ATDTutorialGuidance/Primary",
+            "up": "Root/Content/ChestsScreen/ChestScroll/OnePull"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "NotApplicable",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 36,
+              "x": 125
+            },
+            "localizationKey": "lobby_view.back",
+            "fits": false,
+            "wrapped": true,
+            "overflowCandidate": true,
+            "size": 22
+          },
+          "activeOverlayCandidates": {
+            "1": {
+              "class": "Frame",
+              "path": "Root/ModalScrim"
+            }
+          },
+          "scrollAncestors": [],
+          "selected": false,
+          "rect": {
+            "y": 46,
+            "x": 48,
+            "height": 64,
+            "width": 128
+          },
+          "clipAncestors": [],
+          "selectionOrder": 0,
+          "zIndex": 21,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 46,
+            "x": 48,
+            "height": 64,
+            "width": 128
+          }
+        },
+        "2": {
+          "layoutOrder": 0,
+          "path": "Root/ModalScrim/ModalPanel/ATDReadableContent/Cancel",
+          "navigation": {
+            "left": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "right": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "down": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "up": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "RequiresInputVerification",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 36,
+              "x": 159
+            },
+            "localizationKey": "enum.action.cancel",
+            "fits": true,
+            "wrapped": true,
+            "overflowCandidate": false,
+            "size": 22
+          },
+          "activeOverlayCandidates": [],
+          "scrollAncestors": {
+            "1": {
+              "enabled": true,
+              "direction": "Y",
+              "path": "Root/ModalScrim/ModalPanel/ATDReadableContent",
+              "viewportOutsideSafeRoot": false,
+              "canvasPosition": {
+                "y": 0,
+                "x": 0
+              },
+              "rect": {
+                "y": 381.5,
+                "x": 679.5,
+                "height": 259,
+                "width": 560
+              },
+              "canvasSize": {
+                "y": 259,
+                "x": 560
+              }
+            }
+          },
+          "selected": true,
+          "rect": {
+            "y": 580.5,
+            "x": 965.5,
+            "height": 52,
+            "width": 256
+          },
+          "clipAncestors": [],
+          "selectionOrder": 102,
+          "zIndex": 91,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 580.5,
+            "x": 965.5,
+            "height": 52,
+            "width": 256
+          }
+        }
+      },
+      "viewport": {
+        "y": 1080,
+        "x": 1919
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "textOverflowCandidates": 1,
+        "ClippedWithoutScroll": 0,
+        "overlayCandidates": 11,
+        "offSafeRoot": 0,
+        "ScrollableOffViewport": 0,
+        "WithinCurrentViewport": 13,
+        "disabledControls": 10
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 1022,
+        "width": 1919
+      }
+    },
+    {
+      "label": "ultrawide",
+      "controls": 13,
+      "selectedOrProblems": {
+        "1": {
+          "layoutOrder": 0,
+          "path": "Root/Header/Back",
+          "navigation": {
+            "left": "Root/Content/ChestsScreen/ChestScroll/OnePull",
+            "right": "Root/ATDTutorialGuidance/Primary",
+            "down": "Root/ATDTutorialGuidance/Primary",
+            "up": "Root/Content/ChestsScreen/ChestScroll/OnePull"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "NotApplicable",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 36,
+              "x": 125
+            },
+            "localizationKey": "lobby_view.back",
+            "fits": false,
+            "wrapped": true,
+            "overflowCandidate": true,
+            "size": 22
+          },
+          "activeOverlayCandidates": {
+            "1": {
+              "class": "Frame",
+              "path": "Root/ModalScrim"
+            }
+          },
+          "scrollAncestors": [],
+          "selected": false,
+          "rect": {
+            "y": 46,
+            "x": 48,
+            "height": 64,
+            "width": 128
+          },
+          "clipAncestors": [],
+          "selectionOrder": 0,
+          "zIndex": 21,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 46,
+            "x": 48,
+            "height": 64,
+            "width": 128
+          }
+        },
+        "2": {
+          "layoutOrder": 0,
+          "path": "Root/ModalScrim/ModalPanel/ATDReadableContent/Cancel",
+          "navigation": {
+            "left": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "right": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "down": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "up": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "RequiresInputVerification",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 36,
+              "x": 159
+            },
+            "localizationKey": "enum.action.cancel",
+            "fits": true,
+            "wrapped": true,
+            "overflowCandidate": false,
+            "size": 22
+          },
+          "activeOverlayCandidates": [],
+          "scrollAncestors": {
+            "1": {
+              "enabled": true,
+              "direction": "Y",
+              "path": "Root/ModalScrim/ModalPanel/ATDReadableContent",
+              "viewportOutsideSafeRoot": false,
+              "canvasPosition": {
+                "y": 0,
+                "x": 0
+              },
+              "rect": {
+                "y": 560.5,
+                "x": 1440,
+                "height": 259,
+                "width": 560
+              },
+              "canvasSize": {
+                "y": 259,
+                "x": 560
+              }
+            }
+          },
+          "selected": true,
+          "rect": {
+            "y": 759.5,
+            "x": 1726,
+            "height": 52,
+            "width": 256
+          },
+          "clipAncestors": [],
+          "selectionOrder": 102,
+          "zIndex": 91,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 759.5,
+            "x": 1726,
+            "height": 52,
+            "width": 256
+          }
+        }
+      },
+      "viewport": {
+        "y": 1438,
+        "x": 3440
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "textOverflowCandidates": 1,
+        "ClippedWithoutScroll": 0,
+        "overlayCandidates": 11,
+        "offSafeRoot": 0,
+        "ScrollableOffViewport": 0,
+        "WithinCurrentViewport": 13,
+        "disabledControls": 10
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 1380,
+        "width": 3440
+      }
+    },
+    {
+      "label": "TenFoot",
+      "controls": 13,
+      "selectedOrProblems": {
+        "1": {
+          "layoutOrder": 0,
+          "path": "Root/Header/Back",
+          "navigation": {
+            "left": "Root/Content/ChestsScreen/ChestScroll/OnePull",
+            "right": "Root/ATDTutorialGuidance/Primary",
+            "down": "Root/ATDTutorialGuidance/Primary",
+            "up": "Root/Content/ChestsScreen/ChestScroll/OnePull"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "NotApplicable",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 36,
+              "x": 125
+            },
+            "localizationKey": "lobby_view.back",
+            "fits": false,
+            "wrapped": true,
+            "overflowCandidate": true,
+            "size": 22
+          },
+          "activeOverlayCandidates": {
+            "1": {
+              "class": "Frame",
+              "path": "Root/ModalScrim"
+            }
+          },
+          "scrollAncestors": [],
+          "selected": false,
+          "rect": {
+            "y": 46,
+            "x": 48,
+            "height": 64,
+            "width": 128
+          },
+          "clipAncestors": [],
+          "selectionOrder": 0,
+          "zIndex": 21,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 46,
+            "x": 48,
+            "height": 64,
+            "width": 128
+          }
+        },
+        "2": {
+          "layoutOrder": 0,
+          "path": "Root/ModalScrim/ModalPanel/ATDReadableContent/Cancel",
+          "navigation": {
+            "left": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "right": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "down": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm",
+            "up": "Root/ModalScrim/ModalPanel/ATDReadableContent/Confirm"
+          },
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "RequiresInputVerification",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 36,
+              "x": 159
+            },
+            "localizationKey": "enum.action.cancel",
+            "fits": true,
+            "wrapped": true,
+            "overflowCandidate": false,
+            "size": 22
+          },
+          "activeOverlayCandidates": [],
+          "scrollAncestors": {
+            "1": {
+              "enabled": true,
+              "direction": "Y",
+              "path": "Root/ModalScrim/ModalPanel/ATDReadableContent",
+              "viewportOutsideSafeRoot": false,
+              "canvasPosition": {
+                "y": 0,
+                "x": 0
+              },
+              "rect": {
+                "y": 381.5,
+                "x": 679.5,
+                "height": 259,
+                "width": 560
+              },
+              "canvasSize": {
+                "y": 259,
+                "x": 560
+              }
+            }
+          },
+          "selected": true,
+          "rect": {
+            "y": 580.5,
+            "x": 965.5,
+            "height": 52,
+            "width": 256
+          },
+          "clipAncestors": [],
+          "selectionOrder": 102,
+          "zIndex": 91,
+          "textBoxFocused": false,
+          "clippedNow": false,
+          "visibleRect": {
+            "y": 580.5,
+            "x": 965.5,
+            "height": 52,
+            "width": 256
+          }
+        }
+      },
+      "viewport": {
+        "y": 1080,
+        "x": 1919
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "textOverflowCandidates": 1,
+        "ClippedWithoutScroll": 0,
+        "overlayCandidates": 11,
+        "offSafeRoot": 0,
+        "ScrollableOffViewport": 0,
+        "WithinCurrentViewport": 13,
+        "disabledControls": 10
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 1022,
+        "width": 1919
+      }
+    }
+  ],
+  "interpretation": "Each matrix record measures current geometry after viewport changes. Expected modal scrim overlays cover disabled background controls. Offscreen scrolling candidates require actual input. No physical-device, console, screen-reader, published-client or full first-session acceptance follows."
+}

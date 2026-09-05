@@ -1,0 +1,268 @@
+{
+  "evidence": [
+    "Studio-emulated",
+    "local-hardware"
+  ],
+  "environment": "Unsaved confirmed private staging Match, developer Ryzen 7 7800X3D / RTX 5080; source after final compact layout and physical text measurement fixes. No published or physical-device acceptance.",
+  "preferences": {
+    "text": "Largest",
+    "transparency": 0,
+    "reducedMotion": true,
+    "locale": "pseudo50",
+    "savedUiScale": 1
+  },
+  "resultsLayouts": [
+    {
+      "label": "minimumLandscape",
+      "controls": 1,
+      "selectedOrProblems": [],
+      "viewport": {
+        "y": 374,
+        "x": 666
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 316,
+        "width": 666
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "offSafeRoot": 0,
+        "labelOverflowCandidates": 0,
+        "disabledControls": 0,
+        "undersizedTouchControls": 0,
+        "ClippedWithoutScroll": 0,
+        "placeholdersNeedingVisualReview": 0,
+        "WithinCurrentViewport": 1,
+        "ScrollableOffViewport": 0,
+        "overlayCandidates": 0,
+        "textOverflowCandidates": 0
+      },
+      "labelProblems": []
+    },
+    {
+      "label": "commonPhone",
+      "controls": 1,
+      "selectedOrProblems": [],
+      "viewport": {
+        "y": 361,
+        "x": 749
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 303,
+        "width": 749
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "offSafeRoot": 0,
+        "labelOverflowCandidates": 0,
+        "disabledControls": 0,
+        "undersizedTouchControls": 0,
+        "ClippedWithoutScroll": 0,
+        "placeholdersNeedingVisualReview": 0,
+        "WithinCurrentViewport": 1,
+        "ScrollableOffViewport": 0,
+        "overlayCandidates": 0,
+        "textOverflowCandidates": 0
+      },
+      "labelProblems": []
+    },
+    {
+      "label": "tablet",
+      "controls": 1,
+      "selectedOrProblems": [],
+      "viewport": {
+        "y": 819,
+        "x": 1178
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 761,
+        "width": 1178
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "offSafeRoot": 0,
+        "labelOverflowCandidates": 0,
+        "disabledControls": 0,
+        "undersizedTouchControls": 0,
+        "ClippedWithoutScroll": 0,
+        "placeholdersNeedingVisualReview": 0,
+        "WithinCurrentViewport": 1,
+        "ScrollableOffViewport": 0,
+        "overlayCandidates": 0,
+        "textOverflowCandidates": 0
+      },
+      "labelProblems": []
+    },
+    {
+      "label": "desktop",
+      "controls": 1,
+      "selectedOrProblems": [],
+      "viewport": {
+        "y": 1080,
+        "x": 1919
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 1022,
+        "width": 1919
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "offSafeRoot": 0,
+        "labelOverflowCandidates": 0,
+        "disabledControls": 0,
+        "undersizedTouchControls": 0,
+        "ClippedWithoutScroll": 0,
+        "placeholdersNeedingVisualReview": 0,
+        "WithinCurrentViewport": 1,
+        "ScrollableOffViewport": 0,
+        "overlayCandidates": 0,
+        "textOverflowCandidates": 0
+      },
+      "labelProblems": []
+    },
+    {
+      "label": "ultrawide",
+      "controls": 1,
+      "selectedOrProblems": [],
+      "viewport": {
+        "y": 1439,
+        "x": 3439
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 1381,
+        "width": 3439
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "offSafeRoot": 0,
+        "labelOverflowCandidates": 0,
+        "disabledControls": 0,
+        "undersizedTouchControls": 0,
+        "ClippedWithoutScroll": 0,
+        "placeholdersNeedingVisualReview": 0,
+        "WithinCurrentViewport": 1,
+        "ScrollableOffViewport": 0,
+        "overlayCandidates": 0,
+        "textOverflowCandidates": 0
+      },
+      "labelProblems": []
+    },
+    {
+      "label": "tenFoot",
+      "controls": 1,
+      "selectedOrProblems": {
+        "1": {
+          "layoutOrder": 0,
+          "path": "Root/ResultsOverlay/Replay",
+          "undersizedTouchCandidate": false,
+          "selectable": true,
+          "class": "TextButton",
+          "scrollReachability": "NotApplicable",
+          "fixedContainerClip": false,
+          "ancestryVisible": true,
+          "enabled": true,
+          "classification": "WithinCurrentViewport",
+          "activeOverlayCandidates": [],
+          "offSafeRoot": false,
+          "text": {
+            "scaled": false,
+            "bounds": {
+              "y": 39,
+              "x": 360
+            },
+            "localizationKey": "playable_match_view.play_again",
+            "fits": true,
+            "wrapped": true,
+            "overflowCandidate": false,
+            "size": 25
+          },
+          "visibleRect": {
+            "y": 934,
+            "x": 701.5,
+            "height": 64,
+            "width": 516
+          },
+          "scrollAncestors": [],
+          "navigation": {
+            "left": "Root/ResultsOverlay/Replay",
+            "right": "Root/ResultsOverlay/Replay",
+            "down": "Root/ResultsOverlay/Replay",
+            "up": "Root/ResultsOverlay/Replay"
+          },
+          "rect": {
+            "y": 934,
+            "x": 701.5,
+            "height": 64,
+            "width": 516
+          },
+          "clipAncestors": [],
+          "selectionOrder": 2,
+          "textBoxFocused": false,
+          "selected": true,
+          "clippedNow": false,
+          "zIndex": 1
+        }
+      },
+      "viewport": {
+        "y": 1080,
+        "x": 1919
+      },
+      "safeRoot": {
+        "y": 0,
+        "x": 0,
+        "height": 1022,
+        "width": 1919
+      },
+      "counts": {
+        "NoDrawableArea": 0,
+        "offSafeRoot": 0,
+        "labelOverflowCandidates": 0,
+        "disabledControls": 0,
+        "undersizedTouchControls": 0,
+        "ClippedWithoutScroll": 0,
+        "placeholdersNeedingVisualReview": 0,
+        "WithinCurrentViewport": 1,
+        "ScrollableOffViewport": 0,
+        "overlayCandidates": 0,
+        "textOverflowCandidates": 0
+      },
+      "labelProblems": []
+    }
+  ],
+  "placementGeometry": {
+    "hudBottom": 102,
+    "hudHeight": 92,
+    "placementHeight": 162,
+    "placementVisible": true,
+    "placementTop": 142
+  },
+  "interactionObservations": {
+    "touch": "Minimum landscape: Ready and tower card generated Touch input; map tap enabled Confirm while authority still had zero towers; explicit Confirm placed one tower. Keyboard selection/target/upgrade/sell and actual R replay were also exercised separately.",
+    "controller": "Virtual-controller A Ready and A placement confirmation were observed. Sustained analog and complete controller owner-action acceptance remain pending; later native owner-action snapshots were inconsistent and are not claimed as passes.",
+    "controllerPulseProbe": {
+      "after": "941, 522",
+      "peakEvent": 1,
+      "frames": 600,
+      "before": "941, 522",
+      "peakPoll": 0,
+      "placementFrames": 600,
+      "gamepadFrames": 600,
+      "events": 20,
+      "axisFrames": 0
+    }
+  },
+  "limitations": [
+    "Six-device Results geometry is one observed screen, not six complete first-session/full-match matrices.",
+    "No owned audio assets, physical phone/tablet/controller/console, assistive-device or published-client acceptance."
+  ]
+}

@@ -198,3 +198,25 @@ Victory is 500 Gold. The common authoritative participation rules still apply.
 The source constants are `src/shared/config/MatchRewards.luau`,
 `src/shared/config/Economy.luau`, and the validated content catalogs. Reward
 evaluation and durable claims remain server-owned.
+
+## Reproducible platform-hardening report
+
+Run `lune run tests/balance-report.luau` to write
+`build/content-balance-report.md`. The read-only test tool records report/content
+version 1, seed 1, the Garden build policy and starter pair. It reports tower
+investment and nominal primary-target DPS curves, role tags, difficulty economy
+pressure, all authored finite-wave health/speed/spawn budgets, generated Endless
+checkpoints through wave 10,000, and exported runtime caps. Nominal DPS excludes
+splash multiplicity, fixed-step quantization, target downtime, buffs and overkill.
+
+Campaign results come from the existing `ContentBalanceSimulation` advancing
+the production `PlayableMatchRuntime`, rather than a second simulator. The
+recorded one-participant starter-pair run reached Easy/Normal/Hard Victory at
+20/30/40 waves, with base health 100/75/60 and virtual durations
+249.90/376.80/501.35 seconds. These are deterministic balance observations; they
+do not measure real-time performance or prove newcomer/device acceptance.
+
+`ContentBalanceReport` tests verify byte-stable configuration reporting and the
+existing runtime's campaign outcome. Generation reads validated configuration
+without editing it, creates no live profile or reward writes, and retains only
+the generated Markdown under ignored `build/`.
